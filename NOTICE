@@ -1,0 +1,27 @@
+kfxgen
+Copyright (C) 2025-2026 Justin Loutsch <justin.loutsch@gmail.com>
+
+This program is free software licensed under the GNU General Public
+License v3. See the LICENSE file for the full terms.
+
+------------------------------------------------------------------------
+Third-party code
+------------------------------------------------------------------------
+
+plugin/kfxgen/kfxlib_minimal/
+
+    A modified subset of Calibre's "kfxlib", from the KFX Input/Output
+    plugins by John Howell <jhowell@acm.org>.
+
+    Copyright (C) 2016-2025 John Howell <jhowell@acm.org>
+    Licensed under the GNU General Public License v3.
+
+    kfxgen vendors and modifies this code: the library was trimmed to the
+    Ion/KFX serialization surface kfxgen needs, with security and
+    packaging changes on top. The list of local modifications is kept in
+    plugin/kfxgen/kfxlib_minimal/README.md.
+
+    The upstream KFX plugins are available from the MobileRead forums.
+    kfxgen does not redistribute jhowell's plugin packages themselves;
+    only this modified source subset is included, as permitted by the
+    GPL v3 it is licensed under.

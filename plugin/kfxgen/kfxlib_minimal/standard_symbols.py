@@ -1,3 +1,9 @@
+# Part of kfxgen's kfxlib_minimal: a modified subset of Calibre's kfxlib
+# (the KFX plugins by John Howell). See kfxlib_minimal/README.md for the
+# list of local modifications.
+__license__ = "GPL v3"
+__copyright__ = "2016-2025, John Howell <jhowell@acm.org>"
+
 from .ion_symbol_table import LocalSymbolTable
 
 STANDARD_SYMBOLS = [

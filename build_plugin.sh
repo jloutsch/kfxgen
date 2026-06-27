@@ -77,10 +77,14 @@ ABOUT
 mkdir -p "$DIST_DIR"
 rm -f "$OUT"
 
-# Bundle LICENSE inside the plugin zip so users who install via
-# `calibre-customize -a` have the license text alongside the code.
+# Bundle LICENSE + NOTICE inside the plugin zip so users who install via
+# `calibre-customize -a` have the license text and third-party attribution
+# alongside the code.
 if [ -f "$ROOT/LICENSE" ]; then
   cp "$ROOT/LICENSE" "$BUILD_DIR/LICENSE"
+fi
+if [ -f "$ROOT/NOTICE" ]; then
+  cp "$ROOT/NOTICE" "$BUILD_DIR/NOTICE"
 fi
 
 (cd "$BUILD_DIR" && zip -rq "$OUT" .)
