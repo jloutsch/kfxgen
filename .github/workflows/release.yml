@@ -1,0 +1,65 @@
+name: Release
+
+# Build the Calibre plugin zip and publish it as a GitHub Release asset
+# whenever a version tag (vX.Y.Z) is pushed. This keeps the downloadable
+# plugin in sync with the tagged source — no manual build/upload step.
+#
+# Cut a release with:
+#   git tag vX.Y.Z   # must match `version` in plugin/kfxgen/__init__.py
+#   git push origin vX.Y.Z
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write   # required to create the release + upload the asset
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Resolve and verify version
+        id: ver
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          src="$(python3 -c "import re; m = re.search(r'^version = \((\d+), (\d+), (\d+)\)', open('plugin/kfxgen/__init__.py').read(), re.M); print('.'.join(m.groups()))")"
+          if [ "$tag" != "$src" ]; then
+            echo "::error::Tag v$tag does not match plugin version $src in plugin/kfxgen/__init__.py"
+            exit 1
+          fi
+          echo "version=$src" >> "$GITHUB_OUTPUT"
+
+      - name: Build plugin zip
+        run: bash build_plugin.sh
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.ver.outputs.version }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/kfxgen-plugin-${V}.zip" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "kfxgen — Calibre plugin that generates Amazon KFX from EPUB with a working Kindle navigation pane and table of contents.
+
+          ## Install (Calibre GUI)
+          1. Download **kfxgen-plugin-${V}.zip** from the Assets below.
+          2. Calibre → Preferences → Plugins → **Load plugin from file** → select the zip.
+          3. Restart Calibre.
+
+          ## Install (command line)
+          \`\`\`
+          calibre-customize -a kfxgen-plugin-${V}.zip
+          \`\`\`
+
+          Then convert any book to **KFX** output.
+
+          See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md) for full release notes."
