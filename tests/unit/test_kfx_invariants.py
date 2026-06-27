@@ -331,11 +331,9 @@ class TestCoverFragmentDivergence:
 class TestStyleMagnitudeIsDecimal:
     """$307 magnitude fields inside $157 style structs MUST be IonDecimal.
 
-    History (#68 disposition): an early note in
-    docs/kfx_toc_research/KFXGEN_NATIVE_GENERATOR_ISSUES.md (2025-12)
-    claimed `$307` should be plain int. This was overruled by the
-    Calibre KFX output gold standard (a real-book reference KFX in
-    the maintainer's gitignored research/ directory), which uses
+    History: an early 2025-12 note claimed `$307` should be plain int.
+    This was overruled by the Calibre KFX output gold standard (a
+    reference KFX in the maintainer's gitignored research/ directory), which uses
     Decimal for every $307 in $157 — across
     $48 (margin-bottom), $42 (line-height), $16 (font-size), $36
     (text-indent), $46 (margin-top), $47 (padding-top). The shipping
