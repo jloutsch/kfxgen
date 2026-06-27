@@ -1,5 +1,15 @@
 # Changelog
 
+## 5.3.17 — GPL attribution for vendored kfxlib
+
+Licensing-compliance release. No runtime behavior change from 5.3.16.
+
+- Restored the GPL v3 copyright/license headers (John Howell) on the six
+  `kfxlib_minimal` files that had lost them during the original trim, and
+  marked them as a modified subset of Calibre's `kfxlib`.
+- Added a top-level `NOTICE` crediting John Howell / `kfxlib` (GPL v3);
+  it now ships inside the plugin zip alongside `LICENSE`.
+
 ## 5.3.16 — Packaging and release automation
 
 Maintenance release. No runtime behavior change from 5.3.15.
