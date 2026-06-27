@@ -52,7 +52,7 @@ one from kfxgen and one from jhowell's `KFX Output`. To generate the
 reference:
 
 1. Install jhowell's plugin (`KFX Output` from MobileRead) in Calibre.
-2. Disable kfxgen (`calibre-customize --disable-plugin "KFX Output (kfxgen)"`)
+2. Disable kfxgen (`calibre-customize --disable-plugin "kfxgen"`)
    so the file extension resolves to jhowell's plugin.
 3. Run `ebook-convert <input.epub> <ref.kfx>`.
 

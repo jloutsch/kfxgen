@@ -23,7 +23,7 @@
 5. **Confirm Installation**
    - Calibre will ask: "Are you sure you want to proceed?"
    - Click `Yes`
-   - You should see: "KFX Output (kfxgen)" in the File type plugins list
+   - You should see: "kfxgen" in the File type plugins list
 
 6. **Restart Calibre**
    - Close and reopen Calibre
@@ -65,7 +65,7 @@
 After installation, verify the plugin is active:
 
 1. Go to `Preferences → Plugins`
-2. Look for `KFX Output (kfxgen)` under "File type plugins"
+2. Look for `kfxgen` under "File type plugins"
 3. It should show version `0.1.0`
 
 ### Conversion Working
@@ -107,7 +107,7 @@ A generated KFX file should be:
 
 - **Restart Calibre** (required after installation)
 - Check under `Preferences → Plugins → File type plugins`
-- Look for "KFX Output (kfxgen)"
+- Look for "kfxgen"
 
 ### Conversion Fails
 
@@ -183,7 +183,7 @@ Currently available options:
 To remove the plugin:
 
 1. Go to `Preferences → Plugins`
-2. Find `KFX Output (kfxgen)` under File type plugins
+2. Find `kfxgen` under File type plugins
 3. Right-click → `Remove plugin`
 4. Restart Calibre
 
