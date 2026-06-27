@@ -1,5 +1,15 @@
 # Changelog
 
+## 5.3.16 — Packaging and release automation
+
+Maintenance release. No runtime behavior change from 5.3.15.
+
+- Releases are now built and published automatically: pushing a `vX.Y.Z`
+  tag builds the plugin zip and attaches it to a GitHub Release (the tag
+  must match `version` in `plugin/kfxgen/__init__.py`).
+- Removed stale references to internal-only documentation paths from a
+  test docstring and the `kfxlib_minimal` README.
+
 ## 5.3.15 — Crash fix for chapters with no renderable content
 
 Fixes an `IndexError: list index out of range` in
