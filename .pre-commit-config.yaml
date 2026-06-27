@@ -1,0 +1,76 @@
+# Pre-commit hooks for kfxgen (#56). Local fast-feedback only — CI remains
+# the canonical gate for outside contributors who don't have hooks installed.
+#
+# Setup:
+#   pip install pre-commit && pre-commit install && pre-commit install --hook-type pre-push
+#
+# Bypass (discouraged; CI will still catch it):
+#   SKIP=hook-id git commit
+#   git push --no-verify
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.1
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: no-root-test-files
+        name: Reject root-level test_*.py files
+        description: Test files belong under tests/, not at the repo root (#54).
+        # Use printf '%s\n' "$@" rather than `echo "$@" | tr " " "\n"`:
+        # the latter splits filenames containing spaces into separate
+        # tokens, which silently mis-classifies offenders.
+        entry: |
+          bash -c '
+            offenders=$(printf "%s\n" "$@" | grep -E "^test_[^/]+\.py$" || true)
+            if [ -n "$offenders" ]; then
+              echo "Root-level test files are not permitted. Move them under tests/:" >&2
+              echo "$offenders" >&2
+              exit 1
+            fi
+          ' --
+        language: system
+        pass_filenames: true
+        stages: [pre-commit]
+
+      - id: no-book-binaries
+        name: Reject committed book binaries (.kfx/.epub/.azw3/.mobi)
+        description: |
+          Belt-and-suspenders against `git add -f` bypassing .gitignore.
+          Book binaries belong in research/ (gitignored) or external storage,
+          never in the tracked tree.
+        # See no-root-test-files for the printf vs echo|tr rationale.
+        entry: |
+          bash -c '
+            offenders=$(printf "%s\n" "$@" | grep -E "\.(kfx|epub|azw3|mobi)$" || true)
+            if [ -n "$offenders" ]; then
+              echo "Book binaries cannot be committed. Move to research/ or external storage:" >&2
+              echo "$offenders" >&2
+              exit 1
+            fi
+          ' --
+        language: system
+        pass_filenames: true
+        stages: [pre-commit]
+
+      # pytest-tier1 uses language: system, which requires `python3 -m pytest`
+      # resolvable from PATH. The repo CONTRIBUTING.md notes the venv setup;
+      # contributors who skip it will see the hook fail loudly rather than
+      # silently. Don't switch to language: python without first verifying
+      # the hook works in fresh clones — the venv-managed python isn't always
+      # the one pre-commit uses.
+      - id: pytest-tier1
+        name: Run tier-1 unit tests
+        description: |
+          Pre-push gate per CONTRIBUTING.md oracle hierarchy. Tier-1 tests
+          are in-process invariants — fast (<5s today) and never depend on
+          a Kindle device. CI runs the broader `not device` set.
+        entry: pytest -m tier1
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true

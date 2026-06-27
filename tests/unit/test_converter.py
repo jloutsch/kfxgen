@@ -1,0 +1,386 @@
+"""
+Unit tests for converter.py — TOC and spine extraction.
+
+Issue #6: TOC entries whose href isn't in the spine should fall back to
+matching against the manifest, instead of being silently dropped.
+"""
+
+import os
+import sys
+from unittest.mock import MagicMock
+
+from lxml import etree
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin"))
+
+from kfxgen.converter import (
+    CONTENTS_SKIP_TITLES,
+    HALF_TITLE_TITLES,
+    TITLE_PAGE_TITLES,
+    _replace_title_page,
+    extract_chapters_from_oeb,
+    extract_cover_image,
+    extract_images_from_oeb,
+)
+
+
+def _xhtml(body_text):
+    """Build a minimal XHTML element whose body contains body_text."""
+    src = (
+        '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+        f"<p>{body_text}</p>"
+        "</body></html>"
+    )
+    return etree.fromstring(src)
+
+
+class _SpineItem:
+    def __init__(self, href, body_text):
+        self.href = href
+        self.data = _xhtml(body_text)
+        self.media_type = "application/xhtml+xml"
+
+
+class _ManifestItem:
+    def __init__(
+        self, item_id, href, body_text=None, media_type="application/xhtml+xml"
+    ):
+        self.id = item_id
+        self.href = href
+        self.media_type = media_type
+        self.data = _xhtml(body_text) if body_text is not None else None
+
+
+class _Manifest:
+    """Iterable manifest with .hrefs dict, mimicking Calibre's manifest API."""
+
+    def __init__(self, items):
+        self._items = items
+        self.hrefs = {it.href: it for it in items}
+
+    def __iter__(self):
+        return iter(self._items)
+
+
+class _TOCNode:
+    def __init__(self, title, href, children=()):
+        self.title = title
+        self.href = href
+        self._children = list(children)
+
+    def __iter__(self):
+        return iter(self._children)
+
+
+class _OEBBook:
+    def __init__(self, spine, toc, manifest=None):
+        self.spine = spine
+        self.toc = toc
+        self.manifest = manifest or _Manifest([])
+        # Provide a metadata stub that mimics the bits convert_oeb_to_kfx uses
+        self.metadata = MagicMock()
+        self.metadata.cover = None
+
+
+def _silent_log():
+    """A logger stub matching Calibre's log API (info/warn/error/debug)."""
+    log = MagicMock()
+    log.info = lambda *a, **k: None
+    log.warn = lambda *a, **k: None
+    log.error = lambda *a, **k: None
+    log.debug = lambda *a, **k: None
+    return log
+
+
+class TestTOCBasenameMatch:
+    """TOC hrefs with paths should match spine items by basename."""
+
+    def test_toc_with_path_matches_spine_basename(self):
+        spine = [
+            _SpineItem("chapter1.xhtml", "First chapter content."),
+            _SpineItem("chapter2.xhtml", "Second chapter content."),
+        ]
+        toc = [
+            _TOCNode("Chapter 1", "OEBPS/text/chapter1.xhtml"),
+            _TOCNode("Chapter 2", "OEBPS/text/chapter2.xhtml"),
+        ]
+        oeb = _OEBBook(spine=spine, toc=toc)
+        chapters = extract_chapters_from_oeb(oeb, _silent_log())
+        titles = [c["title"] for c in chapters]
+        assert "Chapter 1" in titles
+        assert "Chapter 2" in titles
+
+
+class TestTOCManifestFallbackEdgeCases:
+    """Defensive behavior when manifest is missing or holds non-XHTML items."""
+
+    def test_no_manifest_does_not_crash(self):
+        """A book with `manifest=None` must skip the fallback gracefully."""
+        spine = [_SpineItem("chapter1.xhtml", "Body.")]
+        toc = [
+            _TOCNode("Chapter 1", "chapter1.xhtml"),
+            _TOCNode("Ghost", "ghost.xhtml"),
+        ]
+        oeb = _OEBBook(spine=spine, toc=toc)
+        oeb.manifest = None  # explicitly clear
+
+        chapters = extract_chapters_from_oeb(oeb, _silent_log())
+        titles = [c["title"] for c in chapters]
+        assert titles == ["Chapter 1"]
+
+    def test_manifest_image_item_with_empty_media_type_is_skipped(self):
+        """An image item with no media_type set must not be parsed as XHTML."""
+        spine = [_SpineItem("chapter1.xhtml", "Body.")]
+        toc = [
+            _TOCNode("Chapter 1", "chapter1.xhtml"),
+            _TOCNode("Cover", "cover.jpg"),
+        ]
+        # Manifest item for cover.jpg has bytes data but no media_type
+        cover = _ManifestItem("cover", "cover.jpg", media_type="")
+        cover.data = b"\xff\xd8\xff\xe0fake-jpeg-bytes"
+        manifest = _Manifest(
+            [
+                _ManifestItem("ch1", "chapter1.xhtml"),
+                cover,
+            ]
+        )
+        oeb = _OEBBook(spine=spine, toc=toc, manifest=manifest)
+
+        chapters = extract_chapters_from_oeb(oeb, _silent_log())
+        titles = [c["title"] for c in chapters]
+        assert "Cover" not in titles, (
+            "Manifest items with non-XHTML / empty media_type must not be "
+            "fed into the XHTML text extractor"
+        )
+
+
+JPEG_BYTES = (
+    b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+    + b"\x00" * 200
+    + b"\xff\xd9"
+)
+
+
+class _GuideRef:
+    def __init__(self, type_, href):
+        self.type = type_
+        self.href = href
+
+
+class TestCoverImageReturnsHref:
+    """extract_cover_image must return (bytes, href) for every discovery
+    method so the body-image pipeline can exclude the cover regardless of
+    where it was found (regression guard for double-emit bug found in PR #20)."""
+
+    def test_method_1_metadata_cover_returns_href(self):
+        cover = _ManifestItem("cover_id", "images/cover.jpg", media_type="image/jpeg")
+        cover.data = JPEG_BYTES
+        manifest = _Manifest([cover])
+        oeb = _OEBBook(spine=[], toc=[], manifest=manifest)
+        oeb.metadata.cover = ["cover_id"]
+
+        data, href = extract_cover_image(oeb, _silent_log())
+        assert data == JPEG_BYTES
+        assert href == "images/cover.jpg"
+
+    def test_method_2_guide_returns_href(self):
+        cover = _ManifestItem(
+            "img_cover", "images/cover_guide.jpg", media_type="image/jpeg"
+        )
+        cover.data = JPEG_BYTES
+        manifest = _Manifest([cover])
+        oeb = _OEBBook(spine=[], toc=[], manifest=manifest)
+        oeb.metadata.cover = None
+        oeb.guide = [_GuideRef("cover", "images/cover_guide.jpg")]
+
+        data, href = extract_cover_image(oeb, _silent_log())
+        assert data == JPEG_BYTES
+        assert href == "images/cover_guide.jpg", (
+            "Method 2 (guide) must return the href so the cover isn't "
+            "double-emitted as a body image"
+        )
+
+    def test_method_3_manifest_scan_returns_href(self):
+        cover = _ManifestItem(
+            "cover_image", "images/cover_scan.jpg", media_type="image/jpeg"
+        )
+        cover.data = JPEG_BYTES
+        manifest = _Manifest([cover])
+        oeb = _OEBBook(spine=[], toc=[], manifest=manifest)
+        oeb.metadata.cover = None
+        oeb.guide = []
+
+        data, href = extract_cover_image(oeb, _silent_log())
+        assert data == JPEG_BYTES
+        assert href == "images/cover_scan.jpg", (
+            "Method 3 (manifest scan) must return the href so the cover "
+            "isn't double-emitted as a body image"
+        )
+
+    def test_no_cover_returns_none_tuple(self):
+        oeb = _OEBBook(spine=[], toc=[], manifest=_Manifest([]))
+        oeb.metadata.cover = None
+        oeb.guide = []
+
+        data, href = extract_cover_image(oeb, _silent_log())
+        assert data is None
+        assert href is None
+
+
+class TestImagesExcludeCover:
+    """Body-image extraction must skip the cover href."""
+
+    def test_cover_excluded_from_body_images(self):
+        cover = _ManifestItem("cover", "images/cover.jpg", media_type="image/jpeg")
+        cover.data = JPEG_BYTES
+        body = _ManifestItem("fig1", "images/figure1.jpg", media_type="image/jpeg")
+        body.data = JPEG_BYTES
+        manifest = _Manifest([cover, body])
+        oeb = _OEBBook(spine=[], toc=[], manifest=manifest)
+
+        result = extract_images_from_oeb(
+            oeb, _silent_log(), exclude_hrefs=["images/cover.jpg"]
+        )
+        hrefs = list(result.keys())
+        assert "images/cover.jpg" not in hrefs
+        assert "images/figure1.jpg" in hrefs
+
+    def test_unsupported_format_skipped_with_warning(self):
+        body = _ManifestItem("gif1", "images/animated.gif", media_type="image/gif")
+        body.data = b"GIF89a" + b"\x00" * 200
+        manifest = _Manifest([body])
+        oeb = _OEBBook(spine=[], toc=[], manifest=manifest)
+
+        log_mock = MagicMock()
+        result = extract_images_from_oeb(oeb, log_mock)
+        assert "images/animated.gif" not in result
+        warn_calls = [str(c) for c in log_mock.warn.call_args_list]
+        assert any(
+            "animated.gif" in c and "unsupported" in c.lower() for c in warn_calls
+        ), (
+            f"Expected an 'unsupported format' warn call mentioning the file, "
+            f"got: {warn_calls}"
+        )
+
+
+class TestTOCMappingPreservesContent:
+    """Existing TOC-to-spine mapping must keep working (regression guard)."""
+
+    def test_normal_toc_to_spine_mapping_unchanged(self):
+        spine = [
+            _SpineItem("chapter1.xhtml", "Chapter 1 body."),
+            _SpineItem("chapter2.xhtml", "Chapter 2 body."),
+            _SpineItem("chapter3.xhtml", "Chapter 3 body."),
+        ]
+        toc = [
+            _TOCNode("Chapter 1", "chapter1.xhtml"),
+            _TOCNode("Chapter 2", "chapter2.xhtml"),
+            _TOCNode("Chapter 3", "chapter3.xhtml"),
+        ]
+        oeb = _OEBBook(spine=spine, toc=toc)
+
+        chapters = extract_chapters_from_oeb(oeb, _silent_log())
+        titles = [c["title"] for c in chapters]
+        assert titles == ["Chapter 1", "Chapter 2", "Chapter 3"]
+
+
+class TestImageOnlyOrphanSkipped:
+    """Orphan recovery must skip spine items that have no real text once
+    IMG tokens are removed — the common case is the EPUB's own cover.xhtml
+    (just an <img> for the cover, which is emitted separately, #32).
+
+    Recovering it appended a junk trailing chapter that emitted zero content
+    chunks and crashed the native generator with an IndexError
+    (native_generator.py:2283). A text-bearing orphan must still recover.
+    """
+
+    def test_image_only_cover_orphan_not_recovered(self):
+        # cover.xhtml is last and not referenced by the TOC -> orphan.
+        spine = [
+            _SpineItem("chapter1.xhtml", "Chapter 1 body."),
+            _SpineItem("chapter2.xhtml", "Chapter 2 body."),
+            _SpineItem("cover.xhtml", '<img src="cover.jpg" alt="Cover"/>'),
+        ]
+        toc = [
+            _TOCNode("Chapter 1", "chapter1.xhtml"),
+            _TOCNode("Chapter 2", "chapter2.xhtml"),
+        ]
+        oeb = _OEBBook(spine=spine, toc=toc)
+
+        chapters = extract_chapters_from_oeb(oeb, _silent_log())
+        titles = [c["title"] for c in chapters]
+        assert titles == ["Chapter 1", "Chapter 2"]
+
+    def test_text_bearing_orphan_still_recovered(self):
+        # A real back-matter page the TOC missed must NOT be dropped.
+        spine = [
+            _SpineItem("chapter1.xhtml", "Chapter 1 body."),
+            _SpineItem("appendix.xhtml", "Appendix with real prose."),
+        ]
+        toc = [_TOCNode("Chapter 1", "chapter1.xhtml")]
+        oeb = _OEBBook(spine=spine, toc=toc)
+
+        chapters = extract_chapters_from_oeb(oeb, _silent_log())
+        texts = "\n".join(c["text"] for c in chapters)
+        assert "Appendix with real prose." in texts
+
+
+class TestHalfTitlePage:
+    """#107: a chapter whose TOC label is 'Half Title Page' (or a
+    variant) must not leak that structural label onto the page. Half-
+    title convention is book-title-only, no author."""
+
+    META = {"title": "The Real Title", "author": "Jane Author"}
+
+    def test_half_title_replaced_with_title_only_no_author(self):
+        chapters = [{"title": "Half Title Page", "text": "the title\n"}]
+        _replace_title_page(chapters, self.META, _silent_log())
+        ch = chapters[0]
+        # Title only — no author, no "by" (distinct from the full title page).
+        assert ch["text"] == "The Real Title"
+        assert "Jane Author" not in ch["text"]
+        assert "by" not in ch["text"]
+        # The structural label must be suppressed as a heading.
+        assert ch["_omit_title_heading"] is True
+
+    def test_variants_recognized(self):
+        for label in [
+            "Half Title",
+            "Half-Title",
+            "half title page",
+            "HALFTITLE",
+            "Halftitle Page",
+            "Bastard Title",
+        ]:
+            chapters = [{"title": label, "text": "x"}]
+            _replace_title_page(chapters, self.META, _silent_log())
+            ch = chapters[0]
+            assert ch["text"] == "The Real Title", f"{label!r} not recognized"
+            assert ch["_omit_title_heading"] is True, f"{label!r} heading not omitted"
+
+    def test_full_title_page_still_includes_author(self):
+        # Regression guard: the full title page path is unchanged.
+        chapters = [{"title": "Title Page", "text": "old"}]
+        _replace_title_page(chapters, self.META, _silent_log())
+        ch = chapters[0]
+        assert ch["text"] == "The Real Title\n\nby\n\nJane Author"
+        assert ch["_omit_title_heading"] is True
+
+    def test_half_title_excluded_from_rebuilt_contents(self):
+        chapters = [
+            {"title": "Contents", "text": "old toc"},
+            {"title": "Half Title Page", "text": "t"},
+            {"title": "Chapter 1", "text": "body one"},
+        ]
+        _replace_title_page(chapters, self.META, _silent_log())
+        contents = chapters[0]
+        assert "Half Title Page" not in contents["text"]
+        listed = [link["text"] for link in contents.get("toc_links", [])]
+        assert "Half Title Page" not in listed
+        assert "Chapter 1" in listed
+
+    def test_skip_sets_stay_in_sync(self):
+        # CONTENTS_SKIP_TITLES is built from the shared sets; guard the
+        # DRY union so a future edit can't desync them (#107).
+        assert HALF_TITLE_TITLES <= CONTENTS_SKIP_TITLES
+        assert TITLE_PAGE_TITLES <= CONTENTS_SKIP_TITLES

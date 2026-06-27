@@ -1,0 +1,26 @@
+# Ruff configuration. Tier-1 quality bar applies to plugin/, tests/, and
+# tools/ — the code that ships and is used as part of the development
+# workflow. Exploratory and one-off scripts are exempt to avoid bikeshedding
+# debug code into "clean" rewrites.
+
+# Match Black's default line length used elsewhere in the toolchain.
+line-length = 88
+
+# Exclude exploratory code only. research/ holds throwaway investigation
+# code where bare `except:` is often intentional. scripts/ was previously
+# excluded but is now in scope (#78) — the few findings there were small
+# enough to fix in line.
+extend-exclude = [
+    "research/",
+    # kfxlib_minimal is a vendored fork/trim of Calibre kfxlib. Reformatting
+    # it adds noise without security benefit and increases merge friction
+    # with future upstream syncs. Targeted modifications (e.g. the #47
+    # length-bound fix in utilities.py) are still allowed; ruff just won't
+    # touch the rest.
+    "plugin/kfxgen/kfxlib_minimal/",
+]
+
+[lint]
+# Default ruleset (E, F) is appropriate here. Add more rule families
+# (B for bugbear, I for import-sort) in a follow-up after the initial
+# enforcement settles.

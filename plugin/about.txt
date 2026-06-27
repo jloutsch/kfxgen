@@ -1,0 +1,50 @@
+kfxgen - Open-Source KFX Generation Plugin
+
+Version: 0.1.0 (Phase 1 - Research)
+Author: kfxgen contributors
+License: GPL v3
+
+DESCRIPTION
+-----------
+kfxgen is an open-source Calibre plugin that generates KFX (Kindle Format 10)
+files with proper OpenType feature support, especially for Fast-Fonts.
+
+This plugin is a 100% open-source alternative to the existing KFX Output plugin,
+eliminating the dependency on Amazon's proprietary Kindle Previewer 3.
+
+KEY FEATURES
+------------
+• Fast conversion (10-100x faster than Kindle Previewer)
+• Full OpenType support (calt, liga, kern, etc.)
+• Fast-Fonts contextual alternates work perfectly
+• Cross-platform (Windows, macOS, Linux)
+• No external dependencies
+• Can coexist with existing KFX Output plugin
+
+CURRENT STATUS
+--------------
+Phase 1: Research & Reverse Engineering (Months 1-4)
+- KFX format analysis
+- OpenType feature processing
+- Font subsetting with feature preservation
+
+NOT YET FUNCTIONAL - This is a development version.
+Full conversion capabilities will be available in Phase 2+.
+
+PROJECT RESOURCES
+-----------------
+• GitHub: https://github.com/[username]/kfxgen
+• Documentation: See PROJECT_PLAN.md and ENGINEERING_PLAN.md
+• MobileRead Forum: [To be created]
+
+INSTALLATION
+------------
+Currently for developers only.
+Use: calibre-customize -b plugin/
+
+For end users: Wait for v1.0 release (approximately 18 months)
+
+SUPPORT
+-------
+This is an open-source project in active development.
+For questions, see the GitHub repository.

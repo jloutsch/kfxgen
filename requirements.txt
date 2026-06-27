@@ -1,0 +1,22 @@
+# kfxgen Core Dependencies
+#
+# Exact pins (#103). At runtime the Calibre plugin uses Calibre's own
+# bundled libraries, NOT these — requirements.txt is for dev/standalone
+# use. Security-sensitive parsers (lxml, cssutils, fonttools) are
+# pinned exactly per the project security standard so an untrusted
+# EPUB never reaches an unvetted parser version. Bump deliberately,
+# not implicitly. lxml is pinned to the version the test suite
+# validates against (.venv); the rest to current stable. (Pillow was
+# removed in #104 as an unused dependency.)
+
+# Amazon Ion serialization (KFX foundation)
+amazon-ion==0.13.0
+
+# Font manipulation
+fonttools==4.63.0
+
+# XML/HTML parsing
+lxml==6.0.2
+
+# CSS parsing
+cssutils==2.15.0

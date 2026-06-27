@@ -1,0 +1,68 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    # kfxgen runs as a Calibre plugin inside Calibre's bundled Python
+    # interpreter — currently 3.14. Testing one Linux × one recent
+    # Python version is sufficient for a pure-Python plugin; the
+    # previous 3 OSes × 4 Python versions (12 jobs) was wasted CI
+    # minutes since the code has no native dependencies and no
+    # platform-specific behavior. Windows pip installs alone took
+    # 8+ minutes per job.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run unit tests
+        run: |
+          pytest tests/unit -v
+
+  ruff-lint:
+    # Enforce ruff for outside contributors who don't have pre-commit
+    # installed locally. Scope is whatever ruff.toml configures (currently
+    # plugin/, tests/, tools/; research/, scripts/, and kfxlib_minimal/
+    # are excluded). This is the canonical full-repo gate — runs both
+    # `ruff check` (lint) and `ruff format --check` (style).
+    name: Ruff Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ruff
+        # Pinned-version-bounded by requirements-dev.txt; install matches
+        # the pre-commit hook (astral-sh/ruff-pre-commit v0.15.1).
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff==0.15.1
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Format check
+        run: ruff format --check .

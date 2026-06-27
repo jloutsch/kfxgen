@@ -1,0 +1,135 @@
+# kfxgen .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.cover
+.hypothesis/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Documentation builds
+docs/_build/
+docs/api/_autosummary/
+
+# Distribution
+*.zip
+kfxgen-plugin.zip
+
+# Test artifacts
+tests/corpus/
+tests/fixtures/*/
+!tests/fixtures/.gitkeep
+# Golden corpus (#48): committed inputs + expected KFX bytes for tier3 diff.
+# Exception order matters: negate the parent before the *.kfx rule below.
+# Re-exclude __pycache__ which the ** glob would otherwise re-include.
+!tests/fixtures/golden/
+!tests/fixtures/golden/**
+tests/fixtures/golden/**/__pycache__/
+# Vendored kfxlib: the tier2 differential-decode test compares against the
+# upstream Calibre KFX Input plugin (jhowell). That third-party zip is NOT
+# redistributed here; supply it locally per CONTRIBUTING.md. The test skips
+# cleanly when it is absent.
+!tests/fixtures/vendor/
+!tests/fixtures/vendor/**
+tests/fixtures/vendor/*.zip
+test_output_files/
+
+# Temporary files
+*.tmp
+tmp/
+temp/
+
+# Logs
+*.log
+
+# Git worktrees (isolated feature branches)
+.worktrees/
+
+# gstack working state (local-only: security reports, plans, checkpoints) (#106)
+.gstack/
+
+# Calibre ebook formats
+*.azw3
+*.mobi
+*.kfx
+!tests/fixtures/golden/expected/*.kfx
+*.epub
+
+# Development/intermediate docs (not for distribution)
+*_PERSONA.md
+COMPARISON.md
+COMPLETE_REINSTALL_STEPS.md
+DEBUGGING_SUMMARY.md
+ENGINEERING_PLAN.md
+EXPERT_PERSONAS_GUIDE.md
+FRAGMENT_COMPARISON_RESULTS.md
+KFX_VALIDATION_RULES.md
+PHASES_SUMMARY.md
+PROJECT_LOG.md
+RELEASE_NOTES_v2.*.md
+SETUP_COMPLETE.md
+SOLUTION_SUMMARY.md
+docs/TOC_ISSUE.md
+
+# Development tools
+Kindle Previewer*.app/
+*.app/
+
+# Development scripts (not part of plugin)
+/analyze_*.py
+/binary_patcher.py
+/compare_*.py
+/complete_fragment_comparison.py
+/deep_compare_*.py
+/simple_template_replace.py
+/template_generator.py
+/template_generator_v2.py
+/template_generator_v3.py
+/test_*.py
+/verify_*.py
+VERSION_*.md
+TEMPLATE_APPROACH_PLAN.md
+
+# Gutenberg baseline corpus (large; not for git)
+research/gutenberg-top-90/
+research/gutenberg-top-90-baseline/*/
+
+research/gutenberg-top-90-baseline-calibre/*/
