@@ -143,13 +143,13 @@ Adversarial-EPUB threat model and reporting process: see [`SECURITY.md`](SECURIT
 
 ## License
 
-GPL v3 — see [LICENSE](LICENSE) for the full text.
+GPL v3 — see [LICENSE](LICENSE) for the full text, and [NOTICE](NOTICE) for third-party attribution.
 
 Copyright © 2025-2026 Justin Loutsch &lt;justin.loutsch@gmail.com&gt;
 
 ## Credits
 
-- **kfxlib** by John Howell — Ion/KFX libraries (the `kfxlib_minimal/` directory is derived from this work)
+- **kfxlib** by John Howell — Ion/KFX libraries, GPL v3. The `kfxlib_minimal/` directory is a modified subset of this work; see [NOTICE](NOTICE) and `plugin/kfxgen/kfxlib_minimal/README.md`.
 - **Calibre** by Kovid Goyal — plugin framework
 
 ---
