@@ -12,7 +12,7 @@ __copyright__ = "2025-2026, Justin Loutsch <justin.loutsch@gmail.com>"
 
 #: Version tuple. Bump this for every release; the plugin wrapper and
 #: converter log message read from here.
-version = (5, 3, 17)
+version = (5, 3, 18)
 __version__ = ".".join(str(x) for x in version)
 
 __all__ = [

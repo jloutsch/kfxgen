@@ -63,7 +63,7 @@ echo "kfxgen" > "$BUILD_DIR/plugin-import-name-kfxgen.txt"
 
 # Generated about.txt — sourced from the actual license/version.
 cat > "$BUILD_DIR/about.txt" <<ABOUT
-KFX Output (kfxgen) — Open Source KFX Converter for Calibre
+kfxgen — Open Source KFX Converter for Calibre
 
 Version: $VERSION
 License: GPL v3

@@ -1,5 +1,22 @@
 # Changelog
 
+## 5.3.18 — Plugin renamed to "kfxgen"
+
+The Calibre plugin now registers as **kfxgen** (previously `KFXGEN`, while
+the docs incorrectly called it "KFX Output (kfxgen)"). This disambiguates
+it from John Howell's "KFX Output" plugin and makes the name consistent
+across the plugin list, `about.txt`, and the docs.
+
+- `name = "kfxgen"` in the plugin wrapper.
+- Fixed install/uninstall docs to use the real name (the old
+  `--disable-plugin "KFX Output (kfxgen)"` command was wrong and would
+  have failed).
+
+Note for anyone who installed an earlier build: Calibre keys plugins by
+name, so the renamed plugin installs as a new entry. Remove the old
+`KFXGEN` plugin once to avoid a duplicate
+(`calibre-customize -r KFXGEN`).
+
 ## 5.3.17 — GPL attribution for vendored kfxlib
 
 Licensing-compliance release. No runtime behavior change from 5.3.16.

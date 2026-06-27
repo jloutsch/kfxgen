@@ -36,7 +36,7 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
     - Optional Kindle Previewer fallback for complex books
     """
 
-    name = "KFXGEN"
+    name = "kfxgen"
     description = "Native KFX generation, blazing fast. Builds Kindle-ready KFX ebooks in seconds — no Kindle Previewer round-trip, no external tools, just pure Python. A drop-in replacement for KFX Output, only quicker."
     supported_platforms = ["windows", "osx", "linux"]
     author = "Justin Loutsch"
