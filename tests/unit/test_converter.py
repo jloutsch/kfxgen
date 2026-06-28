@@ -475,3 +475,41 @@ def test_optimization_skipped_when_embed_originals(monkeypatch, tmp_path):
     _conv.convert_oeb_to_kfx(object(), str(out), _OptsStub(True), _Log2())
     assert captured["images"] == {"x.jpg": b"XX"}  # originals untouched
     assert captured["cover"] == b"COVER"
+
+
+# ── Task 2: extract_blocks_from_html ─────────────────────────────────────────
+
+from kfxgen.inline_style import FLAG_BOLD as Bf  # noqa: E402
+from kfxgen.inline_style import FLAG_ITALIC as I  # noqa: E402, N816
+
+
+def _doc(body_inner):
+    return etree.fromstring(
+        f'<html xmlns="http://www.w3.org/1999/xhtml"><body>{body_inner}</body></html>'.encode()
+    )
+
+
+@pytest.mark.unit
+def test_blocks_capture_italic_span():
+    blocks = _conv.extract_blocks_from_html(_doc("<p>a <em>big</em> cat</p>"))
+    assert len(blocks) == 1
+    assert blocks[0]["text"] == "a big cat"
+    assert blocks[0]["spans"] == [(2, 3, frozenset({I}))]
+
+
+@pytest.mark.unit
+def test_blocks_capture_bold_and_nested():
+    blocks = _conv.extract_blocks_from_html(
+        _doc("<p><strong>x <em>y</em></strong></p>")
+    )
+    assert blocks[0]["text"] == "x y"
+    assert blocks[0]["spans"] == [
+        (0, 2, frozenset({Bf})),
+        (2, 1, frozenset({Bf, I})),
+    ]
+
+
+@pytest.mark.unit
+def test_extract_text_unchanged_delegates_to_blocks():
+    doc = _doc("<p>one</p><p>two <i>three</i></p>")
+    assert _conv.extract_text_from_html(doc) == "one\n\ntwo three"
