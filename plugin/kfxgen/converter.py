@@ -358,7 +358,8 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
         try:
             if not hasattr(item, "data") or item.data is None:
                 continue
-            text = extract_text_from_html(item.data)
+            blocks = extract_blocks_from_html(item.data)
+            text = "\n\n".join(b["text"] for b in blocks)
         except Exception as e:
             href_for_log = getattr(item, "href", "") or "<unknown>"
             log.warn(f"  Spine item {i + 1} parse failed ({href_for_log}): {e}")
@@ -373,7 +374,7 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
 
         spine_map[norm_href] = text
         spine_map[href] = text
-        spine_items_ordered.append({"href": href, "text": text})
+        spine_items_ordered.append({"href": href, "text": text, "blocks": blocks})
         log.info(f"  Spine item {i + 1}: {len(text)} chars ({norm_href})")
 
     if not spine_items_ordered:
@@ -480,7 +481,14 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
             ]
             text = "\n\n".join(parts)
             if text.strip():
-                chapters.append({"title": entry["title"], "text": text})
+                chapter = {"title": entry["title"], "text": text}
+                block_parts = []
+                for k in range(start, end):
+                    if spine_items_ordered[k]["text"]:
+                        block_parts.extend(spine_items_ordered[k]["blocks"])
+                if block_parts:
+                    chapter["blocks"] = block_parts
+                chapters.append(chapter)
                 covered_spine_indices.update(range(start, end))
 
         # Recover spine items the TOC never references. This fires when
@@ -526,7 +534,10 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
                         norm = _normalize_href(item["href"])
                         stem = norm.rsplit(".", 1)[0] if "." in norm else norm
                         title = stem or f"Section {k + 1}"
-                    chapters.append({"title": title, "text": item["text"]})
+                    chapter = {"title": title, "text": item["text"]}
+                    if item.get("blocks"):
+                        chapter["blocks"] = item["blocks"]
+                    chapters.append(chapter)
 
         if chapters:
             log.info(f"Mapped {len(chapters)} TOC entries to spine content")
@@ -540,7 +551,10 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
     # Fallback: use each spine item as a chapter
     chapters = []
     for i, item in enumerate(spine_items_ordered):
-        chapters.append({"title": f"Section {i + 1}", "text": item["text"]})
+        chapter = {"title": f"Section {i + 1}", "text": item["text"]}
+        if item.get("blocks"):
+            chapter["blocks"] = item["blocks"]
+        chapters.append(chapter)
 
     log.info(f"Using {len(chapters)} spine items as chapters (no TOC mapping)")
     _replace_title_page(chapters, metadata, log)

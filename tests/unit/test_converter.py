@@ -513,3 +513,20 @@ def test_blocks_capture_bold_and_nested():
 def test_extract_text_unchanged_delegates_to_blocks():
     doc = _doc("<p>one</p><p>two <i>three</i></p>")
     assert _conv.extract_text_from_html(doc) == "one\n\ntwo three"
+
+
+# ── Task 3: Thread emphasis blocks onto chapters ──────────────────────────────
+
+
+@pytest.fixture
+def simple_oeb_with_italic():
+    item = _SpineItem("chap.xhtml", "see <em>this</em>")
+    toc = [_TOCNode("Chapter 1", "chap.xhtml")]
+    return _OEBBook(spine=[item], toc=toc)
+
+
+@pytest.mark.unit
+def test_chapter_carries_emphasis_blocks(simple_oeb_with_italic):
+    chapters = extract_chapters_from_oeb(simple_oeb_with_italic, _silent_log())
+    blocks = chapters[0]["blocks"]
+    assert any(b["spans"] and b["spans"][0][2] == frozenset({I}) for b in blocks)
