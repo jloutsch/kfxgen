@@ -22,29 +22,35 @@ class _Log:
     def debug(self, m): pass
 
 
+@pytest.mark.unit
 def test_read_size_png():
     assert io._read_image_size(_png(3000, 2000)) == (3000, 2000)
 
 
+@pytest.mark.unit
 def test_read_size_jpeg():
     assert io._read_image_size(_jpeg(2500, 1800)) == (2500, 1800)
 
 
+@pytest.mark.unit
 def test_read_size_unknown_returns_none():
     assert io._read_image_size(b"not an image") is None
     assert io._read_image_size(b"\xff\xd8short") is None
 
 
+@pytest.mark.unit
 def test_env_int_default_when_unset(monkeypatch):
     monkeypatch.delenv("KFXGEN_IMAGE_MAX_DIM", raising=False)
     assert io._read_env_int("KFXGEN_IMAGE_MAX_DIM", 2048, 16, 20000, _Log()) == 2048
 
 
+@pytest.mark.unit
 def test_env_int_valid(monkeypatch):
     monkeypatch.setenv("KFXGEN_IMAGE_MAX_DIM", "1600")
     assert io._read_env_int("KFXGEN_IMAGE_MAX_DIM", 2048, 16, 20000, _Log()) == 1600
 
 
+@pytest.mark.unit
 def test_env_int_invalid_falls_back(monkeypatch):
     monkeypatch.setenv("KFXGEN_IMAGE_MAX_DIM", "huge")
     log = _Log()
@@ -52,6 +58,9 @@ def test_env_int_invalid_falls_back(monkeypatch):
     assert log.warns
 
 
+@pytest.mark.unit
 def test_env_int_out_of_range_falls_back(monkeypatch):
     monkeypatch.setenv("KFXGEN_IMAGE_QUALITY", "999")
-    assert io._read_env_int("KFXGEN_IMAGE_QUALITY", 85, 1, 100, _Log()) == 85
+    log = _Log()
+    assert io._read_env_int("KFXGEN_IMAGE_QUALITY", 85, 1, 100, log) == 85
+    assert log.warns
