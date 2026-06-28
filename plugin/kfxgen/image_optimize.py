@@ -63,3 +63,37 @@ def _read_env_int(name, default, lo, hi, log):
         log.warn(f"  ignoring out-of-range {name}={n} (allowed {lo}-{hi}); using {default}")
         return default
     return n
+
+
+def optimize_image(data, *, max_dim=DEFAULT_MAX_DIM, jpeg_quality=DEFAULT_JPEG_QUALITY, log=None):
+    """Downscale + recompress an over-size JPEG/PNG.
+
+    Returns optimized bytes, or the original bytes unchanged when no
+    optimization applies, calibre is unavailable, or anything fails.
+    Never raises.
+    """
+    size = _read_image_size(data)
+    if size is None:
+        return data
+    if max(size) <= max_dim:
+        return data
+    is_png = data[:8] == _PNG_SIG
+    try:
+        from calibre.utils.img import scale_image
+    except Exception:
+        if log:
+            log.debug("  calibre.utils.img unavailable; leaving image at original size")
+        return data
+    try:
+        # scale_image fits within the (width, height) box, preserving aspect.
+        _fmt, out = scale_image(
+            data, width=max_dim, height=max_dim,
+            as_png=is_png, compression_quality=jpeg_quality,
+        )
+    except Exception as e:  # noqa: BLE001 - never fail a conversion over an image
+        if log:
+            log.warn(f"  image optimize failed ({e}); keeping original")
+        return data
+    if not out or len(out) >= len(data):
+        return data
+    return out

@@ -1,4 +1,6 @@
 import struct
+import sys
+import types
 import pytest
 from kfxgen import image_optimize as io
 
@@ -64,3 +66,67 @@ def test_env_int_out_of_range_falls_back(monkeypatch):
     log = _Log()
     assert io._read_env_int("KFXGEN_IMAGE_QUALITY", 85, 1, 100, log) == 85
     assert log.warns
+
+
+@pytest.mark.unit
+def test_optimize_image_small_is_identity():
+    data = _jpeg(800, 600)
+    assert io.optimize_image(data, max_dim=2048, log=_Log()) is data
+
+
+@pytest.mark.unit
+def test_optimize_image_no_calibre_is_noop():
+    # calibre.utils.img is absent in CI -> over-size image returns unchanged
+    big = _jpeg(4000, 3000)
+    assert io.optimize_image(big, max_dim=2048, log=_Log()) == big
+
+
+@pytest.mark.unit
+def test_optimize_image_downscales_via_calibre(monkeypatch):
+    calls = {}
+    fake = types.ModuleType("calibre.utils.img")
+
+    def scale_image(data, width, height, as_png=False, compression_quality=90):
+        calls["args"] = (width, height, as_png, compression_quality)
+        return ("JPEG", b"small-bytes")
+
+    fake.scale_image = scale_image
+    monkeypatch.setitem(sys.modules, "calibre", types.ModuleType("calibre"))
+    monkeypatch.setitem(sys.modules, "calibre.utils", types.ModuleType("calibre.utils"))
+    monkeypatch.setitem(sys.modules, "calibre.utils.img", fake)
+
+    big = _jpeg(4000, 3000)
+    out = io.optimize_image(big, max_dim=2048, jpeg_quality=85, log=_Log())
+    assert out == b"small-bytes"
+    assert calls["args"] == (2048, 2048, False, 85)
+
+
+@pytest.mark.unit
+def test_optimize_image_keeps_png_format(monkeypatch):
+    seen = {}
+    fake = types.ModuleType("calibre.utils.img")
+
+    def scale_image(data, width, height, as_png=False, compression_quality=90):
+        seen["as_png"] = as_png
+        return ("PNG", b"x" * 10)
+
+    fake.scale_image = scale_image
+    monkeypatch.setitem(sys.modules, "calibre", types.ModuleType("calibre"))
+    monkeypatch.setitem(sys.modules, "calibre.utils", types.ModuleType("calibre.utils"))
+    monkeypatch.setitem(sys.modules, "calibre.utils.img", fake)
+
+    out = io.optimize_image(_png(4000, 3000), max_dim=2048, log=_Log())
+    assert seen["as_png"] is True
+    assert out == b"x" * 10
+
+
+@pytest.mark.unit
+def test_optimize_image_keeps_original_if_result_larger(monkeypatch):
+    fake = types.ModuleType("calibre.utils.img")
+    fake.scale_image = lambda *a, **k: ("JPEG", b"Z" * 100000)
+    monkeypatch.setitem(sys.modules, "calibre", types.ModuleType("calibre"))
+    monkeypatch.setitem(sys.modules, "calibre.utils", types.ModuleType("calibre.utils"))
+    monkeypatch.setitem(sys.modules, "calibre.utils.img", fake)
+
+    big = _jpeg(4000, 3000)
+    assert io.optimize_image(big, max_dim=2048, log=_Log()) == big
