@@ -10,6 +10,8 @@ import sys
 import tempfile
 from unittest.mock import MagicMock
 
+import pytest
+
 
 # Add plugin directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin"))
@@ -897,3 +899,26 @@ class TestHalfTitlePageEndToEnd:
         assert "The Real Title" in chunk_texts
         # Real chapters are unaffected.
         assert "Chapter 1" in chunk_texts
+
+
+@pytest.mark.unit
+def test_emphasis_spans_emit_142():
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    gen = NativeKFXGenerator()
+    frag = gen.build_fragment_259(
+        ["s0"],
+        content_name="content_1",
+        entity_name="l0",
+        positions=[1001],
+        outer_position=1000,
+        outer_style="s0",
+        chunk_kinds=["text"],
+        emphasis_spans=[[(2, 3, "s0it")]],
+    )
+    child = frag.value[IS("$146")][0][IS("$146")][0]
+    spans = child[IS("$142")]
+    assert spans[0][IS("$143")] == 2
+    assert spans[0][IS("$144")] == 3
+    assert spans[0][IS("$157")] == IS("s0it")
+    assert IS("$179") not in spans[0]

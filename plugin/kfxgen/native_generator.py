@@ -1109,6 +1109,7 @@ class NativeKFXGenerator:
         outer_style=None,
         chunk_kinds=None,
         image_specs=None,
+        emphasis_spans=None,
     ):
         """
         Builds Fragment $259 (Storyline / Flow Map)
@@ -1248,16 +1249,47 @@ class NativeKFXGenerator:
                 )
                 entry[IS("$142")] = [span]
 
+            if emphasis_spans and i < len(emphasis_spans) and emphasis_spans[i]:
+                existing = entry.get(IS("$142"), [])
+                for start, length, style_name in emphasis_spans[i]:
+                    self.symtab.create_local_symbol(style_name)
+                    existing.append(
+                        IonStruct(
+                            IS("$143"),
+                            start,
+                            IS("$144"),
+                            length,
+                            IS("$157"),
+                            IS(style_name),
+                        )
+                    )
+                entry[IS("$142")] = existing
+
             children.append(entry)
 
-        # FLAT shape (pre-Phase-3) — used for the TOC-regression test.
-        # Whether to revert nesting permanently or fix the nested shape
-        # depends on the device test outcome.
+        # Phase 3 nested shape: a single outer entry wraps all children.
+        effective_outer_style = (
+            outer_style
+            if outer_style
+            else (story_names[0] if story_names else entity_name)
+        )
+        self.symtab.create_local_symbol(effective_outer_style)
+        effective_outer_pos = outer_position if outer_position is not None else 0
+        outer_entry = IonStruct(
+            IS("$155"),
+            effective_outer_pos,
+            IS("$157"),
+            IS(effective_outer_style),
+            IS("$159"),
+            IS("$269"),
+            IS("$146"),
+            children,
+        )
         value = IonStruct(
             IS("$176"),
             IS(entity_name),
             IS("$146"),
-            children,
+            [outer_entry],
         )
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$259"), value=value)
