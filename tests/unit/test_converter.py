@@ -388,6 +388,29 @@ class TestHalfTitlePage:
         assert TITLE_PAGE_TITLES <= CONTENTS_SKIP_TITLES
 
 
+@pytest.mark.unit
+def test_replace_title_page_clears_stale_blocks():
+    """Chapters whose text is synthesised must not retain stale blocks (#9)."""
+    dummy_blocks = [{"spans": [("old text", "old text", frozenset())]}]
+    chapters = [
+        # Title page — blocks must be cleared after text replacement.
+        {"title": "Title Page", "text": "old", "blocks": list(dummy_blocks)},
+        # Half-title page — same invariant.
+        {"title": "Half Title", "text": "old", "blocks": list(dummy_blocks)},
+        # Contents page — _rebuild_contents_page replaces text, blocks must go.
+        {"title": "Contents", "text": "old", "blocks": list(dummy_blocks)},
+        # Normal chapter — blocks must be left untouched.
+        {"title": "Chapter 1", "text": "body", "blocks": list(dummy_blocks)},
+    ]
+    meta = {"title": "MyBook", "author": "A. Author"}
+    _replace_title_page(chapters, meta, _silent_log())
+
+    assert "blocks" not in chapters[0], "title page blocks not cleared"
+    assert "blocks" not in chapters[1], "half-title page blocks not cleared"
+    assert "blocks" not in chapters[2], "contents page blocks not cleared"
+    assert "blocks" in chapters[3], "normal chapter blocks wrongly cleared"
+
+
 class _OptsStub:
     def __init__(self, embed):
         self.kfxgen_embed_original_images = embed

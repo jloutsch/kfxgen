@@ -613,6 +613,7 @@ def _replace_title_page(chapters, metadata, log):
         ch_title = ch["title"].lower().strip()
         if ch_title in TITLE_PAGE_TITLES:
             ch["text"] = f"{title}\n\nby\n\n{author}"
+            ch.pop("blocks", None)
             # The replaced body already contains the book title — don't
             # also render the chapter's TOC name ("Title Page") as a
             # heading on top of it (#33).
@@ -624,6 +625,7 @@ def _replace_title_page(chapters, metadata, log):
             # printed content — replace with the title and suppress the
             # label as a heading so it can't leak onto the page. (#107)
             ch["text"] = title
+            ch.pop("blocks", None)
             ch["_omit_title_heading"] = True
             log.info(f"  Replaced half-title page with: {title}")
         elif ch_title in ("copyright", "copyright page"):
@@ -632,6 +634,7 @@ def _replace_title_page(chapters, metadata, log):
         elif ch_title in ("contents", "table of contents"):
             # Rebuild contents page from actual chapter titles
             _rebuild_contents_page(ch, chapters, log)
+            ch.pop("blocks", None)
             ch["font_size"] = SMALL_FONT_SIZE
 
         if ch_title in SMALL_TEXT_CHAPTERS:
@@ -668,6 +671,7 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     for link in toc_links:
         lines.append(link["text"])
     contents_ch["text"] = "\n\n".join(lines)
+    contents_ch.pop("blocks", None)
 
     # Structured link data for the native generator
     contents_ch["toc_links"] = toc_links
