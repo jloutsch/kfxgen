@@ -126,6 +126,7 @@ The version is single-sourced from `plugin/kfxgen/__init__.py`. `./build_plugin.
 - TOC entries that navigate within a spine file via `#anchor` (e.g. dictionary-style A/B/C/… sub-entries) surface as separate chapters rather than nested in-page anchors. Reading order and content are preserved.
 - Fonts are not embedded in the KFX. Custom fonts render via the font installed on the Kindle (see [Why this plugin](#why-this-plugin)); this is by design, but it means a font that isn't installed on the device won't travel with the file.
 - Inline emphasis (italic / bold within a paragraph) and most source CSS typography are not yet carried through; paragraph-level styles (font size, line height, alignment, margins, headings) are. KFX supports a subset of CSS, so this is a coverage gap rather than a hard limit — tracked in [#9](https://github.com/jloutsch/kfxgen/issues/9).
+- Images are embedded at source resolution with no downscaling or recompression, so heavily illustrated books can produce very large KFX files (a 469-image book yielded ~300 MB). Image optimization is tracked in [#11](https://github.com/jloutsch/kfxgen/issues/11).
 
 ## Version history
 
