@@ -29,6 +29,23 @@ Side-by-side structural comparison: fragment-type histograms,
 first few `$145` content fragments. The fastest way to confirm whether
 kfxgen output is in the right shape vs a known-good reference.
 
+## fontscan.py
+
+```
+python3 tools/fontscan.py <file.kfx>
+```
+
+Identifies embedded fonts (and other resources) in a single KFX. Pairs
+each `$164` resource manifest with its `$417` raw bytes and classifies it
+by magic bytes (TTF / OTF / TrueType / WOFF / WOFF2 vs JPEG / PNG), then
+reports the distinct `$161` format symbol(s) the fonts use, any orphan
+font blobs, and an inventory of `$157` style properties. Doubles as a
+quick "does this KFX carry fonts?" check.
+
+Phase 0 helper for embedding fonts in kfxgen output (issues #15, #16):
+run it against a font-embedded reference KFX to read the real font
+fragment symbols off the file instead of guessing.
+
 ## glossary_compare.py
 
 ```
