@@ -17,6 +17,8 @@ KFX (Kindle Format 10) is Amazon's modern ebook format. Compared to MOBI/AZW3 it
 
 The official KFX Output plugin for Calibre depends on Kindle Previewer, which is closed-source, Windows/Mac-only (Linux needs Wine), and converts in minutes per book. kfxgen converts in seconds, runs anywhere Calibre runs, and ships as a single Python plugin with no external binary dependencies.
 
+**Custom fonts that actually render.** This is the main reason kfxgen exists. KFX honors the font you've selected on the Kindle — including custom fonts you've installed on the device — and applies that font's OpenType features (ligatures, contextual alternates), which AZW3/MOBI did not do reliably. kfxgen writes `override_kindle_font: false` into the KFX so the device font is respected rather than overridden. The font lives on the Kindle, not in the file — kfxgen does not embed font files.
+
 ## Compatibility and validation
 
 Each release is exercised against a 90-book corpus of public-domain EPUBs from Project Gutenberg covering English, German, Dutch, Latin, ancient text (Beowulf, Odyssey), heavily illustrated books (NASA Mars Rovers — 436 body images), drama (Complete Works of Shakespeare — 1,169 TOC entries), poetry, and reference works (CIA World Factbooks).
@@ -122,7 +124,8 @@ The version is single-sourced from `plugin/kfxgen/__init__.py`. `./build_plugin.
 
 - The Calibre plugin path produces lower text retention than the direct-Python path on verse-heavy or image-heavy books (Mars Rovers, Lady of the Lake, Southern Literature) — Calibre's OEB pipeline normalizes `<br/>`, stanzas, and alt-text differently. See [`research/gutenberg-top-90-baseline-calibre/BASELINE.md`](research/gutenberg-top-90-baseline-calibre/BASELINE.md).
 - TOC entries that navigate within a spine file via `#anchor` (e.g. dictionary-style A/B/C/… sub-entries) surface as separate chapters rather than nested in-page anchors. Reading order and content are preserved.
-- Custom fonts and advanced typography features are not yet plumbed through the native generator.
+- Fonts are not embedded in the KFX. Custom fonts render via the font installed on the Kindle (see [Why this plugin](#why-this-plugin)); this is by design, but it means a font that isn't installed on the device won't travel with the file.
+- Arbitrary CSS typography beyond the styles kfxgen emits (font size, line height, alignment, margins, bold, headings) is not carried through the native generator.
 
 ## Version history
 
