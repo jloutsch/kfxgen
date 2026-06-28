@@ -928,6 +928,7 @@ class NativeKFXGenerator:
         bold=False,
         margin_top=None,
         is_heading=False,
+        italic=False,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -943,6 +944,7 @@ class NativeKFXGenerator:
             line_height: Line height in lh units (default 1.0, matching reference KFX)
             underline: If True, add text-decoration: underline ($23: $328)
             bold: If True, set font-weight: bold ($13: $361)
+            italic: If True, add font-style: italic ($12: $382)
             is_heading: If True, omit padding-top (headings use margin-top for spacing)
 
         Returns:
@@ -995,6 +997,10 @@ class NativeKFXGenerator:
         # $23: $328 = text-decoration: underline
         if underline:
             value[IS("$23")] = IS("$328")
+
+        # $12 = font-style: $382 = italic (authoritative, jhowell kfxlib)
+        if italic:
+            value[IS("$12")] = IS("$382")
 
         # $46 = margin-top (for visual separation before chapter headings)
         if margin_top is not None:
@@ -1103,6 +1109,7 @@ class NativeKFXGenerator:
         outer_style=None,
         chunk_kinds=None,
         image_specs=None,
+        emphasis_spans=None,
     ):
         """
         Builds Fragment $259 (Storyline / Flow Map)
@@ -1241,6 +1248,22 @@ class NativeKFXGenerator:
                     IS(span_style),
                 )
                 entry[IS("$142")] = [span]
+
+            if emphasis_spans and i < len(emphasis_spans) and emphasis_spans[i]:
+                existing = entry.get(IS("$142"), [])
+                for start, length, style_name in emphasis_spans[i]:
+                    self.symtab.create_local_symbol(style_name)
+                    existing.append(
+                        IonStruct(
+                            IS("$143"),
+                            start,
+                            IS("$144"),
+                            length,
+                            IS("$157"),
+                            IS(style_name),
+                        )
+                    )
+                entry[IS("$142")] = existing
 
             children.append(entry)
 
@@ -2191,6 +2214,28 @@ class NativeKFXGenerator:
                 pos += self.CHUNK_SIZE
             return chunks
 
+        def _append_text_with_spans(chunk_text, para_text, para_spans):
+            """Split chunk_text by CHUNK_SIZE and attach the slice of
+            para_spans covering each piece, offsets rebased to the piece.
+            The chunk_text is a (stripped) substring of para_text; find its
+            offset once, then translate spans."""
+            base = para_text.find(chunk_text)
+            if base < 0:
+                base = 0  # defensive: emphasis simply won't apply to this chunk
+            pos = 0
+            while pos < len(chunk_text):
+                piece = chunk_text[pos : pos + self.CHUNK_SIZE]
+                p_start = base + pos
+                p_end = p_start + len(piece)
+                pspans = []
+                for s, length, flags in para_spans:
+                    a = max(s, p_start)
+                    b = min(s + length, p_end)
+                    if b > a:
+                        pspans.append((a - p_start, b - a, flags))
+                all_chunks.append({"type": "text", "text": piece, "spans": pspans})
+                pos += self.CHUNK_SIZE
+
         for ch_idx, chapter in enumerate(chapters):
             start_idx = len(all_chunks)
             title = chapter["title"]
@@ -2237,16 +2282,48 @@ class NativeKFXGenerator:
                 if stripped[: len(title)].lower() == title.lower():
                     text = stripped[len(title) :].lstrip()
                 if text:
-                    paras = text.split("\n\n")
-                    for para in paras:
-                        para = para.strip()
+                    blocks = chapter.get("blocks")
+                    if blocks is not None:
+                        iter_blocks = list(blocks)
+                        if iter_blocks:
+                            first = iter_blocks[0]
+                            first_stripped = first["text"].lstrip()
+                            if first_stripped[: len(title)].lower() == title.lower():
+                                remainder = first_stripped[len(title) :].lstrip()
+                                removed = len(first["text"]) - len(remainder)
+                                rebased_spans = []
+                                for s, length, flags in first.get("spans", []):
+                                    new_s = s - removed
+                                    new_end = s + length - removed
+                                    start = max(new_s, 0)
+                                    end = min(new_end, len(remainder))
+                                    if end > start:
+                                        rebased_spans.append(
+                                            (start, end - start, flags)
+                                        )
+                                if remainder:
+                                    iter_blocks[0] = {
+                                        "text": remainder,
+                                        "spans": rebased_spans,
+                                    }
+                                else:
+                                    iter_blocks = iter_blocks[1:]
+                        para_iter = iter_blocks
+                    else:
+                        para_iter = [
+                            {"text": p, "spans": []} for p in text.split("\n\n")
+                        ]
+
+                    for block in para_iter:
+                        para = block["text"].strip()
                         if not para:
                             continue
+                        para_spans = block.get("spans", [])
                         for chunk in _emit_text_chunks(para):
                             if chunk["type"] == "image":
                                 all_chunks.append(chunk)
                             else:
-                                all_chunks.extend(_split_long_text(chunk["text"]))
+                                _append_text_with_spans(chunk["text"], para, para_spans)
 
             # Guarantee every chapter contributes at least one chunk so it
             # owns a navigable content position and the per-chapter arrays
@@ -2341,6 +2418,8 @@ class NativeKFXGenerator:
             name = f"s{idx}{kind}"
             style_cache[key] = name
             self.fragments.append(self.build_fragment_157(entity_name=name, **attrs))
+            if kind == "_em" and name not in extra_style_names:
+                extra_style_names.append(name)
             return name
 
         for i, chapter in enumerate(chapters):
@@ -2420,6 +2499,15 @@ class NativeKFXGenerator:
             kind = _classify(w, h)
             return image_style_names.get(kind) or image_style_names.get("inline")
 
+        from .inline_style import FLAG_BOLD, FLAG_ITALIC
+
+        def _emphasis_style(flags):
+            return _allocate_style(
+                "_em",
+                italic=FLAG_ITALIC in flags,
+                bold=FLAG_BOLD in flags,
+            )
+
         # With per-chapter $145 fragments (#2), each chapter's $259
         # entries address into their OWN content fragment, so $403
         # indices reset to 0 at the start of every chapter.
@@ -2438,6 +2526,7 @@ class NativeKFXGenerator:
             entry_link_text_lengths = []
             entry_kinds = []
             entry_image_specs = []
+            entry_emphasis_spans = []
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
                 if chunk.get("type") == "image":
@@ -2451,6 +2540,7 @@ class NativeKFXGenerator:
                     entry_image_specs.append(
                         {"resource": chunk["resource"], "alt": chunk.get("alt", "")}
                     )
+                    entry_emphasis_spans.append(None)
                     continue
                 entry_kinds.append("text")
                 entry_image_specs.append(None)
@@ -2472,6 +2562,13 @@ class NativeKFXGenerator:
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)
+                chunk_spans = chunk.get("spans", [])
+                entry_emphasis_spans.append(
+                    [
+                        (s, length, _emphasis_style(flags))
+                        for (s, length, flags) in chunk_spans
+                    ]
+                )
 
             frag_259 = self.build_fragment_259(
                 entry_styles,
@@ -2486,6 +2583,7 @@ class NativeKFXGenerator:
                 outer_style=story_names[ch_idx],
                 chunk_kinds=entry_kinds,
                 image_specs=entry_image_specs,
+                emphasis_spans=entry_emphasis_spans,
             )
             storyline_names.append(sl_name)
             self.fragments.append(frag_259)

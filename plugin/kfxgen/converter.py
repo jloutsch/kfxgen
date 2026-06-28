@@ -16,7 +16,11 @@ from ._img_tokens import (
     IMG_TOKEN_SPACE as _IMG_TOKEN_SPACE,
 )
 from .image_optimize import optimize_images
+from .inline_style import FLAG_BOLD, FLAG_ITALIC, normalize_runs
 from .native_generator import NativeKFXGenerator
+
+_ITALIC_TAGS = {"em", "i"}
+_BOLD_TAGS = {"strong", "b"}
 
 _security_log = logging.getLogger(__name__ + ".security")
 
@@ -52,46 +56,37 @@ def _make_img_token(href, alt):
     )
 
 
-def _walk_paragraph_with_imgs(elem):
-    """Build the inline content of a paragraph, preserving <img> tags as
-    IMG tokens at their source positions.
-
-    Tokens are decoded by the chunker in NativeKFXGenerator and emitted
-    as nested $259 image entries pointing at the matching $164 resource.
-    """
+def _walk_inline(elem, flags=frozenset()):
+    """Yield (segment, flags) pairs for inline content, accumulating italic/
+    bold from ancestor <em>/<i>/<strong>/<b>. <img> becomes an IMG token
+    segment with empty flags so the generator still splits on it."""
+    local = _local_tag(elem.tag)
+    cur = set(flags)
+    if local in _ITALIC_TAGS:
+        cur.add(FLAG_ITALIC)
+    if local in _BOLD_TAGS:
+        cur.add(FLAG_BOLD)
+    cur = frozenset(cur)
     parts = []
     if elem.text:
-        parts.append(elem.text)
+        parts.append((elem.text, cur))
     for child in elem:
-        local = _local_tag(child.tag)
-        if local == "img":
+        clocal = _local_tag(child.tag)
+        if clocal == "img":
             href = child.get("src", "") or ""
             alt = child.get("alt", "") or ""
-            parts.append(_make_img_token(href, alt))
+            parts.append((_make_img_token(href, alt), frozenset()))
         else:
-            parts.append(_walk_paragraph_with_imgs(child))
+            parts.extend(_walk_inline(child, cur))
         if child.tail:
-            parts.append(child.tail)
-    return "".join(parts)
+            parts.append((child.tail, flags))
+    return parts
 
 
-def extract_text_from_html(element):
-    """
-    Extract text from an lxml HTML element's body, preserving inline <img>
-    tags as placeholder tokens.
-
-    Each <img src="..." alt="..."/> becomes a token string of the form
-    \\x00IMG\\x01<src>\\x01<alt>\\x00 inserted in document-order position. The
-    downstream chunking step (in NativeKFXGenerator._build_chapter_content)
-    parses these tokens into nested $259 image entries.
-
-    Args:
-        element: lxml element (root of XHTML document)
-
-    Returns:
-        str: Extracted text with paragraph breaks preserved as \\n\\n and
-             inline image tokens preserved at their source positions.
-    """
+def extract_blocks_from_html(element):
+    """Like extract_text_from_html but returns structured blocks:
+    [{"text": str, "spans": [(start, length, frozenset)]}], preserving inline
+    emphasis as spans and inline <img> as IMG tokens in `text`."""
     body = element.find(".//{http://www.w3.org/1999/xhtml}body")
     if body is None:
         body = element.find(".//body")
@@ -118,18 +113,14 @@ def extract_text_from_html(element):
         block_tags.add(tag)
         block_tags.add(ns + tag)
 
-    paragraphs = []
+    blocks = []
     for elem in body.iter():
         if elem.tag in block_tags:
-            has_block_child = any(child.tag in block_tags for child in elem)
-            if has_block_child:
+            if any(child.tag in block_tags for child in elem):
                 continue
-            content = _walk_paragraph_with_imgs(elem)
-            # Tokens use only non-whitespace control chars, so ' '.join(split())
-            # collapses normal whitespace runs without fragmenting tokens.
-            normalized = " ".join(content.split()).strip()
-            if normalized:
-                paragraphs.append(normalized)
+            text, spans = normalize_runs(_walk_inline(elem))
+            if text:
+                blocks.append({"text": text, "spans": spans})
             continue
 
         # Bare <img> directly under body (rare, but exists in some EPUBs)
@@ -139,16 +130,22 @@ def extract_text_from_html(element):
                 continue  # already handled by the block walker above
             href = elem.get("src", "") or ""
             alt = elem.get("alt", "") or ""
-            paragraphs.append(_make_img_token(href, alt))
+            blocks.append({"text": _make_img_token(href, alt), "spans": []})
 
-    if paragraphs:
-        return "\n\n".join(paragraphs)
+    if blocks:
+        return blocks
 
-    # Fallback: no block elements — flat extraction, no token support
+    # Fallback: no block elements — flat extraction, no spans (unchanged rule).
     text = body.xpath("string()")
     lines = [line.strip() for line in text.split("\n")]
     text = " ".join(line for line in lines if line)
-    return text
+    return [{"text": text, "spans": []}] if text else []
+
+
+def extract_text_from_html(element):
+    """Plain-text extraction (IMG tokens preserved). Now derived from
+    extract_blocks_from_html so the two never diverge."""
+    return "\n\n".join(b["text"] for b in extract_blocks_from_html(element))
 
 
 def extract_metadata(oeb_book, log):
@@ -361,7 +358,8 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
         try:
             if not hasattr(item, "data") or item.data is None:
                 continue
-            text = extract_text_from_html(item.data)
+            blocks = extract_blocks_from_html(item.data)
+            text = "\n\n".join(b["text"] for b in blocks)
         except Exception as e:
             href_for_log = getattr(item, "href", "") or "<unknown>"
             log.warn(f"  Spine item {i + 1} parse failed ({href_for_log}): {e}")
@@ -376,7 +374,7 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
 
         spine_map[norm_href] = text
         spine_map[href] = text
-        spine_items_ordered.append({"href": href, "text": text})
+        spine_items_ordered.append({"href": href, "text": text, "blocks": blocks})
         log.info(f"  Spine item {i + 1}: {len(text)} chars ({norm_href})")
 
     if not spine_items_ordered:
@@ -483,7 +481,14 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
             ]
             text = "\n\n".join(parts)
             if text.strip():
-                chapters.append({"title": entry["title"], "text": text})
+                chapter = {"title": entry["title"], "text": text}
+                block_parts = []
+                for k in range(start, end):
+                    if spine_items_ordered[k]["text"]:
+                        block_parts.extend(spine_items_ordered[k]["blocks"])
+                if block_parts:
+                    chapter["blocks"] = block_parts
+                chapters.append(chapter)
                 covered_spine_indices.update(range(start, end))
 
         # Recover spine items the TOC never references. This fires when
@@ -529,7 +534,10 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
                         norm = _normalize_href(item["href"])
                         stem = norm.rsplit(".", 1)[0] if "." in norm else norm
                         title = stem or f"Section {k + 1}"
-                    chapters.append({"title": title, "text": item["text"]})
+                    chapter = {"title": title, "text": item["text"]}
+                    if item.get("blocks"):
+                        chapter["blocks"] = item["blocks"]
+                    chapters.append(chapter)
 
         if chapters:
             log.info(f"Mapped {len(chapters)} TOC entries to spine content")
@@ -543,7 +551,10 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
     # Fallback: use each spine item as a chapter
     chapters = []
     for i, item in enumerate(spine_items_ordered):
-        chapters.append({"title": f"Section {i + 1}", "text": item["text"]})
+        chapter = {"title": f"Section {i + 1}", "text": item["text"]}
+        if item.get("blocks"):
+            chapter["blocks"] = item["blocks"]
+        chapters.append(chapter)
 
     log.info(f"Using {len(chapters)} spine items as chapters (no TOC mapping)")
     _replace_title_page(chapters, metadata, log)
@@ -602,6 +613,7 @@ def _replace_title_page(chapters, metadata, log):
         ch_title = ch["title"].lower().strip()
         if ch_title in TITLE_PAGE_TITLES:
             ch["text"] = f"{title}\n\nby\n\n{author}"
+            ch.pop("blocks", None)
             # The replaced body already contains the book title — don't
             # also render the chapter's TOC name ("Title Page") as a
             # heading on top of it (#33).
@@ -613,6 +625,7 @@ def _replace_title_page(chapters, metadata, log):
             # printed content — replace with the title and suppress the
             # label as a heading so it can't leak onto the page. (#107)
             ch["text"] = title
+            ch.pop("blocks", None)
             ch["_omit_title_heading"] = True
             log.info(f"  Replaced half-title page with: {title}")
         elif ch_title in ("copyright", "copyright page"):
@@ -621,6 +634,7 @@ def _replace_title_page(chapters, metadata, log):
         elif ch_title in ("contents", "table of contents"):
             # Rebuild contents page from actual chapter titles
             _rebuild_contents_page(ch, chapters, log)
+            ch.pop("blocks", None)
             ch["font_size"] = SMALL_FONT_SIZE
 
         if ch_title in SMALL_TEXT_CHAPTERS:
@@ -657,6 +671,7 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     for link in toc_links:
         lines.append(link["text"])
     contents_ch["text"] = "\n\n".join(lines)
+    contents_ch.pop("blocks", None)
 
     # Structured link data for the native generator
     contents_ch["toc_links"] = toc_links

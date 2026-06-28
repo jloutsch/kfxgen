@@ -10,6 +10,8 @@ import sys
 import tempfile
 from unittest.mock import MagicMock
 
+import pytest
+
 
 # Add plugin directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin"))
@@ -144,6 +146,62 @@ class TestPerParagraphChunking:
             f"Content positions ({max_content_pos}) overlap with section positions ({min_section_pos})"
         )
 
+    @pytest.mark.unit
+    def test_blocks_title_prefix_stripped_no_duplicate(self):
+        # When blocks[0].text equals the chapter title, the title must appear
+        # exactly once across all chunks (heading chunk only, not also as body).
+        gen = NativeKFXGenerator()
+        chapters = [
+            {
+                "title": "Chapter 1",
+                "text": "Chapter 1\n\nbody",
+                "blocks": [
+                    {"text": "Chapter 1", "spans": []},
+                    {"text": "body", "spans": []},
+                ],
+            }
+        ]
+        result = gen._build_chapter_content(chapters)
+        texts = [c["text"] for c in result["all_chunks"] if c["type"] == "text"]
+        assert texts.count("Chapter 1") == 1, f"Title duplicated in chunks: {texts}"
+        assert texts == ["Chapter 1", "body"]
+
+    @pytest.mark.unit
+    def test_blocks_title_prefix_span_rebased(self):
+        # When blocks[0] has "Title rest" with an italic span on "rest",
+        # stripping the title prefix must rebase the span offset correctly.
+        from kfxgen.inline_style import FLAG_ITALIC
+
+        gen = NativeKFXGenerator()
+        # First block: "Chapter 1 italic" where "italic" (chars 10-16) is italic.
+        # Title "Chapter 1" (len 9) + space = 10 chars removed after lstrip.
+        # Span (10, 6, {FLAG_ITALIC}) -> rebased to (0, 6, {FLAG_ITALIC}).
+        chapters = [
+            {
+                "title": "Chapter 1",
+                "text": "Chapter 1 italic\n\nbody",
+                "blocks": [
+                    {"text": "Chapter 1 italic", "spans": [(10, 6, {FLAG_ITALIC})]},
+                    {"text": "body", "spans": []},
+                ],
+            }
+        ]
+        result = gen._build_chapter_content(chapters)
+        texts = [c["text"] for c in result["all_chunks"] if c["type"] == "text"]
+        assert texts[0] == "Chapter 1", f"Expected heading first, got: {texts}"
+        assert texts[1] == "italic", f"Expected rebased remainder second, got: {texts}"
+        italic_chunk = next(
+            c
+            for c in result["all_chunks"]
+            if c["type"] == "text" and c["text"] == "italic"
+        )
+        spans = italic_chunk.get("spans", [])
+        assert len(spans) == 1, f"Expected one span on 'italic' chunk, got: {spans}"
+        s, length, flags = spans[0]
+        assert s == 0, f"Rebased span start should be 0, got {s}"
+        assert length == 6, f"Rebased span length should be 6, got {length}"
+        assert FLAG_ITALIC in flags, f"Expected FLAG_ITALIC in flags, got {flags}"
+
 
 class TestBuildFragment157:
     """Test style fragment building."""
@@ -195,6 +253,20 @@ class TestBuildFragment157:
 
         frag = gen.build_fragment_157(entity_name="s_ul", underline=True)
         assert frag.value[IS("$23")] == IS("$328")
+
+    def test_italic_sets_font_style(self):
+        from kfxgen.kfxlib_minimal.ion import IS
+
+        gen = NativeKFXGenerator()
+        frag = gen.build_fragment_157(entity_name="s_it", italic=True)
+        assert frag.value[IS("$12")] == IS("$382")
+
+    def test_no_italic_by_default(self):
+        from kfxgen.kfxlib_minimal.ion import IS
+
+        gen = NativeKFXGenerator()
+        frag = gen.build_fragment_157(entity_name="s_plain")
+        assert IS("$12") not in frag.value
 
 
 class TestStyleSharing:
@@ -883,3 +955,65 @@ class TestHalfTitlePageEndToEnd:
         assert "The Real Title" in chunk_texts
         # Real chapters are unaffected.
         assert "Chapter 1" in chunk_texts
+
+
+@pytest.mark.unit
+def test_emphasis_spans_emit_142():
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    gen = NativeKFXGenerator()
+    frag = gen.build_fragment_259(
+        ["s0"],
+        content_name="content_1",
+        entity_name="l0",
+        positions=[1001],
+        outer_position=1000,
+        outer_style="s0",
+        chunk_kinds=["text"],
+        emphasis_spans=[[(2, 3, "s0it")]],
+    )
+    child = frag.value[IS("$146")][0]
+    spans = child[IS("$142")]
+    assert spans[0][IS("$143")] == 2
+    assert spans[0][IS("$144")] == 3
+    assert spans[0][IS("$157")] == IS("s0it")
+    assert IS("$179") not in spans[0]
+
+
+@pytest.mark.unit
+def test_emphasis_block_produces_italic_span_in_book(tmp_path):
+    from kfxgen.kfxlib_minimal.ion import IS
+    from kfxgen.inline_style import FLAG_ITALIC
+
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "Ch",
+            "text": "a big cat",
+            "blocks": [
+                {"text": "a big cat", "spans": [(2, 3, frozenset({FLAG_ITALIC}))]}
+            ],
+        }
+    ]
+    out = tmp_path / "out.kfx"
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(out)
+    )
+    # An italic $157 ($12 -> $382) must exist among emitted fragments.
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    assert any(
+        IS("$12") in f.value and f.value[IS("$12")] == IS("$382") for f in styles
+    )
+
+
+@pytest.mark.unit
+def test_plain_chapter_emits_no_emphasis_fragments(tmp_path):
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    gen = NativeKFXGenerator()
+    chapters = [{"title": "Ch", "text": "plain text only"}]  # no blocks
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    assert all(IS("$12") not in f.value for f in styles)  # no italic anywhere

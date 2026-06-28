@@ -388,6 +388,29 @@ class TestHalfTitlePage:
         assert TITLE_PAGE_TITLES <= CONTENTS_SKIP_TITLES
 
 
+@pytest.mark.unit
+def test_replace_title_page_clears_stale_blocks():
+    """Chapters whose text is synthesised must not retain stale blocks (#9)."""
+    dummy_blocks = [{"spans": [("old text", "old text", frozenset())]}]
+    chapters = [
+        # Title page — blocks must be cleared after text replacement.
+        {"title": "Title Page", "text": "old", "blocks": list(dummy_blocks)},
+        # Half-title page — same invariant.
+        {"title": "Half Title", "text": "old", "blocks": list(dummy_blocks)},
+        # Contents page — _rebuild_contents_page replaces text, blocks must go.
+        {"title": "Contents", "text": "old", "blocks": list(dummy_blocks)},
+        # Normal chapter — blocks must be left untouched.
+        {"title": "Chapter 1", "text": "body", "blocks": list(dummy_blocks)},
+    ]
+    meta = {"title": "MyBook", "author": "A. Author"}
+    _replace_title_page(chapters, meta, _silent_log())
+
+    assert "blocks" not in chapters[0], "title page blocks not cleared"
+    assert "blocks" not in chapters[1], "half-title page blocks not cleared"
+    assert "blocks" not in chapters[2], "contents page blocks not cleared"
+    assert "blocks" in chapters[3], "normal chapter blocks wrongly cleared"
+
+
 class _OptsStub:
     def __init__(self, embed):
         self.kfxgen_embed_original_images = embed
@@ -475,3 +498,58 @@ def test_optimization_skipped_when_embed_originals(monkeypatch, tmp_path):
     _conv.convert_oeb_to_kfx(object(), str(out), _OptsStub(True), _Log2())
     assert captured["images"] == {"x.jpg": b"XX"}  # originals untouched
     assert captured["cover"] == b"COVER"
+
+
+# ── Task 2: extract_blocks_from_html ─────────────────────────────────────────
+
+from kfxgen.inline_style import FLAG_BOLD as Bf  # noqa: E402
+from kfxgen.inline_style import FLAG_ITALIC as I  # noqa: E402, N816
+
+
+def _doc(body_inner):
+    return etree.fromstring(
+        f'<html xmlns="http://www.w3.org/1999/xhtml"><body>{body_inner}</body></html>'.encode()
+    )
+
+
+@pytest.mark.unit
+def test_blocks_capture_italic_span():
+    blocks = _conv.extract_blocks_from_html(_doc("<p>a <em>big</em> cat</p>"))
+    assert len(blocks) == 1
+    assert blocks[0]["text"] == "a big cat"
+    assert blocks[0]["spans"] == [(2, 3, frozenset({I}))]
+
+
+@pytest.mark.unit
+def test_blocks_capture_bold_and_nested():
+    blocks = _conv.extract_blocks_from_html(
+        _doc("<p><strong>x <em>y</em></strong></p>")
+    )
+    assert blocks[0]["text"] == "x y"
+    assert blocks[0]["spans"] == [
+        (0, 2, frozenset({Bf})),
+        (2, 1, frozenset({Bf, I})),
+    ]
+
+
+@pytest.mark.unit
+def test_extract_text_unchanged_delegates_to_blocks():
+    doc = _doc("<p>one</p><p>two <i>three</i></p>")
+    assert _conv.extract_text_from_html(doc) == "one\n\ntwo three"
+
+
+# ── Task 3: Thread emphasis blocks onto chapters ──────────────────────────────
+
+
+@pytest.fixture
+def simple_oeb_with_italic():
+    item = _SpineItem("chap.xhtml", "see <em>this</em>")
+    toc = [_TOCNode("Chapter 1", "chap.xhtml")]
+    return _OEBBook(spine=[item], toc=toc)
+
+
+@pytest.mark.unit
+def test_chapter_carries_emphasis_blocks(simple_oeb_with_italic):
+    chapters = extract_chapters_from_oeb(simple_oeb_with_italic, _silent_log())
+    blocks = chapters[0]["blocks"]
+    assert any(b["spans"] and b["spans"][0][2] == frozenset({I}) for b in blocks)
