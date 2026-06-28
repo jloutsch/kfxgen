@@ -922,3 +922,29 @@ def test_emphasis_spans_emit_142():
     assert spans[0][IS("$144")] == 3
     assert spans[0][IS("$157")] == IS("s0it")
     assert IS("$179") not in spans[0]
+
+
+@pytest.mark.unit
+def test_emphasis_block_produces_italic_span_in_book(tmp_path):
+    from kfxgen.kfxlib_minimal.ion import IS
+    from kfxgen.inline_style import FLAG_ITALIC
+
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "Ch",
+            "text": "a big cat",
+            "blocks": [
+                {"text": "a big cat", "spans": [(2, 3, frozenset({FLAG_ITALIC}))]}
+            ],
+        }
+    ]
+    out = tmp_path / "out.kfx"
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(out)
+    )
+    # An italic $157 ($12 -> $382) must exist among emitted fragments.
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    assert any(
+        IS("$12") in f.value and f.value[IS("$12")] == IS("$382") for f in styles
+    )
