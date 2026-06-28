@@ -916,7 +916,7 @@ def test_emphasis_spans_emit_142():
         chunk_kinds=["text"],
         emphasis_spans=[[(2, 3, "s0it")]],
     )
-    child = frag.value[IS("$146")][0][IS("$146")][0]
+    child = frag.value[IS("$146")][0]
     spans = child[IS("$142")]
     assert spans[0][IS("$143")] == 2
     assert spans[0][IS("$144")] == 3

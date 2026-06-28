@@ -1267,29 +1267,14 @@ class NativeKFXGenerator:
 
             children.append(entry)
 
-        # Phase 3 nested shape: a single outer entry wraps all children.
-        effective_outer_style = (
-            outer_style
-            if outer_style
-            else (story_names[0] if story_names else entity_name)
-        )
-        self.symtab.create_local_symbol(effective_outer_style)
-        effective_outer_pos = outer_position if outer_position is not None else 0
-        outer_entry = IonStruct(
-            IS("$155"),
-            effective_outer_pos,
-            IS("$157"),
-            IS(effective_outer_style),
-            IS("$159"),
-            IS("$269"),
-            IS("$146"),
-            children,
-        )
+        # FLAT shape (pre-Phase-3) — used for the TOC-regression test.
+        # Whether to revert nesting permanently or fix the nested shape
+        # depends on the device test outcome.
         value = IonStruct(
             IS("$176"),
             IS(entity_name),
             IS("$146"),
-            [outer_entry],
+            children,
         )
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$259"), value=value)
