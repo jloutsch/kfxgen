@@ -1,7 +1,7 @@
 # kfxgen — Open-source KFX generator for Calibre
 
 [![Tests](https://github.com/jloutsch/kfxgen/actions/workflows/test.yml/badge.svg)](https://github.com/jloutsch/kfxgen/actions/workflows/test.yml)
-[![Version](https://img.shields.io/badge/version-5.3.14-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/github/v/release/jloutsch/kfxgen?label=release&color=blue)](https://github.com/jloutsch/kfxgen/releases/latest)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL%20v3-green.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
 [![Calibre](https://img.shields.io/badge/calibre-5.0%2B-orange.svg)](https://calibre-ebook.com/)
 
@@ -21,7 +21,7 @@ The official KFX Output plugin for Calibre depends on Kindle Previewer, which is
 
 Each release is exercised against a 90-book corpus of public-domain EPUBs from Project Gutenberg covering English, German, Dutch, Latin, ancient text (Beowulf, Odyssey), heavily illustrated books (NASA Mars Rovers — 436 body images), drama (Complete Works of Shakespeare — 1,169 TOC entries), poetry, and reference works (CIA World Factbooks).
 
-Current state on v5.3.14:
+Current state:
 
 | Pipeline | Conversion success | Word-content retention |
 |---|---|---|
@@ -126,7 +126,7 @@ The version is single-sourced from `plugin/kfxgen/__init__.py`. `./build_plugin.
 
 ## Version history
 
-See [`CHANGELOG.md`](CHANGELOG.md). The current release is **v5.3.14** (anchor-collapse fix for in-page TOC navigation; CIA Factbook 2006 went from 0.2% to 98.0% word retention).
+See [`CHANGELOG.md`](CHANGELOG.md) for release notes, and the [releases page](https://github.com/jloutsch/kfxgen/releases/latest) for the current version.
 
 ## Contributing
 
