@@ -948,3 +948,16 @@ def test_emphasis_block_produces_italic_span_in_book(tmp_path):
     assert any(
         IS("$12") in f.value and f.value[IS("$12")] == IS("$382") for f in styles
     )
+
+
+@pytest.mark.unit
+def test_plain_chapter_emits_no_emphasis_fragments(tmp_path):
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    gen = NativeKFXGenerator()
+    chapters = [{"title": "Ch", "text": "plain text only"}]  # no blocks
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    assert all(IS("$12") not in f.value for f in styles)  # no italic anywhere
