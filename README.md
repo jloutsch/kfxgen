@@ -125,7 +125,7 @@ The version is single-sourced from `plugin/kfxgen/__init__.py`. `./build_plugin.
 - The Calibre plugin path produces lower text retention than the direct-Python path on verse-heavy or image-heavy books (Mars Rovers, Lady of the Lake, Southern Literature) — Calibre's OEB pipeline normalizes `<br/>`, stanzas, and alt-text differently. See [`research/gutenberg-top-90-baseline-calibre/BASELINE.md`](research/gutenberg-top-90-baseline-calibre/BASELINE.md).
 - TOC entries that navigate within a spine file via `#anchor` (e.g. dictionary-style A/B/C/… sub-entries) surface as separate chapters rather than nested in-page anchors. Reading order and content are preserved.
 - Fonts are not embedded in the KFX. Custom fonts render via the font installed on the Kindle (see [Why this plugin](#why-this-plugin)); this is by design, but it means a font that isn't installed on the device won't travel with the file.
-- Arbitrary CSS typography beyond the styles kfxgen emits (font size, line height, alignment, margins, bold, headings) is not carried through the native generator.
+- Inline emphasis (italic / bold within a paragraph) and most source CSS typography are not yet carried through; paragraph-level styles (font size, line height, alignment, margins, headings) are. KFX supports a subset of CSS, so this is a coverage gap rather than a hard limit — tracked in [#9](https://github.com/jloutsch/kfxgen/issues/9).
 
 ## Version history
 
