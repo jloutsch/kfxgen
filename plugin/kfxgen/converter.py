@@ -15,6 +15,7 @@ from ._img_tokens import (
     IMG_TOKEN_RE as _IMG_TOKEN_RE,
     IMG_TOKEN_SPACE as _IMG_TOKEN_SPACE,
 )
+from .image_optimize import optimize_images
 from .native_generator import NativeKFXGenerator
 
 _security_log = logging.getLogger(__name__ + ".security")
@@ -921,6 +922,12 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
     images = extract_images_from_oeb(
         oeb_book, log, exclude_hrefs=[cover_href] if cover_href else []
     )
+
+    # Optimize over-size images unless the user opted to embed originals (#11).
+    if getattr(opts, "kfxgen_embed_original_images", False):
+        log.info("  Image optimization disabled (embed original images)")
+    else:
+        cover_image, images = optimize_images(cover_image, images, log)
 
     # Extract structured chapters
     log.info("Extracting chapters...")

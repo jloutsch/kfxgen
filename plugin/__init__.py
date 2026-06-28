@@ -14,7 +14,7 @@ __license__ = "GPL v3"
 __copyright__ = "2025-2026, Justin Loutsch <justin.loutsch@gmail.com>"
 __docformat__ = "restructuredtext en"
 
-from calibre.customize.conversion import OutputFormatPlugin
+from calibre.customize.conversion import OutputFormatPlugin, OptionRecommendation
 
 # Single source of truth for the package version lives in
 # plugin/kfxgen/__init__.py — read it here so the wrapper and the inner
@@ -46,6 +46,18 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
     commit_name = "kfxgen"
     minimum_calibre_version = (5, 0, 0)
     can_be_disabled = True
+
+    options = {
+        OptionRecommendation(
+            name="kfxgen_embed_original_images",
+            recommended_value=False,
+            help=(
+                "Embed images at their original resolution instead of "
+                "downscaling/recompressing them for Kindle. Produces much "
+                "larger KFX files for illustrated books."
+            ),
+        ),
+    }
 
     def convert(self, oeb_book, output_path, input_plugin, opts, log):
         """

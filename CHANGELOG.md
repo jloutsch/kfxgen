@@ -1,5 +1,28 @@
 # Changelog
 
+## 5.3.20 — Fix image optimization no-op
+
+Image optimization shipped in 5.3.19 never actually ran. `calibre.utils.img.scale_image`
+returns a 3-tuple `(width, height, data)`, but the code unpacked it as a
+2-tuple, raising `ValueError` on every image. The error was swallowed and each
+image kept its original size, so image-heavy books were unaffected.
+
+- Unpack `scale_image`'s real 3-tuple return in `optimize_image`.
+- Fix the unit-test mocks, which returned a 2-tuple and so masked the bug.
+- Verified end-to-end: a 308 MB conversion drops to 227 MB (26% off images).
+- Re-closes #11 (5.3.19 closed it but the feature was non-functional).
+
+## 5.3.19 — Automatic image optimization
+
+Heavily illustrated books no longer produce huge KFX files. Images whose
+longest edge exceeds 2048 px are downscaled and recompressed (JPEG quality
+85; PNG kept as PNG) during conversion.
+
+- On by default. Disable with the **Embed original images** output option
+  (CLI `--kfxgen-embed-original-images`).
+- Tunable via `KFXGEN_IMAGE_MAX_DIM` and `KFXGEN_IMAGE_QUALITY`.
+- Closes #11.
+
 ## 5.3.18 — Plugin renamed to "kfxgen"
 
 The Calibre plugin now registers as **kfxgen** (previously `KFXGEN`, while
