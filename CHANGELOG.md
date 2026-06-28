@@ -1,5 +1,16 @@
 # Changelog
 
+## 5.3.19 — Automatic image optimization
+
+Heavily illustrated books no longer produce huge KFX files. Images whose
+longest edge exceeds 2048 px are downscaled and recompressed (JPEG quality
+85; PNG kept as PNG) during conversion.
+
+- On by default. Disable with the **Embed original images** output option
+  (CLI `--kfxgen-embed-original-images`).
+- Tunable via `KFXGEN_IMAGE_MAX_DIM` and `KFXGEN_IMAGE_QUALITY`.
+- Closes #11.
+
 ## 5.3.18 — Plugin renamed to "kfxgen"
 
 The Calibre plugin now registers as **kfxgen** (previously `KFXGEN`, while
