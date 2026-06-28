@@ -14,8 +14,21 @@ DEFAULT_JPEG_QUALITY = 85
 
 _PNG_SIG = b"\x89PNG\r\n\x1a\n"
 # JPEG Start-Of-Frame markers that carry image dimensions.
-_SOF_MARKERS = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
-                0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+_SOF_MARKERS = {
+    0xC0,
+    0xC1,
+    0xC2,
+    0xC3,
+    0xC5,
+    0xC6,
+    0xC7,
+    0xC9,
+    0xCA,
+    0xCB,
+    0xCD,
+    0xCE,
+    0xCF,
+}
 
 
 def _read_image_size(data):
@@ -38,10 +51,10 @@ def _read_image_size(data):
                 continue
             if i + 4 > n:
                 break
-            seg_len = struct.unpack(">H", data[i + 2:i + 4])[0]
+            seg_len = struct.unpack(">H", data[i + 2 : i + 4])[0]
             if marker in _SOF_MARKERS:
                 if i + 9 <= n:
-                    h, w = struct.unpack(">HH", data[i + 5:i + 9])
+                    h, w = struct.unpack(">HH", data[i + 5 : i + 9])
                     return (int(w), int(h))
                 break
             i += 2 + seg_len
@@ -60,12 +73,16 @@ def _read_env_int(name, default, lo, hi, log):
         log.warn(f"  ignoring invalid {name}={raw!r} (not an integer); using {default}")
         return default
     if n < lo or n > hi:
-        log.warn(f"  ignoring out-of-range {name}={n} (allowed {lo}-{hi}); using {default}")
+        log.warn(
+            f"  ignoring out-of-range {name}={n} (allowed {lo}-{hi}); using {default}"
+        )
         return default
     return n
 
 
-def optimize_image(data, *, max_dim=DEFAULT_MAX_DIM, jpeg_quality=DEFAULT_JPEG_QUALITY, log=None):
+def optimize_image(
+    data, *, max_dim=DEFAULT_MAX_DIM, jpeg_quality=DEFAULT_JPEG_QUALITY, log=None
+):
     """Downscale + recompress an over-size JPEG/PNG.
 
     Returns optimized bytes, or the original bytes unchanged when no
@@ -91,8 +108,11 @@ def optimize_image(data, *, max_dim=DEFAULT_MAX_DIM, jpeg_quality=DEFAULT_JPEG_Q
         # raised ValueError on every real call, so optimization silently fell
         # back to the original bytes for every image (#11).
         _w, _h, out = scale_image(
-            data, width=max_dim, height=max_dim,
-            as_png=is_png, compression_quality=jpeg_quality,
+            data,
+            width=max_dim,
+            height=max_dim,
+            as_png=is_png,
+            compression_quality=jpeg_quality,
         )
     except Exception as e:  # noqa: BLE001 - never fail a conversion over an image
         if log:
@@ -108,10 +128,10 @@ _MIN_MAX_DIM, _MAX_MAX_DIM = 16, 20000
 
 def optimize_images(cover_image, images, log):
     """Optimize the cover and every body image. Returns (cover, images)."""
-    max_dim = _read_env_int("KFXGEN_IMAGE_MAX_DIM", DEFAULT_MAX_DIM,
-                            _MIN_MAX_DIM, _MAX_MAX_DIM, log)
-    quality = _read_env_int("KFXGEN_IMAGE_QUALITY", DEFAULT_JPEG_QUALITY,
-                            1, 100, log)
+    max_dim = _read_env_int(
+        "KFXGEN_IMAGE_MAX_DIM", DEFAULT_MAX_DIM, _MIN_MAX_DIM, _MAX_MAX_DIM, log
+    )
+    quality = _read_env_int("KFXGEN_IMAGE_QUALITY", DEFAULT_JPEG_QUALITY, 1, 100, log)
     before = after = 0
     new_images = {}
     for href, data in images.items():
@@ -122,11 +142,14 @@ def optimize_images(cover_image, images, log):
     new_cover = cover_image
     if cover_image:
         before += len(cover_image)
-        new_cover = optimize_image(cover_image, max_dim=max_dim,
-                                   jpeg_quality=quality, log=log)
+        new_cover = optimize_image(
+            cover_image, max_dim=max_dim, jpeg_quality=quality, log=log
+        )
         after += len(new_cover)
     if before and after < before:
         saved = before - after
-        log.info(f"  Image optimization: {before:,} -> {after:,} bytes "
-                 f"(saved {saved:,}, {round(100 * saved / before)}%)")
+        log.info(
+            f"  Image optimization: {before:,} -> {after:,} bytes "
+            f"(saved {saved:,}, {round(100 * saved / before)}%)"
+        )
     return new_cover, new_images

@@ -6,22 +6,46 @@ from kfxgen import image_optimize as io
 
 
 def _png(w, h):
-    return (b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR"
-            + struct.pack(">II", w, h) + b"\x08\x02\x00\x00\x00")
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + struct.pack(">I", 13)
+        + b"IHDR"
+        + struct.pack(">II", w, h)
+        + b"\x08\x02\x00\x00\x00"
+    )
 
 
 def _jpeg(w, h):
     # SOI, APP0 stub, SOF0 (len=17, precision=8, height, width), EOI
-    app0 = b"\xff\xe0" + struct.pack(">H", 16) + b"JFIF\x00" + b"\x01\x01\x00" + b"\x00\x01\x00\x01\x00\x00"
-    sof0 = b"\xff\xc0" + struct.pack(">H", 17) + b"\x08" + struct.pack(">HH", h, w) + b"\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01"
+    app0 = (
+        b"\xff\xe0"
+        + struct.pack(">H", 16)
+        + b"JFIF\x00"
+        + b"\x01\x01\x00"
+        + b"\x00\x01\x00\x01\x00\x00"
+    )
+    sof0 = (
+        b"\xff\xc0"
+        + struct.pack(">H", 17)
+        + b"\x08"
+        + struct.pack(">HH", h, w)
+        + b"\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01"
+    )
     return b"\xff\xd8" + app0 + sof0 + b"\xff\xd9"
 
 
 class _Log:
-    def __init__(self): self.warns = []
-    def warn(self, m): self.warns.append(m)
-    def info(self, m): pass
-    def debug(self, m): pass
+    def __init__(self):
+        self.warns = []
+
+    def warn(self, m):
+        self.warns.append(m)
+
+    def info(self, m):
+        pass
+
+    def debug(self, m):
+        pass
 
 
 @pytest.mark.unit
@@ -136,8 +160,7 @@ def test_optimize_image_keeps_original_if_result_larger(monkeypatch):
 @pytest.mark.unit
 def test_optimize_images_maps_all_and_handles_none_cover(monkeypatch):
     # Force the per-image optimizer to a deterministic stub.
-    monkeypatch.setattr(io, "optimize_image",
-                        lambda data, **k: b"OPT" + data[:1])
+    monkeypatch.setattr(io, "optimize_image", lambda data, **k: b"OPT" + data[:1])
     cover, imgs = io.optimize_images(None, {"a.jpg": b"AAAA", "b.png": b"BBBB"}, _Log())
     assert cover is None
     assert imgs == {"a.jpg": b"OPTA", "b.png": b"OPTB"}
