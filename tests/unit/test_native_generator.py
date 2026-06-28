@@ -196,6 +196,20 @@ class TestBuildFragment157:
         frag = gen.build_fragment_157(entity_name="s_ul", underline=True)
         assert frag.value[IS("$23")] == IS("$328")
 
+    def test_italic_sets_font_style(self):
+        from kfxgen.kfxlib_minimal.ion import IS
+
+        gen = NativeKFXGenerator()
+        frag = gen.build_fragment_157(entity_name="s_it", italic=True)
+        assert frag.value[IS("$12")] == IS("$382")
+
+    def test_no_italic_by_default(self):
+        from kfxgen.kfxlib_minimal.ion import IS
+
+        gen = NativeKFXGenerator()
+        frag = gen.build_fragment_157(entity_name="s_plain")
+        assert IS("$12") not in frag.value
+
 
 class TestStyleSharing:
     """Issue #5: $157 styles must be shared globally, not cloned per chapter.

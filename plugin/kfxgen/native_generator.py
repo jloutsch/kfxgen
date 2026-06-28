@@ -928,6 +928,7 @@ class NativeKFXGenerator:
         bold=False,
         margin_top=None,
         is_heading=False,
+        italic=False,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -943,6 +944,7 @@ class NativeKFXGenerator:
             line_height: Line height in lh units (default 1.0, matching reference KFX)
             underline: If True, add text-decoration: underline ($23: $328)
             bold: If True, set font-weight: bold ($13: $361)
+            italic: If True, add font-style: italic ($12: $382)
             is_heading: If True, omit padding-top (headings use margin-top for spacing)
 
         Returns:
@@ -995,6 +997,10 @@ class NativeKFXGenerator:
         # $23: $328 = text-decoration: underline
         if underline:
             value[IS("$23")] = IS("$328")
+
+        # $12 = font-style: $382 = italic (authoritative, jhowell kfxlib)
+        if italic:
+            value[IS("$12")] = IS("$382")
 
         # $46 = margin-top (for visual separation before chapter headings)
         if margin_top is not None:
