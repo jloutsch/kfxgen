@@ -9,10 +9,12 @@ import os
 import sys
 from unittest.mock import MagicMock
 
+import pytest
 from lxml import etree
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin"))
 
+from kfxgen import converter as _conv
 from kfxgen.converter import (
     CONTENTS_SKIP_TITLES,
     HALF_TITLE_TITLES,
@@ -384,11 +386,6 @@ class TestHalfTitlePage:
         # DRY union so a future edit can't desync them (#107).
         assert HALF_TITLE_TITLES <= CONTENTS_SKIP_TITLES
         assert TITLE_PAGE_TITLES <= CONTENTS_SKIP_TITLES
-
-
-import types as _types
-import pytest
-from kfxgen import converter as _conv
 
 
 class _OptsStub:
