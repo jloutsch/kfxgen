@@ -5,7 +5,7 @@
 [![License: GPL v3](https://img.shields.io/badge/license-GPL%20v3-green.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
 [![Calibre](https://img.shields.io/badge/calibre-5.0%2B-orange.svg)](https://calibre-ebook.com/)
 
-A Calibre output plugin that generates Kindle KFX files in Python, without invoking Amazon's Kindle Previewer. Tested on Kindle devices.
+A Calibre output plugin that generates Kindle KFX files in Python, without invoking Amazon's Kindle Previewer. Tested on Kindle devices. Designed, directed, and device-tested by Justin Loutsch, with development assistance from Claude.
 
 The plugin has been thoroughly tested for bugs: every release runs the full [pytest suite in CI](https://github.com/jloutsch/kfxgen/actions/workflows/test.yml) and is exercised against a 90-book corpus with per-book correctness metrics. See [Compatibility and validation](#compatibility-and-validation) below for the results and links to the committed test reports.
 
