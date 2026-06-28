@@ -384,3 +384,68 @@ class TestHalfTitlePage:
         # DRY union so a future edit can't desync them (#107).
         assert HALF_TITLE_TITLES <= CONTENTS_SKIP_TITLES
         assert TITLE_PAGE_TITLES <= CONTENTS_SKIP_TITLES
+
+
+import types as _types
+import pytest
+from kfxgen import converter as _conv
+
+
+class _OptsStub:
+    def __init__(self, embed): self.kfxgen_embed_original_images = embed
+
+
+class _Log2:
+    def info(self, *a): pass
+    def warn(self, *a): pass
+    def debug(self, *a): pass
+    def error(self, *a): pass
+
+
+def _patch_pipeline(monkeypatch, captured):
+    monkeypatch.setattr(_conv, "extract_metadata",
+                        lambda *a, **k: {"title": "T", "author": "A",
+                                         "language": "en", "publisher": "P",
+                                         "issue_date": None})
+    monkeypatch.setattr(_conv, "extract_cover_image", lambda *a, **k: (b"COVER", "c.jpg"))
+    monkeypatch.setattr(_conv, "extract_images_from_oeb",
+                        lambda *a, **k: {"x.jpg": b"XX"})
+    monkeypatch.setattr(_conv, "extract_chapters_from_oeb",
+                        lambda *a, **k: [{"text": "hi"}])
+
+    class _Gen:
+        def generate_full_book(self, **kw):
+            captured["images"] = kw["images"]
+            captured["cover"] = kw["cover_image"]
+            # create the output file so the success branch passes
+            with open(kw["output_path"], "wb") as f:
+                f.write(b"KFX")
+    monkeypatch.setattr(_conv, "NativeKFXGenerator", lambda: _Gen())
+
+
+@pytest.mark.unit
+def test_optimization_runs_by_default(monkeypatch, tmp_path):
+    captured = {}
+    _patch_pipeline(monkeypatch, captured)
+    called = {}
+    monkeypatch.setattr(_conv, "optimize_images",
+                        lambda cover, images, log: (called.setdefault("yes", True), (b"C2", {"x.jpg": b"Y"}))[1],
+                        raising=False)
+    out = tmp_path / "o.kfx"
+    _conv.convert_oeb_to_kfx(object(), str(out), _OptsStub(False), _Log2())
+    assert called.get("yes") is True
+    assert captured["cover"] == b"C2"
+    assert captured["images"] == {"x.jpg": b"Y"}
+
+
+@pytest.mark.unit
+def test_optimization_skipped_when_embed_originals(monkeypatch, tmp_path):
+    captured = {}
+    _patch_pipeline(monkeypatch, captured)
+    monkeypatch.setattr(_conv, "optimize_images",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not be called")),
+                        raising=False)
+    out = tmp_path / "o.kfx"
+    _conv.convert_oeb_to_kfx(object(), str(out), _OptsStub(True), _Log2())
+    assert captured["images"] == {"x.jpg": b"XX"}  # originals untouched
+    assert captured["cover"] == b"COVER"
