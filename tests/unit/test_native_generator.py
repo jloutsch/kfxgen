@@ -146,6 +146,62 @@ class TestPerParagraphChunking:
             f"Content positions ({max_content_pos}) overlap with section positions ({min_section_pos})"
         )
 
+    @pytest.mark.unit
+    def test_blocks_title_prefix_stripped_no_duplicate(self):
+        # When blocks[0].text equals the chapter title, the title must appear
+        # exactly once across all chunks (heading chunk only, not also as body).
+        gen = NativeKFXGenerator()
+        chapters = [
+            {
+                "title": "Chapter 1",
+                "text": "Chapter 1\n\nbody",
+                "blocks": [
+                    {"text": "Chapter 1", "spans": []},
+                    {"text": "body", "spans": []},
+                ],
+            }
+        ]
+        result = gen._build_chapter_content(chapters)
+        texts = [c["text"] for c in result["all_chunks"] if c["type"] == "text"]
+        assert texts.count("Chapter 1") == 1, f"Title duplicated in chunks: {texts}"
+        assert texts == ["Chapter 1", "body"]
+
+    @pytest.mark.unit
+    def test_blocks_title_prefix_span_rebased(self):
+        # When blocks[0] has "Title rest" with an italic span on "rest",
+        # stripping the title prefix must rebase the span offset correctly.
+        from kfxgen.inline_style import FLAG_ITALIC
+
+        gen = NativeKFXGenerator()
+        # First block: "Chapter 1 italic" where "italic" (chars 10-16) is italic.
+        # Title "Chapter 1" (len 9) + space = 10 chars removed after lstrip.
+        # Span (10, 6, {FLAG_ITALIC}) -> rebased to (0, 6, {FLAG_ITALIC}).
+        chapters = [
+            {
+                "title": "Chapter 1",
+                "text": "Chapter 1 italic\n\nbody",
+                "blocks": [
+                    {"text": "Chapter 1 italic", "spans": [(10, 6, {FLAG_ITALIC})]},
+                    {"text": "body", "spans": []},
+                ],
+            }
+        ]
+        result = gen._build_chapter_content(chapters)
+        texts = [c["text"] for c in result["all_chunks"] if c["type"] == "text"]
+        assert texts[0] == "Chapter 1", f"Expected heading first, got: {texts}"
+        assert texts[1] == "italic", f"Expected rebased remainder second, got: {texts}"
+        italic_chunk = next(
+            c
+            for c in result["all_chunks"]
+            if c["type"] == "text" and c["text"] == "italic"
+        )
+        spans = italic_chunk.get("spans", [])
+        assert len(spans) == 1, f"Expected one span on 'italic' chunk, got: {spans}"
+        s, length, flags = spans[0]
+        assert s == 0, f"Rebased span start should be 0, got {s}"
+        assert length == 6, f"Rebased span length should be 6, got {length}"
+        assert FLAG_ITALIC in flags, f"Expected FLAG_ITALIC in flags, got {flags}"
+
 
 class TestBuildFragment157:
     """Test style fragment building."""

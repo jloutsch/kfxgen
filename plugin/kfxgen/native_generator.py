@@ -2284,7 +2284,31 @@ class NativeKFXGenerator:
                 if text:
                     blocks = chapter.get("blocks")
                     if blocks is not None:
-                        para_iter = blocks
+                        iter_blocks = list(blocks)
+                        if iter_blocks:
+                            first = iter_blocks[0]
+                            first_stripped = first["text"].lstrip()
+                            if first_stripped[: len(title)].lower() == title.lower():
+                                remainder = first_stripped[len(title) :].lstrip()
+                                removed = len(first["text"]) - len(remainder)
+                                rebased_spans = []
+                                for s, length, flags in first.get("spans", []):
+                                    new_s = s - removed
+                                    new_end = s + length - removed
+                                    start = max(new_s, 0)
+                                    end = min(new_end, len(remainder))
+                                    if end > start:
+                                        rebased_spans.append(
+                                            (start, end - start, flags)
+                                        )
+                                if remainder:
+                                    iter_blocks[0] = {
+                                        "text": remainder,
+                                        "spans": rebased_spans,
+                                    }
+                                else:
+                                    iter_blocks = iter_blocks[1:]
+                        para_iter = iter_blocks
                     else:
                         para_iter = [
                             {"text": p, "spans": []} for p in text.split("\n\n")
