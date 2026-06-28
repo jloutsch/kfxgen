@@ -88,7 +88,8 @@ def test_optimize_image_downscales_via_calibre(monkeypatch):
 
     def scale_image(data, width, height, as_png=False, compression_quality=90):
         calls["args"] = (width, height, as_png, compression_quality)
-        return ("JPEG", b"small-bytes")
+        # calibre.utils.img.scale_image returns (width, height, data) (#11).
+        return (2048, 1536, b"small-bytes")
 
     fake.scale_image = scale_image
     monkeypatch.setitem(sys.modules, "calibre", types.ModuleType("calibre"))
@@ -108,7 +109,7 @@ def test_optimize_image_keeps_png_format(monkeypatch):
 
     def scale_image(data, width, height, as_png=False, compression_quality=90):
         seen["as_png"] = as_png
-        return ("PNG", b"x" * 10)
+        return (2048, 1536, b"x" * 10)
 
     fake.scale_image = scale_image
     monkeypatch.setitem(sys.modules, "calibre", types.ModuleType("calibre"))
@@ -123,7 +124,7 @@ def test_optimize_image_keeps_png_format(monkeypatch):
 @pytest.mark.unit
 def test_optimize_image_keeps_original_if_result_larger(monkeypatch):
     fake = types.ModuleType("calibre.utils.img")
-    fake.scale_image = lambda *a, **k: ("JPEG", b"Z" * 100000)
+    fake.scale_image = lambda *a, **k: (2048, 1536, b"Z" * 100000)
     monkeypatch.setitem(sys.modules, "calibre", types.ModuleType("calibre"))
     monkeypatch.setitem(sys.modules, "calibre.utils", types.ModuleType("calibre.utils"))
     monkeypatch.setitem(sys.modules, "calibre.utils.img", fake)

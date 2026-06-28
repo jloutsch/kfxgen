@@ -85,8 +85,12 @@ def optimize_image(data, *, max_dim=DEFAULT_MAX_DIM, jpeg_quality=DEFAULT_JPEG_Q
             log.debug("  calibre.utils.img unavailable; leaving image at original size")
         return data
     try:
-        # scale_image fits within the (width, height) box, preserving aspect.
-        _fmt, out = scale_image(
+        # scale_image fits within the (width, height) box, preserving aspect,
+        # and returns (scaled_width, scaled_height, data) — a 3-tuple, not the
+        # (fmt, data) pair an earlier version assumed. Unpacking it as 2 values
+        # raised ValueError on every real call, so optimization silently fell
+        # back to the original bytes for every image (#11).
+        _w, _h, out = scale_image(
             data, width=max_dim, height=max_dim,
             as_png=is_png, compression_quality=jpeg_quality,
         )
