@@ -97,3 +97,32 @@ def optimize_image(data, *, max_dim=DEFAULT_MAX_DIM, jpeg_quality=DEFAULT_JPEG_Q
     if not out or len(out) >= len(data):
         return data
     return out
+
+
+_MIN_MAX_DIM, _MAX_MAX_DIM = 16, 20000
+
+
+def optimize_images(cover_image, images, log):
+    """Optimize the cover and every body image. Returns (cover, images)."""
+    max_dim = _read_env_int("KFXGEN_IMAGE_MAX_DIM", DEFAULT_MAX_DIM,
+                            _MIN_MAX_DIM, _MAX_MAX_DIM, log)
+    quality = _read_env_int("KFXGEN_IMAGE_QUALITY", DEFAULT_JPEG_QUALITY,
+                            1, 100, log)
+    before = after = 0
+    new_images = {}
+    for href, data in images.items():
+        before += len(data)
+        opt = optimize_image(data, max_dim=max_dim, jpeg_quality=quality, log=log)
+        after += len(opt)
+        new_images[href] = opt
+    new_cover = cover_image
+    if cover_image:
+        before += len(cover_image)
+        new_cover = optimize_image(cover_image, max_dim=max_dim,
+                                   jpeg_quality=quality, log=log)
+        after += len(new_cover)
+    if before and after < before:
+        saved = before - after
+        log.info(f"  Image optimization: {before:,} -> {after:,} bytes "
+                 f"(saved {saved:,}, {round(100 * saved / before)}%)")
+    return new_cover, new_images

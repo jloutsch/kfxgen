@@ -130,3 +130,38 @@ def test_optimize_image_keeps_original_if_result_larger(monkeypatch):
 
     big = _jpeg(4000, 3000)
     assert io.optimize_image(big, max_dim=2048, log=_Log()) == big
+
+
+@pytest.mark.unit
+def test_optimize_images_maps_all_and_handles_none_cover(monkeypatch):
+    # Force the per-image optimizer to a deterministic stub.
+    monkeypatch.setattr(io, "optimize_image",
+                        lambda data, **k: b"OPT" + data[:1])
+    cover, imgs = io.optimize_images(None, {"a.jpg": b"AAAA", "b.png": b"BBBB"}, _Log())
+    assert cover is None
+    assert imgs == {"a.jpg": b"OPTA", "b.png": b"OPTB"}
+
+
+@pytest.mark.unit
+def test_optimize_images_optimizes_cover(monkeypatch):
+    monkeypatch.setattr(io, "optimize_image", lambda data, **k: b"C")
+    cover, imgs = io.optimize_images(b"COVERDATA", {}, _Log())
+    assert cover == b"C"
+    assert imgs == {}
+
+
+@pytest.mark.unit
+def test_optimize_images_reads_env_overrides(monkeypatch):
+    seen = {}
+    monkeypatch.setenv("KFXGEN_IMAGE_MAX_DIM", "1600")
+    monkeypatch.setenv("KFXGEN_IMAGE_QUALITY", "70")
+
+    def spy(data, *, max_dim, jpeg_quality, log):
+        seen["max_dim"] = max_dim
+        seen["q"] = jpeg_quality
+        return data
+
+    monkeypatch.setattr(io, "optimize_image", spy)
+    io.optimize_images(b"COVER", {"a.jpg": b"AAAA"}, _Log())
+    assert seen["max_dim"] == 1600
+    assert seen["q"] == 70
