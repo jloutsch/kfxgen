@@ -1213,6 +1213,43 @@ def test_block_margin_left_produces_overridden_48(tmp_path):
 
 
 @pytest.mark.unit
+def test_block_margin_right_produces_50(tmp_path):
+    from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
+
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "Ch",
+            "text": "quoted line",
+            "blocks": [
+                {
+                    "text": "quoted line",
+                    "spans": [],
+                    "block_style": {
+                        "align": None,
+                        "indent": None,
+                        "margin_left": None,
+                        "margin_right": ("3", "$308"),
+                    },
+                }
+            ],
+        }
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    hit = [
+        f
+        for f in styles
+        if IS("$50") in f.value
+        and f.value[IS("$50")].get(IS("$307")) == IonDecimal("3")
+        and f.value[IS("$50")].get(IS("$306")) == IS("$308")
+    ]
+    assert hit, "expected a $157 with margin-right ($50) emitted as 3em"
+
+
+@pytest.mark.unit
 def test_no_block_style_keeps_default_margins(tmp_path):
     from kfxgen.kfxlib_minimal.ion import IS
 

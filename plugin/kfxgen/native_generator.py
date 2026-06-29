@@ -950,12 +950,13 @@ class NativeKFXGenerator:
             underline: If True, add text-decoration: underline ($23: $328)
             bold: If True, set font-weight: bold ($13: $361)
             italic: If True, add font-style: italic ($12: $382)
-            is_heading: If True, omit padding-top (headings use margin-top for spacing)
+            is_heading: If True, omit the body top margin ($47); headings space
+                        via $46 (margin_top param) instead.
             align: Text alignment override. If a key in ALIGN_MAP ("left", "right", "center"),
                   use the mapped symbol; otherwise default to "justify" ($321).
             text_indent: If a tuple (magnitude_str, unit_symbol), set text-indent ($36)
-                        and suppress padding-top. Default None uses 0% indent and
-                        normal padding behavior.
+                        and suppress the body top margin ($47). Default None uses
+                        0% indent and the normal 1lh top margin.
             margin_left: If a tuple (magnitude_str, unit_symbol), override the default
                         margin-left ($48). Default None uses 0.5% ($314).
             margin_right: If a tuple (magnitude_str, unit_symbol), emit margin-right ($50).
@@ -1018,13 +1019,15 @@ class NativeKFXGenerator:
             font_weight,  # font-weight
         )
 
-        # Body text gets padding-top for paragraph spacing; headings rely on margin-top.
-        # A non-zero first-line indent replaces inter-paragraph spacing (print convention),
-        # so suppress padding-top when indented.
+        # $47 = margin-top (authoritative per jhowell's catalog; earlier comments
+        # mislabeled it "padding-top"). Body text gets a 1lh top margin for
+        # inter-paragraph spacing; headings get their spacing from $46 (margin_top
+        # param). A non-zero first-line indent replaces inter-paragraph spacing
+        # (print convention), so suppress this top margin when indented.
         if not is_heading and text_indent is None:
             value[IS("$47")] = IonStruct(
                 IS("$307"), IonDecimal("1"), IS("$306"), IS("$310")
-            )  # padding-top: 1lh
+            )  # margin-top: 1lh
 
         # Only set font-size when non-default — lets Kindle use its default for normal text
         # Reference KFX files omit font-size on most styles and only set it for headings/small text
