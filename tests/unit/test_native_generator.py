@@ -1173,3 +1173,40 @@ def test_per_chapter_font_size_not_leaked_from_last_chapter(tmp_path):
         "expected a $157 with font_size=0.75rem for the first chapter; "
         "got none — leaked-loop-variable bug may still be present"
     )
+
+
+@pytest.mark.unit
+def test_block_margin_left_produces_overridden_48(tmp_path):
+    from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
+
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "Ch",
+            "text": "quoted line",
+            "blocks": [
+                {
+                    "text": "quoted line",
+                    "spans": [],
+                    "block_style": {
+                        "align": None,
+                        "indent": None,
+                        "margin_left": ("2", "$308"),
+                        "margin_right": None,
+                    },
+                }
+            ],
+        }
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    hit = [
+        f
+        for f in styles
+        if IS("$48") in f.value
+        and f.value[IS("$48")].get(IS("$307")) == IonDecimal("2")
+        and f.value[IS("$48")].get(IS("$306")) == IS("$308")
+    ]
+    assert hit, "expected a $157 with margin-left overridden to 2em"

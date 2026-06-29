@@ -2632,6 +2632,10 @@ class NativeKFXGenerator:
                         attrs["align"] = bs["align"]
                     if bs.get("indent"):
                         attrs["text_indent"] = bs["indent"]
+                    if bs.get("margin_left"):
+                        attrs["margin_left"] = bs["margin_left"]
+                    if bs.get("margin_right"):
+                        attrs["margin_right"] = bs["margin_right"]
                     entry_styles.append(_allocate_style("", **attrs))
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
