@@ -533,6 +533,15 @@ def test_blocks_capture_bold_and_nested():
 
 
 @pytest.mark.unit
+def test_blocks_capture_b_tag():
+    # <b> maps to bold the same as <strong> (the <i>/<b> counterparts of
+    # <em>/<strong>).
+    blocks = _conv.extract_blocks_from_html(_doc("<p>a <b>bee</b> c</p>"))
+    assert blocks[0]["text"] == "a bee c"
+    assert blocks[0]["spans"] == [(2, 3, frozenset({Bf}))]
+
+
+@pytest.mark.unit
 def test_extract_text_unchanged_delegates_to_blocks():
     doc = _doc("<p>one</p><p>two <i>three</i></p>")
     assert _conv.extract_text_from_html(doc) == "one\n\ntwo three"

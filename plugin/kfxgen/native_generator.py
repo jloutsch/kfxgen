@@ -1136,22 +1136,19 @@ class NativeKFXGenerator:
         """
         Builds Fragment $259 (Storyline / Flow Map)
 
-        Phase 3: emits a nested $146 tree matching Calibre's KFX Output shape:
+        Emits a FLAT $146 list — one entry per chunk, directly under the
+        storyline:
 
             $259.value.$146 = [
-              { $155: outer_position, $157: outer_style, $159: $269,
-                $146: [
-                  { $155: pos[0], $157: story[0], $790: 1, ..., $145: ... },
-                  { $155: pos[1], $157: story[1],         ..., $145: ... },
-                  ...
-                ]
-              }
+              { $155: pos[0], $157: story[0], $790: 1, ..., $145: ... },
+              { $155: pos[1], $157: story[1],         ..., $145: ... },
+              ...
             ]
 
-        The single outer entry wraps all chunks as nested children. Kindle's
-        reflow groups nested children into one paragraph rendering box, which
-        is what makes glossary definitions render on separate lines without
-        the disabled $269->$270 patch.
+        (A nested single-outer-wrapper shape was tried during the Phase-3 work
+        but reverted; the flat shape is what ships and is device-verified. The
+        `outer_position` / `outer_style` params are retained for compatibility
+        but are not emitted in the flat shape.)
 
         Args:
             story_names: List of $157 fragment local symbol names per chunk.
@@ -2240,10 +2237,22 @@ class NativeKFXGenerator:
             """Split chunk_text by CHUNK_SIZE and attach the slice of
             para_spans covering each piece, offsets rebased to the piece.
             The chunk_text is a (stripped) substring of para_text; find its
-            offset once, then translate spans."""
+            offset once, then translate spans.
+
+            The CHUNK_SIZE loop below is NOT redundant: chunk_text is a whole
+            paragraph segment from _emit_text_chunks (split only on image
+            tokens, not length), so a long paragraph arrives > CHUNK_SIZE and
+            must be split here — this absorbs the old _split_long_text path.
+            """
+            # find() returns the FIRST occurrence. In the rare case of two
+            # identical text segments around an inline image in one paragraph,
+            # the second segment's spans could rebase to the first's offset.
+            # Low impact (needs emphasis + duplicate segment text + inline img);
+            # tracked in #21. Defensive base=0 means emphasis just won't apply
+            # to a chunk whose text can't be located.
             base = para_text.find(chunk_text)
             if base < 0:
-                base = 0  # defensive: emphasis simply won't apply to this chunk
+                base = 0
             pos = 0
             while pos < len(chunk_text):
                 piece = chunk_text[pos : pos + self.CHUNK_SIZE]

@@ -206,6 +206,8 @@ class TestPerParagraphChunking:
 class TestBuildFragment157:
     """Test style fragment building."""
 
+    pytestmark = pytest.mark.unit
+
     def test_default_line_height(self):
         gen = NativeKFXGenerator()
         from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
@@ -268,7 +270,6 @@ class TestBuildFragment157:
         frag = gen.build_fragment_157(entity_name="s_plain")
         assert IS("$12") not in frag.value
 
-    @pytest.mark.unit
     def test_align_overrides_text_align(self):
         from kfxgen.kfxlib_minimal.ion import IS
 
@@ -283,14 +284,12 @@ class TestBuildFragment157:
             IS("$34")
         ] == IS("$61")
 
-    @pytest.mark.unit
     def test_align_default_is_justify(self):
         from kfxgen.kfxlib_minimal.ion import IS
 
         gen = NativeKFXGenerator()
         assert gen.build_fragment_157(entity_name="sd").value[IS("$34")] == IS("$321")
 
-    @pytest.mark.unit
     def test_text_indent_sets_36_and_omits_padding(self):
         from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
 
@@ -301,7 +300,6 @@ class TestBuildFragment157:
         assert ind[IS("$306")] == IS("$308")
         assert IS("$47") not in frag.value  # padding-top suppressed
 
-    @pytest.mark.unit
     def test_no_text_indent_keeps_default(self):
         from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
 

@@ -1,7 +1,7 @@
 """
 Property-based fuzz for HTML text extraction (#124 / G2).
 
-`extract_text_from_html` and its recursive helper `_walk_paragraph_with_imgs`
+`extract_text_from_html` and its recursive helper `_walk_inline`
 walk attacker-controlled OEB element trees (the parsed XHTML of an EPUB spine
 item). The existing tests cover hand-picked shapes; nothing fuzzed malformed or
 adversarial trees.
@@ -14,7 +14,7 @@ Recursion bound (why this is safe, documented not fixed): the real attack
 surface is *parsed* XHTML bytes, and lxml caps document nesting at 256
 (`XMLSyntaxError: Excessive depth in document`) at parse time — before
 `extract_text_from_html` ever runs. 256 frames is well under Python's 1000
-recursion limit, so `_walk_paragraph_with_imgs` recursion cannot be driven to a
+recursion limit, so `_walk_inline` recursion cannot be driven to a
 RecursionError by attacker bytes. This test builds trees within that realistic
 bound. (A directly-constructed >256-deep tree is not reachable from EPUB input,
 so it is out of the threat model.)
@@ -39,7 +39,7 @@ _XHTML = "{http://www.w3.org/1999/xhtml}"
 
 # Tags the extractor branches on: block-level (paragraph boundaries), inline
 # (recursed through), and img (token path). Mixing all three exercises every
-# branch of extract_text_from_html / _walk_paragraph_with_imgs.
+# branch of extract_text_from_html / _walk_inline.
 _BLOCK_TAGS = ["p", "div", "h1", "h2", "blockquote", "li", "section", "figure"]
 _INLINE_TAGS = ["span", "b", "i", "em", "a", "strong"]
 
