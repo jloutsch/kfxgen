@@ -2236,7 +2236,7 @@ class NativeKFXGenerator:
                 pos += self.CHUNK_SIZE
             return chunks
 
-        def _append_text_with_spans(chunk_text, para_text, para_spans):
+        def _append_text_with_spans(chunk_text, para_text, para_spans, block_style):
             """Split chunk_text by CHUNK_SIZE and attach the slice of
             para_spans covering each piece, offsets rebased to the piece.
             The chunk_text is a (stripped) substring of para_text; find its
@@ -2255,7 +2255,14 @@ class NativeKFXGenerator:
                     b = min(s + length, p_end)
                     if b > a:
                         pspans.append((a - p_start, b - a, flags))
-                all_chunks.append({"type": "text", "text": piece, "spans": pspans})
+                all_chunks.append(
+                    {
+                        "type": "text",
+                        "text": piece,
+                        "spans": pspans,
+                        "block_style": block_style,
+                    }
+                )
                 pos += self.CHUNK_SIZE
 
         for ch_idx, chapter in enumerate(chapters):
@@ -2327,6 +2334,7 @@ class NativeKFXGenerator:
                                     iter_blocks[0] = {
                                         "text": remainder,
                                         "spans": rebased_spans,
+                                        "block_style": first.get("block_style"),
                                     }
                                 else:
                                     iter_blocks = iter_blocks[1:]
@@ -2341,11 +2349,14 @@ class NativeKFXGenerator:
                         if not para:
                             continue
                         para_spans = block.get("spans", [])
+                        block_style = block.get("block_style")
                         for chunk in _emit_text_chunks(para):
                             if chunk["type"] == "image":
                                 all_chunks.append(chunk)
                             else:
-                                _append_text_with_spans(chunk["text"], para, para_spans)
+                                _append_text_with_spans(
+                                    chunk["text"], para, para_spans, block_style
+                                )
 
             # Guarantee every chapter contributes at least one chunk so it
             # owns a navigable content position and the per-chapter arrays
@@ -2580,7 +2591,13 @@ class NativeKFXGenerator:
                     entry_link_styles.append(toc_link_style_names[ch_idx])
                     entry_link_text_lengths.append(len(chunk["text"]))
                 else:
-                    entry_styles.append(story_names[ch_idx])
+                    bs = chunk.get("block_style") or {}
+                    attrs = {"font_size": chapter.get("font_size", 1.0)}
+                    if bs.get("align"):
+                        attrs["align"] = bs["align"]
+                    if bs.get("indent"):
+                        attrs["text_indent"] = bs["indent"]
+                    entry_styles.append(_allocate_style("", **attrs))
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)

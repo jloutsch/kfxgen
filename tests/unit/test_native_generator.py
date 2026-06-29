@@ -1060,3 +1060,37 @@ def test_plain_chapter_emits_no_emphasis_fragments(tmp_path):
     )
     styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
     assert all(IS("$12") not in f.value for f in styles)  # no italic anywhere
+
+
+@pytest.mark.unit
+def test_block_style_produces_aligned_indented_157(tmp_path):
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "Ch",
+            "text": "centered indented line",
+            "blocks": [
+                {
+                    "text": "centered indented line",
+                    "spans": [],
+                    "block_style": {"align": "center", "indent": ("2", "$308")},
+                }
+            ],
+        }
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    # A style must exist with text-align center, text-indent 2em, no padding-top.
+    hit = [
+        f
+        for f in styles
+        if f.value.get(IS("$34")) == IS("$320")
+        and IS("$36") in f.value
+        and f.value[IS("$36")].get(IS("$306")) == IS("$308")
+        and IS("$47") not in f.value
+    ]
+    assert hit, "expected a centered+indented $157 with padding-top suppressed"
