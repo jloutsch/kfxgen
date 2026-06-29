@@ -71,9 +71,14 @@ def normalize_runs(segments):
 def parse_css_length(value):
     """Parse a CSS length string into (magnitude_str, kfx_unit_symbol).
 
-    Returns None for empty/auto/inherit, unsupported units, or a zero
-    magnitude (no override needed). Magnitude is returned as a trimmed
-    string so the caller can hand it to IonDecimal unchanged.
+    Returns None for empty/auto/inherit, unsupported units, a zero magnitude
+    (no override needed), or a NEGATIVE magnitude. Negative text-indent is a
+    hanging indent that the source pairs with a compensating margin-left; since
+    margins are out of scope, honoring the negative indent alone pulls the first
+    line off the left edge and clips leading characters (observed on Gutenberg
+    front-matter metadata lists). Dropping it falls back to the default 0 indent.
+    Magnitude is returned as a trimmed string so the caller can hand it to
+    IonDecimal unchanged.
     """
     if not value:
         return None
@@ -82,7 +87,7 @@ def parse_css_length(value):
         return None
     mag, unit = m.group(1), m.group(2).lower()
     try:
-        if float(mag) == 0.0:
+        if float(mag) <= 0.0:
             return None
     except ValueError:
         return None

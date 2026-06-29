@@ -61,6 +61,11 @@ def test_parse_css_length_rejects():
     assert ist.parse_css_length("2vw") is None
     assert ist.parse_css_length("3ch") is None
     assert ist.parse_css_length("inherit") is None
+    # Negative (hanging) indents are dropped — honoring them without the paired
+    # margin-left clips leading characters off the left edge (Gutenberg #9).
+    assert ist.parse_css_length("-2em") is None
+    assert ist.parse_css_length("-4em") is None
+    assert ist.parse_css_length("-0.6em") is None
 
 
 @pytest.mark.unit
