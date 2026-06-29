@@ -1094,3 +1094,26 @@ def test_block_style_produces_aligned_indented_157(tmp_path):
         and IS("$47") not in f.value
     ]
     assert hit, "expected a centered+indented $157 with padding-top suppressed"
+
+
+@pytest.mark.unit
+def test_no_block_style_emits_default_align_and_indent(tmp_path):
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    gen = NativeKFXGenerator()
+    chapters = [{"title": "Ch", "text": "plain body text"}]  # no blocks/block_style
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    # Every body style keeps justify ($321) and indent 0; none carry a non-% indent unit.
+    for f in styles:
+        if IS("$34") in f.value:
+            assert f.value[IS("$34")] in (
+                IS("$321"),
+                IS("$320"),
+            )  # justify or heading-center if any
+        if IS("$36") in f.value:
+            assert f.value[IS("$36")][IS("$306")] == IS(
+                "$314"
+            )  # default % unit, value 0
