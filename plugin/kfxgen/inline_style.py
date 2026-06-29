@@ -91,3 +91,23 @@ def parse_css_length(value):
     if "." in mag:
         mag = mag.rstrip("0").rstrip(".")
     return (mag, _CSS_UNIT_TO_KFX[unit])
+
+
+#: CSS text-align keyword -> KFX $34 value symbol.
+ALIGN_MAP = {"left": "$59", "right": "$61", "center": "$320", "justify": "$321"}
+
+
+def compute_block_style(css):
+    """Map a computed-CSS dict to kfxgen's block_style shape.
+
+    `css` is a mapping that supports .get(prop) returning CSS strings (e.g. a
+    Calibre Stylizer Style, or a plain dict in tests). Returns
+    {"align": <keyword or None>, "indent": <(mag, unit_sym) or None>}.
+    The align keyword is mapped to a symbol later, in build_fragment_157.
+    """
+    align = None
+    raw_align = (css.get("text-align") or "").strip().lower()
+    if raw_align in ALIGN_MAP:
+        align = raw_align
+    indent = parse_css_length(css.get("text-indent") or "")
+    return {"align": align, "indent": indent}

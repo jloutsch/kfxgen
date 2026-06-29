@@ -61,3 +61,32 @@ def test_parse_css_length_rejects():
     assert ist.parse_css_length("2vw") is None
     assert ist.parse_css_length("3ch") is None
     assert ist.parse_css_length("inherit") is None
+
+
+@pytest.mark.unit
+def test_align_map_values():
+    assert ist.ALIGN_MAP == {
+        "left": "$59",
+        "right": "$61",
+        "center": "$320",
+        "justify": "$321",
+    }
+
+
+@pytest.mark.unit
+def test_compute_block_style_align():
+    assert ist.compute_block_style({"text-align": "center"})["align"] == "center"
+    assert ist.compute_block_style({"text-align": "left"})["align"] == "left"
+    assert ist.compute_block_style({"text-align": "JUSTIFY"})["align"] == "justify"
+    assert ist.compute_block_style({"text-align": "start"})["align"] is None
+    assert ist.compute_block_style({})["align"] is None
+
+
+@pytest.mark.unit
+def test_compute_block_style_indent():
+    assert ist.compute_block_style({"text-indent": "1.5em"})["indent"] == (
+        "1.5",
+        "$308",
+    )
+    assert ist.compute_block_style({"text-indent": "0"})["indent"] is None
+    assert ist.compute_block_style({})["indent"] is None
