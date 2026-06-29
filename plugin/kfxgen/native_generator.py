@@ -931,6 +931,7 @@ class NativeKFXGenerator:
         is_heading=False,
         italic=False,
         align=None,
+        text_indent=None,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -950,6 +951,9 @@ class NativeKFXGenerator:
             is_heading: If True, omit padding-top (headings use margin-top for spacing)
             align: Text alignment override. If a key in ALIGN_MAP ("left", "right", "center"),
                   use the mapped symbol; otherwise default to "justify" ($321).
+            text_indent: If a tuple (magnitude_str, unit_symbol), set text-indent ($36)
+                        and suppress padding-top. Default None uses 0% indent and
+                        normal padding behavior.
 
         Returns:
             YJFragment with type $157
@@ -965,6 +969,19 @@ class NativeKFXGenerator:
         # $34 = text-align; default justify ($321), overridden per element.
         text_align = IS(ALIGN_MAP[align]) if align in ALIGN_MAP else IS("$321")
 
+        # $36 = text-indent; default 0%, overridden per element.
+        if text_indent is not None:
+            indent_struct = IonStruct(
+                IS("$307"),
+                IonDecimal(text_indent[0]),
+                IS("$306"),
+                IS(text_indent[1]),
+            )
+        else:
+            indent_struct = IonStruct(
+                IS("$307"), IonDecimal("0"), IS("$306"), IS("$314")
+            )
+
         value = IonStruct(
             IS("$48"),
             IonStruct(
@@ -973,9 +990,7 @@ class NativeKFXGenerator:
             IS("$34"),
             text_align,  # text-align: justify ($320=center, $321=justify, $59=left, $61=right)
             IS("$36"),
-            IonStruct(
-                IS("$307"), IonDecimal("0"), IS("$306"), IS("$314")
-            ),  # text-indent: 0
+            indent_struct,  # text-indent
             IS("$42"),
             IonStruct(
                 IS("$307"), IonDecimal(str(line_height)), IS("$306"), IS("$310")
@@ -986,8 +1001,10 @@ class NativeKFXGenerator:
             font_weight,  # font-weight
         )
 
-        # Body text gets padding-top for paragraph spacing; headings rely on margin-top
-        if not is_heading:
+        # Body text gets padding-top for paragraph spacing; headings rely on margin-top.
+        # A non-zero first-line indent replaces inter-paragraph spacing (print convention),
+        # so suppress padding-top when indented.
+        if not is_heading and text_indent is None:
             value[IS("$47")] = IonStruct(
                 IS("$307"), IonDecimal("1"), IS("$306"), IS("$310")
             )  # padding-top: 1lh
