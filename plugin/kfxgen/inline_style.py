@@ -109,12 +109,20 @@ def compute_block_style(css):
 
     `css` is a mapping that supports .get(prop) returning CSS strings (e.g. a
     Calibre Stylizer Style, or a plain dict in tests). Returns
-    {"align": <keyword or None>, "indent": <(mag, unit_sym) or None>}.
-    The align keyword is mapped to a symbol later, in build_fragment_157.
+    {"align": <keyword or None>, "indent"/"margin_left"/"margin_right":
+    <(mag, unit_sym) or None>}. The align keyword is mapped to a symbol later,
+    in build_fragment_157.
     """
     align = None
     raw_align = (css.get("text-align") or "").strip().lower()
     if raw_align in ALIGN_MAP:
         align = raw_align
     indent = parse_css_length(css.get("text-indent") or "")
-    return {"align": align, "indent": indent}
+    margin_left = parse_css_length(css.get("margin-left") or "")
+    margin_right = parse_css_length(css.get("margin-right") or "")
+    return {
+        "align": align,
+        "indent": indent,
+        "margin_left": margin_left,
+        "margin_right": margin_right,
+    }

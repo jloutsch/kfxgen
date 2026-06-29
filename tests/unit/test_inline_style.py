@@ -114,3 +114,19 @@ def test_compute_block_style_indent():
     )
     assert ist.compute_block_style({"text-indent": "0"})["indent"] is None
     assert ist.compute_block_style({})["indent"] is None
+
+
+@pytest.mark.unit
+def test_compute_block_style_margins():
+    bs = ist.compute_block_style({"margin-left": "2em", "margin-right": "1em"})
+    assert bs["margin_left"] == ("2", "$308")
+    assert bs["margin_right"] == ("1", "$308")
+
+
+@pytest.mark.unit
+def test_compute_block_style_margins_absent_and_negative():
+    bs = ist.compute_block_style({})
+    assert bs["margin_left"] is None and bs["margin_right"] is None
+    # negative margins are dropped (no clipping), like negative indent
+    bs2 = ist.compute_block_style({"margin-left": "-3em"})
+    assert bs2["margin_left"] is None
