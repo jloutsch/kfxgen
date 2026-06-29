@@ -16,7 +16,7 @@ from ._img_tokens import (
     IMG_TOKEN_SPACE as _IMG_TOKEN_SPACE,
 )
 from .image_optimize import optimize_images
-from .inline_style import FLAG_BOLD, FLAG_ITALIC, normalize_runs
+from .inline_style import FLAG_BOLD, FLAG_ITALIC, compute_block_style, normalize_runs
 from .native_generator import NativeKFXGenerator
 
 _ITALIC_TAGS = {"em", "i"}
@@ -83,10 +83,12 @@ def _walk_inline(elem, flags=frozenset()):
     return parts
 
 
-def extract_blocks_from_html(element):
+def extract_blocks_from_html(element, style_resolver=None):
     """Like extract_text_from_html but returns structured blocks:
-    [{"text": str, "spans": [(start, length, frozenset)]}], preserving inline
-    emphasis as spans and inline <img> as IMG tokens in `text`."""
+    [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None}],
+    preserving inline emphasis as spans and inline <img> as IMG tokens in `text`.
+    When style_resolver is given, it is called per block element (elem -> css_dict|None)
+    and the result is passed to compute_block_style to populate block_style."""
     body = element.find(".//{http://www.w3.org/1999/xhtml}body")
     if body is None:
         body = element.find(".//body")
@@ -120,7 +122,12 @@ def extract_blocks_from_html(element):
                 continue
             text, spans = normalize_runs(_walk_inline(elem))
             if text:
-                blocks.append({"text": text, "spans": spans})
+                bstyle = None
+                if style_resolver is not None:
+                    css = style_resolver(elem)
+                    if css is not None:
+                        bstyle = compute_block_style(css)
+                blocks.append({"text": text, "spans": spans, "block_style": bstyle})
             continue
 
         # Bare <img> directly under body (rare, but exists in some EPUBs)
@@ -130,7 +137,9 @@ def extract_blocks_from_html(element):
                 continue  # already handled by the block walker above
             href = elem.get("src", "") or ""
             alt = elem.get("alt", "") or ""
-            blocks.append({"text": _make_img_token(href, alt), "spans": []})
+            blocks.append(
+                {"text": _make_img_token(href, alt), "spans": [], "block_style": None}
+            )
 
     if blocks:
         return blocks
@@ -139,7 +148,7 @@ def extract_blocks_from_html(element):
     text = body.xpath("string()")
     lines = [line.strip() for line in text.split("\n")]
     text = " ".join(line for line in lines if line)
-    return [{"text": text, "spans": []}] if text else []
+    return [{"text": text, "spans": [], "block_style": None}] if text else []
 
 
 def extract_text_from_html(element):

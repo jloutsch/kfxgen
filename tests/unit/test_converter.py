@@ -553,3 +553,29 @@ def test_chapter_carries_emphasis_blocks(simple_oeb_with_italic):
     chapters = extract_chapters_from_oeb(simple_oeb_with_italic, _silent_log())
     blocks = chapters[0]["blocks"]
     assert any(b["spans"] and b["spans"][0][2] == frozenset({I}) for b in blocks)
+
+
+# ── Task 3 (plan B/9): block_style via style_resolver ────────────────────────
+
+
+@pytest.mark.unit
+def test_blocks_block_style_from_resolver():
+    doc = _doc("<p>centered</p><p>plain</p>")  # _doc helper exists from Plan A
+
+    def resolver(elem):
+        # first <p> centered + indented, second has nothing
+        txt = "".join(elem.itertext())
+        if "centered" in txt:
+            return {"text-align": "center", "text-indent": "2em"}
+        return {}
+
+    blocks = _conv.extract_blocks_from_html(doc, style_resolver=resolver)
+    assert blocks[0]["block_style"] == {"align": "center", "indent": ("2", "$308")}
+    assert blocks[1]["block_style"] == {"align": None, "indent": None}
+
+
+@pytest.mark.unit
+def test_blocks_block_style_none_without_resolver():
+    doc = _doc("<p>x</p>")
+    blocks = _conv.extract_blocks_from_html(doc)
+    assert blocks[0]["block_style"] is None
