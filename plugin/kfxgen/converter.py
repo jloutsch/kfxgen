@@ -41,6 +41,8 @@ def _build_style_resolver(oeb_book, item, log):
                 return {
                     "text-align": st.get("text-align"),
                     "text-indent": st.get("text-indent"),
+                    "margin-left": st.get("margin-left"),
+                    "margin-right": st.get("margin-right"),
                 }
             except Exception:
                 return None
