@@ -1210,3 +1210,22 @@ def test_block_margin_left_produces_overridden_48(tmp_path):
         and f.value[IS("$48")].get(IS("$306")) == IS("$308")
     ]
     assert hit, "expected a $157 with margin-left overridden to 2em"
+
+
+@pytest.mark.unit
+def test_no_block_style_keeps_default_margins(tmp_path):
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    gen = NativeKFXGenerator()
+    chapters = [{"title": "Ch", "text": "plain body text"}]  # no blocks
+    gen.generate_full_book(
+        title="T",
+        author="A",
+        chapters=chapters,
+        output_path=str(tmp_path / "o.kfx"),
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    for f in styles:
+        if IS("$48") in f.value:
+            assert f.value[IS("$48")][IS("$306")] == IS("$314")  # default % unit
+        assert IS("$50") not in f.value  # margin-right never default
