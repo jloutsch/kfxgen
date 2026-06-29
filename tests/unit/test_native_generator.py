@@ -309,6 +309,34 @@ class TestBuildFragment157:
         assert ind[IS("$307")] == IonDecimal("0")
         assert IS("$47") in frag.value  # padding-top present by default (non-heading)
 
+    def test_margin_left_overrides_48(self):
+        from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
+
+        gen = NativeKFXGenerator()
+        frag = gen.build_fragment_157(entity_name="sml", margin_left=("2", "$308"))
+        ml = frag.value[IS("$48")]
+        assert ml[IS("$307")] == IonDecimal("2")
+        assert ml[IS("$306")] == IS("$308")
+
+    def test_margin_right_emits_50(self):
+        from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
+
+        gen = NativeKFXGenerator()
+        frag = gen.build_fragment_157(entity_name="smr", margin_right=("1", "$308"))
+        mr = frag.value[IS("$50")]
+        assert mr[IS("$307")] == IonDecimal("1")
+        assert mr[IS("$306")] == IS("$308")
+
+    def test_margins_default_byte_stable(self):
+        from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
+
+        gen = NativeKFXGenerator()
+        frag = gen.build_fragment_157(entity_name="smd")
+        ml = frag.value[IS("$48")]
+        assert ml[IS("$307")] == IonDecimal("0.5")
+        assert ml[IS("$306")] == IS("$314")
+        assert IS("$50") not in frag.value
+
 
 class TestStyleSharing:
     """Issue #5: $157 styles must be shared globally, not cloned per chapter.
