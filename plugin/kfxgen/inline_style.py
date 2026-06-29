@@ -94,7 +94,7 @@ def parse_css_length(value):
     except ValueError:
         return None
     # Normalize "2.0" -> "2", "1.50" -> "1.5" without forcing a float repr.
-    mag = mag.strip()
+    # (mag has no surrounding whitespace — the regex group excludes it.)
     if "." in mag:
         mag = mag.rstrip("0").rstrip(".")
     return (mag, _CSS_UNIT_TO_KFX[unit])

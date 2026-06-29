@@ -163,6 +163,8 @@ def extract_blocks_from_html(element, style_resolver=None):
                 continue  # already handled by the block walker above
             href = elem.get("src", "") or ""
             alt = elem.get("alt", "") or ""
+            # block_style is intentionally None: a bare image carries no text
+            # block-style (align/indent), so the resolver is not consulted here.
             blocks.append(
                 {"text": _make_img_token(href, alt), "spans": [], "block_style": None}
             )

@@ -2340,10 +2340,13 @@ class NativeKFXGenerator:
                                             (start, end - start, flags)
                                         )
                                 if remainder:
+                                    # Copy-and-override so any other keys on the
+                                    # block dict (e.g. block_style, future keys)
+                                    # are forwarded, not silently dropped.
                                     iter_blocks[0] = {
+                                        **first,
                                         "text": remainder,
                                         "spans": rebased_spans,
-                                        "block_style": first.get("block_style"),
                                     }
                                 else:
                                     iter_blocks = iter_blocks[1:]
