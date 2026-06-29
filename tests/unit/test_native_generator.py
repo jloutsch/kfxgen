@@ -268,6 +268,28 @@ class TestBuildFragment157:
         frag = gen.build_fragment_157(entity_name="s_plain")
         assert IS("$12") not in frag.value
 
+    @pytest.mark.unit
+    def test_align_overrides_text_align(self):
+        from kfxgen.kfxlib_minimal.ion import IS
+
+        gen = NativeKFXGenerator()
+        assert gen.build_fragment_157(entity_name="sa", align="center").value[
+            IS("$34")
+        ] == IS("$320")
+        assert gen.build_fragment_157(entity_name="sb", align="left").value[
+            IS("$34")
+        ] == IS("$59")
+        assert gen.build_fragment_157(entity_name="sc", align="right").value[
+            IS("$34")
+        ] == IS("$61")
+
+    @pytest.mark.unit
+    def test_align_default_is_justify(self):
+        from kfxgen.kfxlib_minimal.ion import IS
+
+        gen = NativeKFXGenerator()
+        assert gen.build_fragment_157(entity_name="sd").value[IS("$34")] == IS("$321")
+
 
 class TestStyleSharing:
     """Issue #5: $157 styles must be shared globally, not cloned per chapter.

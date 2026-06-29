@@ -6,6 +6,7 @@ import posixpath
 import re
 
 from ._img_tokens import IMG_TOKEN_RE
+from .inline_style import ALIGN_MAP
 from .kfxlib_minimal.kfx_container import KfxContainer
 from .kfxlib_minimal.standard_symbols import StandardSymbolTable
 from .kfxlib_minimal.ion import IonStruct, IonDecimal, IonAnnotation, IonBLOB, IS
@@ -929,6 +930,7 @@ class NativeKFXGenerator:
         margin_top=None,
         is_heading=False,
         italic=False,
+        align=None,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -946,6 +948,8 @@ class NativeKFXGenerator:
             bold: If True, set font-weight: bold ($13: $361)
             italic: If True, add font-style: italic ($12: $382)
             is_heading: If True, omit padding-top (headings use margin-top for spacing)
+            align: Text alignment override. If a key in ALIGN_MAP ("left", "right", "center"),
+                  use the mapped symbol; otherwise default to "justify" ($321).
 
         Returns:
             YJFragment with type $157
@@ -958,15 +962,16 @@ class NativeKFXGenerator:
         # $13 = font-weight: $350=normal, $361=bold
         font_weight = IS("$361") if bold else IS("$350")
 
+        # $34 = text-align; default justify ($321), overridden per element.
+        text_align = IS(ALIGN_MAP[align]) if align in ALIGN_MAP else IS("$321")
+
         value = IonStruct(
             IS("$48"),
             IonStruct(
                 IS("$307"), IonDecimal("0.5"), IS("$306"), IS("$314")
             ),  # margin-bottom: 0.5%
             IS("$34"),
-            IS(
-                "$321"
-            ),  # text-align: justify ($320=center, $321=justify, $59=left, $61=right)
+            text_align,  # text-align: justify ($320=center, $321=justify, $59=left, $61=right)
             IS("$36"),
             IonStruct(
                 IS("$307"), IonDecimal("0"), IS("$306"), IS("$314")
