@@ -579,8 +579,18 @@ def test_blocks_block_style_from_resolver():
         return {}
 
     blocks = _conv.extract_blocks_from_html(doc, style_resolver=resolver)
-    assert blocks[0]["block_style"] == {"align": "center", "indent": ("2", "$308")}
-    assert blocks[1]["block_style"] == {"align": None, "indent": None}
+    assert blocks[0]["block_style"] == {
+        "align": "center",
+        "indent": ("2", "$308"),
+        "margin_left": None,
+        "margin_right": None,
+    }
+    assert blocks[1]["block_style"] == {
+        "align": None,
+        "indent": None,
+        "margin_left": None,
+        "margin_right": None,
+    }
 
 
 @pytest.mark.unit
@@ -588,6 +598,23 @@ def test_blocks_block_style_none_without_resolver():
     doc = _doc("<p>x</p>")
     blocks = _conv.extract_blocks_from_html(doc)
     assert blocks[0]["block_style"] is None
+
+
+@pytest.mark.unit
+def test_blocks_block_style_margins_from_resolver():
+    doc = _doc("<blockquote>quoted</blockquote><p>plain</p>")
+
+    def resolver(elem):
+        txt = "".join(elem.itertext())
+        if "quoted" in txt:
+            return {"margin-left": "2em", "margin-right": "1em"}
+        return {}
+
+    blocks = _conv.extract_blocks_from_html(doc, style_resolver=resolver)
+    assert blocks[0]["block_style"]["margin_left"] == ("2", "$308")
+    assert blocks[0]["block_style"]["margin_right"] == ("1", "$308")
+    assert blocks[1]["block_style"]["margin_left"] is None
+    assert blocks[1]["block_style"]["margin_right"] is None
 
 
 # ── Task 4: Stylizer-backed style_resolver ───────────────────────────────────

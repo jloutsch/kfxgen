@@ -932,6 +932,8 @@ class NativeKFXGenerator:
         italic=False,
         align=None,
         text_indent=None,
+        margin_left=None,
+        margin_right=None,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -954,6 +956,10 @@ class NativeKFXGenerator:
             text_indent: If a tuple (magnitude_str, unit_symbol), set text-indent ($36)
                         and suppress padding-top. Default None uses 0% indent and
                         normal padding behavior.
+            margin_left: If a tuple (magnitude_str, unit_symbol), override the default
+                        margin-left ($48). Default None uses 0.5% ($314).
+            margin_right: If a tuple (magnitude_str, unit_symbol), emit margin-right ($50).
+                         Default None omits $50.
 
         Returns:
             YJFragment with type $157
@@ -982,11 +988,22 @@ class NativeKFXGenerator:
                 IS("$307"), IonDecimal("0"), IS("$306"), IS("$314")
             )
 
+        # $48 = margin-left; default 0.5%, overridden per element.
+        if margin_left is not None:
+            margin_left_struct = IonStruct(
+                IS("$307"),
+                IonDecimal(margin_left[0]),
+                IS("$306"),
+                IS(margin_left[1]),
+            )
+        else:
+            margin_left_struct = IonStruct(
+                IS("$307"), IonDecimal("0.5"), IS("$306"), IS("$314")
+            )
+
         value = IonStruct(
             IS("$48"),
-            IonStruct(
-                IS("$307"), IonDecimal("0.5"), IS("$306"), IS("$314")
-            ),  # margin-bottom: 0.5%
+            margin_left_struct,
             IS("$34"),
             text_align,  # text-align: justify ($320=center, $321=justify, $59=left, $61=right)
             IS("$36"),
@@ -1028,6 +1045,12 @@ class NativeKFXGenerator:
         if margin_top is not None:
             value[IS("$46")] = IonStruct(
                 IS("$307"), IonDecimal(str(margin_top)), IS("$306"), IS("$310")
+            )
+
+        # $50 = margin-right; emitted only when the source specifies it.
+        if margin_right is not None:
+            value[IS("$50")] = IonStruct(
+                IS("$307"), IonDecimal(margin_right[0]), IS("$306"), IS(margin_right[1])
             )
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
@@ -2609,6 +2632,10 @@ class NativeKFXGenerator:
                         attrs["align"] = bs["align"]
                     if bs.get("indent"):
                         attrs["text_indent"] = bs["indent"]
+                    if bs.get("margin_left"):
+                        attrs["margin_left"] = bs["margin_left"]
+                    if bs.get("margin_right"):
+                        attrs["margin_right"] = bs["margin_right"]
                     entry_styles.append(_allocate_style("", **attrs))
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)

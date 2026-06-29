@@ -309,6 +309,34 @@ class TestBuildFragment157:
         assert ind[IS("$307")] == IonDecimal("0")
         assert IS("$47") in frag.value  # padding-top present by default (non-heading)
 
+    def test_margin_left_overrides_48(self):
+        from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
+
+        gen = NativeKFXGenerator()
+        frag = gen.build_fragment_157(entity_name="sml", margin_left=("2", "$308"))
+        ml = frag.value[IS("$48")]
+        assert ml[IS("$307")] == IonDecimal("2")
+        assert ml[IS("$306")] == IS("$308")
+
+    def test_margin_right_emits_50(self):
+        from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
+
+        gen = NativeKFXGenerator()
+        frag = gen.build_fragment_157(entity_name="smr", margin_right=("1", "$308"))
+        mr = frag.value[IS("$50")]
+        assert mr[IS("$307")] == IonDecimal("1")
+        assert mr[IS("$306")] == IS("$308")
+
+    def test_margins_default_byte_stable(self):
+        from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
+
+        gen = NativeKFXGenerator()
+        frag = gen.build_fragment_157(entity_name="smd")
+        ml = frag.value[IS("$48")]
+        assert ml[IS("$307")] == IonDecimal("0.5")
+        assert ml[IS("$306")] == IS("$314")
+        assert IS("$50") not in frag.value
+
 
 class TestStyleSharing:
     """Issue #5: $157 styles must be shared globally, not cloned per chapter.
@@ -1145,3 +1173,59 @@ def test_per_chapter_font_size_not_leaked_from_last_chapter(tmp_path):
         "expected a $157 with font_size=0.75rem for the first chapter; "
         "got none — leaked-loop-variable bug may still be present"
     )
+
+
+@pytest.mark.unit
+def test_block_margin_left_produces_overridden_48(tmp_path):
+    from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
+
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "Ch",
+            "text": "quoted line",
+            "blocks": [
+                {
+                    "text": "quoted line",
+                    "spans": [],
+                    "block_style": {
+                        "align": None,
+                        "indent": None,
+                        "margin_left": ("2", "$308"),
+                        "margin_right": None,
+                    },
+                }
+            ],
+        }
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    hit = [
+        f
+        for f in styles
+        if IS("$48") in f.value
+        and f.value[IS("$48")].get(IS("$307")) == IonDecimal("2")
+        and f.value[IS("$48")].get(IS("$306")) == IS("$308")
+    ]
+    assert hit, "expected a $157 with margin-left overridden to 2em"
+
+
+@pytest.mark.unit
+def test_no_block_style_keeps_default_margins(tmp_path):
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    gen = NativeKFXGenerator()
+    chapters = [{"title": "Ch", "text": "plain body text"}]  # no blocks
+    gen.generate_full_book(
+        title="T",
+        author="A",
+        chapters=chapters,
+        output_path=str(tmp_path / "o.kfx"),
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    for f in styles:
+        if IS("$48") in f.value:
+            assert f.value[IS("$48")][IS("$306")] == IS("$314")  # default % unit
+        assert IS("$50") not in f.value  # margin-right never default
