@@ -25,6 +25,32 @@ _BOLD_TAGS = {"strong", "b"}
 _security_log = logging.getLogger(__name__ + ".security")
 
 
+def _build_style_resolver(oeb_book, item, log):
+    """Return a callable elem->computed-CSS-dict using Calibre's Stylizer, or
+    None when Calibre/Stylizer is unavailable or construction fails. Never
+    raises — failure degrades to no per-element block styling."""
+    try:
+        from calibre.ebooks.oeb.stylizer import Stylizer  # noqa: PLC0415
+
+        profile = getattr(getattr(oeb_book, "opts", None), "output_profile", None)
+        stylizer = Stylizer(item.data, item.href, oeb_book, oeb_book.opts, profile)
+
+        def resolve(elem):
+            try:
+                st = stylizer.style(elem)
+                return {
+                    "text-align": st.get("text-align"),
+                    "text-indent": st.get("text-indent"),
+                }
+            except Exception:
+                return None
+
+        return resolve
+    except Exception as e:
+        log.warn(f"  Stylizer unavailable ({e}); skipping per-element CSS")
+        return None
+
+
 def _has_real_text(text):
     """True if `text` has any non-whitespace content once IMG tokens are removed.
 
@@ -367,7 +393,8 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
         try:
             if not hasattr(item, "data") or item.data is None:
                 continue
-            blocks = extract_blocks_from_html(item.data)
+            resolver = _build_style_resolver(oeb_book, item, log)
+            blocks = extract_blocks_from_html(item.data, style_resolver=resolver)
             text = "\n\n".join(b["text"] for b in blocks)
         except Exception as e:
             href_for_log = getattr(item, "href", "") or "<unknown>"
