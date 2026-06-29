@@ -6,6 +6,7 @@ import posixpath
 import re
 
 from ._img_tokens import IMG_TOKEN_RE
+from .inline_style import ALIGN_MAP
 from .kfxlib_minimal.kfx_container import KfxContainer
 from .kfxlib_minimal.standard_symbols import StandardSymbolTable
 from .kfxlib_minimal.ion import IonStruct, IonDecimal, IonAnnotation, IonBLOB, IS
@@ -929,6 +930,8 @@ class NativeKFXGenerator:
         margin_top=None,
         is_heading=False,
         italic=False,
+        align=None,
+        text_indent=None,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -946,6 +949,11 @@ class NativeKFXGenerator:
             bold: If True, set font-weight: bold ($13: $361)
             italic: If True, add font-style: italic ($12: $382)
             is_heading: If True, omit padding-top (headings use margin-top for spacing)
+            align: Text alignment override. If a key in ALIGN_MAP ("left", "right", "center"),
+                  use the mapped symbol; otherwise default to "justify" ($321).
+            text_indent: If a tuple (magnitude_str, unit_symbol), set text-indent ($36)
+                        and suppress padding-top. Default None uses 0% indent and
+                        normal padding behavior.
 
         Returns:
             YJFragment with type $157
@@ -958,19 +966,31 @@ class NativeKFXGenerator:
         # $13 = font-weight: $350=normal, $361=bold
         font_weight = IS("$361") if bold else IS("$350")
 
+        # $34 = text-align; default justify ($321), overridden per element.
+        text_align = IS(ALIGN_MAP[align]) if align in ALIGN_MAP else IS("$321")
+
+        # $36 = text-indent; default 0%, overridden per element.
+        if text_indent is not None:
+            indent_struct = IonStruct(
+                IS("$307"),
+                IonDecimal(text_indent[0]),
+                IS("$306"),
+                IS(text_indent[1]),
+            )
+        else:
+            indent_struct = IonStruct(
+                IS("$307"), IonDecimal("0"), IS("$306"), IS("$314")
+            )
+
         value = IonStruct(
             IS("$48"),
             IonStruct(
                 IS("$307"), IonDecimal("0.5"), IS("$306"), IS("$314")
             ),  # margin-bottom: 0.5%
             IS("$34"),
-            IS(
-                "$321"
-            ),  # text-align: justify ($320=center, $321=justify, $59=left, $61=right)
+            text_align,  # text-align: justify ($320=center, $321=justify, $59=left, $61=right)
             IS("$36"),
-            IonStruct(
-                IS("$307"), IonDecimal("0"), IS("$306"), IS("$314")
-            ),  # text-indent: 0
+            indent_struct,  # text-indent
             IS("$42"),
             IonStruct(
                 IS("$307"), IonDecimal(str(line_height)), IS("$306"), IS("$310")
@@ -981,8 +1001,10 @@ class NativeKFXGenerator:
             font_weight,  # font-weight
         )
 
-        # Body text gets padding-top for paragraph spacing; headings rely on margin-top
-        if not is_heading:
+        # Body text gets padding-top for paragraph spacing; headings rely on margin-top.
+        # A non-zero first-line indent replaces inter-paragraph spacing (print convention),
+        # so suppress padding-top when indented.
+        if not is_heading and text_indent is None:
             value[IS("$47")] = IonStruct(
                 IS("$307"), IonDecimal("1"), IS("$306"), IS("$310")
             )  # padding-top: 1lh
@@ -2214,7 +2236,7 @@ class NativeKFXGenerator:
                 pos += self.CHUNK_SIZE
             return chunks
 
-        def _append_text_with_spans(chunk_text, para_text, para_spans):
+        def _append_text_with_spans(chunk_text, para_text, para_spans, block_style):
             """Split chunk_text by CHUNK_SIZE and attach the slice of
             para_spans covering each piece, offsets rebased to the piece.
             The chunk_text is a (stripped) substring of para_text; find its
@@ -2233,7 +2255,14 @@ class NativeKFXGenerator:
                     b = min(s + length, p_end)
                     if b > a:
                         pspans.append((a - p_start, b - a, flags))
-                all_chunks.append({"type": "text", "text": piece, "spans": pspans})
+                all_chunks.append(
+                    {
+                        "type": "text",
+                        "text": piece,
+                        "spans": pspans,
+                        "block_style": block_style,
+                    }
+                )
                 pos += self.CHUNK_SIZE
 
         for ch_idx, chapter in enumerate(chapters):
@@ -2305,6 +2334,7 @@ class NativeKFXGenerator:
                                     iter_blocks[0] = {
                                         "text": remainder,
                                         "spans": rebased_spans,
+                                        "block_style": first.get("block_style"),
                                     }
                                 else:
                                     iter_blocks = iter_blocks[1:]
@@ -2319,11 +2349,14 @@ class NativeKFXGenerator:
                         if not para:
                             continue
                         para_spans = block.get("spans", [])
+                        block_style = block.get("block_style")
                         for chunk in _emit_text_chunks(para):
                             if chunk["type"] == "image":
                                 all_chunks.append(chunk)
                             else:
-                                _append_text_with_spans(chunk["text"], para, para_spans)
+                                _append_text_with_spans(
+                                    chunk["text"], para, para_spans, block_style
+                                )
 
             # Guarantee every chapter contributes at least one chunk so it
             # owns a navigable content position and the per-chapter arrays
@@ -2558,7 +2591,13 @@ class NativeKFXGenerator:
                     entry_link_styles.append(toc_link_style_names[ch_idx])
                     entry_link_text_lengths.append(len(chunk["text"]))
                 else:
-                    entry_styles.append(story_names[ch_idx])
+                    bs = chunk.get("block_style") or {}
+                    attrs = {"font_size": chapters[ch_idx].get("font_size", 1.0)}
+                    if bs.get("align"):
+                        attrs["align"] = bs["align"]
+                    if bs.get("indent"):
+                        attrs["text_indent"] = bs["indent"]
+                    entry_styles.append(_allocate_style("", **attrs))
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)

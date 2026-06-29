@@ -16,13 +16,39 @@ from ._img_tokens import (
     IMG_TOKEN_SPACE as _IMG_TOKEN_SPACE,
 )
 from .image_optimize import optimize_images
-from .inline_style import FLAG_BOLD, FLAG_ITALIC, normalize_runs
+from .inline_style import FLAG_BOLD, FLAG_ITALIC, compute_block_style, normalize_runs
 from .native_generator import NativeKFXGenerator
 
 _ITALIC_TAGS = {"em", "i"}
 _BOLD_TAGS = {"strong", "b"}
 
 _security_log = logging.getLogger(__name__ + ".security")
+
+
+def _build_style_resolver(oeb_book, item, log):
+    """Return a callable elem->computed-CSS-dict using Calibre's Stylizer, or
+    None when Calibre/Stylizer is unavailable or construction fails. Never
+    raises — failure degrades to no per-element block styling."""
+    try:
+        from calibre.ebooks.oeb.stylizer import Stylizer  # noqa: PLC0415
+
+        profile = getattr(getattr(oeb_book, "opts", None), "output_profile", None)
+        stylizer = Stylizer(item.data, item.href, oeb_book, oeb_book.opts, profile)
+
+        def resolve(elem):
+            try:
+                st = stylizer.style(elem)
+                return {
+                    "text-align": st.get("text-align"),
+                    "text-indent": st.get("text-indent"),
+                }
+            except Exception:
+                return None
+
+        return resolve
+    except Exception as e:
+        log.warning(f"  Stylizer unavailable ({e}); skipping per-element CSS")
+        return None
 
 
 def _has_real_text(text):
@@ -83,10 +109,12 @@ def _walk_inline(elem, flags=frozenset()):
     return parts
 
 
-def extract_blocks_from_html(element):
+def extract_blocks_from_html(element, style_resolver=None):
     """Like extract_text_from_html but returns structured blocks:
-    [{"text": str, "spans": [(start, length, frozenset)]}], preserving inline
-    emphasis as spans and inline <img> as IMG tokens in `text`."""
+    [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None}],
+    preserving inline emphasis as spans and inline <img> as IMG tokens in `text`.
+    When style_resolver is given, it is called per block element (elem -> css_dict|None)
+    and the result is passed to compute_block_style to populate block_style."""
     body = element.find(".//{http://www.w3.org/1999/xhtml}body")
     if body is None:
         body = element.find(".//body")
@@ -120,7 +148,12 @@ def extract_blocks_from_html(element):
                 continue
             text, spans = normalize_runs(_walk_inline(elem))
             if text:
-                blocks.append({"text": text, "spans": spans})
+                bstyle = None
+                if style_resolver is not None:
+                    css = style_resolver(elem)
+                    if css is not None:
+                        bstyle = compute_block_style(css)
+                blocks.append({"text": text, "spans": spans, "block_style": bstyle})
             continue
 
         # Bare <img> directly under body (rare, but exists in some EPUBs)
@@ -130,7 +163,9 @@ def extract_blocks_from_html(element):
                 continue  # already handled by the block walker above
             href = elem.get("src", "") or ""
             alt = elem.get("alt", "") or ""
-            blocks.append({"text": _make_img_token(href, alt), "spans": []})
+            blocks.append(
+                {"text": _make_img_token(href, alt), "spans": [], "block_style": None}
+            )
 
     if blocks:
         return blocks
@@ -139,7 +174,7 @@ def extract_blocks_from_html(element):
     text = body.xpath("string()")
     lines = [line.strip() for line in text.split("\n")]
     text = " ".join(line for line in lines if line)
-    return [{"text": text, "spans": []}] if text else []
+    return [{"text": text, "spans": [], "block_style": None}] if text else []
 
 
 def extract_text_from_html(element):
@@ -358,7 +393,8 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
         try:
             if not hasattr(item, "data") or item.data is None:
                 continue
-            blocks = extract_blocks_from_html(item.data)
+            resolver = _build_style_resolver(oeb_book, item, log)
+            blocks = extract_blocks_from_html(item.data, style_resolver=resolver)
             text = "\n\n".join(b["text"] for b in blocks)
         except Exception as e:
             href_for_log = getattr(item, "href", "") or "<unknown>"

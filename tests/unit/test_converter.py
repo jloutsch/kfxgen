@@ -553,3 +553,78 @@ def test_chapter_carries_emphasis_blocks(simple_oeb_with_italic):
     chapters = extract_chapters_from_oeb(simple_oeb_with_italic, _silent_log())
     blocks = chapters[0]["blocks"]
     assert any(b["spans"] and b["spans"][0][2] == frozenset({I}) for b in blocks)
+
+
+# ── Task 3 (plan B/9): block_style via style_resolver ────────────────────────
+
+
+@pytest.mark.unit
+def test_blocks_block_style_from_resolver():
+    doc = _doc("<p>centered</p><p>plain</p>")  # _doc helper exists from Plan A
+
+    def resolver(elem):
+        # first <p> centered + indented, second has nothing
+        txt = "".join(elem.itertext())
+        if "centered" in txt:
+            return {"text-align": "center", "text-indent": "2em"}
+        return {}
+
+    blocks = _conv.extract_blocks_from_html(doc, style_resolver=resolver)
+    assert blocks[0]["block_style"] == {"align": "center", "indent": ("2", "$308")}
+    assert blocks[1]["block_style"] == {"align": None, "indent": None}
+
+
+@pytest.mark.unit
+def test_blocks_block_style_none_without_resolver():
+    doc = _doc("<p>x</p>")
+    blocks = _conv.extract_blocks_from_html(doc)
+    assert blocks[0]["block_style"] is None
+
+
+# ── Task 4: Stylizer-backed style_resolver ───────────────────────────────────
+
+
+@pytest.fixture
+def simple_oeb_centered():
+    """OEB book with one spine item containing a centered and a plain paragraph."""
+    data = _doc('<p class="c">Title</p><p>body</p>')
+
+    class _Item:
+        href = "chap.xhtml"
+        media_type = "application/xhtml+xml"
+
+    item = _Item()
+    item.data = data
+    toc = [_TOCNode("Chapter 1", "chap.xhtml")]
+    return _OEBBook(spine=[item], toc=toc)
+
+
+@pytest.mark.unit
+def test_style_resolver_none_outside_calibre():
+    # calibre.ebooks.oeb.stylizer is absent in CI -> resolver is None
+    import logging
+
+    r = _conv._build_style_resolver(object(), object(), logging.getLogger("t"))
+    assert r is None
+
+
+@pytest.mark.unit
+def test_chapters_carry_block_style_with_fake_stylizer(
+    monkeypatch, simple_oeb_centered
+):
+    # Monkeypatch _build_style_resolver to a fake so the test needs no Calibre.
+    def fake_builder(oeb, item, log):
+        def resolver(elem):
+            cls = elem.get("class") or ""
+            return {"text-align": "center"} if "c" in cls.split() else {}
+
+        return resolver
+
+    monkeypatch.setattr(_conv, "_build_style_resolver", fake_builder)
+    import logging
+
+    chapters = _conv.extract_chapters_from_oeb(
+        simple_oeb_centered, logging.getLogger("t")
+    )
+    blocks = chapters[0].get("blocks", [])
+    assert any((b.get("block_style") or {}).get("align") == "center" for b in blocks)

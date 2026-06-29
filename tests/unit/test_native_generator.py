@@ -268,6 +268,49 @@ class TestBuildFragment157:
         frag = gen.build_fragment_157(entity_name="s_plain")
         assert IS("$12") not in frag.value
 
+    @pytest.mark.unit
+    def test_align_overrides_text_align(self):
+        from kfxgen.kfxlib_minimal.ion import IS
+
+        gen = NativeKFXGenerator()
+        assert gen.build_fragment_157(entity_name="sa", align="center").value[
+            IS("$34")
+        ] == IS("$320")
+        assert gen.build_fragment_157(entity_name="sb", align="left").value[
+            IS("$34")
+        ] == IS("$59")
+        assert gen.build_fragment_157(entity_name="sc", align="right").value[
+            IS("$34")
+        ] == IS("$61")
+
+    @pytest.mark.unit
+    def test_align_default_is_justify(self):
+        from kfxgen.kfxlib_minimal.ion import IS
+
+        gen = NativeKFXGenerator()
+        assert gen.build_fragment_157(entity_name="sd").value[IS("$34")] == IS("$321")
+
+    @pytest.mark.unit
+    def test_text_indent_sets_36_and_omits_padding(self):
+        from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
+
+        gen = NativeKFXGenerator()
+        frag = gen.build_fragment_157(entity_name="si", text_indent=("1.5", "$308"))
+        ind = frag.value[IS("$36")]
+        assert ind[IS("$307")] == IonDecimal("1.5")
+        assert ind[IS("$306")] == IS("$308")
+        assert IS("$47") not in frag.value  # padding-top suppressed
+
+    @pytest.mark.unit
+    def test_no_text_indent_keeps_default(self):
+        from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
+
+        gen = NativeKFXGenerator()
+        frag = gen.build_fragment_157(entity_name="sj")
+        ind = frag.value[IS("$36")]
+        assert ind[IS("$307")] == IonDecimal("0")
+        assert IS("$47") in frag.value  # padding-top present by default (non-heading)
+
 
 class TestStyleSharing:
     """Issue #5: $157 styles must be shared globally, not cloned per chapter.
@@ -1017,3 +1060,90 @@ def test_plain_chapter_emits_no_emphasis_fragments(tmp_path):
     )
     styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
     assert all(IS("$12") not in f.value for f in styles)  # no italic anywhere
+
+
+@pytest.mark.unit
+def test_block_style_produces_aligned_indented_157(tmp_path):
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "Ch",
+            "text": "centered indented line",
+            "blocks": [
+                {
+                    "text": "centered indented line",
+                    "spans": [],
+                    "block_style": {"align": "center", "indent": ("2", "$308")},
+                }
+            ],
+        }
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    # A style must exist with text-align center, text-indent 2em, no padding-top.
+    hit = [
+        f
+        for f in styles
+        if f.value.get(IS("$34")) == IS("$320")
+        and IS("$36") in f.value
+        and f.value[IS("$36")].get(IS("$306")) == IS("$308")
+        and IS("$47") not in f.value
+    ]
+    assert hit, "expected a centered+indented $157 with padding-top suppressed"
+
+
+@pytest.mark.unit
+def test_no_block_style_emits_default_align_and_indent(tmp_path):
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    gen = NativeKFXGenerator()
+    chapters = [{"title": "Ch", "text": "plain body text"}]  # no blocks/block_style
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    # Every body style keeps justify ($321) and indent 0; none carry a non-% indent unit.
+    for f in styles:
+        if IS("$34") in f.value:
+            assert f.value[IS("$34")] in (
+                IS("$321"),
+                IS("$320"),
+            )  # justify or heading-center if any
+        if IS("$36") in f.value:
+            assert f.value[IS("$36")][IS("$306")] == IS(
+                "$314"
+            )  # default % unit, value 0
+
+
+@pytest.mark.unit
+def test_per_chapter_font_size_not_leaked_from_last_chapter(tmp_path):
+    """Regression: plain-text block-style path must use each chapter's own
+    font_size, not the leaked final chapter's value from an earlier loop."""
+    from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
+
+    gen = NativeKFXGenerator()
+    chapters = [
+        {"title": "Copyright", "text": "c 2026 Author", "font_size": 0.75},
+        {"title": "Chapter One", "text": "The main body text begins here."},
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    # The first chapter has font_size=0.75 (non-default), so at least one $157
+    # must carry $16 with $307=0.75 and $306=$505 (rem unit).
+    small_styles = [
+        f
+        for f in styles
+        if IS("$16") in f.value
+        and f.value[IS("$16")].get(IS("$307")) == IonDecimal("0.75")
+        and f.value[IS("$16")].get(IS("$306")) == IS("$505")
+    ]
+    assert small_styles, (
+        "expected a $157 with font_size=0.75rem for the first chapter; "
+        "got none — leaked-loop-variable bug may still be present"
+    )
