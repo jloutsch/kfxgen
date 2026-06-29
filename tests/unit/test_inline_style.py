@@ -40,3 +40,24 @@ def test_adjacent_same_flags_merge():
     text, spans = ist.normalize_runs([("ab", frozenset({I})), ("cd", frozenset({I}))])
     assert text == "abcd"
     assert spans == [(0, 4, frozenset({I}))]
+
+
+@pytest.mark.unit
+def test_parse_css_length_units():
+    assert ist.parse_css_length("1.5em") == ("1.5", "$308")
+    assert ist.parse_css_length("2rem") == ("2", "$505")
+    assert ist.parse_css_length("5%") == ("5", "$314")
+    assert ist.parse_css_length("12pt") == ("12", "$318")
+    assert ist.parse_css_length("3px") == ("3", "$319")
+    assert ist.parse_css_length("4mm") == ("4", "$316")
+
+
+@pytest.mark.unit
+def test_parse_css_length_rejects():
+    assert ist.parse_css_length("") is None
+    assert ist.parse_css_length("auto") is None
+    assert ist.parse_css_length("0") is None
+    assert ist.parse_css_length("0em") is None
+    assert ist.parse_css_length("2vw") is None
+    assert ist.parse_css_length("3ch") is None
+    assert ist.parse_css_length("inherit") is None
