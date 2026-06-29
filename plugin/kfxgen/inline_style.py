@@ -23,7 +23,9 @@ _CSS_UNIT_TO_KFX = {
 _LENGTH_RE = re.compile(r"^\s*([+-]?[0-9]*\.?[0-9]+)\s*(em|rem|%|pt|px|mm)\s*$", re.I)
 
 
-def normalize_runs(segments):
+def normalize_runs(
+    segments: list[tuple[str, frozenset]],
+) -> tuple[str, list[tuple[int, int, frozenset]]]:
     """Collapse whitespace across (text, flags) segments and return
     (normalized_text, spans). Mirrors the converter's existing
     `" ".join(text.split())` rule: each run of ASCII whitespace becomes a

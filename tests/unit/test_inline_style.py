@@ -43,6 +43,25 @@ def test_adjacent_same_flags_merge():
 
 
 @pytest.mark.unit
+def test_adjacent_differing_flags_stay_separate():
+    text, spans = ist.normalize_runs([("a", frozenset({I})), ("b", frozenset({B}))])
+    assert text == "ab"
+    assert spans == [(0, 1, frozenset({I})), (1, 1, frozenset({B}))]
+
+
+@pytest.mark.unit
+def test_collapsed_space_between_same_flag_segments_fragments():
+    # A bare (unstyled) space segment between two italic segments collapses to
+    # one space that carries its own (empty) flags, so the two italic runs do
+    # NOT merge — they fragment into two spans around the unstyled space.
+    text, spans = ist.normalize_runs(
+        [("a", frozenset({I})), (" ", frozenset()), ("b", frozenset({I}))]
+    )
+    assert text == "a b"
+    assert spans == [(0, 1, frozenset({I})), (2, 1, frozenset({I}))]
+
+
+@pytest.mark.unit
 def test_parse_css_length_units():
     assert ist.parse_css_length("1.5em") == ("1.5", "$308")
     assert ist.parse_css_length("2rem") == ("2", "$505")
