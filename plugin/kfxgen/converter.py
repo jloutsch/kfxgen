@@ -47,7 +47,7 @@ def _build_style_resolver(oeb_book, item, log):
 
         return resolve
     except Exception as e:
-        log.warn(f"  Stylizer unavailable ({e}); skipping per-element CSS")
+        log.warning(f"  Stylizer unavailable ({e}); skipping per-element CSS")
         return None
 
 

@@ -1117,3 +1117,33 @@ def test_no_block_style_emits_default_align_and_indent(tmp_path):
             assert f.value[IS("$36")][IS("$306")] == IS(
                 "$314"
             )  # default % unit, value 0
+
+
+@pytest.mark.unit
+def test_per_chapter_font_size_not_leaked_from_last_chapter(tmp_path):
+    """Regression: plain-text block-style path must use each chapter's own
+    font_size, not the leaked final chapter's value from an earlier loop."""
+    from kfxgen.kfxlib_minimal.ion import IS, IonDecimal
+
+    gen = NativeKFXGenerator()
+    chapters = [
+        {"title": "Copyright", "text": "c 2026 Author", "font_size": 0.75},
+        {"title": "Chapter One", "text": "The main body text begins here."},
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    # The first chapter has font_size=0.75 (non-default), so at least one $157
+    # must carry $16 with $307=0.75 and $306=$505 (rem unit).
+    small_styles = [
+        f
+        for f in styles
+        if IS("$16") in f.value
+        and f.value[IS("$16")].get(IS("$307")) == IonDecimal("0.75")
+        and f.value[IS("$16")].get(IS("$306")) == IS("$505")
+    ]
+    assert small_styles, (
+        "expected a $157 with font_size=0.75rem for the first chapter; "
+        "got none — leaked-loop-variable bug may still be present"
+    )

@@ -2592,7 +2592,7 @@ class NativeKFXGenerator:
                     entry_link_text_lengths.append(len(chunk["text"]))
                 else:
                     bs = chunk.get("block_style") or {}
-                    attrs = {"font_size": chapter.get("font_size", 1.0)}
+                    attrs = {"font_size": chapters[ch_idx].get("font_size", 1.0)}
                     if bs.get("align"):
                         attrs["align"] = bs["align"]
                     if bs.get("indent"):
