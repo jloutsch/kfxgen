@@ -726,8 +726,9 @@ class NativeKFXGenerator:
         # outer_positions stays in ch_data shape for future nested-$259
         # re-enabling but is unused here in the flat-revert v5.3.2 path.
 
-        # Build $265 entries — content positions (from $259), including
-        # image entries.
+        # Build $265 entries — section element + content positions (from
+        # $259), including image entries.
+        #
         # The reference Calibre KFX file maps every $259 leaf entry into
         # $265, including image entries. Excluding image positions from
         # $265 (as v5.3.4 did) breaks navigation for image-heavy chapters
@@ -736,17 +737,32 @@ class NativeKFXGenerator:
         # book. Give image chunks a small synthetic char-offset (+1) so
         # they get their own $265 entry without colliding with adjacent
         # text chunks.
-        # Section positions ($260) are intentionally excluded — including
-        # them creates "boundary markers" that cause Kindle TOC nav to
-        # land one page past the target.
+        #
+        # Section positions ($260) ARE included, as the pid-0 (length-1)
+        # element at the very start of each section (#20). jhowell's KFX
+        # Input resolves every eid referenced by $264 and $550 against the
+        # eids defined in $265; with the section eids present only in
+        # $264/$550, the reader reports "position_map has extra eids" /
+        # "location_map failed to locate eid" and fails the desktop
+        # KFX->EPUB round-trip. The reader's own walk of the real $259
+        # content places the section eid at pid 0, length 1, immediately
+        # before the heading — and the jhowell KFX Output reference emits
+        # exactly that ($265 begins each section with {$184: pid, $185:
+        # <section eid>}). An earlier attempt that inserted section
+        # positions at the WRONG offset produced phantom boundary markers
+        # and Kindle TOC nav landed one page past the target; placing the
+        # eid at the section's real start offset (matching the reference)
+        # is the conformant shape.
         entries_265_raw = []
         char_offset = 0
 
         for ch_idx in range(len(chapters)):
-            chapter_char_start = char_offset
             start, end = chapter_chunk_ranges[ch_idx]
 
-            chunk_offset = chapter_char_start
+            # Section element: length 1, at the section's starting pid.
+            entries_265_raw.append((char_offset, section_positions[ch_idx]))
+            char_offset += 1
+
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
                 is_image = isinstance(chunk, dict) and chunk.get("type") == "image"
@@ -756,10 +772,8 @@ class NativeKFXGenerator:
                     chunk_text_len = len(chunk["text"])
                 else:
                     chunk_text_len = len(chunk)  # legacy: bare string
-                entries_265_raw.append((chunk_offset, chunk_positions[chunk_idx]))
-                chunk_offset += chunk_text_len
-
-            char_offset = chunk_offset
+                entries_265_raw.append((char_offset, chunk_positions[chunk_idx]))
+                char_offset += chunk_text_len
 
         entries_265_raw.sort(key=lambda x: x[0])
         # Deduplicate entries with same $184 char-offset (rare with text-

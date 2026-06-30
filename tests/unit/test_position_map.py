@@ -135,32 +135,38 @@ class TestZ3Sentinel:
 
 
 class TestPositionRangeSeparation:
-    """Section positions ($260, 10000+) must NEVER appear in $265 position map.
+    """$265 contains exactly the content positions ($259, 1000+ range) and
+    the section eids ($260, 10000+ range) — and nothing else.
 
-    Per project memory: 'section positions in $265 create boundary markers
-    that cause Kindle TOC navigation to land one page past the target.'
+    Prior to #20 section positions were excluded from $265 on the belief
+    that they created "boundary markers" causing Kindle TOC nav to land one
+    page past the target. That regression came from inserting them at the
+    wrong offset; the conformant reference (jhowell KFX Output) places each
+    section eid at the section's real start offset, and the reader requires
+    it (see TestSectionEidsResolvableInPositionMap). This test now guards
+    the other direction: no stray eid outside the content/section ranges
+    leaks into $265.
     """
 
-    def test_265_contains_only_content_positions(
+    def test_265_contains_only_content_and_section_positions(
         self, sample_chapters, load_kfx_fragments
     ):
         path = _generate_book(sample_chapters)
         try:
             frags = load_kfx_fragments(path)
-            map_265 = _by_type(frags, "$265")
-            v = _val(map_265[0])
-            entries = v if isinstance(v, list) else v.get(IS("$181")) or []
-            for e in entries:
-                pos = e.get(IS("$185")) if hasattr(e, "get") else None
-                pos_int = int(pos) if pos is not None else 0
-                # Sentinel 0 is allowed; section range 10000+ is not.
-                if pos_int == 0:
-                    continue
+            allowed = _content_positions_in_265(frags)  # current $265 eid set
+            section_eids = _section_eids(frags)
+            content_eids = allowed - section_eids
+            # Every content eid is below SECTION_POS_BASE; every section eid
+            # is at or above it. Anything else would be a stray value.
+            for pos_int in content_eids:
                 assert pos_int < NativeKFXGenerator.SECTION_POS_BASE, (
-                    f"$265 contains section position {pos_int} "
-                    f"(>= SECTION_POS_BASE={NativeKFXGenerator.SECTION_POS_BASE}); "
-                    f"only content positions allowed"
+                    f"$265 content eid {pos_int} is in the section range "
+                    f"(>= SECTION_POS_BASE={NativeKFXGenerator.SECTION_POS_BASE})"
                 )
+            assert section_eids <= allowed, (
+                f"$265 is missing section eids {sorted(section_eids - allowed)}"
+            )
         finally:
             os.unlink(path)
 
@@ -197,7 +203,12 @@ class TestPositionRangeSeparation:
 
 
 def _content_positions_in_265(frags) -> set[int]:
-    """Return the non-sentinel content positions present in $265."""
+    """Return every non-sentinel eid present in $265 (the position-id map).
+
+    With the #20 conformance fix this includes section eids ($260 range),
+    which now appear as the pid-0 element of each section, alongside the
+    content eids.
+    """
     map_265 = _by_type(frags, "$265")
     v = _val(map_265[0])
     entries_265 = v if isinstance(v, list) else v.get(IS("$181")) or []
@@ -208,6 +219,95 @@ def _content_positions_in_265(frags) -> set[int]:
             if p is not None and int(p) != 0:
                 pos_in_265.add(int(p))
     return pos_in_265
+
+
+def _section_eids(frags) -> set[int]:
+    """Return the $155 eid of every $260 section fragment."""
+    eids: set[int] = set()
+    for f in _by_type(frags, "$260"):
+        v = _val(f)
+        entries = v.get(IS("$141")) if hasattr(v, "get") else None
+        for entry in entries or []:
+            pos = entry.get(IS("$155")) if hasattr(entry, "get") else None
+            if pos is not None:
+                eids.add(int(pos))
+    return eids
+
+
+def _eids_in_264(frags) -> set[int]:
+    """Return every eid listed in $264 per-section $181 lists."""
+    eids: set[int] = set()
+    for sec in _val(_by_type(frags, "$264")[0]):
+        for pid in (sec.get(IS("$181")) if hasattr(sec, "get") else []) or []:
+            eids.add(int(pid))
+    return eids
+
+
+def _eids_in_550(frags) -> set[int]:
+    """Return every eid referenced by $550 location entries ($182.$155)."""
+    eids: set[int] = set()
+    v550 = _val(_by_type(frags, "$550")[0])
+    entries = v550 if isinstance(v550, list) else [v550]
+    for item in entries:
+        if not hasattr(item, "get"):
+            continue
+        for p in item.get(IS("$182")) or []:
+            pos = p.get(IS("$155")) if hasattr(p, "get") else None
+            if pos is not None and int(pos) != 0:
+                eids.add(int(pos))
+    return eids
+
+
+class TestSectionEidsResolvableInPositionMap:
+    """jhowell's KFX Input resolves every eid referenced in $264 (position
+    map) and $550 (location map) against the eids defined in $265. Section
+    eids that appear in $264/$550 but are absent from $265 are reported as
+    'position_map has extra eids' / 'location_map failed to locate eid',
+    which blocks the desktop KFX->EPUB round-trip (#20).
+
+    The conformant reference (jhowell KFX Output) places each section's
+    $260 eid into $265 as the pid-0 element of that section. These tests
+    lock in that invariant.
+    """
+
+    def test_section_eids_present_in_265(self, sample_chapters, load_kfx_fragments):
+        path = _generate_book(sample_chapters)
+        try:
+            frags = load_kfx_fragments(path)
+            section_eids = _section_eids(frags)
+            assert section_eids, "Test setup error: no $260 sections found"
+            missing = section_eids - _content_positions_in_265(frags)
+            assert not missing, (
+                f"$260 section eids absent from $265: {sorted(missing)}. "
+                f"jhowell's reader reports these as 'position_map has extra "
+                f"eids' / 'location_map failed to locate eid' (#20)."
+            )
+        finally:
+            os.unlink(path)
+
+    def test_264_eids_subset_of_265(self, sample_chapters, load_kfx_fragments):
+        path = _generate_book(sample_chapters)
+        try:
+            frags = load_kfx_fragments(path)
+            missing = _eids_in_264(frags) - _content_positions_in_265(frags)
+            assert not missing, (
+                f"$264 references eids not present in $265: {sorted(missing)} "
+                f"(reader: 'position_map has extra eids')."
+            )
+        finally:
+            os.unlink(path)
+
+    def test_550_eids_subset_of_265(self, sample_chapters, load_kfx_fragments):
+        path = _generate_book(sample_chapters)
+        try:
+            frags = load_kfx_fragments(path)
+            missing = _eids_in_550(frags) - _content_positions_in_265(frags)
+            assert not missing, (
+                f"$550 references eids not present in $265: {sorted(missing)} "
+                f"(reader: 'location_map failed to locate eid')."
+            )
+        finally:
+            os.unlink(path)
 
 
 def _image_entry_positions(frags) -> set[int]:
