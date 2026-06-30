@@ -852,3 +852,56 @@ class TestCoordinateAssemblyEdges:
         assert chapters[0]["title"] == "IX"
         assert chapters[1]["title"] == "license"
         assert "License text" in chapters[1]["text"]
+
+
+# ── Task 5: Gatsby-shaped integration test ───────────────────────────────────
+
+
+def _multi_block_spine(href, blocks):
+    """Build a real XHTML spine item from (tag, id, text) tuples so the live
+    extract_blocks path (not a hand-built block list) is exercised."""
+    parts = []
+    for tag, anchor_id, text in blocks:
+        idattr = f' id="{anchor_id}"' if anchor_id else ""
+        parts.append(f"<{tag}{idattr}>{text}</{tag}>")
+    body = "".join(parts)
+
+    class _Item:
+        def __init__(self):
+            self.href = href
+            self.data = _xhtml_raw(body)
+            self.media_type = "application/xhtml+xml"
+
+    return _Item()
+
+
+class TestGatsbyShapedSplit:
+    def test_within_file_anchors_split_into_chapters(self):
+        # h-0 holds title + chapters I..III via within-file anchors
+        spine = [
+            _multi_block_spine(
+                "h-0.xhtml",
+                [
+                    ("h1", "title", "The Great Gatsby"),
+                    ("div", "chapter-1", "Chapter one prose."),
+                    ("div", "chapter-2", "Chapter two prose."),
+                    ("div", "chapter-3", "Chapter three prose."),
+                ],
+            ),
+            _multi_block_spine(
+                "h-1.xhtml", [("div", "chapter-4", "Chapter four prose.")]
+            ),
+        ]
+        toc = [
+            _TOCNode("Title", "h-0.xhtml#title"),
+            _TOCNode("I", "h-0.xhtml#chapter-1"),
+            _TOCNode("II", "h-0.xhtml#chapter-2"),
+            _TOCNode("III", "h-0.xhtml#chapter-3"),
+            _TOCNode("IV", "h-1.xhtml#chapter-4"),
+        ]
+        oeb = _OEBBook(spine=spine, toc=toc)
+        chapters = extract_chapters_from_oeb(oeb, _silent_log())
+        titles = [c["title"] for c in chapters]
+        assert titles == ["Title", "I", "II", "III", "IV"]
+        assert "Chapter two prose." in chapters[2]["text"]
+        assert "Chapter two prose." not in chapters[1]["text"]
