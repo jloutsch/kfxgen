@@ -19,6 +19,8 @@ from kfxgen.converter import (
     CONTENTS_SKIP_TITLES,
     HALF_TITLE_TITLES,
     TITLE_PAGE_TITLES,
+    _anchor_block_index,
+    _href_fragment,
     _replace_title_page,
     extract_blocks_from_html,
     extract_chapters_from_oeb,
@@ -665,6 +667,24 @@ def test_chapters_carry_block_style_with_fake_stylizer(
     )
     blocks = chapters[0].get("blocks", [])
     assert any((b.get("block_style") or {}).get("align") == "center" for b in blocks)
+
+
+# ── Task 2: Coordinate helpers ──────────────────────────────────────────────
+
+
+class TestCoordinateHelpers:
+    def test_href_fragment(self):
+        assert _href_fragment("ch.xhtml#c2") == "c2"
+        assert _href_fragment("ch.xhtml") == ""
+        assert _href_fragment("") == ""
+
+    def test_anchor_block_index_first_wins(self):
+        blocks = [
+            {"anchor_ids": ["a"]},
+            {"anchor_ids": ["b", "a"]},
+            {"anchor_ids": []},
+        ]
+        assert _anchor_block_index(blocks) == {"a": 0, "b": 1}
 
 
 # ── Task 1: per-block anchor_ids ─────────────────────────────────────────────

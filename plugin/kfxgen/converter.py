@@ -373,6 +373,21 @@ def _normalize_href(href):
     return basename
 
 
+def _href_fragment(href):
+    """Return the fragment after '#', or '' when there is none."""
+    return href.split("#", 1)[1] if href and "#" in href else ""
+
+
+def _anchor_block_index(blocks):
+    """Map each anchor id to the index of the FIRST block that carries it."""
+    out = {}
+    for i, b in enumerate(blocks):
+        for aid in b.get("anchor_ids", ()):
+            if aid not in out:
+                out[aid] = i
+    return out
+
+
 def _find_manifest_item(oeb_book, href):
     """Return a manifest item whose href matches (exactly or by basename)."""
     if not hasattr(oeb_book, "manifest") or oeb_book.manifest is None:
