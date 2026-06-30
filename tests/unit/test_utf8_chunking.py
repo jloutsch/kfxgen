@@ -78,8 +78,12 @@ def _all_chunk_strings(frags) -> list[str]:
 
 
 def _max_position_id(frags) -> int:
-    """Return the largest $185 (position-id) value across the $265 map.
-    Used to assert $265 offsets stay within character-count bounds."""
+    """Return the largest CONTENT position-id ($185) in the $265 map.
+
+    Section eids ($260, >= SECTION_POS_BASE) also appear in $265 since #20
+    (as the pid-0 element of each section); they are a fixed separate range,
+    not character-derived content offsets, so they are excluded here — this
+    helper exists to catch byte-vs-char inflation of *content* offsets."""
     max_pos = 0
     for f in by_type(frags, "$265"):
         v = val(f)
@@ -87,7 +91,7 @@ def _max_position_id(frags) -> int:
         for e in entries:
             if hasattr(e, "get"):
                 p = e.get(IS("$185"))
-                if p is not None:
+                if p is not None and int(p) < NativeKFXGenerator.SECTION_POS_BASE:
                     max_pos = max(max_pos, int(p))
     return max_pos
 

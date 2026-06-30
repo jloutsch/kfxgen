@@ -1,5 +1,38 @@
 # Changelog
 
+## 5.3.21 — Section position-map conformance ($264/$265/$550)
+
+kfxgen's KFX is now parseable by jhowell's `KFX Input` plugin. Previously
+the desktop round-trip (`ebook-convert book.kfx out.epub`) hard-failed
+while building the position/location map:
+
+```
+position_map has extra eids: 10000, 10002, ...
+location_map N failed to locate eid 10000 offset 0
+```
+
+Root cause: the generator referenced the synthetic section position IDs
+(`SECTION_POS_BASE` range) in `$264` and `$550` but omitted them from
+`$265`. jhowell's reader resolves every eid in `$264`/`$550` against the
+eids defined in `$265`, so the section eids were dangling. The reader's
+own walk of the real `$259` content expects each section eid at pid 0
+(length 1) of its section — and the jhowell `KFX Output` reference emits
+exactly that.
+
+- `$265` now begins each section with its `$260` eid as the pid-0,
+  length-1 element, matching the reference (single shared eid namespace).
+- Clears all `position_map`/`location_map` errors; `ebook-convert` now
+  decodes kfxgen output to EPUB. Verified against the upstream `kfxlib`
+  across the golden corpus (0 position/location-map errors).
+- A prior attempt that inserted section positions at the wrong offset
+  produced phantom boundary markers (TOC nav landed one page past the
+  target); placing the eid at the section's real start offset is the
+  conformant shape.
+- Device-verified: TOC navigation jumps correctly to every chapter on a
+  physical Kindle (the `$265` change is device-load-bearing, so this was
+  confirmed by sideload, the only render test available for raw `.kfx`).
+- Closes #20.
+
 ## 5.3.20 — Fix image optimization no-op
 
 Image optimization shipped in 5.3.19 never actually ran. `calibre.utils.img.scale_image`
