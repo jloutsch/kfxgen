@@ -1,5 +1,41 @@
 # Changelog
 
+## 5.3.22 — Within-file #anchor chapter splitting (#23)
+
+kfxgen can now split chapters at inline `#anchor` targets inside a single
+spine document — not just at EPUB spine-file boundaries.
+
+**Anchor-aware block extraction:** `_extract_blocks` annotates each block
+dict with `anchor_ids: list[str]` (the `id` attributes found on the block
+element). This is the per-block anchor inventory consumed downstream.
+
+**Global block-coordinate assembly:** `_assemble_chapters_by_coordinate`
+replaces the old spine-index deduplication path. It walks every spine
+document's block list, looks up each block's anchor IDs against an
+`_anchor_block_index` built from the OEB TOC, and emits one chapter dict
+per matched anchor. Block coordinates (spine index + block offset) serve
+as the split points, giving a monotonically ordered, globally consistent
+chapter sequence regardless of how many chapters share one spine file.
+
+**Edge cases covered:**
+- Front-matter leading chapter: the first TOC entry may begin at block 0;
+  no anchor lookup needed, content is taken from the document head.
+- Missing-anchor snap: if a TOC href anchor is absent from the extracted
+  blocks, the chapter snaps to the nearest prior block boundary rather
+  than silently dropping the chapter.
+- Non-monotonic skip: out-of-order or duplicate coordinates are detected
+  and skipped with a warning rather than producing overlapping chapters.
+- Tail orphans: blocks after the last TOC anchor are appended to the final
+  chapter, matching the behaviour of the old spine-boundary splitter.
+
+**Measure-first scale gate (400 chapters, in-envelope):** a `@pytest.mark.slow`
+scale test confirms that generating a 400-chapter book stays within the
+KFX `content_max` envelope (measured peak 3 398, limit 10 000). A
+guaranteed position-range rework is deferred to #30 — the current envelope
+headroom makes it non-urgent.
+
+Device verification is pending (physical Kindle sideload — see Step 6).
+
 ## 5.3.21 — Section position-map conformance ($264/$265/$550)
 
 kfxgen's KFX is now parseable by jhowell's `KFX Input` plugin. Previously
