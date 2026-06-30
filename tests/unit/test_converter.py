@@ -20,6 +20,7 @@ from kfxgen.converter import (
     HALF_TITLE_TITLES,
     TITLE_PAGE_TITLES,
     _replace_title_page,
+    extract_blocks_from_html,
     extract_chapters_from_oeb,
     extract_cover_image,
     extract_images_from_oeb,
@@ -664,3 +665,50 @@ def test_chapters_carry_block_style_with_fake_stylizer(
     )
     blocks = chapters[0].get("blocks", [])
     assert any((b.get("block_style") or {}).get("align") == "center" for b in blocks)
+
+
+# ── Task 1: per-block anchor_ids ─────────────────────────────────────────────
+
+
+def _xhtml_raw(body_inner):
+    src = f'<html xmlns="http://www.w3.org/1999/xhtml"><body>{body_inner}</body></html>'
+    return etree.fromstring(src)
+
+
+class TestBlockAnchorIds:
+    def test_id_on_block_element(self):
+        blocks = extract_blocks_from_html(_xhtml_raw('<h2 id="c1">One</h2>'))
+        assert blocks[0]["anchor_ids"] == ["c1"]
+
+    def test_id_on_container_attaches_to_first_leaf(self):
+        el = _xhtml_raw('<div id="c1"><p>First</p><p>Second</p></div>')
+        blocks = extract_blocks_from_html(el)
+        assert blocks[0]["text"] == "First"
+        assert blocks[0]["anchor_ids"] == ["c1"]
+        assert blocks[1]["anchor_ids"] == []
+
+    def test_standalone_anchor_between_blocks(self):
+        el = _xhtml_raw('<p>Before</p><a id="c2"></a><p>After</p>')
+        blocks = extract_blocks_from_html(el)
+        assert blocks[0]["anchor_ids"] == []
+        assert blocks[1]["anchor_ids"] == ["c2"]
+
+    def test_legacy_a_name_anchor(self):
+        el = _xhtml_raw('<a name="c3"></a><p>Body</p>')
+        blocks = extract_blocks_from_html(el)
+        assert blocks[0]["anchor_ids"] == ["c3"]
+
+    def test_inline_anchor_snaps_to_containing_block(self):
+        el = _xhtml_raw('<p>Mid <a id="c4">word</a> here</p>')
+        blocks = extract_blocks_from_html(el)
+        assert blocks[0]["anchor_ids"] == ["c4"]
+
+    def test_empty_id_block_carries_forward(self):
+        el = _xhtml_raw('<p id="c5"></p><p>Real</p>')
+        blocks = extract_blocks_from_html(el)
+        assert blocks[0]["text"] == "Real"
+        assert blocks[0]["anchor_ids"] == ["c5"]
+
+    def test_block_without_anchor_has_empty_list(self):
+        blocks = extract_blocks_from_html(_xhtml_raw("<p>Plain</p>"))
+        assert blocks[0]["anchor_ids"] == []

@@ -111,6 +111,37 @@ def _walk_inline(elem, flags=frozenset()):
     return parts
 
 
+def _own_anchor_ids(elem):
+    """Anchor ids declared directly on `elem`: its id, plus an <a name="...">."""
+    ids = []
+    eid = elem.get("id")
+    if eid:
+        ids.append(eid)
+    if _local_tag(elem.tag) == "a":
+        name = elem.get("name")
+        if name:
+            ids.append(name)
+    return ids
+
+
+def _subtree_anchor_ids(elem):
+    """All anchor ids on `elem` and its descendants, in document order."""
+    ids = []
+    for e in elem.iter():
+        ids.extend(_own_anchor_ids(e))
+    return ids
+
+
+def _dedupe_keep_order(items):
+    seen = set()
+    out = []
+    for it in items:
+        if it not in seen:
+            seen.add(it)
+            out.append(it)
+    return out
+
+
 def extract_blocks_from_html(element, style_resolver=None):
     """Like extract_text_from_html but returns structured blocks:
     [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None}],
@@ -144,32 +175,57 @@ def extract_blocks_from_html(element, style_resolver=None):
         block_tags.add(ns + tag)
 
     blocks = []
-    for elem in body.iter():
-        if elem.tag in block_tags:
-            if any(child.tag in block_tags for child in elem):
-                continue
+    pending_ids = []  # anchors awaiting the next leaf block (containers, standalone <a>)
+
+    def _walk(elem, parent_is_block):
+        is_block = elem.tag in block_tags
+        has_block_child = any(child.tag in block_tags for child in elem)
+
+        if is_block and not has_block_child:
             text, spans = normalize_runs(_walk_inline(elem))
+            ids = pending_ids[:]
+            pending_ids.clear()
+            ids.extend(_subtree_anchor_ids(elem))
             if text:
                 bstyle = None
                 if style_resolver is not None:
                     css = style_resolver(elem)
                     if css is not None:
                         bstyle = compute_block_style(css)
-                blocks.append({"text": text, "spans": spans, "block_style": bstyle})
-            continue
+                blocks.append(
+                    {
+                        "text": text,
+                        "spans": spans,
+                        "block_style": bstyle,
+                        "anchor_ids": _dedupe_keep_order(ids),
+                    }
+                )
+            else:
+                pending_ids.extend(ids)  # empty anchor block: carry ids forward
+            return
 
-        # Bare <img> directly under body (rare, but exists in some EPUBs)
-        if _local_tag(elem.tag) == "img":
-            parent = elem.getparent()
-            if parent is not None and parent.tag in block_tags:
-                continue  # already handled by the block walker above
+        if _local_tag(elem.tag) == "img" and not parent_is_block:
+            ids = pending_ids[:]
+            pending_ids.clear()
+            ids.extend(_own_anchor_ids(elem))
             href = elem.get("src", "") or ""
             alt = elem.get("alt", "") or ""
-            # block_style is intentionally None: a bare image carries no text
-            # block-style (align/indent), so the resolver is not consulted here.
             blocks.append(
-                {"text": _make_img_token(href, alt), "spans": [], "block_style": None}
+                {
+                    "text": _make_img_token(href, alt),
+                    "spans": [],
+                    "block_style": None,
+                    "anchor_ids": _dedupe_keep_order(ids),
+                }
             )
+            return
+
+        pending_ids.extend(_own_anchor_ids(elem))
+        for child in elem:
+            _walk(child, parent_is_block=is_block)
+
+    for child in body:
+        _walk(child, parent_is_block=False)
 
     if blocks:
         return blocks
@@ -178,7 +234,16 @@ def extract_blocks_from_html(element, style_resolver=None):
     text = body.xpath("string()")
     lines = [line.strip() for line in text.split("\n")]
     text = " ".join(line for line in lines if line)
-    return [{"text": text, "spans": [], "block_style": None}] if text else []
+    if not text:
+        return []
+    return [
+        {
+            "text": text,
+            "spans": [],
+            "block_style": None,
+            "anchor_ids": _dedupe_keep_order(pending_ids),
+        }
+    ]
 
 
 def extract_text_from_html(element):
