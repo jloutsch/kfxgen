@@ -20,6 +20,7 @@ from kfxgen.converter import (
     HALF_TITLE_TITLES,
     TITLE_PAGE_TITLES,
     _anchor_block_index,
+    _assemble_chapters_by_coordinate,
     _href_fragment,
     _replace_title_page,
     extract_blocks_from_html,
@@ -732,3 +733,71 @@ class TestBlockAnchorIds:
     def test_block_without_anchor_has_empty_list(self):
         blocks = extract_blocks_from_html(_xhtml_raw("<p>Plain</p>"))
         assert blocks[0]["anchor_ids"] == []
+
+
+# ---------------------------------------------------------------------------
+# Coordinate-based chapter assembly
+# ---------------------------------------------------------------------------
+
+
+def _spine_item(href, blocks):
+    """blocks: list of (text, anchor_ids) tuples."""
+    return {
+        "href": href,
+        "text": "\n\n".join(t for t, _ in blocks),
+        "blocks": [
+            {"text": t, "spans": [], "block_style": None, "anchor_ids": list(a)}
+            for t, a in blocks
+        ],
+    }
+
+
+class TestCoordinateAssembly:
+    def test_multi_anchor_split_within_one_file(self):
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [("I", ["c1"]), ("Body one", []), ("II", ["c2"]), ("Body two", [])],
+            )
+        ]
+        toc = [
+            {"title": "I", "href": "book.xhtml#c1"},
+            {"title": "II", "href": "book.xhtml#c2"},
+        ]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert [c["title"] for c in chapters] == ["I", "II"]
+        assert chapters[0]["text"] == "I\n\nBody one"
+        assert chapters[1]["text"] == "II\n\nBody two"
+
+    def test_one_file_per_chapter(self):
+        spine = [
+            _spine_item("a.xhtml", [("Alpha", [])]),
+            _spine_item("b.xhtml", [("Beta", [])]),
+        ]
+        toc = [
+            {"title": "Alpha", "href": "a.xhtml"},
+            {"title": "Beta", "href": "b.xhtml"},
+        ]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert [c["title"] for c in chapters] == ["Alpha", "Beta"]
+
+    def test_split_sibling_spans_files(self):
+        # chap.xhtml is in the TOC; chap_split_001.xhtml is an orphan sibling
+        # between two TOC anchors -> absorbed into the first chapter.
+        spine = [
+            _spine_item("chap.xhtml", [("One", ["c1"])]),
+            _spine_item("chap_split_001.xhtml", [("One continued", [])]),
+            _spine_item("chap2.xhtml", [("Two", ["c2"])]),
+        ]
+        toc = [
+            {"title": "One", "href": "chap.xhtml#c1"},
+            {"title": "Two", "href": "chap2.xhtml#c2"},
+        ]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert [c["title"] for c in chapters] == ["One", "Two"]
+        assert "One continued" in chapters[0]["text"]
+
+    def test_returns_none_when_no_toc_entry_in_spine(self):
+        spine = [_spine_item("a.xhtml", [("Alpha", [])])]
+        toc = [{"title": "Ghost", "href": "missing.xhtml"}]
+        assert _assemble_chapters_by_coordinate(spine, toc, _silent_log()) is None

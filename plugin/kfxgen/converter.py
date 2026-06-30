@@ -443,6 +443,110 @@ def _extract_text_from_manifest_item(oeb_book, href, log):
     return None
 
 
+def _leading_chapter_title(head_blocks, first_spine_item):
+    """Title for front matter that precedes the first TOC anchor.
+
+    Use the first block's text when it is short enough to be a heading,
+    otherwise a neutral 'Front Matter' label."""
+    if head_blocks:
+        t = (head_blocks[0].get("text") or "").strip()
+        if 0 < len(t) <= 60 and "\n" not in t:
+            return t
+    return "Front Matter"
+
+
+def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
+    """Resolve each TOC entry to a (spine_index, block_index) coordinate and
+    slice content between consecutive coordinates into chapters. Returns None
+    when no TOC entry resolves to a spine item (caller falls back)."""
+    spine_blocks = [s.get("blocks") or [] for s in spine_items_ordered]
+    spine_anchor = [_anchor_block_index(b) for b in spine_blocks]
+    spine_order = [_normalize_href(s["href"]) for s in spine_items_ordered]
+
+    file_offset = []
+    acc = 0
+    for b in spine_blocks:
+        file_offset.append(acc)
+        acc += len(b)
+
+    flat = []
+    for b in spine_blocks:
+        flat.extend(b)
+
+    coords = []  # (flat_index, spine_index, title)
+    last_block_in_file = {}
+    prev_flat = -1
+    for entry in toc_entries:
+        norm = _normalize_href(entry["href"])
+        try:
+            si = spine_order.index(norm)
+        except ValueError:
+            log.warn(f"  TOC entry {entry['title']!r} dropped: not in spine")
+            continue
+        frag = _href_fragment(entry["href"])
+        amap = spine_anchor[si]
+        if frag and frag in amap:
+            bi = amap[frag]
+        elif frag:
+            bi = last_block_in_file.get(si, -1) + 1
+            log.warn(
+                f"  TOC anchor #{frag} not found in {norm}; snapping to block {bi}"
+            )
+        else:
+            bi = 0
+        bi = min(bi, len(spine_blocks[si]) - 1) if spine_blocks[si] else 0
+        fi = file_offset[si] + bi
+        if fi <= prev_flat:
+            log.warn(
+                f"  TOC entry {entry['title']!r} out of document order; skipping split"
+            )
+            continue
+        coords.append((fi, si, entry["title"]))
+        prev_flat = fi
+        last_block_in_file[si] = bi
+
+    if not coords:
+        return None
+
+    def _mk(title, block_slice):
+        text = "\n\n".join(b["text"] for b in block_slice if b.get("text"))
+        if not text.strip():
+            return None
+        return {"title": title, "text": text, "blocks": list(block_slice)}
+
+    chapters = []
+
+    first_fi = coords[0][0]
+    if first_fi > 0:
+        head = flat[0:first_fi]
+        ch = _mk(_leading_chapter_title(head, spine_items_ordered[0]), head)
+        if ch:
+            chapters.append(ch)
+
+    for k, (fi, si, title) in enumerate(coords):
+        if k + 1 < len(coords):
+            end = coords[k + 1][0]
+        else:
+            end = file_offset[si] + len(spine_blocks[si])
+        ch = _mk(title, flat[fi:end])
+        if ch:
+            chapters.append(ch)
+
+    last_si = coords[-1][1]
+    for si in range(last_si + 1, len(spine_items_ordered)):
+        item = spine_items_ordered[si]
+        if not _has_real_text(item["text"]):
+            log.info(f"  Skipping image-only orphan {_normalize_href(item['href'])}")
+            continue
+        norm = _normalize_href(item["href"])
+        stem = norm.rsplit(".", 1)[0] if "." in norm else norm
+        ch = _mk(stem or f"Section {si + 1}", spine_blocks[si])
+        if ch:
+            chapters.append(ch)
+
+    return chapters
+
+
 def extract_chapters_from_oeb(oeb_book, log, metadata=None):
     """
     Extract structured chapters from OEB book by mapping TOC to spine items.
