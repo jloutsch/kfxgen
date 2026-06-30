@@ -144,7 +144,8 @@ def _dedupe_keep_order(items):
 
 def extract_blocks_from_html(element, style_resolver=None):
     """Like extract_text_from_html but returns structured blocks:
-    [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None}],
+    [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None,
+    "anchor_ids": list[str]}],
     preserving inline emphasis as spans and inline <img> as IMG tokens in `text`.
     When style_resolver is given, it is called per block element (elem -> css_dict|None)
     and the result is passed to compute_block_style to populate block_style."""
@@ -226,6 +227,15 @@ def extract_blocks_from_html(element, style_resolver=None):
 
     for child in body:
         _walk(child, parent_is_block=False)
+
+    # Trailing anchors (e.g. <a id="eof"/> after the last leaf block) never
+    # reach a subsequent block to flush to; snap them onto the last emitted
+    # block instead of dropping them silently.
+    if pending_ids and blocks:
+        last_block = blocks[-1]
+        last_block["anchor_ids"] = _dedupe_keep_order(
+            last_block["anchor_ids"] + pending_ids
+        )
 
     if blocks:
         return blocks
@@ -527,14 +537,21 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
     first_fi = coords[0][0]
     # A head block that carries an anchor referenced (even non-monotonically) in
     # the TOC is NOT front matter — fold it into the first chapter instead.
+    # NOTE: Known limitation — a malformed EPUB where genuine front matter
+    # carries an `id` that duplicates a TOC fragment would be folded into
+    # chapter 1 rather than emitted as a separate leading chapter.
     head_has_toc_anchor = first_fi > 0 and any(
         a in toc_anchors for b in flat[0:first_fi] for a in (b.get("anchor_ids") or [])
     )
     if first_fi > 0 and not head_has_toc_anchor:
         head = flat[0:first_fi]
-        ch = _mk(_leading_chapter_title(head, spine_items_ordered[0]), head)
-        if ch:
-            chapters.append(ch)
+        head_text = "\n\n".join(b["text"] for b in head if b.get("text"))
+        if not _has_real_text(head_text):
+            log.info("  Skipping image-only head before first TOC anchor")
+        else:
+            ch = _mk(_leading_chapter_title(head, spine_items_ordered[0]), head)
+            if ch:
+                chapters.append(ch)
 
     for k, (fi, si, title) in enumerate(coords):
         if k + 1 < len(coords):
@@ -547,6 +564,8 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
             chapters.append(ch)
 
     last_si = coords[-1][1]
+    # Tail orphans use filename-stem titles; TOC titles drove the inline splits
+    # above so they are not available to reassign here (intentional).
     for si in range(last_si + 1, len(spine_items_ordered)):
         item = spine_items_ordered[si]
         if not _has_real_text(item["text"]):

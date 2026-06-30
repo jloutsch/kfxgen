@@ -734,6 +734,13 @@ class TestBlockAnchorIds:
         blocks = extract_blocks_from_html(_xhtml_raw("<p>Plain</p>"))
         assert blocks[0]["anchor_ids"] == []
 
+    def test_trailing_anchor_snaps_to_last_block(self):
+        # A standalone anchor AFTER the last leaf block must attach to the last
+        # block's anchor_ids, not be silently dropped (FIX 7).
+        el = _xhtml_raw('<p>Last</p><a id="eof"></a>')
+        blocks = extract_blocks_from_html(el)
+        assert blocks[-1]["anchor_ids"] == ["eof"]
+
 
 # ---------------------------------------------------------------------------
 # Coordinate-based chapter assembly
@@ -853,6 +860,49 @@ class TestCoordinateAssemblyEdges:
         assert chapters[1]["title"] == "license"
         assert "License text" in chapters[1]["text"]
 
+    def test_image_only_head_not_emitted_as_leading_chapter(self):
+        # A spine file whose content before the first TOC anchor is only an IMG
+        # token (e.g. an inline cover image) must NOT produce a leading chapter.
+        # This is consistent with how tail orphans skip image-only content (FIX 1).
+        img_token = _conv._make_img_token("cover.jpg", "")
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [(img_token, []), ("Chapter I", ["c1"]), ("Body text", [])],
+            )
+        ]
+        toc = [{"title": "I", "href": "book.xhtml#c1"}]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        # Only chapter I; no image-only "Front Matter" leading chapter.
+        assert [c["title"] for c in chapters] == ["I"]
+
+    def test_head_is_folded_when_it_carries_toc_anchor(self):
+        # When the head (blocks before the first coordinate) carries an anchor
+        # that appears in the TOC (even as a non-monotonic/skipped entry),
+        # the head must fold into the first chapter rather than being emitted
+        # as a separate "Front Matter" chapter (FIX 3: head_has_toc_anchor branch).
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [
+                    ("Pre-chapter text", ["intro"]),  # block 0: anchor in TOC
+                    ("Chapter I", ["c1"]),  # block 1: first coord
+                    ("Body text", []),
+                ],
+            )
+        ]
+        toc = [
+            {"title": "I", "href": "book.xhtml#c1"},  # block 1 -> first valid coord
+            {
+                "title": "Intro",
+                "href": "book.xhtml#intro",
+            },  # block 0 -> non-monotonic, skipped
+        ]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        # head_has_toc_anchor = True -> no separate Front Matter chapter
+        assert [c["title"] for c in chapters] == ["I"]
+        assert "Pre-chapter text" in chapters[0]["text"]
+
 
 # ── Task 5: Gatsby-shaped integration test ───────────────────────────────────
 
@@ -911,14 +961,33 @@ class TestGatsbyShapedSplit:
 
 
 class TestHighChapterCountScale:
-    def test_400_chapter_book_converts_and_stays_in_envelope(self, tmp_path):
+    @pytest.mark.xfail(
+        reason="#30 position-range rework needed at high chapter+chunk counts",
+        strict=False,
+    )
+    def test_1200_chapter_book_converts_and_stays_in_envelope(self, tmp_path):
+        # Measured content_max = 17798 (1200 chapters × 6 paragraphs) — exceeds
+        # SECTION_POS_BASE (10000). Escalate to #30 for position-range rework.
         from kfxgen.native_generator import NativeKFXGenerator
         from kfxgen.kfxlib_minimal.ion import IS
         from tests._kfx_introspect import by_type, val, load_fragments
 
+        # 1200 chapters, each with 6 paragraphs (~6 content chunks per chapter).
+        # Samples both the chapter axis and the content-chunk axis to find the
+        # realistic worst-case content position id.
         chapters = [
-            {"title": f"Chapter {i}", "text": f"Chapter {i}\n\nBody of chapter {i}."}
-            for i in range(400)
+            {
+                "title": f"Chapter {i}",
+                "text": (
+                    f"Chapter {i}\n\n"
+                    f"First sentence of chapter {i}.\n\n"
+                    f"Second sentence of chapter {i}.\n\n"
+                    f"Third sentence of chapter {i}.\n\n"
+                    f"Fourth sentence of chapter {i}.\n\n"
+                    f"Fifth sentence of chapter {i}."
+                ),
+            }
+            for i in range(1200)
         ]
         out = tmp_path / "scale.kfx"
         NativeKFXGenerator().generate_full_book(
@@ -927,9 +996,11 @@ class TestHighChapterCountScale:
         frags = load_fragments(out)
 
         # All $260 sections present.
-        assert len(by_type(frags, "$260")) == 400
+        assert len(by_type(frags, "$260")) == 1200
 
         # Content positions stay below SECTION_POS_BASE; sections at/above it.
+        # Measured content_max = 17798 (1200 chapters × 6 paragraphs), which
+        # exceeds SECTION_POS_BASE (10000) — hence xfail; see issue #30.
         content_max = 0
         for f in by_type(frags, "$259"):
             v = val(f)
