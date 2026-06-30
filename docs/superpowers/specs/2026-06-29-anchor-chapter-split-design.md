@@ -95,14 +95,30 @@ The current `already claimed` spine-index dedup branch (the bug) is removed.
 
 ## Edge cases / error handling
 
-- **Content before the first anchor in a spine item** attaches to the previous
-  chapter; for the very first spine item it merges into the first TOC chapter
-  (matches today's "first chapter owns the head" behavior).
-- **Unresolved / missing anchor** → block 0 + warning.
-- **Non-monotonic / out-of-spine-order TOC** → keep the existing guard that
-  skips backward coordinates.
-- **Orphan spine items** not referenced by any TOC entry → existing recovery
-  path, re-expressed in coordinates (image-only orphans still skipped).
+- **Content before the first anchor — later spine file.** Blocks before the
+  first anchor in a non-first spine file sit between the previous chapter's
+  coordinate and this one, so they attach to the **previous chapter** (the
+  Calibre split-sibling case). Falls out of the slice rule; no special code.
+- **Content before the first coordinate — first spine file (front matter not
+  in the TOC).** Becomes its **own leading chapter**, NOT merged into the first
+  TOC chapter (avoids gluing title/copyright text onto Chapter I). Recovered
+  like an orphan, placed at the **front** of the chapter list, titled from its
+  first heading block, or a filename-stem fallback.
+- **Unresolved / missing anchor.** Snap to the block **just after the previous
+  resolved anchor in the same spine file** (keeps sibling entries distinct and
+  monotonic, never re-introducing the collapse); use block 0 only when it is
+  the first entry in that file. Log a warning. (Survey: ~0.2% of anchors.)
+- **Non-monotonic / out-of-document-order TOC.** Process entries in TOC order;
+  **skip the split** at any entry whose coordinate ≤ the previous boundary, and
+  log it. Reading order stays intact (no reordering); the stray nav entry is
+  dropped. Rare.
+- **Orphan spine items.** In the coordinate model, spine items between the
+  first and last coordinate are already owned by a chapter's range. True
+  orphans are only **head** (before the first coordinate — handled as the
+  leading-chapter case above) and **tail** (back-matter spine files after the
+  last TOC coordinate, e.g. Gatsby's license file). Tail orphans keep the
+  existing recovery (filename-stem title, image-only orphans skipped), appended
+  in spine order.
 - **page-list anchors** are never consulted — only `oeb_book.toc` is read,
   which excludes the page-list (confirmed by survey).
 
