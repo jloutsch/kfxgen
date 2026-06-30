@@ -905,3 +905,38 @@ class TestGatsbyShapedSplit:
         assert titles == ["Title", "I", "II", "III", "IV"]
         assert "Chapter two prose." in chapters[2]["text"]
         assert "Chapter two prose." not in chapters[1]["text"]
+
+
+# ── Task 6: High-chapter-count scale gate (#23, measure-first) ───────────────
+
+
+class TestHighChapterCountScale:
+    def test_400_chapter_book_converts_and_stays_in_envelope(self, tmp_path):
+        from kfxgen.native_generator import NativeKFXGenerator
+        from kfxgen.kfxlib_minimal.ion import IS
+        from tests._kfx_introspect import by_type, val, load_fragments
+
+        chapters = [
+            {"title": f"Chapter {i}", "text": f"Chapter {i}\n\nBody of chapter {i}."}
+            for i in range(400)
+        ]
+        out = tmp_path / "scale.kfx"
+        NativeKFXGenerator().generate_full_book(
+            title="Scale", author="T", chapters=chapters, output_path=str(out)
+        )
+        frags = load_fragments(out)
+
+        # All $260 sections present.
+        assert len(by_type(frags, "$260")) == 400
+
+        # Content positions stay below SECTION_POS_BASE; sections at/above it.
+        content_max = 0
+        for f in by_type(frags, "$259"):
+            v = val(f)
+            for e in v.get(IS("$146")) or v.get(IS("$181")) or []:
+                if hasattr(e, "get") and e.get(IS("$155")) is not None:
+                    content_max = max(content_max, int(e.get(IS("$155"))))
+        assert content_max < NativeKFXGenerator.SECTION_POS_BASE, (
+            f"content position {content_max} entered the section range — "
+            f"envelope exceeded; escalate to #30"
+        )
