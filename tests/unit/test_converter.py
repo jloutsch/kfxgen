@@ -963,7 +963,7 @@ class TestGatsbyShapedSplit:
 class TestHighChapterCountScale:
     @pytest.mark.xfail(
         reason="#30 position-range rework needed at high chapter+chunk counts",
-        strict=False,
+        strict=True,
     )
     def test_1200_chapter_book_converts_and_stays_in_envelope(self, tmp_path):
         # Measured content_max = 17798 (1200 chapters × 6 paragraphs) — exceeds
