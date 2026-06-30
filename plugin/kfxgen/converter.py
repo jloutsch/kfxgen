@@ -473,6 +473,14 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
     for b in spine_blocks:
         flat.extend(b)
 
+    # Collect all anchor fragments referenced in the TOC (even non-monotonic ones)
+    # so we can detect head blocks that belong to a skipped TOC entry.
+    toc_anchors: set[str] = set()
+    for _e in toc_entries:
+        _f = _href_fragment(_e["href"])
+        if _f:
+            toc_anchors.add(_f)
+
     coords = []  # (flat_index, spine_index, title)
     last_block_in_file = {}
     prev_flat = -1
@@ -517,7 +525,12 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
     chapters = []
 
     first_fi = coords[0][0]
-    if first_fi > 0:
+    # A head block that carries an anchor referenced (even non-monotonically) in
+    # the TOC is NOT front matter — fold it into the first chapter instead.
+    head_has_toc_anchor = first_fi > 0 and any(
+        a in toc_anchors for b in flat[0:first_fi] for a in (b.get("anchor_ids") or [])
+    )
+    if first_fi > 0 and not head_has_toc_anchor:
         head = flat[0:first_fi]
         ch = _mk(_leading_chapter_title(head, spine_items_ordered[0]), head)
         if ch:
@@ -528,7 +541,8 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
             end = coords[k + 1][0]
         else:
             end = file_offset[si] + len(spine_blocks[si])
-        ch = _mk(title, flat[fi:end])
+        start = 0 if (k == 0 and head_has_toc_anchor) else fi
+        ch = _mk(title, flat[start:end])
         if ch:
             chapters.append(ch)
 

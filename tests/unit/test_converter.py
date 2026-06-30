@@ -801,3 +801,54 @@ class TestCoordinateAssembly:
         spine = [_spine_item("a.xhtml", [("Alpha", [])])]
         toc = [{"title": "Ghost", "href": "missing.xhtml"}]
         assert _assemble_chapters_by_coordinate(spine, toc, _silent_log()) is None
+
+
+class TestCoordinateAssemblyEdges:
+    def test_front_matter_becomes_leading_chapter(self):
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [("Copyright 2026", []), ("I", ["c1"]), ("Body", [])],
+            )
+        ]
+        toc = [{"title": "I", "href": "book.xhtml#c1"}]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert [c["title"] for c in chapters] == ["Copyright 2026", "I"]
+        # Front matter is NOT merged into Chapter I
+        assert "Copyright" not in chapters[1]["text"]
+
+    def test_missing_anchor_snaps_after_previous(self):
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [("I", ["c1"]), ("Mid", []), ("II body", [])],
+            )
+        ]
+        toc = [
+            {"title": "I", "href": "book.xhtml#c1"},
+            {"title": "II", "href": "book.xhtml#ghost"},  # missing -> block 1
+        ]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert [c["title"] for c in chapters] == ["I", "II"]
+        assert chapters[0]["text"] == "I"
+        assert chapters[1]["text"] == "Mid\n\nII body"
+
+    def test_non_monotonic_toc_skips_split(self):
+        spine = [_spine_item("book.xhtml", [("I", ["c1"]), ("II", ["c2"])])]
+        toc = [
+            {"title": "II", "href": "book.xhtml#c2"},  # block 1 first
+            {"title": "I", "href": "book.xhtml#c1"},  # block 0 -> backward, skipped
+        ]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert [c["title"] for c in chapters] == ["II"]
+
+    def test_tail_orphan_recovered_as_separate_chapter(self):
+        spine = [
+            _spine_item("ch.xhtml", [("Nine", ["c9"])]),
+            _spine_item("license.xhtml", [("Project Gutenberg License text", [])]),
+        ]
+        toc = [{"title": "IX", "href": "ch.xhtml#c9"}]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert chapters[0]["title"] == "IX"
+        assert chapters[1]["title"] == "license"
+        assert "License text" in chapters[1]["text"]
