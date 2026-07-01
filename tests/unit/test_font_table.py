@@ -1,10 +1,13 @@
 import pytest
 from kfxgen.font_table import (
     Face,
+    extract_src_urls,
+    emitted_name,
+    faces_from_rules,
     is_ttf_otf,
     normalize_family,
-    parse_weight,
     parse_style,
+    parse_weight,
 )
 
 pytestmark = pytest.mark.unit
@@ -58,3 +61,80 @@ def test_face_is_a_dataclass():
         location="resource/font0",
     )
     assert f.weight == 700 and f.italic is True
+
+
+class _Log:
+    def __init__(self):
+        self.warns = []
+
+    def warn(self, m):
+        self.warns.append(m)
+
+    def info(self, m):
+        pass
+
+    warning = warn
+
+
+def test_extract_src_urls_handles_bare_href_and_url_list():
+    assert extract_src_urls("fonts/x.ttf") == ["fonts/x.ttf"]
+    got = extract_src_urls("url(fonts/x.woff2) format('woff2'), url('fonts/x.ttf')")
+    assert got == ["fonts/x.woff2", "fonts/x.ttf"]
+
+
+def test_emitted_name_is_deterministic_and_unique():
+    taken = set()
+    a = emitted_name("Merriweather", 700, True, taken)
+    assert a == "merriweather-700i"
+    b = emitted_name("Merriweather", 700, True, taken)  # collision
+    assert b != a and b.startswith("merriweather-700i")
+
+
+def _mk_manifest(mapping):
+    return lambda href: mapping.get(href)
+
+
+def test_faces_from_rules_emits_ttf_prefers_over_woff2():
+    log = _Log()
+    rules = [
+        {
+            "font-family": '"Foo"',
+            "font-weight": "bold",
+            "font-style": "italic",
+            "src": "url(f.woff2) format('woff2'), url(f.ttf)",
+        }
+    ]
+    manifest = _mk_manifest({"f.woff2": b"wOF2xx", "f.ttf": b"\x00\x01\x00\x00yy"})
+    faces = faces_from_rules(rules, manifest, log)
+    assert len(faces) == 1
+    f = faces[0]
+    assert f.css_family == "foo" and f.weight == 700 and f.italic is True
+    assert f.data[:4] == b"\x00\x01\x00\x00"
+    assert f.emitted_family == "foo-700i" and f.location == "resource/font0"
+
+
+def test_faces_from_rules_skips_when_only_woff_available():
+    log = _Log()
+    rules = [{"font-family": "Foo", "src": "url(f.woff2)"}]
+    manifest = _mk_manifest({"f.woff2": b"wOF2xx"})
+    faces = faces_from_rules(rules, manifest, log)
+    assert faces == []
+    assert any("woff" in w.lower() or "skip" in w.lower() for w in log.warns)
+
+
+def test_faces_from_rules_dedups_same_href():
+    log = _Log()
+    rules = [
+        {"font-family": "Foo", "src": "url(f.ttf)"},
+        {"font-family": "Foo", "src": "url(f.ttf)"},
+    ]
+    manifest = _mk_manifest({"f.ttf": b"\x00\x01\x00\x00yy"})
+    faces = faces_from_rules(rules, manifest, log)
+    assert len(faces) == 1
+
+
+def test_faces_from_rules_skips_rule_without_family():
+    faces = faces_from_rules(
+        [{"src": "url(f.ttf)"}], _mk_manifest({"f.ttf": b"\x00\x01\x00\x00"}), _Log()
+    )
+    assert faces == []

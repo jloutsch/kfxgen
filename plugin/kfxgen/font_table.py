@@ -4,6 +4,7 @@ Isolated from the generator so the risky parsing/matching logic is unit-tested
 without Calibre. Calibre only appears in build_font_table (Task 4).
 """
 
+import re
 from dataclasses import dataclass
 
 # TrueType/OpenType magic bytes. WOFF (wOFF) / WOFF2 (wOF2) are intentionally
@@ -47,3 +48,80 @@ def parse_weight(v):
 
 def parse_style(v):
     return str(v or "").strip().lower() in ("italic", "oblique")
+
+
+_URL_RE = re.compile(r"url\(\s*['\"]?([^'\")]+)['\"]?\s*\)")
+
+
+def extract_src_urls(src):
+    """Return ordered candidate hrefs from a CSS `src` (or a bare href)."""
+    if not src:
+        return []
+    s = str(src)
+    urls = _URL_RE.findall(s)
+    if urls:
+        return [u.strip() for u in urls]
+    return [s.strip()]  # bare href (some Calibre versions pre-resolve src)
+
+
+def _slug(name):
+    out = re.sub(r"[^a-z0-9]+", "-", normalize_family(name)).strip("-")
+    return out or "font"
+
+
+def emitted_name(css_family, weight, italic, taken):
+    base = f"{_slug(css_family)}-{weight}{'i' if italic else ''}"
+    name = base
+    n = 1
+    while name in taken:
+        name = f"{base}-{n}"
+        n += 1
+    taken.add(name)
+    return name
+
+
+def faces_from_rules(rules, manifest_lookup, log):
+    """Turn @font-face rule dicts + a manifest byte-lookup into Face objects.
+
+    Skips (with a warning) rules whose family is missing or whose only
+    resolvable src bytes are not TTF/OTF. Dedups by resolved href.
+    """
+    faces = []
+    taken_names = set()
+    seen_hrefs = set()
+    idx = 0
+    for rule in rules:
+        get = rule.get if hasattr(rule, "get") else (lambda k: None)
+        family = normalize_family(get("font-family"))
+        if not family:
+            continue
+        weight = parse_weight(get("font-weight"))
+        italic = parse_style(get("font-style"))
+        chosen_href = None
+        chosen_data = None
+        for href in extract_src_urls(get("src")):
+            data = manifest_lookup(href)
+            if data and is_ttf_otf(data):
+                chosen_href, chosen_data = href, data
+                break
+        if chosen_data is None:
+            log.warn(
+                f"  Skipping @font-face {family!r}: no embeddable TTF/OTF src "
+                f"(WOFF/WOFF2/missing not supported)"
+            )
+            continue
+        if chosen_href in seen_hrefs:
+            continue
+        seen_hrefs.add(chosen_href)
+        faces.append(
+            Face(
+                css_family=family,
+                weight=weight,
+                italic=italic,
+                data=chosen_data,
+                emitted_family=emitted_name(family, weight, italic, taken_names),
+                location=f"resource/font{idx}",
+            )
+        )
+        idx += 1
+    return faces
