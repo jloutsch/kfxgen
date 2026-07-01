@@ -176,3 +176,68 @@ class FontTable:
         weight_ok = (regular.weight >= 600) == want_bold
         style_ok = regular.italic == want_italic
         return (regular.emitted_family, weight_ok, style_ok)
+
+
+def build_manifest_lookup(oeb_book):
+    """Return href -> bytes, with a basename fallback.
+
+    Calibre `@font-face` `src` hrefs are usually relative to the CSS/spine item,
+    so an exact manifest-href hit is not guaranteed; fall back to the basename.
+    """
+    by_href = {}
+    by_base = {}
+    for item in getattr(oeb_book, "manifest", []) or []:
+        href = getattr(item, "href", "") or ""
+        data = getattr(item, "data", None)
+        if not href or not isinstance(data, (bytes, bytearray)):
+            continue
+        b = bytes(data)
+        by_href[href] = b
+        by_base[href.rsplit("/", 1)[-1]] = b
+
+    def lookup(href):
+        if not href:
+            return None
+        if href in by_href:
+            return by_href[href]
+        base = href.rsplit("/", 1)[-1]
+        return by_base.get(base)
+
+    return lookup
+
+
+def _default_stylizer_factory(oeb_book, log):
+    def make(item):
+        try:
+            from calibre.ebooks.oeb.stylizer import Stylizer  # noqa: PLC0415
+
+            profile = getattr(getattr(oeb_book, "opts", None), "output_profile", None)
+            return Stylizer(item.data, item.href, oeb_book, oeb_book.opts, profile)
+        except Exception as e:
+            log.warning(f"  Stylizer unavailable for fonts ({e})")
+            return None
+
+    return make
+
+
+def build_font_table(oeb_book, log, stylizer_factory=None):
+    """Aggregate @font-face rules across the spine and build a FontTable.
+
+    Fonts declared in shared CSS repeat per spine item; faces_from_rules dedups
+    by resolved href. `stylizer_factory(item)` is injectable for tests. Books
+    with no embeddable fonts yield an empty FontTable, preserving today's output.
+    """
+    make = stylizer_factory or _default_stylizer_factory(oeb_book, log)
+    all_rules = []
+    for item in getattr(oeb_book, "spine", []) or []:
+        if getattr(item, "data", None) is None:
+            continue
+        st = make(item)
+        if st is None:
+            continue
+        all_rules.extend(getattr(st, "font_face_rules", []) or [])
+    lookup = build_manifest_lookup(oeb_book)
+    faces = faces_from_rules(all_rules, lookup, log)
+    if faces:
+        log.info(f"  Embedded fonts: {len(faces)} face(s)")
+    return FontTable(faces)

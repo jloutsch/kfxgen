@@ -2,6 +2,8 @@ import pytest
 from kfxgen.font_table import (
     Face,
     FontTable,
+    build_font_table,
+    build_manifest_lookup,
     extract_src_urls,
     emitted_name,
     faces_from_rules,
@@ -239,3 +241,56 @@ def test_match_family_with_only_bold_face_plain_text():
     assert fam == "foo-700"
     assert w_ok is False  # face is bold, regular requested -> mismatch signalled
     assert s_ok is True
+
+
+# --- Task 4: build_font_table / build_manifest_lookup (Calibre integration) ---
+
+
+class _Item:
+    def __init__(self, href, data, media_type="application/font-sfnt"):
+        self.href, self.data, self.media_type = href, data, media_type
+
+
+class _Oeb:
+    def __init__(self, items, spine):
+        self.manifest = list(items)
+        self.spine = spine
+
+
+class _Stylizer:
+    def __init__(self, rules):
+        self.font_face_rules = rules
+
+
+class _SpineItem:
+    """A spine document item — carries parsed data + href like Calibre's."""
+
+    def __init__(self, href="c.xhtml"):
+        self.href, self.data = href, object()
+
+
+def test_build_manifest_lookup_resolves_by_href_and_basename():
+    oeb = _Oeb([_Item("OEBPS/fonts/x.ttf", b"\x00\x01\x00\x00zz")], spine=[])
+    lookup = build_manifest_lookup(oeb)
+    assert lookup("OEBPS/fonts/x.ttf")[:4] == b"\x00\x01\x00\x00"
+    assert lookup("x.ttf")[:4] == b"\x00\x01\x00\x00"  # basename fallback
+    assert lookup("nope.ttf") is None
+    assert lookup("") is None
+
+
+def test_build_font_table_aggregates_and_dedups_across_spine():
+    font = _Item("fonts/f.ttf", b"\x00\x01\x00\x00yy")
+    oeb = _Oeb([font], spine=[_SpineItem("c1.xhtml"), _SpineItem("c2.xhtml")])
+    rules = [{"font-family": "Foo", "src": "url(fonts/f.ttf)"}]
+    table = build_font_table(
+        oeb, _Log(), stylizer_factory=lambda item: _Stylizer(rules)
+    )
+    # Same rule seen on both spine items -> deduped to one face.
+    assert len(table.faces) == 1
+    assert table.faces[0].css_family == "foo"
+
+
+def test_build_font_table_empty_when_no_fonts():
+    oeb = _Oeb([], spine=[object()])
+    table = build_font_table(oeb, _Log(), stylizer_factory=lambda item: _Stylizer([]))
+    assert table.faces == []
