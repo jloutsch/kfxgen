@@ -1341,3 +1341,37 @@ def test_build_fragment_157_without_font_family_omits_11():
     g.next_entity_id = 1
     frag = g.build_fragment_157(entity_name="s0")
     assert IS("$11") not in frag.value
+
+
+def test_font_applied_to_body_and_emphasis_runs():
+    # Mirrors the real chapter shape: a "blocks" list of {text, spans,
+    # block_style}. One paragraph in family "foo" with a bold span. The body
+    # run resolves to the regular face; the bold span resolves to the real
+    # bold face (no synthetic $13 needed).
+    from kfxgen.font_table import Face, FontTable
+    from kfxgen.inline_style import FLAG_BOLD
+
+    g = NativeKFXGenerator()
+    face_r = Face("foo", 400, False, b"\x00\x01\x00\x00r", "foo-400", "resource/font0")
+    face_b = Face("foo", 700, False, b"\x00\x01\x00\x00b", "foo-700", "resource/font1")
+    chapter = {
+        "title": "C1",
+        "text": "Normal bold.",
+        "blocks": [
+            {
+                "text": "Normal bold.",
+                "spans": [(7, 4, frozenset({FLAG_BOLD}))],
+                "block_style": {"font_family": ["foo"]},
+            }
+        ],
+    }
+    g.generate_full_book(
+        title="T",
+        author="A",
+        chapters=[chapter],
+        font_table=FontTable([face_r, face_b]),
+    )
+    styles = [f for f in g.fragments if str(f.ftype) == "$157"]
+    fams = {f.value[IS("$11")] for f in styles if IS("$11") in f.value}
+    assert "foo-400" in fams  # body run in the regular face
+    assert "foo-700" in fams  # bold run in the real bold face

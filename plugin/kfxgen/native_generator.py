@@ -124,6 +124,11 @@ class NativeKFXGenerator:
         # ($585, $490, $538, $410, $419 all use fid=348)
         self.next_entity_id = 349
         self.field_403_counter = 10  # Global counter for Fragment 259 Field $403
+        # Empty by default (#15): storyline builders may run without a full
+        # generate_full_book call. generate_full_book overrides this per book.
+        from .font_table import FontTable  # noqa: PLC0415
+
+        self.font_table = FontTable([])
 
     def generate_metadata_only(self, title, author, asin=None, output_path=None):
         """
@@ -2663,12 +2668,19 @@ class NativeKFXGenerator:
 
         from .inline_style import FLAG_BOLD, FLAG_ITALIC
 
-        def _emphasis_style(flags):
-            return _allocate_style(
-                "_em",
-                italic=FLAG_ITALIC in flags,
-                bold=FLAG_BOLD in flags,
-            )
+        def _emphasis_style(flags, family_list):
+            # Resolve the run's (family, bold, italic) to an embedded face.
+            # When a real bold/italic face exists, weight_ok/style_ok are True
+            # and we suppress synthetic bold/italic ($13/$12). With no matching
+            # family, match() returns (None, False, False) and font_family is
+            # omitted -> byte-identical to today's synthetic-only output.
+            bold = FLAG_BOLD in flags
+            italic = FLAG_ITALIC in flags
+            fam, weight_ok, style_ok = self.font_table.match(family_list, bold, italic)
+            attrs = {"italic": italic and not style_ok, "bold": bold and not weight_ok}
+            if fam:
+                attrs["font_family"] = fam
+            return _allocate_style("_em", **attrs)
 
         # With per-chapter $145 fragments (#2), each chapter's $259
         # entries address into their OWN content fragment, so $403
@@ -2730,14 +2742,23 @@ class NativeKFXGenerator:
                         attrs["margin_left"] = bs["margin_left"]
                     if bs.get("margin_right"):
                         attrs["margin_right"] = bs["margin_right"]
+                    # Body run: match the block's font-family at regular
+                    # weight/style. Only added when a face matched, so no-font
+                    # books keep byte-identical $157 output and style caching.
+                    fam, _w, _s = self.font_table.match(
+                        bs.get("font_family", []), bold=False, italic=False
+                    )
+                    if fam:
+                        attrs["font_family"] = fam
                     entry_styles.append(_allocate_style("", **attrs))
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)
                 chunk_spans = chunk.get("spans", [])
+                chunk_fam = (chunk.get("block_style") or {}).get("font_family", [])
                 entry_emphasis_spans.append(
                     [
-                        (s, length, _emphasis_style(flags))
+                        (s, length, _emphasis_style(flags, chunk_fam))
                         for (s, length, flags) in chunk_spans
                     ]
                 )
