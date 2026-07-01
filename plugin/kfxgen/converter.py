@@ -1012,6 +1012,25 @@ def extract_cover_image(oeb_book, log):
     return None, None
 
 
+def _ensure_oeb_opts(oeb_book, opts):
+    """Attach the conversion `opts` to the OEB when it lacks them.
+
+    Calibre's OutputFormatPlugin.convert() receives `opts` as a separate
+    argument; the OEBBook itself has no `.opts` on this pipeline. Both the
+    per-element style resolver (#9) and @font-face extraction (#15) build a
+    Stylizer, which needs opts + output_profile, and read them off
+    `oeb_book.opts`. Without this, Stylizer construction raises and both
+    silently degrade (no block CSS, no embedded fonts). Never overwrite an
+    existing `.opts`; tolerate objects that reject attribute assignment.
+    """
+    if getattr(oeb_book, "opts", None) is not None:
+        return
+    try:
+        oeb_book.opts = opts
+    except (AttributeError, TypeError):
+        pass
+
+
 def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
     """
     Convert Calibre OEB book to KFX format using native generator.
@@ -1026,6 +1045,10 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         None (writes to output_path)
     """
     from . import __version__ as _kfxgen_version
+
+    # Make the conversion opts reachable via oeb_book.opts so Stylizer-based
+    # CSS resolution (#9) and @font-face font extraction (#15) can construct.
+    _ensure_oeb_opts(oeb_book, opts)
 
     log.info("=" * 70)
     log.info(f"kfxgen v{_kfxgen_version} - Native KFX Generator")

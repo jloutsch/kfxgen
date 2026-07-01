@@ -1051,3 +1051,42 @@ class TestSectionBase:
         # content eids are always even; the relocated base stays even
         for cm in (10000, 10002, 12344, 17798):
             assert NativeKFXGenerator._section_base(cm) % 2 == 0
+
+
+# --- #15/#9: attach conversion opts to the OEB so Stylizer can construct ---
+# Calibre's OutputFormatPlugin.convert() passes `opts` as a separate arg; the
+# OEBBook has no `.opts` on this pipeline, so both the per-element style
+# resolver and @font-face extraction (which build a Stylizer needing opts)
+# silently degraded until this shim.
+
+
+@pytest.mark.unit
+def test_ensure_oeb_opts_attaches_when_missing():
+    class _Oeb:
+        pass
+
+    oeb = _Oeb()
+    opts = object()
+    _conv._ensure_oeb_opts(oeb, opts)
+    assert oeb.opts is opts
+
+
+@pytest.mark.unit
+def test_ensure_oeb_opts_preserves_existing():
+    class _Oeb:
+        pass
+
+    oeb = _Oeb()
+    existing = object()
+    oeb.opts = existing
+    _conv._ensure_oeb_opts(oeb, object())
+    assert oeb.opts is existing
+
+
+@pytest.mark.unit
+def test_ensure_oeb_opts_tolerates_unsettable_object():
+    class _Frozen:
+        __slots__ = ()
+
+    # Must not raise even if the OEB rejects attribute assignment.
+    _conv._ensure_oeb_opts(_Frozen(), object())
