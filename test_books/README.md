@@ -35,6 +35,25 @@ the Kindle renderer supports natively.
 
 **Character count**: Well within the 500 character limit of kfxgen v0.1.0
 
+## font-matching-test/
+
+**Purpose**: Exercise the #15 native font-embedding face matcher with a family
+that embeds all four faces (regular, bold, italic, bold-italic).
+
+**Structure**: Unpacked EPUB (`mimetype`, `META-INF/`, `OEBPS/`). Pack it with
+`cd test_books/font-matching-test && zip -X0 ../font-matching-test.epub mimetype && zip -Xr9D ../font-matching-test.epub META-INF OEBPS`
+if a single `.epub` file is needed.
+
+**Fonts**: `OEBPS/fonts/CharisSIL{R,B,I,BI}.ttf` — the four Charis SIL faces,
+covering every weight/style axis the matcher resolves. Charis SIL is
+(c) SIL International, 1997-2007, licensed under the SIL Open Font License 1.1;
+the license text is bundled at `OEBPS/fonts/OFL.txt` as OFL requires. The book
+text in `chapter1.xhtml` is original placeholder content authored for this repo.
+
+**Use in tests**: `chapter1.xhtml` declares one `@font-face` family with all four
+faces and applies regular/bold/italic/bold-italic spans, so a conversion drives
+`FontTable.match()` down every branch (exact face per axis, no faux synthesis).
+
 ## How to Use
 
 ### Test in Calibre
