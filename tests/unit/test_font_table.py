@@ -138,3 +138,36 @@ def test_faces_from_rules_skips_rule_without_family():
         [{"src": "url(f.ttf)"}], _mk_manifest({"f.ttf": b"\x00\x01\x00\x00"}), _Log()
     )
     assert faces == []
+
+
+def test_faces_from_rules_reads_cssfontfacerule_style_objects():
+    class _Style:
+        def __init__(self, d):
+            self._d = d
+
+        def getPropertyValue(self, k):
+            return self._d.get(k, "")
+
+    class _Rule:  # mimics css_parser CSSFontFaceRule: has .style, no .get
+        def __init__(self, d):
+            self.style = _Style(d)
+
+    log = _Log()
+    rules = [
+        _Rule(
+            {
+                "font-family": '"Fam"',
+                "font-weight": "bold",
+                "font-style": "italic",
+                "src": "url(fonts/f.ttf)",
+            }
+        )
+    ]
+    manifest = _mk_manifest({"fonts/f.ttf": b"\x00\x01\x00\x00yy"})
+    faces = faces_from_rules(rules, manifest, log)
+    assert len(faces) == 1
+    assert (
+        faces[0].css_family == "fam"
+        and faces[0].weight == 700
+        and faces[0].italic is True
+    )

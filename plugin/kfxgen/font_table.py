@@ -80,6 +80,17 @@ def emitted_name(css_family, weight, italic, taken):
     return name
 
 
+def rule_field(rule, key):
+    """Read an @font-face field from a css_parser CSSFontFaceRule OR a plain
+    dict. Returns the string value or None."""
+    style = getattr(rule, "style", None)
+    if style is not None and hasattr(style, "getPropertyValue"):
+        return style.getPropertyValue(key) or None
+    if hasattr(rule, "get"):
+        return rule.get(key)
+    return None
+
+
 def faces_from_rules(rules, manifest_lookup, log):
     """Turn @font-face rule dicts + a manifest byte-lookup into Face objects.
 
@@ -91,15 +102,14 @@ def faces_from_rules(rules, manifest_lookup, log):
     seen_hrefs = set()
     idx = 0
     for rule in rules:
-        get = rule.get if hasattr(rule, "get") else (lambda k: None)
-        family = normalize_family(get("font-family"))
+        family = normalize_family(rule_field(rule, "font-family"))
         if not family:
             continue
-        weight = parse_weight(get("font-weight"))
-        italic = parse_style(get("font-style"))
+        weight = parse_weight(rule_field(rule, "font-weight"))
+        italic = parse_style(rule_field(rule, "font-style"))
         chosen_href = None
         chosen_data = None
-        for href in extract_src_urls(get("src")):
+        for href in extract_src_urls(rule_field(rule, "src")):
             data = manifest_lookup(href)
             if data and is_ttf_otf(data):
                 chosen_href, chosen_data = href, data
