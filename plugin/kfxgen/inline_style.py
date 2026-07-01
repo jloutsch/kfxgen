@@ -104,6 +104,18 @@ def parse_css_length(value):
 ALIGN_MAP = {"left": "$59", "right": "$61", "center": "$320", "justify": "$321"}
 
 
+def _parse_font_family(value):
+    """Split a CSS font-family value into normalized, lowercased names."""
+    if not value:
+        return []
+    out = []
+    for part in str(value).split(","):
+        name = part.strip().strip("\"'").strip().lower()
+        if name:
+            out.append(name)
+    return out
+
+
 def compute_block_style(css):
     """Map a computed-CSS dict to kfxgen's block_style shape.
 
@@ -125,4 +137,5 @@ def compute_block_style(css):
         "indent": indent,
         "margin_left": margin_left,
         "margin_right": margin_right,
+        "font_family": _parse_font_family(css.get("font-family")),
     }

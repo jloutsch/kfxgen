@@ -588,12 +588,14 @@ def test_blocks_block_style_from_resolver():
         "indent": ("2", "$308"),
         "margin_left": None,
         "margin_right": None,
+        "font_family": [],
     }
     assert blocks[1]["block_style"] == {
         "align": None,
         "indent": None,
         "margin_left": None,
         "margin_right": None,
+        "font_family": [],
     }
 
 

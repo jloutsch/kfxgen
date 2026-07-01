@@ -130,3 +130,13 @@ def test_compute_block_style_margins_absent_and_negative():
     # negative margins are dropped (no clipping), like negative indent
     bs2 = ist.compute_block_style({"margin-left": "-3em"})
     assert bs2["margin_left"] is None
+
+
+def test_compute_block_style_captures_font_family_list():
+    bs = ist.compute_block_style({"font-family": '"Merriweather", Georgia, serif'})
+    assert bs["font_family"] == ["merriweather", "georgia", "serif"]
+
+
+def test_compute_block_style_font_family_empty_when_absent():
+    bs = ist.compute_block_style({"text-align": "center"})
+    assert bs["font_family"] == []
