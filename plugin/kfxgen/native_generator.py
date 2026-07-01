@@ -2113,6 +2113,11 @@ class NativeKFXGenerator:
     #     but for books whose content overflows it the sections relocate to
     #     just above content_max (via _section_base) so content and section
     #     eids stay disjoint. Normal books are unaffected (stay at 10000).
+    #     Caveat: a huge book (~1200+ chapters) pushes relocated section eids
+    #     into the ~20k range — believed safe (well under the 100000 that
+    #     broke progress, and content itself already renders near ~18k) but
+    #     NOT yet device-observed at that height. Pending the #30 device gate;
+    #     don't treat ~20k as confirmed-good.
     #   - There is no need to assert a content-position ceiling. An
     #     earlier attempt (#19, removed in v5.3.2) added a ValueError
     #     when content_pos_id climbed into the section range. That
