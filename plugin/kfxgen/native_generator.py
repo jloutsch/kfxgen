@@ -347,6 +347,12 @@ class NativeKFXGenerator:
         $11 (family) is the join key a $157 style sets to apply this face.
         $12/$13 (style/weight) reflect the actual face; omitted when default
         ($350), matching observed KDP output. $15 (stretch) omitted in v1.
+
+        In a final (non-KPF-prepub) KFX, $262 is a ROOT fragment and MUST be
+        keyed by its own type — fid="$262" — not the family name (kfxlib
+        kpf_book.py re-keys prepub family-named $262 fragments to "$262" on the
+        way to final KFX). The family name lives only in $11; multiple faces
+        are separate $262 fragments all sharing fid="$262".
         """
         self.symtab.create_local_symbol(emitted_family)
         self.symtab.create_local_symbol(location_name)
@@ -360,7 +366,7 @@ class NativeKFXGenerator:
             value[IS("$13")] = IS("$361")  # font-weight: bold
         if italic:
             value[IS("$12")] = IS("$382")  # font-style: italic
-        return YJFragment(fid=IS(emitted_family), ftype=IS("$262"), value=value)
+        return YJFragment(fid=IS("$262"), ftype=IS("$262"), value=value)
 
     def build_fragment_490(
         self,
@@ -2086,6 +2092,12 @@ class NativeKFXGenerator:
         for resource_name, location_name in image_resources.values():
             all_entity_names.append(resource_name)
             all_entity_names.append(location_name)
+        # Embedded fonts (#15): register the $418 raw-font locations so the
+        # reader can resolve them (otherwise "missing from entity map" and the
+        # device font wins). $262 is a self-keyed root fragment (fid="$262"),
+        # so it is not listed here by name — only its $418 location is.
+        for face in self.font_table.faces:
+            all_entity_names.append(face.location)
         self.fragments.append(self.build_fragment_419(container_id, all_entity_names))
 
         # 15. Build $270 container info fragment (REQUIRED)
@@ -2126,6 +2138,12 @@ class NativeKFXGenerator:
         for resource_name, location_name in image_resources.values():
             entity_map.append([164, get_id(resource_name)])
             entity_map.append([417, get_id(location_name)])
+        # Embedded fonts (#15): $262 (@font-face decl, self-keyed root -> id
+        # 262) + $418 (raw bytes, keyed by location). Without these the reader
+        # can't resolve the font resources and falls back to the device font.
+        for face in self.font_table.faces:
+            entity_map.append([262, get_id(IS("$262"))])
+            entity_map.append([418, get_id(face.location)])
         entity_map.extend(
             [
                 [395, 348],

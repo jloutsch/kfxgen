@@ -1282,6 +1282,9 @@ def test_build_fragment_262_regular_omits_descriptors():
     g = NativeKFXGenerator()
     frag = g.build_fragment_262("foo-400", "resource/font0", weight=400, italic=False)
     assert frag.ftype == IS("$262")
+    # $262 is a self-keyed root fragment in final KFX: fid == "$262", NOT the
+    # family name (kfxlib rejects family-named $262 outside KPF prepub).
+    assert frag.fid == IS("$262")
     v = frag.value
     assert v[IS("$11")] == "foo-400"
     assert v[IS("$165")] == "resource/font0"
@@ -1403,3 +1406,30 @@ def test_override_kindle_font_false_without_fonts():
     g = NativeKFXGenerator()  # empty font_table -> respect device font
     frag = g.build_fragment_490("T", "A", "asin", "cid")
     assert _override_kindle_font(frag) is False
+
+
+def test_fonts_registered_in_entity_map_and_index():
+    # kfxlib rejects font fragments that aren't registered in the $270 entity
+    # map / $419 entity index ("missing from entity map"), which stops the
+    # Kindle from resolving them. Every emitted face must appear in both.
+    from kfxgen.font_table import Face, FontTable
+
+    g = NativeKFXGenerator()
+    face = Face("foo", 400, False, b"\x00\x01\x00\x00x", "foo-400", "resource/font0")
+    g.generate_full_book(
+        title="T",
+        author="A",
+        chapters=[{"title": "C1", "text": "Hi."}],
+        font_table=FontTable([face]),
+    )
+    frag270 = next(f for f in g.fragments if str(f.ftype) == "$270")
+    ftypes = {pair[0] for pair in frag270.value[IS("$181")]}
+    assert 262 in ftypes  # @font-face decl registered
+    assert 418 in ftypes  # raw font bytes registered
+
+    frag419 = next(f for f in g.fragments if str(f.ftype) == "$419")
+    names = {str(s) for s in frag419.value[IS("$252")][0][IS("$181")]}
+    # $418 raw-font location is registered; $262 is self-keyed so not listed
+    # here by family name.
+    assert "resource/font0" in names  # $418 fid
+    assert "foo-400" not in names
