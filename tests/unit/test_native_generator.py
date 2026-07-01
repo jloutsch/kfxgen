@@ -1375,3 +1375,31 @@ def test_font_applied_to_body_and_emphasis_runs():
     fams = {f.value[IS("$11")] for f in styles if IS("$11") in f.value}
     assert "foo-400" in fams  # body run in the regular face
     assert "foo-700" in fams  # bold run in the real bold face
+
+
+def _override_kindle_font(frag):
+    """Pull the override_kindle_font value out of a $490 book-metadata frag."""
+    for elem in frag.value[IS("$491")]:
+        if IS("$495") in elem and elem[IS("$495")] == "kindle_title_metadata":
+            for e in elem[IS("$258")]:
+                if IS("$492") in e and e[IS("$492")] == "override_kindle_font":
+                    return e[IS("$307")]
+    return None
+
+
+def test_override_kindle_font_true_when_fonts_embedded():
+    from kfxgen.font_table import Face, FontTable
+
+    g = NativeKFXGenerator()
+    g.font_table = FontTable(
+        [Face("foo", 400, False, b"\x00\x01\x00\x00", "foo-400", "resource/font0")]
+    )
+    frag = g.build_fragment_490("T", "A", "asin", "cid")
+    # Embedded fonts must win over the device's selected font.
+    assert _override_kindle_font(frag) is True
+
+
+def test_override_kindle_font_false_without_fonts():
+    g = NativeKFXGenerator()  # empty font_table -> respect device font
+    frag = g.build_fragment_490("T", "A", "asin", "cid")
+    assert _override_kindle_font(frag) is False

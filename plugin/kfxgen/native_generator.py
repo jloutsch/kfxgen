@@ -452,7 +452,16 @@ class NativeKFXGenerator:
                 issue_date or "1970-01-01",
             ),
             IonStruct(IS("$492"), "language", IS("$307"), language),
-            IonStruct(IS("$492"), "override_kindle_font", IS("$307"), False),
+            # override_kindle_font: when the book embeds fonts (#15), the
+            # embedded faces must win over the device's selected font, so set
+            # True. With no embedded fonts, keep False so the device font is
+            # respected (byte-identical to pre-5.4.0 output).
+            IonStruct(
+                IS("$492"),
+                "override_kindle_font",
+                IS("$307"),
+                bool(self.font_table.faces),
+            ),
             IonStruct(IS("$492"), "publisher", IS("$307"), publisher),
             IonStruct(IS("$492"), "title", IS("$307"), title),
         ]
