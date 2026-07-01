@@ -11,6 +11,7 @@ Prints only structural shape (rule type, field values, font magic bytes) — it
 does not print or persist book identity beyond what the operator's EPUB path
 already reveals locally. Do not commit its output.
 """
+
 import os
 import sys
 
@@ -43,7 +44,10 @@ def main(path):
     for item in oeb.spine:
         try:
             st = Stylizer(
-                item.data, item.href, oeb, oeb.opts,
+                item.data,
+                item.href,
+                oeb,
+                oeb.opts,
                 getattr(oeb.opts, "output_profile", None),
             )
         except Exception as e:
@@ -59,8 +63,10 @@ def main(path):
                     for prop in ("font-family", "src", "font-weight", "font-style"):
                         print(f"    {prop}: {style.getPropertyValue(prop)!r}")
                 print(
-                    "    has .get:", hasattr(r, "get"),
-                    "| has __getitem__:", hasattr(r, "__getitem__"),
+                    "    has .get:",
+                    hasattr(r, "get"),
+                    "| has __getitem__:",
+                    hasattr(r, "__getitem__"),
                 )
             printed = True
             break
@@ -72,7 +78,9 @@ def main(path):
         href = getattr(it, "href", "") or ""
         if href.lower().endswith((".ttf", ".otf", ".woff", ".woff2")):
             data = getattr(it, "data", b"") or b""
-            magic = bytes(data[:4]).hex() if isinstance(data, (bytes, bytearray)) else "?"
+            magic = (
+                bytes(data[:4]).hex() if isinstance(data, (bytes, bytearray)) else "?"
+            )
             n = len(data) if hasattr(data, "__len__") else "?"
             print(f"  .{href.rsplit('.', 1)[-1]} magic {magic} len {n}")
 
