@@ -127,6 +127,29 @@ Internal only — kfxgen owns both `$262.$11` and `$157.$11`, so both get the
 **identical** string (sidesteps the KDP lowercase-mismatch quirk in the #16
 reference). Uniqueness enforced via the dedup index.
 
+## Phase 0 confirmed (2026-07-01)
+
+Verified against a real 4-face EPUB (family names genericized here per repo
+policy). Findings that reshape Tasks 2/4:
+
+- `stylizer.font_face_rules` is a list of **`css_parser.css.cssfontfacerule.CSSFontFaceRule`**
+  objects — **not dicts**. They have neither `.get` nor `__getitem__`.
+- Field access is `rule.style.getPropertyValue(<prop>)`:
+  - `font-family` → e.g. `'"Family"'` (quoted string; `normalize_family` strips quotes)
+  - `src` → e.g. `'url(fonts/regular.ttf)'` (`url()` form, href relative to the
+    CSS file; `extract_src_urls` parses it, and `build_manifest_lookup`'s
+    basename fallback resolves the relative path)
+  - `font-weight` → `'normal'` / `'bold'`; `font-style` → `'normal'` / `'italic'`
+- Manifest font bytes are **de-obfuscated** by Calibre's OEB import (magic
+  `00010000` TTF observed) — confirms the de-obfuscation assumption.
+- The 4 faces were R/B/I/BI of one family — the canonical face-matching case.
+
+**Accessor requirement:** `faces_from_rules` must read fields via a small
+adapter that handles a `CSSFontFaceRule` (`.style.getPropertyValue`) AND a
+plain dict (`.get`, used by the pure unit tests). Building the OEB for a
+Stylizer outside the plugin needs `create_oebbook(log, opf, opts)` then
+`oeb.opts = opts` (the real output pipeline attaches `opts`; Stylizer reads it).
+
 ## Fragment shapes
 
 ```
