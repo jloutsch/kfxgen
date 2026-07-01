@@ -1,5 +1,30 @@
 # Changelog
 
+## 5.4.0 — Embedded font support (#15)
+
+Fonts declared in a source EPUB via `@font-face` now travel inside the `.kfx`
+instead of being dropped in favour of the installed Kindle font. Text is mapped
+to the correct embedded face (regular / bold / italic / bold-italic per run), so
+publisher typography, display faces, and books that ship their own font can
+render on-device.
+
+**How it works:** a new `font_table.py` builds a `FontTable` from Calibre's
+`@font-face` rules + the OEB manifest bytes. Each used face is emitted as the
+image-resource analog pair — `$418` (raw font BLOB) + `$262` (`@font-face`
+declaration) — and `FontTable.match()` sets `$11` (font-family) on the relevant
+`$157` styles, with `override_kindle_font` implied per style. Real bold/italic
+faces suppress the synthetic weight/slant that would otherwise be applied.
+
+**Scope:** TrueType/OpenType only (WOFF/WOFF2 are skipped with a warning; no new
+dependencies). Books with no embeddable fonts produce byte-identical output to
+5.3.23 — guaranteed by the `emitted_family is None` path and the tier3_strict
+golden corpus.
+
+> Device verification pending: kfxgen `.kfx` cannot be rendered on desktop, so
+> on-device font rendering (and whether a `$593` capability flag is required)
+> must be confirmed by sideloading to a physical Kindle before release. See
+> `docs/kfx-embedded-fonts-reference.md`.
+
 ## 5.3.23 — Dynamic section-position base (#30)
 
 Content and section eid ranges are now disjoint by construction at any chapter

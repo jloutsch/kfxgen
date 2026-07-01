@@ -1,15 +1,14 @@
 # Progress / Session Handoff
 
-Living pick-up-where-we-left-off note. Last updated: 2026-06-30.
+Living pick-up-where-we-left-off note. Last updated: 2026-07-01.
 
 ## Current state
 
-- On `main`, clean, synced with origin. Current version: **5.3.23**
-  (`plugin/kfxgen/__init__.py`).
-- Calibre has the **5.3.23 build** of kfxgen installed locally
-  (`./build_plugin.sh --install` rebuilds/installs from the working tree).
-- Test suite: `.venv/bin/python -m pytest` → 444 passed, 12 skipped
+- On branch `feat/15-native-font-embed`. Branch version bumped to **5.4.0**
+  (`plugin/kfxgen/__init__.py`); `main` is still 5.3.23.
+- Test suite: `.venv/bin/python -m pytest` → 482 passed, 12 skipped
   (tier-2 needs the vendored `KFX Input.zip`, absent by default), 0 xfail.
+  Tree-wide `ruff check` + `ruff format --check` both clean.
 - Lint gate (both required): `.venv/bin/python -m ruff check` AND
   `ruff format --check`, ruff pinned **0.15.1**.
 
@@ -26,20 +25,32 @@ Living pick-up-where-we-left-off note. Last updated: 2026-06-30.
 
 ### #15 — Embed `@font-face` fonts in native KFX output (the big one; unblocked by #16)
 
-Already scoped by the #16 spike (`docs/kfx-embedded-fonts-reference.md`). Key facts:
-- Font model = image-resource pattern: **`$418`** raw font BLOB (analog of `$417`),
-  **`$262`** `@font-face` (`$11` family, `$165`→`$418` location, `$12/$13/$15` =
-  style/weight/stretch, `$350` = default value), **`$157`** style applies via `$11`.
-- All font symbols already resolve in `kfxlib_minimal` (no catalog change).
-- Template to copy: `native_generator.py::build_fragment_164` + `build_fragment_417`
-  + `extract_images_from_oeb`.
-- **#15 is generator-code-only.** Suggested phasing: (1) carry font files from OEB
-  manifest → emit `$418`+`$262`; (2) map source CSS `font-family`/weight/style onto
-  emitted family names + set `$11` on `$157` styles; (3) device gate.
-- Reference KFX with real fonts (no plugin install needed): any font-embedding KDP
-  `.kfx` (decode candidates, check for `$262`/`$418` fragments).
-- Biggest/riskiest remaining item; needs physical-Kindle rounds (fonts render pass/fail
-  only on-device). Run as a phased plan, not one shot.
+**Code complete on `feat/15-native-font-embed` — device gate is the only thing
+left before release.** Plan: `docs/superpowers/plans/2026-07-01-native-font-embed.md`.
+
+Implemented (Tasks 0–11, all committed, 482 tests green, no-font output
+byte-identical via tier3_strict goldens):
+- `plugin/kfxgen/font_table.py` — `Face`, `faces_from_rules`, `FontTable.match`,
+  `build_font_table` (aggregates Calibre `@font-face` rules + OEB manifest bytes;
+  TTF/OTF only, WOFF skipped with a warning).
+- `native_generator.py` — `build_fragment_418` (raw font BLOB) + `build_fragment_262`
+  (`@font-face` decl); `build_fragment_157` gained a `font_family` (`$11`) param;
+  body + `_emphasis_style` resolve each run via `match()` and set `$11`, suppressing
+  synthetic bold/italic when a real face exists.
+- `inline_style.py` / `converter.py` — block-level `font_family` capture + the
+  converter builds the `FontTable` and passes it to `generate_full_book`.
+- Tests: `tests/unit/test_font_table.py`, font tests in `test_native_generator.py`,
+  and `tests/integration/test_font_integration.py` (real four-face fixture at
+  `test_books/font-matching-test/`, Charis SIL under OFL).
+
+**Remaining before merge/release:**
+1. **Device gate (only on physical Kindle).** Sideload a font-embedded conversion;
+   confirm the embedded face renders (not the device default), that real bold/italic
+   render distinctly, that a regular-only family with a `<b>` run shows faux bold,
+   and that a no-font book is unchanged. Decide whether a `$593` capability flag is
+   needed — the #16 reference did not observe it as required; verify on-device and
+   record the outcome in `docs/kfx-embedded-fonts-reference.md`.
+2. `/tech-debt-review`, then open the PR (held pending the device gate).
 
 ### #30 follow-through (low priority)
 

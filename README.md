@@ -17,7 +17,7 @@ KFX (Kindle Format 10) is Amazon's modern ebook format. Compared to MOBI/AZW3 it
 
 The official KFX Output plugin for Calibre depends on Kindle Previewer, which is closed-source, Windows/Mac-only (Linux needs Wine), and converts in minutes per book. kfxgen converts in seconds, runs anywhere Calibre runs, and ships as a single Python plugin with no external binary dependencies.
 
-**Custom fonts that actually render.** This is the main reason kfxgen exists. KFX honors the font you've selected on the Kindle — including custom fonts you've installed on the device — and applies that font's OpenType features (ligatures, contextual alternates), which AZW3/MOBI did not do reliably. kfxgen writes `override_kindle_font: false` into the KFX so the device font is respected rather than overridden. The font lives on the Kindle, not in the file — kfxgen does not embed font files.
+**Custom fonts that actually render.** This is the main reason kfxgen exists. KFX honors the font you've selected on the Kindle — including custom fonts you've installed on the device — and applies that font's OpenType features (ligatures, contextual alternates), which AZW3/MOBI did not do reliably. By default, when a book declares no embedded fonts, kfxgen writes `override_kindle_font: false` so the device font is respected. As of 5.4.0, fonts a book embeds via `@font-face` also travel inside the `.kfx` and are mapped to the text, so publisher typography renders even without the font installed on the device ([#15](https://github.com/jloutsch/kfxgen/issues/15)).
 
 ## Compatibility and validation
 
@@ -124,7 +124,7 @@ The version is single-sourced from `plugin/kfxgen/__init__.py`. `./build_plugin.
 
 - The Calibre plugin path produces lower text retention than the direct-Python path on verse-heavy or image-heavy books (Mars Rovers, Lady of the Lake, Southern Literature) — Calibre's OEB pipeline normalizes `<br/>`, stanzas, and alt-text differently. See [`research/gutenberg-top-90-baseline-calibre/BASELINE.md`](research/gutenberg-top-90-baseline-calibre/BASELINE.md).
 - TOC entries that navigate within a spine file via `#anchor` (e.g. dictionary-style A/B/C/… sub-entries) surface as separate chapters rather than nested in-page anchors. Reading order and content are preserved.
-- Fonts are not embedded in the KFX. Custom fonts render via the font installed on the Kindle (see [Why this plugin](#why-this-plugin)); this is by design, but it means a font that isn't installed on the device won't travel with the file.
+- Embedded fonts: a source EPUB's `@font-face` TrueType/OpenType fonts are carried into the KFX and mapped to the text ([#15](https://github.com/jloutsch/kfxgen/issues/15)). WOFF/WOFF2 faces are skipped (Kindle can't use them). Books with no embeddable fonts fall back to the installed Kindle font, exactly as before.
 - Inline emphasis (italic / bold within a paragraph) and most source CSS typography are not yet carried through; paragraph-level styles (font size, line height, alignment, margins, headings) are. KFX supports a subset of CSS, so this is a coverage gap rather than a hard limit — tracked in [#9](https://github.com/jloutsch/kfxgen/issues/9).
 - Images larger than 2048 px on the long edge are automatically downscaled and recompressed (JPEG quality 85) so illustrated books stay a reasonable size. To keep originals, enable **Embed original images** in the KFX output options (CLI: `--kfxgen-embed-original-images`). Tune with `KFXGEN_IMAGE_MAX_DIM` and `KFXGEN_IMAGE_QUALITY`.
 
@@ -137,7 +137,6 @@ See [`CHANGELOG.md`](CHANGELOG.md) for release notes, and the [releases page](ht
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). Good first-issue areas:
 
 - Cross-pipeline parity for verse and image-heavy books
-- Custom font plumbing through the native generator
 - In-page anchor TOC support (sub-chapter navigation)
 - Additional test corpora beyond Project Gutenberg
 

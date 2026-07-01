@@ -40,8 +40,13 @@ ebook-convert mybook.epub mybook.kfx
 Fast-Fonts (OpenType fonts whose `calt` feature bolds the first part of each
 word) are **installed on the Kindle device**, not embedded in the book — KFX's
 renderer applies the device font's OpenType features directly, which older
-Kindle formats do not. kfxgen does not embed or process fonts; convert
-normally and select the installed font on the device.
+Kindle formats do not. For Fast-Fonts, convert normally and select the
+installed font on the device.
+
+Separately, as of 5.4.0 kfxgen embeds a source EPUB's own `@font-face`
+TrueType/OpenType fonts into the KFX and maps text to them (#15), so a book's
+publisher typography travels with the file. That is independent of the
+device-installed Fast-Font path above.
 
 ## Layout
 
