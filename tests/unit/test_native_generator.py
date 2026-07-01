@@ -1327,3 +1327,17 @@ def test_generate_full_book_no_font_table_emits_no_font_fragments():
     )
     types = [str(f.ftype) for f in g.fragments]
     assert "$418" not in types and "$262" not in types
+
+
+def test_build_fragment_157_sets_font_family():
+    g = NativeKFXGenerator()
+    g.next_entity_id = 1
+    frag = g.build_fragment_157(entity_name="s0", font_family="foo-400")
+    assert frag.value[IS("$11")] == "foo-400"
+
+
+def test_build_fragment_157_without_font_family_omits_11():
+    g = NativeKFXGenerator()
+    g.next_entity_id = 1
+    frag = g.build_fragment_157(entity_name="s0")
+    assert IS("$11") not in frag.value

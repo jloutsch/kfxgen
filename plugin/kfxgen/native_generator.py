@@ -979,6 +979,7 @@ class NativeKFXGenerator:
         text_indent=None,
         margin_left=None,
         margin_right=None,
+        font_family=None,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -1088,6 +1089,11 @@ class NativeKFXGenerator:
         # $12 = font-style: $382 = italic (authoritative, jhowell kfxlib)
         if italic:
             value[IS("$12")] = IS("$382")
+
+        # $11 = font-family (#15). Set only when an embedded face was matched;
+        # its absence preserves byte-identical output for non-font books.
+        if font_family:
+            value[IS("$11")] = font_family
 
         # $46 = margin-top (for visual separation before chapter headings)
         if margin_top is not None:
