@@ -1686,6 +1686,7 @@ class NativeKFXGenerator:
         publisher="kfxgen",
         issue_date=None,
         images=None,
+        font_table=None,
     ):
         """
         Generates a complete KFX book with metadata and content.
@@ -1760,6 +1761,10 @@ class NativeKFXGenerator:
         self.entity_ids = {}
         self.next_entity_id = 349
         self.field_403_counter = 10
+
+        from .font_table import FontTable  # noqa: PLC0415
+
+        self.font_table = font_table if font_table is not None else FontTable([])
 
         # 1. Build metadata fragments
         self.fragments.append(self.build_fragment_585())
@@ -1863,6 +1868,17 @@ class NativeKFXGenerator:
                     self._image_basename_collisions = getattr(
                         self, "_image_basename_collisions", []
                     ) + [base]
+
+        # Embedded fonts (#15): one $418 (bytes) + one $262 (@font-face) per
+        # face, mirroring the image $417/$164 pair. Application (setting $11 on
+        # $157 styles) happens later via self.font_table.match().
+        for face in self.font_table.faces:
+            self.fragments.append(self.build_fragment_418(face.location, face.data))
+            self.fragments.append(
+                self.build_fragment_262(
+                    face.emitted_family, face.location, face.weight, face.italic
+                )
+            )
 
         # Cover-in-reading-flow (#32): make the cover image visible as the
         # first reading page by registering its resource under a synthetic

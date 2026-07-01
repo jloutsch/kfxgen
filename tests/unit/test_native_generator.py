@@ -1295,3 +1295,35 @@ def test_build_fragment_262_bold_italic_sets_descriptors():
     v = frag.value
     assert v[IS("$13")] == IS("$361")  # bold
     assert v[IS("$12")] == IS("$382")  # italic
+
+
+def test_generate_full_book_emits_font_fragments():
+    from kfxgen.font_table import FontTable, Face
+
+    g = NativeKFXGenerator()
+    face = Face(
+        css_family="foo",
+        weight=700,
+        italic=False,
+        data=b"\x00\x01\x00\x00fontbytes",
+        emitted_family="foo-700",
+        location="resource/font0",
+    )
+    g.generate_full_book(
+        title="T",
+        author="A",
+        chapters=[{"title": "C1", "text": "Hello world."}],
+        font_table=FontTable([face]),
+    )
+    types = [str(f.ftype) for f in g.fragments]
+    assert "$418" in types
+    assert "$262" in types
+
+
+def test_generate_full_book_no_font_table_emits_no_font_fragments():
+    g = NativeKFXGenerator()
+    g.generate_full_book(
+        title="T", author="A", chapters=[{"title": "C1", "text": "Hi."}]
+    )
+    types = [str(f.ftype) for f in g.fragments]
+    assert "$418" not in types and "$262" not in types
