@@ -1,5 +1,53 @@
 # Changelog
 
+## 5.3.22 — Within-file #anchor chapter splitting (#23)
+
+kfxgen can now split chapters at inline `#anchor` targets inside a single
+spine document — not just at EPUB spine-file boundaries.
+
+**Anchor-aware block extraction:** `extract_blocks_from_html` annotates each
+block dict with `anchor_ids: list[str]` — the block element's own `id`, the
+`id`s of ancestor containers whose first leaf this block is, standalone
+`<a id>`/`<a name>` anchors between blocks, and inline-descendant `id`s
+(a mid-block anchor snaps to its containing block). This is the per-block
+anchor inventory consumed downstream.
+
+**Global block-coordinate assembly:** `_assemble_chapters_by_coordinate`
+replaces the old spine-index deduplication path. It walks every spine
+document's block list, looks up each block's anchor IDs against an
+`_anchor_block_index` built from the OEB TOC, and emits one chapter dict
+per matched anchor. Block coordinates (spine index + block offset) serve
+as the split points, giving a monotonically ordered, globally consistent
+chapter sequence regardless of how many chapters share one spine file.
+
+**Edge cases covered:**
+- Front matter before the first anchor becomes its own leading chapter — it
+  is NOT merged into Chapter I (so a title/copyright/boilerplate head keeps
+  its own entry instead of prepending onto the first real chapter).
+- Missing-anchor snap: if a TOC href anchor is absent from the extracted
+  blocks, the chapter snaps to just after the previous resolved anchor in
+  the same spine file (block 0 only if it is the first entry there), so
+  sibling entries stay distinct rather than collapsing or dropping.
+- Non-monotonic skip: a TOC entry whose coordinate points earlier than the
+  previous one is skipped (reading order preserved, the stray nav entry
+  dropped) rather than producing overlapping chapters.
+- Tail orphans: spine files after the last TOC coordinate become their own
+  chapters (filename-stem titles, image-only files skipped); the last TOC
+  chapter ends at the end of its own spine file.
+
+**Measure-first scale gate + #30:** a 400-chapter book stays comfortably in
+the KFX `content_max` envelope (peak 3 398, limit 10 000). A realistic
+worst case (1 200 chapters × several paragraphs) pushes content positions
+to 17 798, past the 10 000 mark — so that test is `xfail(strict=True)`
+against #30 (guaranteed position-range rework). Device testing shows the
+overlap is tolerated in practice: a 1 170-chapter book (Complete Works of
+Shakespeare) renders and its TOC navigates correctly on a physical Kindle,
+so #30 is non-urgent.
+
+**Device-verified:** The Great Gatsby (Gutenberg) splits from 3 collapsed
+mega-chapters into its 9 real chapters (I–IX) plus front/back matter, and
+every TOC entry taps to the correct chapter on a physical Kindle.
+
 ## 5.3.21 — Section position-map conformance ($264/$265/$550)
 
 kfxgen's KFX is now parseable by jhowell's `KFX Input` plugin. Previously

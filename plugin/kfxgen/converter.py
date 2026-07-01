@@ -111,9 +111,41 @@ def _walk_inline(elem, flags=frozenset()):
     return parts
 
 
+def _own_anchor_ids(elem):
+    """Anchor ids declared directly on `elem`: its id, plus an <a name="...">."""
+    ids = []
+    eid = elem.get("id")
+    if eid:
+        ids.append(eid)
+    if _local_tag(elem.tag) == "a":
+        name = elem.get("name")
+        if name:
+            ids.append(name)
+    return ids
+
+
+def _subtree_anchor_ids(elem):
+    """All anchor ids on `elem` and its descendants, in document order."""
+    ids = []
+    for e in elem.iter():
+        ids.extend(_own_anchor_ids(e))
+    return ids
+
+
+def _dedupe_keep_order(items):
+    seen = set()
+    out = []
+    for it in items:
+        if it not in seen:
+            seen.add(it)
+            out.append(it)
+    return out
+
+
 def extract_blocks_from_html(element, style_resolver=None):
     """Like extract_text_from_html but returns structured blocks:
-    [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None}],
+    [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None,
+    "anchor_ids": list[str]}],
     preserving inline emphasis as spans and inline <img> as IMG tokens in `text`.
     When style_resolver is given, it is called per block element (elem -> css_dict|None)
     and the result is passed to compute_block_style to populate block_style."""
@@ -144,32 +176,66 @@ def extract_blocks_from_html(element, style_resolver=None):
         block_tags.add(ns + tag)
 
     blocks = []
-    for elem in body.iter():
-        if elem.tag in block_tags:
-            if any(child.tag in block_tags for child in elem):
-                continue
+    pending_ids = []  # anchors awaiting the next leaf block (containers, standalone <a>)
+
+    def _walk(elem, parent_is_block):
+        is_block = elem.tag in block_tags
+        has_block_child = any(child.tag in block_tags for child in elem)
+
+        if is_block and not has_block_child:
             text, spans = normalize_runs(_walk_inline(elem))
+            ids = pending_ids[:]
+            pending_ids.clear()
+            ids.extend(_subtree_anchor_ids(elem))
             if text:
                 bstyle = None
                 if style_resolver is not None:
                     css = style_resolver(elem)
                     if css is not None:
                         bstyle = compute_block_style(css)
-                blocks.append({"text": text, "spans": spans, "block_style": bstyle})
-            continue
+                blocks.append(
+                    {
+                        "text": text,
+                        "spans": spans,
+                        "block_style": bstyle,
+                        "anchor_ids": _dedupe_keep_order(ids),
+                    }
+                )
+            else:
+                pending_ids.extend(ids)  # empty anchor block: carry ids forward
+            return
 
-        # Bare <img> directly under body (rare, but exists in some EPUBs)
-        if _local_tag(elem.tag) == "img":
-            parent = elem.getparent()
-            if parent is not None and parent.tag in block_tags:
-                continue  # already handled by the block walker above
+        if _local_tag(elem.tag) == "img" and not parent_is_block:
+            ids = pending_ids[:]
+            pending_ids.clear()
+            ids.extend(_own_anchor_ids(elem))
             href = elem.get("src", "") or ""
             alt = elem.get("alt", "") or ""
-            # block_style is intentionally None: a bare image carries no text
-            # block-style (align/indent), so the resolver is not consulted here.
             blocks.append(
-                {"text": _make_img_token(href, alt), "spans": [], "block_style": None}
+                {
+                    "text": _make_img_token(href, alt),
+                    "spans": [],
+                    "block_style": None,
+                    "anchor_ids": _dedupe_keep_order(ids),
+                }
             )
+            return
+
+        pending_ids.extend(_own_anchor_ids(elem))
+        for child in elem:
+            _walk(child, parent_is_block=is_block)
+
+    for child in body:
+        _walk(child, parent_is_block=False)
+
+    # Trailing anchors (e.g. <a id="eof"/> after the last leaf block) never
+    # reach a subsequent block to flush to; snap them onto the last emitted
+    # block instead of dropping them silently.
+    if pending_ids and blocks:
+        last_block = blocks[-1]
+        last_block["anchor_ids"] = _dedupe_keep_order(
+            last_block["anchor_ids"] + pending_ids
+        )
 
     if blocks:
         return blocks
@@ -178,7 +244,16 @@ def extract_blocks_from_html(element, style_resolver=None):
     text = body.xpath("string()")
     lines = [line.strip() for line in text.split("\n")]
     text = " ".join(line for line in lines if line)
-    return [{"text": text, "spans": [], "block_style": None}] if text else []
+    if not text:
+        return []
+    return [
+        {
+            "text": text,
+            "spans": [],
+            "block_style": None,
+            "anchor_ids": _dedupe_keep_order(pending_ids),
+        }
+    ]
 
 
 def extract_text_from_html(element):
@@ -308,6 +383,21 @@ def _normalize_href(href):
     return basename
 
 
+def _href_fragment(href):
+    """Return the fragment after '#', or '' when there is none."""
+    return href.split("#", 1)[1] if href and "#" in href else ""
+
+
+def _anchor_block_index(blocks):
+    """Map each anchor id to the index of the FIRST block that carries it."""
+    out = {}
+    for i, b in enumerate(blocks):
+        for aid in b.get("anchor_ids", ()):
+            if aid not in out:
+                out[aid] = i
+    return out
+
+
 def _find_manifest_item(oeb_book, href):
     """Return a manifest item whose href matches (exactly or by basename)."""
     if not hasattr(oeb_book, "manifest") or oeb_book.manifest is None:
@@ -361,6 +451,139 @@ def _extract_text_from_manifest_item(oeb_book, href, log):
     if text and text.strip():
         return text
     return None
+
+
+# Max length for treating a leading front-matter block's text as its own
+# heading/title; longer reads as body prose, so fall back to a neutral label
+# rather than dumping a paragraph into the nav entry.
+_LEADING_TITLE_MAX_LEN = 60
+
+
+def _leading_chapter_title(head_blocks):
+    """Title for front matter that precedes the first TOC anchor.
+
+    Use the first block's text when it is short enough to be a heading,
+    otherwise a neutral 'Front Matter' label."""
+    if head_blocks:
+        t = (head_blocks[0].get("text") or "").strip()
+        if 0 < len(t) <= _LEADING_TITLE_MAX_LEN and "\n" not in t:
+            return t
+    return "Front Matter"
+
+
+def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
+    """Resolve each TOC entry to a (spine_index, block_index) coordinate and
+    slice content between consecutive coordinates into chapters. Returns None
+    when no TOC entry resolves to a spine item (caller falls back)."""
+    spine_blocks = [s.get("blocks") or [] for s in spine_items_ordered]
+    spine_anchor = [_anchor_block_index(b) for b in spine_blocks]
+    spine_order = [_normalize_href(s["href"]) for s in spine_items_ordered]
+
+    file_offset = []
+    acc = 0
+    for b in spine_blocks:
+        file_offset.append(acc)
+        acc += len(b)
+
+    flat = []
+    for b in spine_blocks:
+        flat.extend(b)
+
+    # Collect all anchor fragments referenced in the TOC (even non-monotonic ones)
+    # so we can detect head blocks that belong to a skipped TOC entry.
+    toc_anchors: set[str] = set()
+    for _e in toc_entries:
+        _f = _href_fragment(_e["href"])
+        if _f:
+            toc_anchors.add(_f)
+
+    coords = []  # (flat_index, spine_index, title)
+    last_block_in_file = {}
+    prev_flat = -1
+    for entry in toc_entries:
+        norm = _normalize_href(entry["href"])
+        try:
+            si = spine_order.index(norm)
+        except ValueError:
+            log.warn(f"  TOC entry {entry['title']!r} dropped: not in spine")
+            continue
+        frag = _href_fragment(entry["href"])
+        amap = spine_anchor[si]
+        if frag and frag in amap:
+            bi = amap[frag]
+        elif frag:
+            bi = last_block_in_file.get(si, -1) + 1
+            log.warn(
+                f"  TOC anchor #{frag} not found in {norm}; snapping to block {bi}"
+            )
+        else:
+            bi = 0
+        bi = min(bi, len(spine_blocks[si]) - 1) if spine_blocks[si] else 0
+        fi = file_offset[si] + bi
+        if fi <= prev_flat:
+            log.warn(
+                f"  TOC entry {entry['title']!r} out of document order; skipping split"
+            )
+            continue
+        coords.append((fi, si, entry["title"]))
+        prev_flat = fi
+        last_block_in_file[si] = bi
+
+    if not coords:
+        return None
+
+    def _mk(title, block_slice):
+        text = "\n\n".join(b["text"] for b in block_slice if b.get("text"))
+        if not text.strip():
+            return None
+        return {"title": title, "text": text, "blocks": list(block_slice)}
+
+    chapters = []
+
+    first_fi = coords[0][0]
+    # A head block that carries an anchor referenced (even non-monotonically) in
+    # the TOC is NOT front matter — fold it into the first chapter instead.
+    # NOTE: Known limitation — a malformed EPUB where genuine front matter
+    # carries an `id` that duplicates a TOC fragment would be folded into
+    # chapter 1 rather than emitted as a separate leading chapter.
+    head_has_toc_anchor = first_fi > 0 and any(
+        a in toc_anchors for b in flat[0:first_fi] for a in (b.get("anchor_ids") or [])
+    )
+    if first_fi > 0 and not head_has_toc_anchor:
+        head = flat[0:first_fi]
+        head_text = "\n\n".join(b["text"] for b in head if b.get("text"))
+        if not _has_real_text(head_text):
+            log.info("  Skipping image-only head before first TOC anchor")
+        else:
+            ch = _mk(_leading_chapter_title(head), head)
+            if ch:
+                chapters.append(ch)
+
+    for k, (fi, si, title) in enumerate(coords):
+        if k + 1 < len(coords):
+            end = coords[k + 1][0]
+        else:
+            end = file_offset[si] + len(spine_blocks[si])
+        start = 0 if (k == 0 and head_has_toc_anchor) else fi
+        ch = _mk(title, flat[start:end])
+        if ch:
+            chapters.append(ch)
+
+    last_si = coords[-1][1]
+    # Tail orphans use filename-stem titles; TOC titles drove the inline splits
+    # above so they are not available to reassign here (intentional).
+    for si in range(last_si + 1, len(spine_items_ordered)):
+        item = spine_items_ordered[si]
+        if not _has_real_text(item["text"]):
+            log.info(f"  Skipping image-only orphan {_normalize_href(item['href'])}")
+            continue
+        norm = _normalize_href(item["href"])
+        stem = norm.rsplit(".", 1)[0] if "." in norm else norm
+        ch = _mk(stem or f"Section {si + 1}", spine_blocks[si])
+        if ch:
+            chapters.append(ch)
+
+    return chapters
 
 
 def extract_chapters_from_oeb(oeb_book, log, metadata=None):
@@ -431,162 +654,14 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
     toc_entries = _extract_toc_with_hrefs(oeb_book, log)
 
     if toc_entries:
-        # Each TOC entry owns all spine items from its href up to (but not
-        # including) the next TOC-referenced spine item. This handles Calibre's
-        # split-at-page-break output, where a chapter's body lives in sibling
-        # `_split_001` / `_split_002` spine items that have no TOC entry.
-        spine_order = [_normalize_href(s["href"]) for s in spine_items_ordered]
-
-        toc_spine_indices = []
-        for entry in toc_entries:
-            norm = _normalize_href(entry["href"])
-            try:
-                toc_spine_indices.append(spine_order.index(norm))
-            except ValueError:
-                toc_spine_indices.append(None)
-
-        chapters = []
-        seen_starts = set()
-        covered_spine_indices = set()
-        # Titles from TOC entries that got dropped by spine-index dedup
-        # (e.g. anchored siblings). Bound to orphan spine items below so
-        # CIA-Factbook–style books surface as A/B/C/... instead of opaque
-        # filename stems.
-        dropped_toc_titles = []
-
-        for i, entry in enumerate(toc_entries):
-            start = toc_spine_indices[i]
-
-            if start is None:
-                # Manifest fallback (#6) is disabled in v5.3.2: it recovered
-                # image-only chapters (Title Page, Maps) with near-empty
-                # text bodies that contributed to a Kindle progress
-                # display regression. Re-enabling needs a separate fix
-                # for the body-image emission path. See #6 for status.
-                log.warn(f"  TOC entry {entry['title']!r} dropped: not in spine")
-                continue
-
-            if start in seen_starts:
-                log.warn(
-                    f"  TOC entry {entry['title']!r} skipped: spine "
-                    f"index {start} already claimed"
-                )
-                dropped_toc_titles.append(entry["title"])
-                continue
-            seen_starts.add(start)
-
-            # Default: own only this spine item. Extend forward only when a
-            # later TOC entry has a valid spine index further downstream,
-            # meaning there are orphan spine items (e.g. Calibre split-at-
-            # page-break siblings) between us and the next TOC anchor that
-            # belong to this chapter.
-            #
-            # Issue #1's first fix (commit 4de5168) used wide absorption
-            # (`end = len(spine_order)`) which fixed split-chapter content
-            # but caused the *last* TOC entry to absorb unrelated back-matter
-            # (e.g. next-reads.xhtml), shifting KFX nav positions. The
-            # narrowed default below preserves the split-recovery behavior
-            # only for chapters that genuinely have orphans between them
-            # and the next TOC anchor.
-            # Forward-extension picks up orphan spine items between this
-            # TOC anchor and the next one (Calibre's --enable-heuristics
-            # splits a chapter into chap.html + chap_split_001.html +
-            # chap_split_002.html, and only chap.html is in the TOC).
-            #
-            # Stop the search at the first successor with a known spine
-            # index. If that successor maps to the same spine index, the
-            # source EPUB is using within-file #anchor navigation (e.g.
-            # CIA Factbook: 27 TOC entries all pointing to spine[0]#A..#Z),
-            # and we must NOT extend — extending would absorb every
-            # subsequent content spine item until the next distinct TOC
-            # anchor and either drown the KFX writer in a mega-chapter or
-            # silently drop content downstream of the position-id envelope.
-            end = start + 1
-            for j in range(i + 1, len(toc_entries)):
-                nxt = toc_spine_indices[j]
-                # Skip None (TOC entry not in spine) and skip non-monotonic
-                # entries (nxt < start, EPUBs whose TOC is out of spine order).
-                # Stop on nxt == start (anchored sibling, don't extend) or
-                # nxt > start (extend to absorb orphans, Calibre-split case).
-                if nxt is None or nxt < start:
-                    continue
-                if nxt > start:
-                    end = nxt
-                break
-
-            parts = [
-                spine_items_ordered[k]["text"]
-                for k in range(start, end)
-                if spine_items_ordered[k]["text"]
-            ]
-            text = "\n\n".join(parts)
-            if text.strip():
-                chapter = {"title": entry["title"], "text": text}
-                block_parts = []
-                for k in range(start, end):
-                    if spine_items_ordered[k]["text"]:
-                        block_parts.extend(spine_items_ordered[k]["blocks"])
-                if block_parts:
-                    chapter["blocks"] = block_parts
-                chapters.append(chapter)
-                covered_spine_indices.update(range(start, end))
-
-        # Recover spine items the TOC never references. This fires when
-        # every TOC entry normalizes to the same spine item (anchored
-        # within-file navigation, e.g. CIA World Factbook: 27 TOC entries
-        # all #A,#B,#C inside spine[0]). Without this, spine items 1..N
-        # are silently dropped — the book was losing ~98% of its text.
-        # Orphans append in spine order with filename-stem fallback titles.
+        chapters = _assemble_chapters_by_coordinate(
+            spine_items_ordered, toc_entries, log
+        )
         if chapters:
-            orphan_indices = [
-                k
-                for k in range(len(spine_items_ordered))
-                if k not in covered_spine_indices
-            ]
-            if orphan_indices:
-                log.info(
-                    f"  Recovering {len(orphan_indices)} spine item(s) "
-                    f"not referenced by TOC"
-                )
-                for k in orphan_indices:
-                    item = spine_items_ordered[k]
-                    # Skip image-only orphans (no real text once IMG tokens
-                    # are stripped). The common case is the EPUB's own
-                    # cover.xhtml: its <img> points at the cover, which is
-                    # emitted separately (#32), so the token never resolves
-                    # to a body resource. Recovering it appended a junk
-                    # trailing chapter that rendered blank and produced zero
-                    # content chunks — which crashed the generator with an
-                    # IndexError on a trailing empty chapter. This mirrors
-                    # the #6 policy above: image-only chapters are not
-                    # recovered. (A resolvable inline image inside a chapter
-                    # with prose still flows normally — only orphans with no
-                    # prose at all are dropped here.)
-                    if not _has_real_text(item["text"]):
-                        log.info(
-                            f"  Skipping image-only orphan "
-                            f"{_normalize_href(item['href'])}"
-                        )
-                        continue
-                    if dropped_toc_titles:
-                        title = dropped_toc_titles.pop(0)
-                    else:
-                        norm = _normalize_href(item["href"])
-                        stem = norm.rsplit(".", 1)[0] if "." in norm else norm
-                        title = stem or f"Section {k + 1}"
-                    chapter = {"title": title, "text": item["text"]}
-                    if item.get("blocks"):
-                        chapter["blocks"] = item["blocks"]
-                    chapters.append(chapter)
-
-        if chapters:
-            log.info(f"Mapped {len(chapters)} TOC entries to spine content")
+            log.info(f"Assembled {len(chapters)} chapters from TOC coordinates")
             _replace_title_page(chapters, metadata, log)
             return chapters
-        else:
-            log.info(
-                "No TOC entries matched spine items, using spine items as chapters"
-            )
+        log.info("TOC produced no chapters; using spine items as chapters")
 
     # Fallback: use each spine item as a chapter
     chapters = []

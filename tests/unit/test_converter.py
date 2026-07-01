@@ -19,7 +19,11 @@ from kfxgen.converter import (
     CONTENTS_SKIP_TITLES,
     HALF_TITLE_TITLES,
     TITLE_PAGE_TITLES,
+    _anchor_block_index,
+    _assemble_chapters_by_coordinate,
+    _href_fragment,
     _replace_title_page,
+    extract_blocks_from_html,
     extract_chapters_from_oeb,
     extract_cover_image,
     extract_images_from_oeb,
@@ -664,3 +668,346 @@ def test_chapters_carry_block_style_with_fake_stylizer(
     )
     blocks = chapters[0].get("blocks", [])
     assert any((b.get("block_style") or {}).get("align") == "center" for b in blocks)
+
+
+# ── Task 2: Coordinate helpers ──────────────────────────────────────────────
+
+
+class TestCoordinateHelpers:
+    def test_href_fragment(self):
+        assert _href_fragment("ch.xhtml#c2") == "c2"
+        assert _href_fragment("ch.xhtml") == ""
+        assert _href_fragment("") == ""
+
+    def test_anchor_block_index_first_wins(self):
+        blocks = [
+            {"anchor_ids": ["a"]},
+            {"anchor_ids": ["b", "a"]},
+            {"anchor_ids": []},
+        ]
+        assert _anchor_block_index(blocks) == {"a": 0, "b": 1}
+
+
+# ── Task 1: per-block anchor_ids ─────────────────────────────────────────────
+
+
+def _xhtml_raw(body_inner):
+    src = f'<html xmlns="http://www.w3.org/1999/xhtml"><body>{body_inner}</body></html>'
+    return etree.fromstring(src)
+
+
+class TestBlockAnchorIds:
+    def test_id_on_block_element(self):
+        blocks = extract_blocks_from_html(_xhtml_raw('<h2 id="c1">One</h2>'))
+        assert blocks[0]["anchor_ids"] == ["c1"]
+
+    def test_id_on_container_attaches_to_first_leaf(self):
+        el = _xhtml_raw('<div id="c1"><p>First</p><p>Second</p></div>')
+        blocks = extract_blocks_from_html(el)
+        assert blocks[0]["text"] == "First"
+        assert blocks[0]["anchor_ids"] == ["c1"]
+        assert blocks[1]["anchor_ids"] == []
+
+    def test_standalone_anchor_between_blocks(self):
+        el = _xhtml_raw('<p>Before</p><a id="c2"></a><p>After</p>')
+        blocks = extract_blocks_from_html(el)
+        assert blocks[0]["anchor_ids"] == []
+        assert blocks[1]["anchor_ids"] == ["c2"]
+
+    def test_legacy_a_name_anchor(self):
+        el = _xhtml_raw('<a name="c3"></a><p>Body</p>')
+        blocks = extract_blocks_from_html(el)
+        assert blocks[0]["anchor_ids"] == ["c3"]
+
+    def test_inline_anchor_snaps_to_containing_block(self):
+        el = _xhtml_raw('<p>Mid <a id="c4">word</a> here</p>')
+        blocks = extract_blocks_from_html(el)
+        assert blocks[0]["anchor_ids"] == ["c4"]
+
+    def test_empty_id_block_carries_forward(self):
+        el = _xhtml_raw('<p id="c5"></p><p>Real</p>')
+        blocks = extract_blocks_from_html(el)
+        assert blocks[0]["text"] == "Real"
+        assert blocks[0]["anchor_ids"] == ["c5"]
+
+    def test_block_without_anchor_has_empty_list(self):
+        blocks = extract_blocks_from_html(_xhtml_raw("<p>Plain</p>"))
+        assert blocks[0]["anchor_ids"] == []
+
+    def test_trailing_anchor_snaps_to_last_block(self):
+        # A standalone anchor AFTER the last leaf block must attach to the last
+        # block's anchor_ids, not be silently dropped (FIX 7).
+        el = _xhtml_raw('<p>Last</p><a id="eof"></a>')
+        blocks = extract_blocks_from_html(el)
+        assert blocks[-1]["anchor_ids"] == ["eof"]
+
+
+# ---------------------------------------------------------------------------
+# Coordinate-based chapter assembly
+# ---------------------------------------------------------------------------
+
+
+def _spine_item(href, blocks):
+    """blocks: list of (text, anchor_ids) tuples."""
+    return {
+        "href": href,
+        "text": "\n\n".join(t for t, _ in blocks),
+        "blocks": [
+            {"text": t, "spans": [], "block_style": None, "anchor_ids": list(a)}
+            for t, a in blocks
+        ],
+    }
+
+
+class TestCoordinateAssembly:
+    def test_multi_anchor_split_within_one_file(self):
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [("I", ["c1"]), ("Body one", []), ("II", ["c2"]), ("Body two", [])],
+            )
+        ]
+        toc = [
+            {"title": "I", "href": "book.xhtml#c1"},
+            {"title": "II", "href": "book.xhtml#c2"},
+        ]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert [c["title"] for c in chapters] == ["I", "II"]
+        assert chapters[0]["text"] == "I\n\nBody one"
+        assert chapters[1]["text"] == "II\n\nBody two"
+
+    def test_one_file_per_chapter(self):
+        spine = [
+            _spine_item("a.xhtml", [("Alpha", [])]),
+            _spine_item("b.xhtml", [("Beta", [])]),
+        ]
+        toc = [
+            {"title": "Alpha", "href": "a.xhtml"},
+            {"title": "Beta", "href": "b.xhtml"},
+        ]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert [c["title"] for c in chapters] == ["Alpha", "Beta"]
+
+    def test_split_sibling_spans_files(self):
+        # chap.xhtml is in the TOC; chap_split_001.xhtml is an orphan sibling
+        # between two TOC anchors -> absorbed into the first chapter.
+        spine = [
+            _spine_item("chap.xhtml", [("One", ["c1"])]),
+            _spine_item("chap_split_001.xhtml", [("One continued", [])]),
+            _spine_item("chap2.xhtml", [("Two", ["c2"])]),
+        ]
+        toc = [
+            {"title": "One", "href": "chap.xhtml#c1"},
+            {"title": "Two", "href": "chap2.xhtml#c2"},
+        ]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert [c["title"] for c in chapters] == ["One", "Two"]
+        assert "One continued" in chapters[0]["text"]
+
+    def test_returns_none_when_no_toc_entry_in_spine(self):
+        spine = [_spine_item("a.xhtml", [("Alpha", [])])]
+        toc = [{"title": "Ghost", "href": "missing.xhtml"}]
+        assert _assemble_chapters_by_coordinate(spine, toc, _silent_log()) is None
+
+
+class TestCoordinateAssemblyEdges:
+    def test_front_matter_becomes_leading_chapter(self):
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [("Copyright 2026", []), ("I", ["c1"]), ("Body", [])],
+            )
+        ]
+        toc = [{"title": "I", "href": "book.xhtml#c1"}]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert [c["title"] for c in chapters] == ["Copyright 2026", "I"]
+        # Front matter is NOT merged into Chapter I
+        assert "Copyright" not in chapters[1]["text"]
+
+    def test_missing_anchor_snaps_after_previous(self):
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [("I", ["c1"]), ("Mid", []), ("II body", [])],
+            )
+        ]
+        toc = [
+            {"title": "I", "href": "book.xhtml#c1"},
+            {"title": "II", "href": "book.xhtml#ghost"},  # missing -> block 1
+        ]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert [c["title"] for c in chapters] == ["I", "II"]
+        assert chapters[0]["text"] == "I"
+        assert chapters[1]["text"] == "Mid\n\nII body"
+
+    def test_non_monotonic_toc_skips_split(self):
+        spine = [_spine_item("book.xhtml", [("I", ["c1"]), ("II", ["c2"])])]
+        toc = [
+            {"title": "II", "href": "book.xhtml#c2"},  # block 1 first
+            {"title": "I", "href": "book.xhtml#c1"},  # block 0 -> backward, skipped
+        ]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert [c["title"] for c in chapters] == ["II"]
+
+    def test_tail_orphan_recovered_as_separate_chapter(self):
+        spine = [
+            _spine_item("ch.xhtml", [("Nine", ["c9"])]),
+            _spine_item("license.xhtml", [("Project Gutenberg License text", [])]),
+        ]
+        toc = [{"title": "IX", "href": "ch.xhtml#c9"}]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert chapters[0]["title"] == "IX"
+        assert chapters[1]["title"] == "license"
+        assert "License text" in chapters[1]["text"]
+
+    def test_image_only_head_not_emitted_as_leading_chapter(self):
+        # A spine file whose content before the first TOC anchor is only an IMG
+        # token (e.g. an inline cover image) must NOT produce a leading chapter.
+        # This is consistent with how tail orphans skip image-only content (FIX 1).
+        img_token = _conv._make_img_token("cover.jpg", "")
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [(img_token, []), ("Chapter I", ["c1"]), ("Body text", [])],
+            )
+        ]
+        toc = [{"title": "I", "href": "book.xhtml#c1"}]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        # Only chapter I; no image-only "Front Matter" leading chapter.
+        assert [c["title"] for c in chapters] == ["I"]
+
+    def test_head_is_folded_when_it_carries_toc_anchor(self):
+        # When the head (blocks before the first coordinate) carries an anchor
+        # that appears in the TOC (even as a non-monotonic/skipped entry),
+        # the head must fold into the first chapter rather than being emitted
+        # as a separate "Front Matter" chapter (FIX 3: head_has_toc_anchor branch).
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [
+                    ("Pre-chapter text", ["intro"]),  # block 0: anchor in TOC
+                    ("Chapter I", ["c1"]),  # block 1: first coord
+                    ("Body text", []),
+                ],
+            )
+        ]
+        toc = [
+            {"title": "I", "href": "book.xhtml#c1"},  # block 1 -> first valid coord
+            {
+                "title": "Intro",
+                "href": "book.xhtml#intro",
+            },  # block 0 -> non-monotonic, skipped
+        ]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        # head_has_toc_anchor = True -> no separate Front Matter chapter
+        assert [c["title"] for c in chapters] == ["I"]
+        assert "Pre-chapter text" in chapters[0]["text"]
+
+
+# ── Task 5: Gatsby-shaped integration test ───────────────────────────────────
+
+
+def _multi_block_spine(href, blocks):
+    """Build a real XHTML spine item from (tag, id, text) tuples so the live
+    extract_blocks path (not a hand-built block list) is exercised."""
+    parts = []
+    for tag, anchor_id, text in blocks:
+        idattr = f' id="{anchor_id}"' if anchor_id else ""
+        parts.append(f"<{tag}{idattr}>{text}</{tag}>")
+    body = "".join(parts)
+
+    class _Item:
+        def __init__(self):
+            self.href = href
+            self.data = _xhtml_raw(body)
+            self.media_type = "application/xhtml+xml"
+
+    return _Item()
+
+
+class TestGatsbyShapedSplit:
+    def test_within_file_anchors_split_into_chapters(self):
+        # h-0 holds title + chapters I..III via within-file anchors
+        spine = [
+            _multi_block_spine(
+                "h-0.xhtml",
+                [
+                    ("h1", "title", "The Great Gatsby"),
+                    ("div", "chapter-1", "Chapter one prose."),
+                    ("div", "chapter-2", "Chapter two prose."),
+                    ("div", "chapter-3", "Chapter three prose."),
+                ],
+            ),
+            _multi_block_spine(
+                "h-1.xhtml", [("div", "chapter-4", "Chapter four prose.")]
+            ),
+        ]
+        toc = [
+            _TOCNode("Title", "h-0.xhtml#title"),
+            _TOCNode("I", "h-0.xhtml#chapter-1"),
+            _TOCNode("II", "h-0.xhtml#chapter-2"),
+            _TOCNode("III", "h-0.xhtml#chapter-3"),
+            _TOCNode("IV", "h-1.xhtml#chapter-4"),
+        ]
+        oeb = _OEBBook(spine=spine, toc=toc)
+        chapters = extract_chapters_from_oeb(oeb, _silent_log())
+        titles = [c["title"] for c in chapters]
+        assert titles == ["Title", "I", "II", "III", "IV"]
+        assert "Chapter two prose." in chapters[2]["text"]
+        assert "Chapter two prose." not in chapters[1]["text"]
+
+
+# ── Task 6: High-chapter-count scale gate (#23, measure-first) ───────────────
+
+
+class TestHighChapterCountScale:
+    @pytest.mark.xfail(
+        reason="#30 position-range rework needed at high chapter+chunk counts",
+        strict=True,
+    )
+    def test_1200_chapter_book_converts_and_stays_in_envelope(self, tmp_path):
+        # Measured content_max = 17798 (1200 chapters × 6 paragraphs) — exceeds
+        # SECTION_POS_BASE (10000). Escalate to #30 for position-range rework.
+        from kfxgen.native_generator import NativeKFXGenerator
+        from kfxgen.kfxlib_minimal.ion import IS
+        from tests._kfx_introspect import by_type, val, load_fragments
+
+        # 1200 chapters, each with 6 paragraphs (~6 content chunks per chapter).
+        # Samples both the chapter axis and the content-chunk axis to find the
+        # realistic worst-case content position id.
+        chapters = [
+            {
+                "title": f"Chapter {i}",
+                "text": (
+                    f"Chapter {i}\n\n"
+                    f"First sentence of chapter {i}.\n\n"
+                    f"Second sentence of chapter {i}.\n\n"
+                    f"Third sentence of chapter {i}.\n\n"
+                    f"Fourth sentence of chapter {i}.\n\n"
+                    f"Fifth sentence of chapter {i}."
+                ),
+            }
+            for i in range(1200)
+        ]
+        out = tmp_path / "scale.kfx"
+        NativeKFXGenerator().generate_full_book(
+            title="Scale", author="T", chapters=chapters, output_path=str(out)
+        )
+        frags = load_fragments(out)
+
+        # All $260 sections present.
+        assert len(by_type(frags, "$260")) == 1200
+
+        # Content positions stay below SECTION_POS_BASE; sections at/above it.
+        # Measured content_max = 17798 (1200 chapters × 6 paragraphs), which
+        # exceeds SECTION_POS_BASE (10000) — hence xfail; see issue #30.
+        content_max = 0
+        for f in by_type(frags, "$259"):
+            v = val(f)
+            for e in v.get(IS("$146")) or v.get(IS("$181")) or []:
+                if hasattr(e, "get") and e.get(IS("$155")) is not None:
+                    content_max = max(content_max, int(e.get(IS("$155"))))
+        assert content_max < NativeKFXGenerator.SECTION_POS_BASE, (
+            f"content position {content_max} entered the section range — "
+            f"envelope exceeded; escalate to #30"
+        )
