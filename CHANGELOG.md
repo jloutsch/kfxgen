@@ -1,5 +1,14 @@
 # Changelog
 
+## 5.3.23 — Dynamic section-position base (#30)
+
+Content and section eid ranges are now disjoint by construction at any chapter
+count. `SECTION_POS_BASE` is a floor: sections stay at 10 000 for normal books
+and relocate just above the content range only for books that would otherwise
+overflow it. Normal books are byte-identical (no re-verification needed). The
+#23 scale gate now asserts disjointness directly; the xfail marker has been
+removed.
+
 ## 5.3.22 — Within-file #anchor chapter splitting (#23)
 
 kfxgen can now split chapters at inline `#anchor` targets inside a single
