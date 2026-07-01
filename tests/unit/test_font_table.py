@@ -1,6 +1,7 @@
 import pytest
 from kfxgen.font_table import (
     Face,
+    FontTable,
     extract_src_urls,
     emitted_name,
     faces_from_rules,
@@ -171,3 +172,52 @@ def test_faces_from_rules_reads_cssfontfacerule_style_objects():
         and faces[0].weight == 700
         and faces[0].italic is True
     )
+
+
+def _face(fam, w, it):
+    return Face(
+        css_family=fam,
+        weight=w,
+        italic=it,
+        data=b"\x00\x01\x00\x00",
+        emitted_family=f"{fam}-{w}{'i' if it else ''}",
+        location="resource/x",
+    )
+
+
+def test_match_no_embedded_family_returns_none():
+    t = FontTable([_face("foo", 400, False)])
+    assert t.match(["bar", "serif"], bold=False, italic=False) == (None, False, False)
+    assert t.match([], bold=True, italic=False) == (None, False, False)
+
+
+def test_match_exact_regular():
+    t = FontTable([_face("foo", 400, False)])
+    assert t.match(["foo"], bold=False, italic=False) == ("foo-400", True, True)
+
+
+def test_match_exact_bold_face():
+    t = FontTable([_face("foo", 400, False), _face("foo", 700, False)])
+    assert t.match(["foo"], bold=True, italic=False) == ("foo-700", True, True)
+
+
+def test_match_bold_requested_only_regular_embedded_falls_back_synthetic():
+    t = FontTable([_face("foo", 400, False)])
+    # regular family applied, but weight not satisfied -> caller synthesizes bold
+    assert t.match(["foo"], bold=True, italic=False) == ("foo-400", False, True)
+
+
+def test_match_italic_requested_only_regular_embedded():
+    t = FontTable([_face("foo", 400, False)])
+    assert t.match(["foo"], bold=False, italic=True) == ("foo-400", True, False)
+
+
+def test_match_exact_bold_italic():
+    t = FontTable([_face("foo", 400, False), _face("foo", 700, True)])
+    assert t.match(["foo"], bold=True, italic=True) == ("foo-700i", True, True)
+
+
+def test_match_family_list_uses_first_embedded():
+    t = FontTable([_face("bar", 400, False)])
+    # "foo" not embedded, "bar" is -> use bar
+    assert t.match(["foo", "bar"], bold=False, italic=False) == ("bar-400", True, True)

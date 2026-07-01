@@ -135,3 +135,42 @@ def faces_from_rules(rules, manifest_lookup, log):
         )
         idx += 1
     return faces
+
+
+class FontTable:
+    """Embedded faces + face-matching for application (#15)."""
+
+    def __init__(self, faces):
+        self.faces = list(faces)
+        self._by_family = {}
+        for f in self.faces:
+            self._by_family.setdefault(f.css_family, []).append(f)
+
+    def match(self, family_list, bold, italic):
+        """Resolve (family_list, bold, italic) to a face.
+
+        Returns (emitted_family | None, weight_ok, style_ok). *_ok True means
+        the chosen face already satisfies that axis, so the caller should NOT
+        synthesize it. When no family is embedded, returns (None, False, False)
+        so the caller reproduces today's synthetic behavior unchanged.
+        """
+        fam_faces = None
+        for fam in family_list or []:
+            if fam in self._by_family:
+                fam_faces = self._by_family[fam]
+                break
+        if not fam_faces:
+            return (None, False, False)
+
+        want_bold = bool(bold)
+        want_italic = bool(italic)
+        # Exact face: weight side (>=600 == bold) and italic side both match.
+        for f in fam_faces:
+            if (f.weight >= 600) == want_bold and f.italic == want_italic:
+                return (f.emitted_family, True, True)
+        # Fallback: regular face (weight<600, upright), else any face.
+        regular = next(
+            (f for f in fam_faces if f.weight < 600 and not f.italic),
+            fam_faces[0],
+        )
+        return (regular.emitted_family, not want_bold, not want_italic)
