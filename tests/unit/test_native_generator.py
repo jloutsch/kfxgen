@@ -17,6 +17,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin"))
 
 from kfxgen.native_generator import NativeKFXGenerator  # noqa: E402
+from kfxgen.kfxlib_minimal.ion import IS, IonBLOB  # noqa: E402
 
 from tests._helpers import MINIMAL_JPEG  # noqa: E402
 
@@ -1266,3 +1267,31 @@ def test_no_block_style_keeps_default_margins(tmp_path):
         if IS("$48") in f.value:
             assert f.value[IS("$48")][IS("$306")] == IS("$314")  # default % unit
         assert IS("$50") not in f.value  # margin-right never default
+
+
+def test_build_fragment_418_is_raw_blob():
+    g = NativeKFXGenerator()  # __init__ sets self.symtab
+    frag = g.build_fragment_418("resource/font0", b"\x00\x01\x00\x00data")
+    assert frag.ftype == IS("$418")
+    assert frag.fid == IS("resource/font0")
+    assert isinstance(frag.value, IonBLOB)
+    assert bytes(frag.value) == b"\x00\x01\x00\x00data"
+
+
+def test_build_fragment_262_regular_omits_descriptors():
+    g = NativeKFXGenerator()
+    frag = g.build_fragment_262("foo-400", "resource/font0", weight=400, italic=False)
+    assert frag.ftype == IS("$262")
+    v = frag.value
+    assert v[IS("$11")] == "foo-400"
+    assert v[IS("$165")] == "resource/font0"
+    assert IS("$13") not in v  # normal weight omitted
+    assert IS("$12") not in v  # upright omitted
+
+
+def test_build_fragment_262_bold_italic_sets_descriptors():
+    g = NativeKFXGenerator()
+    frag = g.build_fragment_262("foo-700i", "resource/font1", weight=700, italic=True)
+    v = frag.value
+    assert v[IS("$13")] == IS("$361")  # bold
+    assert v[IS("$12")] == IS("$382")  # italic

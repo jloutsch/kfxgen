@@ -326,6 +326,37 @@ class NativeKFXGenerator:
             fid=IS(location_name), ftype=IS("$417"), value=IonBLOB(image_data)
         )
 
+    def build_fragment_418(self, location_name, font_data):
+        """Raw font BLOB ($418) — analog of $417 for images.
+
+        The fid MUST match the $165 value of the paired $262 fragment.
+        """
+        self.symtab.create_local_symbol(location_name)
+        return YJFragment(
+            fid=IS(location_name), ftype=IS("$418"), value=IonBLOB(font_data)
+        )
+
+    def build_fragment_262(self, emitted_family, location_name, weight, italic):
+        """@font-face declaration ($262) — analog of $164 for images.
+
+        $11 (family) is the join key a $157 style sets to apply this face.
+        $12/$13 (style/weight) reflect the actual face; omitted when default
+        ($350), matching observed KDP output. $15 (stretch) omitted in v1.
+        """
+        self.symtab.create_local_symbol(emitted_family)
+        self.symtab.create_local_symbol(location_name)
+        value = IonStruct(
+            IS("$11"),
+            emitted_family,  # font-family (plain string)
+            IS("$165"),
+            location_name,  # location -> $418 fid (plain string)
+        )
+        if weight >= 600:
+            value[IS("$13")] = IS("$361")  # font-weight: bold
+        if italic:
+            value[IS("$12")] = IS("$382")  # font-style: italic
+        return YJFragment(fid=IS(emitted_family), ftype=IS("$262"), value=value)
+
     def build_fragment_490(
         self,
         title,
