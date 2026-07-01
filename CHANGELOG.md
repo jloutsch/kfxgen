@@ -1,5 +1,20 @@
 # Changelog
 
+## 5.3.23 — Dynamic section-position base (#30)
+
+Content and section eid ranges are now disjoint by construction at any chapter
+count. `SECTION_POS_BASE` is a floor: sections stay at 10 000 for normal books
+and relocate just above the content range only for books that would otherwise
+overflow it. Normal books are byte-identical (no re-verification needed). The
+#23 scale gate now asserts disjointness directly; the xfail marker has been
+removed.
+
+Verified against the upstream `kfxlib` decoder: a 1,170-chapter book that
+previously produced 1,141 `duplicate eid` warnings from the range overlap now
+produces zero. Device-verified: that book (section eids relocated to ~20k)
+navigates correctly on a physical Kindle — late-chapter TOC taps land on target
+and the progress readout is sane.
+
 ## 5.3.22 — Within-file #anchor chapter splitting (#23)
 
 kfxgen can now split chapters at inline `#anchor` targets inside a single

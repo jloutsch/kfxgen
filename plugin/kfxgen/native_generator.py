@@ -2107,9 +2107,18 @@ class NativeKFXGenerator:
     #     duplicates don't break nav.
     #   - Despite (a), the values themselves matter. Pushing
     #     SECTION_POS_BASE up to 100000 broke Kindle's progress display
-    #     ("at start of book" showed 100% complete). The 5-digit range
-    #     v5.2.0 used (≤ 16000-ish for content, 10000+ for sections) is
-    #     the known-good envelope. Don't widen.
+    #     ("at start of book" showed 100% complete). Keep section eids in
+    #     the low 5-digit range Kindle has been observed to handle.
+    #   - The section base is dynamic (#30): SECTION_POS_BASE is the floor,
+    #     but for books whose content overflows it the sections relocate to
+    #     just above content_max (via _section_base) so content and section
+    #     eids stay disjoint. Normal books are unaffected (stay at 10000).
+    #     A huge book (~1200+ chapters) pushes relocated section eids into the
+    #     ~20k range. Device-verified (#30): a 1170-chapter book (Complete
+    #     Works of Shakespeare, section eids to ~20k) navigates correctly on a
+    #     physical Kindle — late-chapter TOC taps land right and the progress
+    #     readout is sane (88% at a late play). Still well under the 100000
+    #     that broke progress; keep section eids in the low 5-digit range.
     #   - There is no need to assert a content-position ceiling. An
     #     earlier attempt (#19, removed in v5.3.2) added a ValueError
     #     when content_pos_id climbed into the section range. That
@@ -2123,6 +2132,19 @@ class NativeKFXGenerator:
     CONTENT_POS_STEP = 2  # Position ID step for $259 entries
     SECTION_POS_BASE = 10000  # Position ID base for $260 sections (v5.2.0 known-good)
     SECTION_POS_STEP = 2  # Position ID step for $260 sections
+
+    @classmethod
+    def _section_base(cls, content_max):
+        """Base position id for $260 sections.
+
+        Sections start strictly above the content range so content and
+        section eids never collide (#30). For normal books (content stays
+        under SECTION_POS_BASE) this is the floor SECTION_POS_BASE, keeping
+        output byte-identical; only books whose content would overflow the
+        floor relocate their sections just above content_max. Content eids
+        are always even, so content_max + SECTION_POS_STEP stays even-aligned.
+        """
+        return max(cls.SECTION_POS_BASE, content_max + cls.SECTION_POS_STEP)
 
     @staticmethod
     def _detect_image_dimensions(image_data):
@@ -2437,12 +2459,14 @@ class NativeKFXGenerator:
                 chunk_positions[chunk_idx] = content_pos_id
                 content_pos_id += self.CONTENT_POS_STEP
 
-        # Section position IDs (for $260) — separate range, may arithmetically
-        # collide with chunk positions for busy books (v5.2.0 had ~71 such
-        # collisions on the test corpus and worked correctly).
+        # Section position IDs (for $260). The base is dynamic (#30): sections
+        # start strictly above the content range so content and section eids
+        # are disjoint at any chapter count. Normal books keep SECTION_POS_BASE
+        # (byte-identical); only overflow books relocate.
+        content_max = content_pos_id - self.CONTENT_POS_STEP
+        section_base = self._section_base(content_max)
         section_positions = [
-            self.SECTION_POS_BASE + i * self.SECTION_POS_STEP
-            for i in range(len(chapters))
+            section_base + i * self.SECTION_POS_STEP for i in range(len(chapters))
         ]
 
         # Chapter start positions for TOC entries. These MUST point to a

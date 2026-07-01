@@ -961,20 +961,15 @@ class TestGatsbyShapedSplit:
 
 
 class TestHighChapterCountScale:
-    @pytest.mark.xfail(
-        reason="#30 position-range rework needed at high chapter+chunk counts",
-        strict=True,
-    )
-    def test_1200_chapter_book_converts_and_stays_in_envelope(self, tmp_path):
-        # Measured content_max = 17798 (1200 chapters × 6 paragraphs) — exceeds
-        # SECTION_POS_BASE (10000). Escalate to #30 for position-range rework.
+    """A large book (1200 chapters × several paragraphs) must keep content and
+    section eid ranges disjoint by construction (#30) — no reliance on the
+    old fixed 10000 boundary, which this book's content overflows."""
+
+    def test_1200_chapter_book_has_disjoint_eid_ranges(self, tmp_path):
         from kfxgen.native_generator import NativeKFXGenerator
         from kfxgen.kfxlib_minimal.ion import IS
         from tests._kfx_introspect import by_type, val, load_fragments
 
-        # 1200 chapters, each with 6 paragraphs (~6 content chunks per chapter).
-        # Samples both the chapter axis and the content-chunk axis to find the
-        # realistic worst-case content position id.
         chapters = [
             {
                 "title": f"Chapter {i}",
@@ -995,19 +990,62 @@ class TestHighChapterCountScale:
         )
         frags = load_fragments(out)
 
-        # All $260 sections present.
         assert len(by_type(frags, "$260")) == 1200
 
-        # Content positions stay below SECTION_POS_BASE; sections at/above it.
-        # Measured content_max = 17798 (1200 chapters × 6 paragraphs), which
-        # exceeds SECTION_POS_BASE (10000) — hence xfail; see issue #30.
-        content_max = 0
+        content_eids = set()
         for f in by_type(frags, "$259"):
             v = val(f)
             for e in v.get(IS("$146")) or v.get(IS("$181")) or []:
                 if hasattr(e, "get") and e.get(IS("$155")) is not None:
-                    content_max = max(content_max, int(e.get(IS("$155"))))
-        assert content_max < NativeKFXGenerator.SECTION_POS_BASE, (
-            f"content position {content_max} entered the section range — "
-            f"envelope exceeded; escalate to #30"
+                    content_eids.add(int(e.get(IS("$155"))))
+
+        section_eids = set()
+        for f in by_type(frags, "$260"):
+            v = val(f)
+            for e in v.get(IS("$141")) or []:
+                if hasattr(e, "get") and e.get(IS("$155")) is not None:
+                    section_eids.add(int(e.get(IS("$155"))))
+
+        # Content pushes past the old 10000 floor at this scale...
+        assert max(content_eids) >= NativeKFXGenerator.SECTION_POS_BASE
+        # ...but content and section eid sets are still disjoint by construction.
+        assert content_eids.isdisjoint(section_eids), (
+            f"content/section eid overlap: {sorted(content_eids & section_eids)[:10]}"
         )
+
+        # #23 invariant still holds: every section eid is present in $265.
+        pos_265 = set()
+        for f in by_type(frags, "$265"):
+            v = val(f)
+            entries = v if isinstance(v, list) else v.get(IS("$181")) or []
+            for e in entries:
+                if hasattr(e, "get") and e.get(IS("$185")) is not None:
+                    pos_265.add(int(e.get(IS("$185"))))
+        missing = section_eids - pos_265
+        assert not missing, f"section eids absent from $265: {sorted(missing)[:10]}"
+
+
+# ── Task 1: Dynamic section base (#30) ────────────────────────────────────────
+
+
+class TestSectionBase:
+    def test_normal_book_keeps_default_base(self):
+        from kfxgen.native_generator import NativeKFXGenerator
+
+        # content well under the floor -> sections stay at SECTION_POS_BASE
+        assert NativeKFXGenerator._section_base(3398) == 10000
+        assert NativeKFXGenerator._section_base(9998) == 10000
+
+    def test_overflow_relocates_above_content(self):
+        from kfxgen.native_generator import NativeKFXGenerator
+
+        # content at/above the floor -> section base moves just above content_max
+        assert NativeKFXGenerator._section_base(10000) == 10002
+        assert NativeKFXGenerator._section_base(17798) == 17800
+
+    def test_result_is_even_aligned(self):
+        from kfxgen.native_generator import NativeKFXGenerator
+
+        # content eids are always even; the relocated base stays even
+        for cm in (10000, 10002, 12344, 17798):
+            assert NativeKFXGenerator._section_base(cm) % 2 == 0
