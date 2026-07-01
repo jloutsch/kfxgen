@@ -453,14 +453,20 @@ def _extract_text_from_manifest_item(oeb_book, href, log):
     return None
 
 
-def _leading_chapter_title(head_blocks, first_spine_item):
+# Max length for treating a leading front-matter block's text as its own
+# heading/title; longer reads as body prose, so fall back to a neutral label
+# rather than dumping a paragraph into the nav entry.
+_LEADING_TITLE_MAX_LEN = 60
+
+
+def _leading_chapter_title(head_blocks):
     """Title for front matter that precedes the first TOC anchor.
 
     Use the first block's text when it is short enough to be a heading,
     otherwise a neutral 'Front Matter' label."""
     if head_blocks:
         t = (head_blocks[0].get("text") or "").strip()
-        if 0 < len(t) <= 60 and "\n" not in t:
+        if 0 < len(t) <= _LEADING_TITLE_MAX_LEN and "\n" not in t:
             return t
     return "Front Matter"
 
@@ -549,7 +555,7 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
         if not _has_real_text(head_text):
             log.info("  Skipping image-only head before first TOC anchor")
         else:
-            ch = _mk(_leading_chapter_title(head, spine_items_ordered[0]), head)
+            ch = _mk(_leading_chapter_title(head), head)
             if ch:
                 chapters.append(ch)
 
