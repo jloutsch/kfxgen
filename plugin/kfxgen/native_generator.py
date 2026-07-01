@@ -2808,6 +2808,16 @@ class NativeKFXGenerator:
             storyline_names.append(sl_name)
             self.fragments.append(frag_259)
 
+        # Register every allocated $157 style. _allocate_style only auto-tracks
+        # the chapter body (story_names) and _em/heading/link styles; per-chunk
+        # body styles (distinct block CSS or font-family) also produce $157
+        # fragments and would otherwise be orphaned ("missing from entity map").
+        registered = set(story_names) | set(extra_style_names)
+        for name in style_cache.values():
+            if name not in registered:
+                extra_style_names.append(name)
+                registered.add(name)
+
         return {
             "story_names": story_names,
             "storyline_names": storyline_names,

@@ -1433,3 +1433,25 @@ def test_fonts_registered_in_entity_map_and_index():
     # here by family name.
     assert "resource/font0" in names  # $418 fid
     assert "foo-400" not in names
+
+
+def test_per_chunk_body_styles_registered_in_entity_map():
+    # Paragraphs with differing block styles allocate distinct $157 fragments;
+    # every one must be registered or kfxlib reports "missing from entity map".
+    g = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "C1",
+            "text": "left para right para",
+            "blocks": [
+                {"text": "left para", "spans": [], "block_style": {"align": "left"}},
+                {"text": "right para", "spans": [], "block_style": {"align": "right"}},
+            ],
+        }
+    ]
+    g.generate_full_book(title="T", author="A", chapters=chapters)
+    style_fids = {str(f.fid) for f in g.fragments if str(f.ftype) == "$157"}
+    frag419 = next(f for f in g.fragments if str(f.ftype) == "$419")
+    registered = {str(s) for s in frag419.value[IS("$252")][0][IS("$181")]}
+    missing = style_fids - registered
+    assert not missing, f"$157 styles missing from $419 entity index: {missing}"
