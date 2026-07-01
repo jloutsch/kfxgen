@@ -1067,6 +1067,12 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
     log.info(f"  Chapters: {len(chapters)}")
     log.info(f"  Total content: {total_chars:,} characters")
 
+    # Build embedded-font table (#15). Empty (no faces) for books without
+    # embeddable @font-face fonts, in which case KFX output is unchanged.
+    from .font_table import build_font_table  # noqa: PLC0415
+
+    font_table = build_font_table(oeb_book, log)
+
     # Generate KFX
     log.info("Generating KFX file...")
     gen = NativeKFXGenerator()
@@ -1080,6 +1086,7 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         language=metadata["language"],
         publisher=metadata["publisher"],
         issue_date=metadata.get("issue_date"),
+        font_table=font_table,
     )
 
     if os.path.isfile(output_path):
