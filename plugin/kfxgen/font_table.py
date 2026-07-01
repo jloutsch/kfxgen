@@ -173,4 +173,6 @@ class FontTable:
             (f for f in fam_faces if f.weight < 600 and not f.italic),
             fam_faces[0],
         )
-        return (regular.emitted_family, not want_bold, not want_italic)
+        weight_ok = (regular.weight >= 600) == want_bold
+        style_ok = regular.italic == want_italic
+        return (regular.emitted_family, weight_ok, style_ok)

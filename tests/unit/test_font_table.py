@@ -221,3 +221,21 @@ def test_match_family_list_uses_first_embedded():
     t = FontTable([_face("bar", 400, False)])
     # "foo" not embedded, "bar" is -> use bar
     assert t.match(["foo", "bar"], bold=False, italic=False) == ("bar-400", True, True)
+
+
+def test_match_family_with_only_bold_italic_face_no_double_bold():
+    # Family embeds ONLY a bold-italic face; caller wants bold+upright.
+    t = FontTable([_face("foo", 700, True)])
+    fam, w_ok, s_ok = t.match(["foo"], bold=True, italic=False)
+    assert fam == "foo-700i"
+    assert w_ok is True  # face already bold -> do NOT faux-bold
+    assert s_ok is False  # face is italic but upright requested -> flag mismatch
+
+
+def test_match_family_with_only_bold_face_plain_text():
+    # Family embeds ONLY a bold face; caller wants plain regular text.
+    t = FontTable([_face("foo", 700, False)])
+    fam, w_ok, s_ok = t.match(["foo"], bold=False, italic=False)
+    assert fam == "foo-700"
+    assert w_ok is False  # face is bold, regular requested -> mismatch signalled
+    assert s_ok is True
