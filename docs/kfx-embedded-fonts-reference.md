@@ -8,19 +8,20 @@ emits them correctly instead of guessing.
 
 jhowell's `KFX Output` plugin is **not installed** locally, so the "generate a
 reference via KFX Output" recipe in `tools/README.md` was not used. Instead, the
-structure below was read directly off **KDP-produced KFX files already in the
-Calibre library**, which embed fonts. Confirmed font-embedding examples
-(fragment `$262`/`$418` present):
+structure below was read directly off **KDP-produced KFX files** (Amazon output
+embeds fonts). Any KDP `.kfx` that ships fonts works; typical counts observed
+across a handful of them:
 
-| Book | `$262` fonts | `$418` raw fonts |
-|------|-------------|------------------|
-| Accidental Medicine / Random Acts of Medicine | 16 | 16 |
-| Cravings (cookbook) | 14 | 14 |
-| Grow Your Groceries | 13 | 13 |
-| Fatal Intrusion (novel — used for the dumps below) | 12 | 12 |
+| Source (KDP) | `$262` fonts | `$418` raw fonts |
+|--------------|-------------|------------------|
+| nonfiction title | 16 | 16 |
+| cookbook | 14 | 14 |
+| how-to title | 13 | 13 |
+| novel (used for the dumps below) | 12 | 12 |
 
-Any of these is a usable reference; `Fatal Intrusion` was decoded via the
-vendored upstream `kfxlib` (`YJ_Book.decode_book()`) to read the shapes.
+Any font-embedding KDP `.kfx` is a usable reference; the novel above was decoded
+via the vendored upstream `kfxlib` (`YJ_Book.decode_book()`) to read the shapes.
+To find one, decode candidates and check for `$262`/`$418` fragments.
 
 ## The font model — three pieces
 
@@ -31,20 +32,20 @@ already emits (`$164` metadata + `$417` raw bytes, see
 ### 1. `$418` — raw font bytes (analog of `$417`)
 
 A `RAW_FRAGMENT_TYPE` whose value is an `IonBLOB` of the `.ttf`/`.otf` bytes.
-The fragment's `fid` is the font's *location* string (e.g. `resource/rsrc611`).
+The fragment's `fid` is the font's *location* string (e.g. `resource/rsrcNNN`).
 Emit exactly like `build_fragment_417` does for images:
 `YJFragment(fid=IS(location), ftype=IS("$418"), value=IonBLOB(font_bytes))`.
 
 ### 2. `$262` — the `@font-face` declaration (analog of `$164`)
 
-An `IonStruct`. Real example (Fatal Intrusion):
+An `IonStruct`. Real example (shape preserved; family name genericized):
 
 ```
-{$11: 'part0000-Black',               # font-family name (the join key)
+{$11: 'part0000-Bold',                # font-family name (the join key)
  $12: $350,                           # font-style  (value $350 = default "normal")
  $13: $350,                           # font-weight (value $350 = default "normal")
  $15: $350,                           # font-stretch(value $350 = default "normal")
- $165: 'resource/rsrc611'}            # location -> the $418 raw-font fragment fid
+ $165: 'resource/rsrcNNN'}            # location -> the $418 raw-font fragment fid
 ```
 
 Field meanings (from upstream `kfxlib/yj_to_epub_properties.py`):
@@ -61,7 +62,7 @@ Field meanings (from upstream `kfxlib/yj_to_epub_properties.py`):
 of `$12/$13/$15` whose value is `$350`. So a plain regular face carries only
 `$11` + `$165`; bold/italic faces set `$13`/`$12` to a non-`$350` weight/style
 value. KDP namespaces family names as `part0000-<Name>` (e.g.
-`part0000-ProximaNova Regular`).
+`part0000-<FamilyName> Regular`).
 
 ### 3. `$157` style — applies a font
 
@@ -69,7 +70,7 @@ A content style sets `$11` (font-family) to the `$262` font's name to render
 text in that face. Real example:
 
 ```
-{..., $11: 'part0000-proximanova regular', ...}   # matches a $262 $11 (lowercased)
+{..., $11: 'part0000-<familyname> regular', ...}  # matches a $262 $11 (lowercased)
 ```
 
 So the linkage chain is:

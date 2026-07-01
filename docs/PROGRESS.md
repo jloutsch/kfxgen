@@ -36,8 +36,8 @@ Already scoped by the #16 spike (`docs/kfx-embedded-fonts-reference.md`). Key fa
 - **#15 is generator-code-only.** Suggested phasing: (1) carry font files from OEB
   manifest → emit `$418`+`$262`; (2) map source CSS `font-family`/weight/style onto
   emitted family names + set `$11` on `$157` styles; (3) device gate.
-- Reference KFX with real fonts (no plugin install needed): KDP books in the Calibre
-  library — `Fatal Intrusion`, `Accidental Medicine`, `Cravings`.
+- Reference KFX with real fonts (no plugin install needed): any font-embedding KDP
+  `.kfx` (decode candidates, check for `$262`/`$418` fragments).
 - Biggest/riskiest remaining item; needs physical-Kindle rounds (fonts render pass/fail
   only on-device). Run as a phased plan, not one shot.
 
