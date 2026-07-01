@@ -18,6 +18,13 @@
 - **Emitted family names** are internal, deterministic, lowercased slugs shared identically between `$262.$11` and `$157.$11`.
 - **Symbols:** weight `$361` (bold) / `$350` (normal); style `$382` (italic) / `$350` (normal). `$11`/`$165` emitted as plain strings (confirm in Task 0).
 
+**Verified test conventions (use these exactly):**
+- Tests live in `tests/unit/` and `tests/integration/` (NOT `plugin/tests/`). Modules: `tests/unit/test_native_generator.py`, `tests/unit/test_inline_style.py`, `tests/unit/test_converter.py`, `tests/unit/test_font_table.py` (new), `tests/integration/test_golden_corpus.py`, `tests/integration/test_font_integration.py` (new).
+- `tests/conftest.py` already inserts `plugin/` on `sys.path`, so test files import directly: `from kfxgen.font_table import FontTable`. No per-file `sys.path` hack needed.
+- Ion: `from kfxgen.kfxlib_minimal.ion import IS, IonBLOB, IonStruct`. Symbols are built and compared with `IS("$X")` — there is no `IonSymbol` name in tests. Assert like `frag.value[IS("$13")] == IS("$361")`, `frag.ftype == IS("$418")`, `IS("$11") in frag.value`.
+- `NativeKFXGenerator()` already sets `self.symtab` in `__init__` — construct it directly, no manual symtab wiring.
+- **CACE guardrail is the existing byte-identical golden harness:** `@pytest.mark.tier3_strict` in `tests/integration/test_golden_corpus.py` SHA-256s fresh vs. committed goldens. Run `.venv/bin/python -m pytest -m tier3_strict` after Tasks 6/9/10 — it must stay green (no-font fixtures unchanged). Goldens regenerate via `python -m tests.fixtures.golden.regenerate` (only if an intentional change is expected — it should NOT be for #15).
+
 ---
 
 ## Task 0: Phase-0 spike — verify `font_face_rules` shape (investigation, no production code)
@@ -98,7 +105,7 @@ git commit -m "spike: confirm Calibre font_face_rules shape (#15 Phase 0)"
 
 **Files:**
 - Create: `plugin/kfxgen/font_table.py`
-- Test: `plugin/tests/test_font_table.py`
+- Test: `tests/unit/test_font_table.py`
 
 **Interfaces:**
 - Produces: `Face` (dataclass: `css_family: str`, `weight: int`, `italic: bool`, `data: bytes`, `emitted_family: str`, `location: str`); `is_ttf_otf(data: bytes) -> bool`; `normalize_family(name: str) -> str`; `parse_weight(v) -> int`; `parse_style(v) -> bool`.
@@ -106,7 +113,7 @@ git commit -m "spike: confirm Calibre font_face_rules shape (#15 Phase 0)"
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-# plugin/tests/test_font_table.py
+# tests/unit/test_font_table.py
 import pytest
 from kfxgen.font_table import (
     Face, is_ttf_otf, normalize_family, parse_weight, parse_style,
@@ -162,7 +169,7 @@ def test_face_is_a_dataclass():
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/python -m pytest plugin/tests/test_font_table.py -v`
+Run: `.venv/bin/python -m pytest tests/unit/test_font_table.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'kfxgen.font_table'`
 
 - [ ] **Step 3: Implement**
@@ -221,13 +228,13 @@ def parse_style(v):
 
 - [ ] **Step 4: Run to verify pass + lint**
 
-Run: `.venv/bin/python -m pytest plugin/tests/test_font_table.py -v && .venv/bin/python -m ruff check plugin/kfxgen/font_table.py && .venv/bin/python -m ruff format --check plugin/kfxgen/font_table.py`
+Run: `.venv/bin/python -m pytest tests/unit/test_font_table.py -v && .venv/bin/python -m ruff check plugin/kfxgen/font_table.py && .venv/bin/python -m ruff format --check plugin/kfxgen/font_table.py`
 Expected: all PASS, ruff clean
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add plugin/kfxgen/font_table.py plugin/tests/test_font_table.py
+git add plugin/kfxgen/font_table.py tests/unit/test_font_table.py
 git commit -m "feat: Face + font primitives for #15 font embedding"
 ```
 
@@ -237,7 +244,7 @@ git commit -m "feat: Face + font primitives for #15 font embedding"
 
 **Files:**
 - Modify: `plugin/kfxgen/font_table.py`
-- Test: `plugin/tests/test_font_table.py`
+- Test: `tests/unit/test_font_table.py`
 
 **Interfaces:**
 - Consumes: `Face`, `is_ttf_otf`, `normalize_family`, `parse_weight`, `parse_style` (Task 1).
@@ -246,7 +253,7 @@ git commit -m "feat: Face + font primitives for #15 font embedding"
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-# append to plugin/tests/test_font_table.py
+# append to tests/unit/test_font_table.py
 from kfxgen.font_table import extract_src_urls, emitted_name, faces_from_rules
 
 
@@ -319,7 +326,7 @@ def test_faces_from_rules_skips_rule_without_family():
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/python -m pytest plugin/tests/test_font_table.py -k "src or emitted or faces_from" -v`
+Run: `.venv/bin/python -m pytest tests/unit/test_font_table.py -k "src or emitted or faces_from" -v`
 Expected: FAIL — `ImportError: cannot import name 'faces_from_rules'`
 
 - [ ] **Step 3: Implement**
@@ -402,13 +409,13 @@ def faces_from_rules(rules, manifest_lookup, log):
 
 - [ ] **Step 4: Run to verify pass + lint**
 
-Run: `.venv/bin/python -m pytest plugin/tests/test_font_table.py -v && .venv/bin/python -m ruff check plugin/kfxgen/font_table.py && .venv/bin/python -m ruff format --check plugin/kfxgen/font_table.py`
+Run: `.venv/bin/python -m pytest tests/unit/test_font_table.py -v && .venv/bin/python -m ruff check plugin/kfxgen/font_table.py && .venv/bin/python -m ruff format --check plugin/kfxgen/font_table.py`
 Expected: all PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add plugin/kfxgen/font_table.py plugin/tests/test_font_table.py
+git add plugin/kfxgen/font_table.py tests/unit/test_font_table.py
 git commit -m "feat: faces_from_rules parsing + dedup for #15"
 ```
 
@@ -418,7 +425,7 @@ git commit -m "feat: faces_from_rules parsing + dedup for #15"
 
 **Files:**
 - Modify: `plugin/kfxgen/font_table.py`
-- Test: `plugin/tests/test_font_table.py`
+- Test: `tests/unit/test_font_table.py`
 
 **Interfaces:**
 - Consumes: `Face` (Task 1).
@@ -427,7 +434,7 @@ git commit -m "feat: faces_from_rules parsing + dedup for #15"
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-# append to plugin/tests/test_font_table.py
+# append to tests/unit/test_font_table.py
 from kfxgen.font_table import FontTable
 
 
@@ -477,7 +484,7 @@ def test_match_family_list_uses_first_embedded():
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/python -m pytest plugin/tests/test_font_table.py -k match -v`
+Run: `.venv/bin/python -m pytest tests/unit/test_font_table.py -k match -v`
 Expected: FAIL — `ImportError: cannot import name 'FontTable'`
 
 - [ ] **Step 3: Implement**
@@ -525,13 +532,13 @@ class FontTable:
 
 - [ ] **Step 4: Run to verify pass + lint**
 
-Run: `.venv/bin/python -m pytest plugin/tests/test_font_table.py -v && .venv/bin/python -m ruff check plugin/kfxgen/font_table.py && .venv/bin/python -m ruff format --check plugin/kfxgen/font_table.py`
+Run: `.venv/bin/python -m pytest tests/unit/test_font_table.py -v && .venv/bin/python -m ruff check plugin/kfxgen/font_table.py && .venv/bin/python -m ruff format --check plugin/kfxgen/font_table.py`
 Expected: all PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add plugin/kfxgen/font_table.py plugin/tests/test_font_table.py
+git add plugin/kfxgen/font_table.py tests/unit/test_font_table.py
 git commit -m "feat: FontTable.match face matching for #15"
 ```
 
@@ -541,7 +548,7 @@ git commit -m "feat: FontTable.match face matching for #15"
 
 **Files:**
 - Modify: `plugin/kfxgen/font_table.py`
-- Test: `plugin/tests/test_font_table.py`
+- Test: `tests/unit/test_font_table.py`
 
 **Interfaces:**
 - Consumes: `faces_from_rules`, `FontTable`.
@@ -550,7 +557,7 @@ git commit -m "feat: FontTable.match face matching for #15"
 - [ ] **Step 1: Write the failing tests** (no Calibre — inject fakes)
 
 ```python
-# append to plugin/tests/test_font_table.py
+# append to tests/unit/test_font_table.py
 from kfxgen.font_table import build_font_table, build_manifest_lookup
 
 
@@ -599,7 +606,7 @@ def test_build_font_table_empty_when_no_fonts():
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/python -m pytest plugin/tests/test_font_table.py -k "manifest_lookup or build_font_table" -v`
+Run: `.venv/bin/python -m pytest tests/unit/test_font_table.py -k "manifest_lookup or build_font_table" -v`
 Expected: FAIL — `ImportError: cannot import name 'build_font_table'`
 
 - [ ] **Step 3: Implement**
@@ -666,13 +673,13 @@ def build_font_table(oeb_book, log, stylizer_factory=None):
 
 - [ ] **Step 4: Run + lint**
 
-Run: `.venv/bin/python -m pytest plugin/tests/test_font_table.py -v && .venv/bin/python -m ruff check plugin/kfxgen/font_table.py && .venv/bin/python -m ruff format --check plugin/kfxgen/font_table.py`
+Run: `.venv/bin/python -m pytest tests/unit/test_font_table.py -v && .venv/bin/python -m ruff check plugin/kfxgen/font_table.py && .venv/bin/python -m ruff format --check plugin/kfxgen/font_table.py`
 Expected: all PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add plugin/kfxgen/font_table.py plugin/tests/test_font_table.py
+git add plugin/kfxgen/font_table.py tests/unit/test_font_table.py
 git commit -m "feat: build_font_table Calibre integration for #15"
 ```
 
@@ -682,7 +689,7 @@ git commit -m "feat: build_font_table Calibre integration for #15"
 
 **Files:**
 - Modify: `plugin/kfxgen/native_generator.py` (add methods near `build_fragment_417`, after line 327)
-- Test: `plugin/tests/test_native_generator.py` (or the existing generator test module — match the repo's location)
+- Test: `tests/unit/test_native_generator.py`
 
 **Interfaces:**
 - Consumes: `Face` (for descriptor values via `weight`/`italic`).
@@ -691,54 +698,41 @@ git commit -m "feat: build_font_table Calibre integration for #15"
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-# append to the generator test module
-import pytest
-from kfxgen.native_generator import NativeKFXGenerator
-from kfxgen.kfxlib_minimal.ion import IonBLOB, IonSymbol
-
-pytestmark = pytest.mark.unit
-
-
-def _new_gen():
-    g = NativeKFXGenerator()
-    from kfxgen.native_generator import StandardSymbolTable
-    g.symtab = StandardSymbolTable()
-    return g
+# add to imports at top of tests/unit/test_native_generator.py
+from kfxgen.kfxlib_minimal.ion import IS, IonBLOB  # noqa: E402
 
 
 def test_build_fragment_418_is_raw_blob():
-    g = _new_gen()
+    g = NativeKFXGenerator()  # __init__ sets self.symtab
     frag = g.build_fragment_418("resource/font0", b"\x00\x01\x00\x00data")
-    assert str(frag.ftype) == "$418"
-    assert str(frag.fid) == "resource/font0"
+    assert frag.ftype == IS("$418")
+    assert frag.fid == IS("resource/font0")
     assert isinstance(frag.value, IonBLOB)
     assert bytes(frag.value) == b"\x00\x01\x00\x00data"
 
 
 def test_build_fragment_262_regular_omits_descriptors():
-    g = _new_gen()
+    g = NativeKFXGenerator()
     frag = g.build_fragment_262("foo-400", "resource/font0", weight=400, italic=False)
-    assert str(frag.ftype) == "$262"
+    assert frag.ftype == IS("$262")
     v = frag.value
-    assert v[IonSymbol("$11")] == "foo-400"
-    assert v[IonSymbol("$165")] == "resource/font0"
-    assert IonSymbol("$13") not in v   # normal weight omitted
-    assert IonSymbol("$12") not in v   # upright omitted
+    assert v[IS("$11")] == "foo-400"
+    assert v[IS("$165")] == "resource/font0"
+    assert IS("$13") not in v   # normal weight omitted
+    assert IS("$12") not in v   # upright omitted
 
 
 def test_build_fragment_262_bold_italic_sets_descriptors():
-    g = _new_gen()
+    g = NativeKFXGenerator()
     frag = g.build_fragment_262("foo-700i", "resource/font1", weight=700, italic=True)
     v = frag.value
-    assert v[IonSymbol("$13")] == IonSymbol("$361")  # bold
-    assert v[IonSymbol("$12")] == IonSymbol("$382")  # italic
+    assert v[IS("$13")] == IS("$361")  # bold
+    assert v[IS("$12")] == IS("$382")  # italic
 ```
-
-> If the repo's Ion import path differs (check an existing generator test's imports), use that path. Do not invent one.
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/python -m pytest <generator test module> -k "418 or 262" -v`
+Run: `.venv/bin/python -m pytest tests/unit/test_native_generator.py -k "418 or 262" -v`
 Expected: FAIL — `AttributeError: 'NativeKFXGenerator' object has no attribute 'build_fragment_418'`
 
 - [ ] **Step 3: Implement** (insert after `build_fragment_417`, ~line 327)
@@ -776,13 +770,13 @@ Expected: FAIL — `AttributeError: 'NativeKFXGenerator' object has no attribute
 
 - [ ] **Step 4: Run + lint**
 
-Run: `.venv/bin/python -m pytest <generator test module> -k "418 or 262" -v && .venv/bin/python -m ruff check plugin/kfxgen/native_generator.py && .venv/bin/python -m ruff format --check plugin/kfxgen/native_generator.py`
+Run: `.venv/bin/python -m pytest tests/unit/test_native_generator.py -k "418 or 262" -v && .venv/bin/python -m ruff check plugin/kfxgen/native_generator.py && .venv/bin/python -m ruff format --check plugin/kfxgen/native_generator.py`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add plugin/kfxgen/native_generator.py <generator test module>
+git add plugin/kfxgen/native_generator.py tests/unit/test_native_generator.py
 git commit -m "feat: build_fragment_418/262 font fragments for #15"
 ```
 
@@ -830,7 +824,7 @@ def test_generate_full_book_no_font_table_emits_no_font_fragments():
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/python -m pytest <generator test module> -k "emits_font or no_font_table" -v`
+Run: `.venv/bin/python -m pytest tests/unit/test_native_generator.py -k "emits_font or no_font_table" -v`
 Expected: FAIL — `TypeError: generate_full_book() got an unexpected keyword argument 'font_table'`
 
 - [ ] **Step 3: Implement**
@@ -863,13 +857,13 @@ Add the emission loop immediately after the image emission block (after line 183
 
 - [ ] **Step 4: Run + lint + full suite (catch regressions early)**
 
-Run: `.venv/bin/python -m pytest <generator test module> -k "emits_font or no_font_table" -v && .venv/bin/python -m pytest -q && .venv/bin/python -m ruff check plugin/kfxgen/native_generator.py && .venv/bin/python -m ruff format --check plugin/kfxgen/native_generator.py`
+Run: `.venv/bin/python -m pytest tests/unit/test_native_generator.py -k "emits_font or no_font_table" -v && .venv/bin/python -m pytest -q && .venv/bin/python -m ruff check plugin/kfxgen/native_generator.py && .venv/bin/python -m ruff format --check plugin/kfxgen/native_generator.py`
 Expected: new tests PASS; full suite still 444 passed / 12 skipped
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add plugin/kfxgen/native_generator.py <generator test module>
+git add plugin/kfxgen/native_generator.py tests/unit/test_native_generator.py
 git commit -m "feat: emit $418/$262 font fragments in generate_full_book (#15)"
 ```
 
@@ -889,22 +883,22 @@ git commit -m "feat: emit $418/$262 font fragments in generate_full_book (#15)"
 ```python
 # append to generator test module
 def test_build_fragment_157_sets_font_family():
-    g = _new_gen()
+    g = NativeKFXGenerator()
     g.next_entity_id = 1
     frag = g.build_fragment_157(entity_name="s0", font_family="foo-400")
-    assert frag.value[IonSymbol("$11")] == "foo-400"
+    assert frag.value[IS("$11")] == "foo-400"
 
 
 def test_build_fragment_157_without_font_family_omits_11():
-    g = _new_gen()
+    g = NativeKFXGenerator()
     g.next_entity_id = 1
     frag = g.build_fragment_157(entity_name="s0")
-    assert IonSymbol("$11") not in frag.value
+    assert IS("$11") not in frag.value
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/python -m pytest <generator test module> -k "157_sets_font or 157_without_font" -v`
+Run: `.venv/bin/python -m pytest tests/unit/test_native_generator.py -k "157_sets_font or 157_without_font" -v`
 Expected: FAIL — `TypeError: build_fragment_157() got an unexpected keyword argument 'font_family'`
 
 - [ ] **Step 3: Implement**
@@ -922,13 +916,13 @@ Add after the `italic` block (after line 1059, `value[IS("$12")] = IS("$382")`):
 
 - [ ] **Step 4: Run + lint**
 
-Run: `.venv/bin/python -m pytest <generator test module> -k "157_sets_font or 157_without_font" -v && .venv/bin/python -m ruff check plugin/kfxgen/native_generator.py && .venv/bin/python -m ruff format --check plugin/kfxgen/native_generator.py`
+Run: `.venv/bin/python -m pytest tests/unit/test_native_generator.py -k "157_sets_font or 157_without_font" -v && .venv/bin/python -m ruff check plugin/kfxgen/native_generator.py && .venv/bin/python -m ruff format --check plugin/kfxgen/native_generator.py`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add plugin/kfxgen/native_generator.py <generator test module>
+git add plugin/kfxgen/native_generator.py tests/unit/test_native_generator.py
 git commit -m "feat: build_fragment_157 font_family ($11) param for #15"
 ```
 
@@ -939,7 +933,7 @@ git commit -m "feat: build_fragment_157 font_family ($11) param for #15"
 **Files:**
 - Modify: `plugin/kfxgen/inline_style.py` (`compute_block_style` ~107-128)
 - Modify: `plugin/kfxgen/converter.py` (`_build_style_resolver.resolve` dict ~41-46)
-- Test: `plugin/tests/test_inline_style.py`
+- Test: `tests/unit/test_inline_style.py`
 
 **Interfaces:**
 - Produces: `compute_block_style(css)` output now includes `"font_family": list[str]` (ordered, normalized, lowercased; `[]` when absent). Resolver dict includes `"font-family"`.
@@ -947,7 +941,7 @@ git commit -m "feat: build_fragment_157 font_family ($11) param for #15"
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# append to plugin/tests/test_inline_style.py
+# append to tests/unit/test_inline_style.py
 from kfxgen.inline_style import compute_block_style
 
 
@@ -963,7 +957,7 @@ def test_compute_block_style_font_family_empty_when_absent():
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/python -m pytest plugin/tests/test_inline_style.py -k font_family -v`
+Run: `.venv/bin/python -m pytest tests/unit/test_inline_style.py -k font_family -v`
 Expected: FAIL — `KeyError: 'font_family'`
 
 - [ ] **Step 3: Implement**
@@ -997,13 +991,13 @@ In `converter.py` `_build_style_resolver.resolve`, add to the returned dict (aft
 
 - [ ] **Step 4: Run + lint**
 
-Run: `.venv/bin/python -m pytest plugin/tests/test_inline_style.py -v && .venv/bin/python -m ruff check plugin/kfxgen/inline_style.py plugin/kfxgen/converter.py && .venv/bin/python -m ruff format --check plugin/kfxgen/inline_style.py plugin/kfxgen/converter.py`
+Run: `.venv/bin/python -m pytest tests/unit/test_inline_style.py -v && .venv/bin/python -m ruff check plugin/kfxgen/inline_style.py plugin/kfxgen/converter.py && .venv/bin/python -m ruff format --check plugin/kfxgen/inline_style.py plugin/kfxgen/converter.py`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add plugin/kfxgen/inline_style.py plugin/kfxgen/converter.py plugin/tests/test_inline_style.py
+git add plugin/kfxgen/inline_style.py plugin/kfxgen/converter.py tests/unit/test_inline_style.py
 git commit -m "feat: capture font-family in block style for #15"
 ```
 
@@ -1043,7 +1037,7 @@ def test_font_applied_to_body_and_emphasis_runs():
     g.generate_full_book(title="T", author="A", chapters=[chapter],
                          font_table=FontTable([face_r, face_b]))
     styles = [f for f in g.fragments if str(f.ftype) == "$157"]
-    fams = {f.value[IonSymbol("$11")] for f in styles if IonSymbol("$11") in f.value}
+    fams = {f.value[IS("$11")] for f in styles if IS("$11") in f.value}
     assert "foo-400" in fams   # body run in regular face
     assert "foo-700" in fams   # bold run in the real bold face (no synthetic $13)
 ```
@@ -1052,7 +1046,7 @@ def test_font_applied_to_body_and_emphasis_runs():
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/python -m pytest <generator test module> -k font_applied -v`
+Run: `.venv/bin/python -m pytest tests/unit/test_native_generator.py -k font_applied -v`
 Expected: FAIL — `$11` families absent (application not wired)
 
 - [ ] **Step 3: Implement**
@@ -1110,13 +1104,13 @@ Also update the per-chapter body style at 2537 so plain (unspanned) paragraphs t
 
 - [ ] **Step 4: Run + full suite (CACE check)**
 
-Run: `.venv/bin/python -m pytest <generator test module> -k font_applied -v && .venv/bin/python -m pytest -q && .venv/bin/python -m ruff check plugin/kfxgen/native_generator.py && .venv/bin/python -m ruff format --check plugin/kfxgen/native_generator.py`
+Run: `.venv/bin/python -m pytest tests/unit/test_native_generator.py -k font_applied -v && .venv/bin/python -m pytest -q && .venv/bin/python -m ruff check plugin/kfxgen/native_generator.py && .venv/bin/python -m ruff format --check plugin/kfxgen/native_generator.py`
 Expected: new test PASS; full suite unchanged (444 passed / 12 skipped) — proves no-font books untouched
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add plugin/kfxgen/native_generator.py <generator test module>
+git add plugin/kfxgen/native_generator.py tests/unit/test_native_generator.py
 git commit -m "feat: apply matched fonts to body + emphasis $157 styles (#15)"
 ```
 
@@ -1126,30 +1120,17 @@ git commit -m "feat: apply matched fonts to body + emphasis $157 styles (#15)"
 
 **Files:**
 - Modify: `plugin/kfxgen/converter.py` (build table ~1064; pass to `generate_full_book` ~1072)
-- Test: `plugin/tests/` — a byte-identical golden test if the repo has a tier3/golden harness (see `test_*golden*`/`tier3`); otherwise a converter-level test asserting no `$418`/`$262` for a no-font book.
+- Test: the CACE guardrail is the **existing** byte-identical golden harness — `tests/integration/test_golden_corpus.py` (`@pytest.mark.tier3_strict`). No new golden test needed; running it after the wiring proves no-font books are untouched. Optionally add a converter-level assertion in `tests/unit/test_converter.py`.
 
 **Interfaces:**
 - Consumes: `build_font_table` (Task 4), `generate_full_book(font_table=...)` (Task 6).
 
-- [ ] **Step 1: Write the failing / guardrail test**
+- [ ] **Step 1: Establish the guardrail baseline**
 
-```python
-# In the converter/golden test module. If a byte-stable golden harness exists
-# (deterministic container id per #89), assert a no-font EPUB fixture converts
-# byte-identically to its committed golden. Otherwise:
-def test_no_font_book_emits_no_font_fragments_end_to_end():
-    # Convert an existing no-font EPUB fixture through the full converter and
-    # assert the generated fragments contain no $418/$262. Reuse whatever
-    # fixture + conversion helper the existing converter tests use.
-    ...
-```
+Run the byte-identical golden corpus BEFORE wiring, to confirm it's green on `main` and you have a clean baseline:
 
-> Locate the existing converter/golden test module and its fixtures first; mirror its setup exactly rather than inventing a harness.
-
-- [ ] **Step 2: Run to verify baseline**
-
-Run: `.venv/bin/python -m pytest <converter/golden test module> -v`
-Expected: baseline PASS (guardrail should already hold since Task 9 kept the suite green)
+Run: `.venv/bin/python -m pytest -m tier3_strict -v`
+Expected: PASS — every committed golden SHA-256 matches a fresh build. (These fixtures embed no fonts, so they are the regression oracle for Task 10.)
 
 - [ ] **Step 3: Implement the wiring**
 
@@ -1164,15 +1145,15 @@ After chapter extraction (~line 1064), before the generate call:
 
 Add `font_table=font_table,` to the `gen.generate_full_book(...)` call (after `issue_date=...`, line 1081).
 
-- [ ] **Step 4: Run + full suite**
+- [ ] **Step 4: Run full suite + byte-identical guardrail**
 
-Run: `.venv/bin/python -m pytest -q && .venv/bin/python -m ruff check plugin/kfxgen/converter.py && .venv/bin/python -m ruff format --check plugin/kfxgen/converter.py`
-Expected: full suite green; no-font golden byte-identical
+Run: `.venv/bin/python -m pytest -q && .venv/bin/python -m pytest -m tier3_strict -v && .venv/bin/python -m ruff check plugin/kfxgen/converter.py && .venv/bin/python -m ruff format --check plugin/kfxgen/converter.py`
+Expected: full suite green; **`tier3_strict` still byte-identical** (no golden drift → no-font books untouched). If a golden SHA changes, STOP — the `emitted_family is None` guardrail regressed; do not regenerate goldens.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add plugin/kfxgen/converter.py <converter/golden test module>
+git add plugin/kfxgen/converter.py tests/unit/test_converter.py
 git commit -m "feat: wire font embedding into converter pipeline (#15)"
 ```
 
@@ -1181,8 +1162,8 @@ git commit -m "feat: wire font embedding into converter pipeline (#15)"
 ## Task 11: Integration test — real EPUB round-trip (tier-2)
 
 **Files:**
-- Create: `plugin/tests/fixtures/font_embed.epub` (tiny EPUB: one TTF `@font-face` applied to body text, plus a bold face)
-- Test: `plugin/tests/test_font_integration.py`
+- Create: `tests/fixtures/font_embed.epub` (tiny EPUB: one TTF `@font-face` applied to body text, plus a bold face)
+- Test: `tests/integration/test_font_integration.py`
 
 **Interfaces:**
 - Consumes: full converter path + `build_font_table` (needs Calibre `Stylizer` → `@pytest.mark.integration`).
@@ -1194,7 +1175,7 @@ Create a minimal EPUB embedding a small open-license TTF (e.g. a single-weight d
 - [ ] **Step 2: Write the integration test**
 
 ```python
-# plugin/tests/test_font_integration.py
+# tests/integration/test_font_integration.py
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -1214,13 +1195,13 @@ def test_font_embed_epub_round_trips_fonts():
 
 - [ ] **Step 3: Run (tier-2)**
 
-Run: `.venv/bin/python -m pytest plugin/tests/test_font_integration.py -v`
+Run: `.venv/bin/python -m pytest tests/integration/test_font_integration.py -v`
 Expected: PASS where Calibre is available; SKIP in bare CI (consistent with existing tier-2)
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add plugin/tests/test_font_integration.py plugin/tests/fixtures/font_embed.epub
+git add tests/integration/test_font_integration.py tests/fixtures/font_embed.epub
 git commit -m "test: tier-2 integration for #15 font embedding"
 ```
 
