@@ -110,3 +110,42 @@ exists (used for `$417` images), so `$418` reuses that path.
 
 The existing image path (`build_fragment_164` + `build_fragment_417` +
 `extract_images_from_oeb`) is the closest template to copy.
+
+## Device-gate outcome (#15, resolved 2026-07-02)
+
+Fonts embed and render on a physical Kindle. Verified by decoding kfxgen's own
+output with jhowell's `kfxlib` (installed locally as *KFX Input.zip*) and by
+sideloading three test books (see `test_books/font-matching-test/` + the
+inline-emphasis variant). Open questions 4 and 5 above are now answered:
+
+- **Item 4 — `$593` capability flag: NOT required.** Fonts render without any
+  `kindle_capability_metadata` entry. The list stays empty.
+- **Item 5 — device gate: PASS.** Regular, bold, italic, and bold-italic
+  embedded faces all render distinctly; a family that ships only a regular face
+  gets synthesized bold; non-embedded families fall back to the device font.
+
+Faults found and fixed to get there (all verified via `kfxlib` decode +
+device):
+
+1. **`$262` must be keyed `fid="$262"`** in a final (non-KPF-prepub) KFX — it is
+   a `ROOT_FRAGMENT_TYPE`, so `fid` must equal the ftype. The family name lives
+   only in `$11`; multiple faces are separate `$262` fragments all sharing
+   `fid="$262"` (mirrors `kfxlib/kpf_book.py`, which re-keys prepub family-named
+   `$262` to `"$262"`). Keying `$262` by family name → *"Root fragment has
+   unexpected id"*.
+2. **Register font fragments** in the `$270` entity map and `$419` entity index:
+   each `$418` location must be listed (self-keyed `$262` registers as
+   `[262, 262]`). Otherwise → *"missing from entity map"* and the reader ignores
+   them.
+3. **`override_kindle_font = True`** in `$490` when fonts are embedded, else the
+   device font wins by default.
+4. **Attach conversion `opts` to the OEB** (`_ensure_oeb_opts`) — Calibre's
+   OEB has no `.opts` in the output-plugin path, so the Stylizer (which parses
+   `@font-face` and computes per-element CSS) could not be constructed.
+5. **Read inherited `font-family` via `Style[prop]`, not `Style.get()`** — the
+   latter returns `None` for values inherited from `<body>`, which is where most
+   books declare the family.
+
+**Known limitation:** paragraph-level bold/italic set via CSS class
+(`p.foo { font-weight: bold }`) is not carried onto the font match — only inline
+`<b>`/`<i>`/`<strong>`/`<em>` runs are (shared #9 run model). Tracked separately.

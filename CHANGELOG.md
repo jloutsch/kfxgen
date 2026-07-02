@@ -15,15 +15,35 @@ declaration) — and `FontTable.match()` sets `$11` (font-family) on the relevan
 `$157` styles, with `override_kindle_font` implied per style. Real bold/italic
 faces suppress the synthetic weight/slant that would otherwise be applied.
 
+**Making it render (device-gate fixes).** Structural verification against
+jhowell's `kfxlib` and on-device testing exposed several faults that made the
+Kindle ignore embedded fonts; all are fixed:
+
+- **Stylizer never ran.** Calibre passes conversion `opts` as a separate arg;
+  the OEB has no `.opts`, so `@font-face` extraction (and the #9 block-CSS
+  resolver) silently no-op'd. `_ensure_oeb_opts` attaches opts to the OEB.
+- **Inherited `font-family` was dropped.** `Style.get("font-family")` returns
+  `None` when inherited from `<body>`; `Style[...]` returns the computed value.
+  Since most books set `body { font-family }`, embedding applied to no text.
+  Fixed via `_computed_value` (getitem).
+- **Font fragments were orphaned.** `$262`/`$418` weren't in the `$270` entity
+  map / `$419` index, so the reader couldn't resolve them. Now registered.
+- **`$262` keyed wrong.** As a root fragment it must be keyed `fid="$262"` in a
+  final KFX (not the family name); the family lives in `$11`.
+- **`override_kindle_font`** is set `True` when the book embeds fonts so the
+  embedded face is the default (the reader can still switch).
+- Per-chunk body `$157` styles are now registered too.
+
+**Verified on a physical Kindle:** embedded faces render (regular / bold /
+italic / bold-italic), non-embedded families fall back to the device font, and
+no `$593` capability flag is required. **Known limitation:** paragraph bold/italic
+expressed via CSS class (`p { font-weight: bold }`) is not carried — only inline
+`<b>`/`<i>`/`<strong>`/`<em>` runs are (the #9 run model).
+
 **Scope:** TrueType/OpenType only (WOFF/WOFF2 are skipped with a warning; no new
 dependencies). Books with no embeddable fonts produce byte-identical output to
 5.3.23 — guaranteed by the `emitted_family is None` path and the tier3_strict
 golden corpus.
-
-> Device verification pending: kfxgen `.kfx` cannot be rendered on desktop, so
-> on-device font rendering (and whether a `$593` capability flag is required)
-> must be confirmed by sideloading to a physical Kindle before release. See
-> `docs/kfx-embedded-fonts-reference.md`.
 
 ## 5.3.23 — Dynamic section-position base (#30)
 

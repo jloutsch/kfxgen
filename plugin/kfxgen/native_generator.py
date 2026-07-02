@@ -2142,7 +2142,7 @@ class NativeKFXGenerator:
         # 262) + $418 (raw bytes, keyed by location). Without these the reader
         # can't resolve the font resources and falls back to the device font.
         for face in self.font_table.faces:
-            entity_map.append([262, get_id(IS("$262"))])
+            entity_map.append([262, get_id("$262")])
             entity_map.append([418, get_id(face.location)])
         entity_map.extend(
             [
