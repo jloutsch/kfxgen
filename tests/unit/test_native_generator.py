@@ -17,6 +17,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin"))
 
 from kfxgen.native_generator import NativeKFXGenerator  # noqa: E402
+from kfxgen.kfxlib_minimal.ion import IS, IonBLOB  # noqa: E402
 
 from tests._helpers import MINIMAL_JPEG  # noqa: E402
 
@@ -1266,3 +1267,245 @@ def test_no_block_style_keeps_default_margins(tmp_path):
         if IS("$48") in f.value:
             assert f.value[IS("$48")][IS("$306")] == IS("$314")  # default % unit
         assert IS("$50") not in f.value  # margin-right never default
+
+
+def test_build_fragment_418_is_raw_blob():
+    g = NativeKFXGenerator()  # __init__ sets self.symtab
+    frag = g.build_fragment_418("resource/font0", b"\x00\x01\x00\x00data")
+    assert frag.ftype == IS("$418")
+    assert frag.fid == IS("resource/font0")
+    assert isinstance(frag.value, IonBLOB)
+    assert bytes(frag.value) == b"\x00\x01\x00\x00data"
+
+
+def test_build_fragment_262_regular_omits_descriptors():
+    g = NativeKFXGenerator()
+    frag = g.build_fragment_262("foo-400", "resource/font0", weight=400, italic=False)
+    assert frag.ftype == IS("$262")
+    # $262 is a self-keyed root fragment in final KFX: fid == "$262", NOT the
+    # family name (kfxlib rejects family-named $262 outside KPF prepub).
+    assert frag.fid == IS("$262")
+    v = frag.value
+    assert v[IS("$11")] == "foo-400"
+    assert v[IS("$165")] == "resource/font0"
+    assert IS("$13") not in v  # normal weight omitted
+    assert IS("$12") not in v  # upright omitted
+
+
+def test_build_fragment_262_bold_italic_sets_descriptors():
+    g = NativeKFXGenerator()
+    frag = g.build_fragment_262("foo-700i", "resource/font1", weight=700, italic=True)
+    v = frag.value
+    assert v[IS("$13")] == IS("$361")  # bold
+    assert v[IS("$12")] == IS("$382")  # italic
+
+
+def test_generate_full_book_emits_font_fragments():
+    from kfxgen.font_table import FontTable, Face
+
+    g = NativeKFXGenerator()
+    face = Face(
+        css_family="foo",
+        weight=700,
+        italic=False,
+        data=b"\x00\x01\x00\x00fontbytes",
+        emitted_family="foo-700",
+        location="resource/font0",
+    )
+    g.generate_full_book(
+        title="T",
+        author="A",
+        chapters=[{"title": "C1", "text": "Hello world."}],
+        font_table=FontTable([face]),
+    )
+    types = [str(f.ftype) for f in g.fragments]
+    assert "$418" in types
+    assert "$262" in types
+
+
+def test_generate_full_book_no_font_table_emits_no_font_fragments():
+    g = NativeKFXGenerator()
+    g.generate_full_book(
+        title="T", author="A", chapters=[{"title": "C1", "text": "Hi."}]
+    )
+    types = [str(f.ftype) for f in g.fragments]
+    assert "$418" not in types and "$262" not in types
+
+
+def test_build_fragment_157_sets_font_family():
+    g = NativeKFXGenerator()
+    g.next_entity_id = 1
+    frag = g.build_fragment_157(entity_name="s0", font_family="foo-400")
+    assert frag.value[IS("$11")] == "foo-400"
+
+
+def test_build_fragment_157_without_font_family_omits_11():
+    g = NativeKFXGenerator()
+    g.next_entity_id = 1
+    frag = g.build_fragment_157(entity_name="s0")
+    assert IS("$11") not in frag.value
+
+
+def test_font_applied_to_body_and_emphasis_runs():
+    # Mirrors the real chapter shape: a "blocks" list of {text, spans,
+    # block_style}. One paragraph in family "foo" with a bold span. The body
+    # run resolves to the regular face; the bold span resolves to the real
+    # bold face (no synthetic $13 needed).
+    from kfxgen.font_table import Face, FontTable
+    from kfxgen.inline_style import FLAG_BOLD
+
+    g = NativeKFXGenerator()
+    face_r = Face("foo", 400, False, b"\x00\x01\x00\x00r", "foo-400", "resource/font0")
+    face_b = Face("foo", 700, False, b"\x00\x01\x00\x00b", "foo-700", "resource/font1")
+    chapter = {
+        "title": "C1",
+        "text": "Normal bold.",
+        "blocks": [
+            {
+                "text": "Normal bold.",
+                "spans": [(7, 4, frozenset({FLAG_BOLD}))],
+                "block_style": {"font_family": ["foo"]},
+            }
+        ],
+    }
+    g.generate_full_book(
+        title="T",
+        author="A",
+        chapters=[chapter],
+        font_table=FontTable([face_r, face_b]),
+    )
+    styles = [f for f in g.fragments if str(f.ftype) == "$157"]
+    fams = {f.value[IS("$11")] for f in styles if IS("$11") in f.value}
+    assert "foo-400" in fams  # body run in the regular face
+    assert "foo-700" in fams  # bold run in the real bold face
+
+
+def _override_kindle_font(frag):
+    """Pull the override_kindle_font value out of a $490 book-metadata frag."""
+    for elem in frag.value[IS("$491")]:
+        if IS("$495") in elem and elem[IS("$495")] == "kindle_title_metadata":
+            for e in elem[IS("$258")]:
+                if IS("$492") in e and e[IS("$492")] == "override_kindle_font":
+                    return e[IS("$307")]
+    return None
+
+
+def test_override_kindle_font_true_when_fonts_embedded():
+    from kfxgen.font_table import Face, FontTable
+
+    g = NativeKFXGenerator()
+    g.font_table = FontTable(
+        [Face("foo", 400, False, b"\x00\x01\x00\x00", "foo-400", "resource/font0")]
+    )
+    frag = g.build_fragment_490("T", "A", "asin", "cid")
+    # Embedded fonts must win over the device's selected font.
+    assert _override_kindle_font(frag) is True
+
+
+def test_override_kindle_font_false_without_fonts():
+    g = NativeKFXGenerator()  # empty font_table -> respect device font
+    frag = g.build_fragment_490("T", "A", "asin", "cid")
+    assert _override_kindle_font(frag) is False
+
+
+def test_fonts_registered_in_entity_map_and_index():
+    # kfxlib rejects font fragments that aren't registered in the $270 entity
+    # map / $419 entity index ("missing from entity map"), which stops the
+    # Kindle from resolving them. Every emitted face must appear in both.
+    from kfxgen.font_table import Face, FontTable
+
+    g = NativeKFXGenerator()
+    face = Face("foo", 400, False, b"\x00\x01\x00\x00x", "foo-400", "resource/font0")
+    g.generate_full_book(
+        title="T",
+        author="A",
+        chapters=[{"title": "C1", "text": "Hi."}],
+        font_table=FontTable([face]),
+    )
+    frag270 = next(f for f in g.fragments if str(f.ftype) == "$270")
+    ftypes = {pair[0] for pair in frag270.value[IS("$181")]}
+    assert 262 in ftypes  # @font-face decl registered
+    assert 418 in ftypes  # raw font bytes registered
+
+    frag419 = next(f for f in g.fragments if str(f.ftype) == "$419")
+    names = {str(s) for s in frag419.value[IS("$252")][0][IS("$181")]}
+    # $418 raw-font location is registered; $262 is self-keyed so not listed
+    # here by family name.
+    assert "resource/font0" in names  # $418 fid
+    assert "foo-400" not in names
+
+
+def test_per_chunk_body_styles_registered_in_entity_map():
+    # Paragraphs with differing block styles allocate distinct $157 fragments;
+    # every one must be registered or kfxlib reports "missing from entity map".
+    g = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "C1",
+            "text": "left para right para",
+            "blocks": [
+                {"text": "left para", "spans": [], "block_style": {"align": "left"}},
+                {"text": "right para", "spans": [], "block_style": {"align": "right"}},
+            ],
+        }
+    ]
+    g.generate_full_book(title="T", author="A", chapters=chapters)
+    style_fids = {str(f.fid) for f in g.fragments if str(f.ftype) == "$157"}
+    frag419 = next(f for f in g.fragments if str(f.ftype) == "$419")
+    registered = {str(s) for s in frag419.value[IS("$252")][0][IS("$181")]}
+    missing = style_fids - registered
+    assert not missing, f"$157 styles missing from $419 entity index: {missing}"
+
+
+def test_block_level_bold_selects_bold_face():
+    # A paragraph made bold via CSS (block_style bold=True), no inline tags,
+    # must resolve to the embedded bold face (#15 follow-up: #34).
+    from kfxgen.font_table import Face, FontTable
+
+    g = NativeKFXGenerator()
+    face_r = Face("foo", 400, False, b"\x00\x01\x00\x00r", "foo-400", "resource/font0")
+    face_b = Face("foo", 700, False, b"\x00\x01\x00\x00b", "foo-700", "resource/font1")
+    chapter = {
+        "title": "C1",
+        "text": "Bold para.",
+        "blocks": [
+            {
+                "text": "Bold para.",
+                "spans": [],
+                "block_style": {
+                    "font_family": ["foo"],
+                    "bold": True,
+                    "italic": False,
+                },
+            }
+        ],
+    }
+    g.generate_full_book(
+        title="T",
+        author="A",
+        chapters=[chapter],
+        font_table=FontTable([face_r, face_b]),
+    )
+    styles = [f for f in g.fragments if str(f.ftype) == "$157"]
+    fams = {f.value[IS("$11")] for f in styles if IS("$11") in f.value}
+    assert "foo-700" in fams  # block-level bold -> real bold face
+
+
+def test_block_level_bold_no_font_table_unchanged():
+    # No embedded fonts: block bold must NOT synthesize (preserve byte-identity).
+    g = NativeKFXGenerator()
+    chapter = {
+        "title": "C1",
+        "text": "Bold para.",
+        "blocks": [{"text": "Bold para.", "spans": [], "block_style": {"bold": True}}],
+    }
+    g.generate_full_book(title="T", author="A", chapters=[chapter])
+    # body style (kind "") must not carry synthetic bold ($13:$361) from a
+    # block-level CSS bold when there is no font table.
+    body = [
+        f
+        for f in g.fragments
+        if str(f.ftype) == "$157" and not str(f.fid).endswith(("_em", "_h", "_link"))
+    ]
+    assert body, "expected a body style"
+    assert all(f.value.get(IS("$13")) != IS("$361") for f in body)

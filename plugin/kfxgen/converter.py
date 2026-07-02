@@ -25,6 +25,21 @@ _BOLD_TAGS = {"strong", "b"}
 _security_log = logging.getLogger(__name__ + ".security")
 
 
+def _computed_value(style, prop):
+    """Return a Calibre Style's fully computed value for `prop`.
+
+    Calibre's `Style.get(prop)` returns only the element's own specified value
+    (None when the property is inherited from an ancestor). `Style[prop]`
+    returns the computed value including inheritance and initial defaults. For
+    inherited properties like font-family (commonly set on <body>), getitem is
+    required; fall back to .get() if getitem is unavailable.
+    """
+    try:
+        return style[prop]
+    except Exception:
+        return style.get(prop)
+
+
 def _build_style_resolver(oeb_book, item, log):
     """Return a callable elem->computed-CSS-dict using Calibre's Stylizer, or
     None when Calibre/Stylizer is unavailable or construction fails. Never
@@ -43,6 +58,14 @@ def _build_style_resolver(oeb_book, item, log):
                     "text-indent": st.get("text-indent"),
                     "margin-left": st.get("margin-left"),
                     "margin-right": st.get("margin-right"),
+                    # font-family/-weight/-style are INHERITED CSS properties,
+                    # usually set on <body> and inherited by paragraphs.
+                    # Style.get() returns only element-local values (None when
+                    # inherited); Style[prop] returns the computed value. Use
+                    # getitem so ancestor-declared emphasis/fonts apply.
+                    "font-family": _computed_value(st, "font-family"),
+                    "font-weight": _computed_value(st, "font-weight"),
+                    "font-style": _computed_value(st, "font-style"),
                 }
             except Exception:
                 return None
@@ -1011,6 +1034,25 @@ def extract_cover_image(oeb_book, log):
     return None, None
 
 
+def _ensure_oeb_opts(oeb_book, opts):
+    """Attach the conversion `opts` to the OEB when it lacks them.
+
+    Calibre's OutputFormatPlugin.convert() receives `opts` as a separate
+    argument; the OEBBook itself has no `.opts` on this pipeline. Both the
+    per-element style resolver (#9) and @font-face extraction (#15) build a
+    Stylizer, which needs opts + output_profile, and read them off
+    `oeb_book.opts`. Without this, Stylizer construction raises and both
+    silently degrade (no block CSS, no embedded fonts). Never overwrite an
+    existing `.opts`; tolerate objects that reject attribute assignment.
+    """
+    if getattr(oeb_book, "opts", None) is not None:
+        return
+    try:
+        oeb_book.opts = opts
+    except (AttributeError, TypeError):
+        pass
+
+
 def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
     """
     Convert Calibre OEB book to KFX format using native generator.
@@ -1025,6 +1067,10 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         None (writes to output_path)
     """
     from . import __version__ as _kfxgen_version
+
+    # Make the conversion opts reachable via oeb_book.opts so Stylizer-based
+    # CSS resolution (#9) and @font-face font extraction (#15) can construct.
+    _ensure_oeb_opts(oeb_book, opts)
 
     log.info("=" * 70)
     log.info(f"kfxgen v{_kfxgen_version} - Native KFX Generator")
@@ -1066,6 +1112,12 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
     log.info(f"  Chapters: {len(chapters)}")
     log.info(f"  Total content: {total_chars:,} characters")
 
+    # Build embedded-font table (#15). Empty (no faces) for books without
+    # embeddable @font-face fonts, in which case KFX output is unchanged.
+    from .font_table import build_font_table  # noqa: PLC0415
+
+    font_table = build_font_table(oeb_book, log)
+
     # Generate KFX
     log.info("Generating KFX file...")
     gen = NativeKFXGenerator()
@@ -1079,6 +1131,7 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         language=metadata["language"],
         publisher=metadata["publisher"],
         issue_date=metadata.get("issue_date"),
+        font_table=font_table,
     )
 
     if os.path.isfile(output_path):

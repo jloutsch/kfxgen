@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+  <title>Font Matching Test</title>
+  <style type="text/css">
+    @font-face {
+      font-family: "Charis SIL";
+      font-weight: normal;
+      font-style: normal;
+      src: url("fonts/CharisSILR.ttf");
+    }
+    @font-face {
+      font-family: "Charis SIL";
+      font-weight: bold;
+      font-style: normal;
+      src: url("fonts/CharisSILB.ttf");
+    }
+    @font-face {
+      font-family: "Charis SIL";
+      font-weight: normal;
+      font-style: italic;
+      src: url("fonts/CharisSILI.ttf");
+    }
+    @font-face {
+      font-family: "Charis SIL";
+      font-weight: bold;
+      font-style: italic;
+      src: url("fonts/CharisSILBI.ttf");
+    }
+    body { font-family: "Charis SIL", serif; }
+    .b { font-weight: bold; }
+    .i { font-style: italic; }
+    .bi { font-weight: bold; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h1>Font Matching Test</h1>
+  <p>This paragraph uses the regular Charis SIL face.</p>
+  <p class="b">This paragraph asks for the bold face.</p>
+  <p class="i">This paragraph asks for the italic face.</p>
+  <p class="bi">This paragraph asks for the bold italic face.</p>
+  <p>Inline styles let the matcher resolve every axis:
+    <span class="b">bold span</span>,
+    <span class="i">italic span</span>, and
+    <span class="bi">bold italic span</span>
+    all draw from one embedded family.</p>
+</body>
+</html>

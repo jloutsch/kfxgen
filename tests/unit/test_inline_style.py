@@ -130,3 +130,29 @@ def test_compute_block_style_margins_absent_and_negative():
     # negative margins are dropped (no clipping), like negative indent
     bs2 = ist.compute_block_style({"margin-left": "-3em"})
     assert bs2["margin_left"] is None
+
+
+def test_compute_block_style_captures_font_family_list():
+    bs = ist.compute_block_style({"font-family": '"Merriweather", Georgia, serif'})
+    assert bs["font_family"] == ["merriweather", "georgia", "serif"]
+
+
+def test_compute_block_style_font_family_empty_when_absent():
+    bs = ist.compute_block_style({"text-align": "center"})
+    assert bs["font_family"] == []
+
+
+def test_compute_block_style_captures_bold_from_font_weight():
+    assert ist.compute_block_style({"font-weight": "bold"})["bold"] is True
+    assert ist.compute_block_style({"font-weight": "700"})["bold"] is True
+    assert ist.compute_block_style({"font-weight": "600"})["bold"] is True
+    assert ist.compute_block_style({"font-weight": "normal"})["bold"] is False
+    assert ist.compute_block_style({"font-weight": "400"})["bold"] is False
+    assert ist.compute_block_style({})["bold"] is False
+
+
+def test_compute_block_style_captures_italic_from_font_style():
+    assert ist.compute_block_style({"font-style": "italic"})["italic"] is True
+    assert ist.compute_block_style({"font-style": "oblique"})["italic"] is True
+    assert ist.compute_block_style({"font-style": "normal"})["italic"] is False
+    assert ist.compute_block_style({})["italic"] is False

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Font Matching Test Book</dc:title>
+    <dc:creator>kfxgen Contributors</dc:creator>
+    <dc:language>en</dc:language>
+    <dc:identifier id="bookid">kfxgen-test-font-matching-001</dc:identifier>
+    <dc:rights>Charis SIL fonts (c) SIL International, 1997-2007, under the SIL Open Font License 1.1. See OEBPS/fonts/OFL.txt.</dc:rights>
+    <meta property="dcterms:modified">2025-01-28T00:00:00Z</meta>
+  </metadata>
+
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="chapter1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="font-regular" href="fonts/CharisSILR.ttf" media-type="font/ttf"/>
+    <item id="font-bold" href="fonts/CharisSILB.ttf" media-type="font/ttf"/>
+    <item id="font-italic" href="fonts/CharisSILI.ttf" media-type="font/ttf"/>
+    <item id="font-bolditalic" href="fonts/CharisSILBI.ttf" media-type="font/ttf"/>
+  </manifest>
+
+  <spine toc="ncx">
+    <itemref idref="chapter1"/>
+  </spine>
+</package>

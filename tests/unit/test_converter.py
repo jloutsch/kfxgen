@@ -588,12 +588,18 @@ def test_blocks_block_style_from_resolver():
         "indent": ("2", "$308"),
         "margin_left": None,
         "margin_right": None,
+        "font_family": [],
+        "bold": False,
+        "italic": False,
     }
     assert blocks[1]["block_style"] == {
         "align": None,
         "indent": None,
         "margin_left": None,
         "margin_right": None,
+        "font_family": [],
+        "bold": False,
+        "italic": False,
     }
 
 
@@ -1049,3 +1055,75 @@ class TestSectionBase:
         # content eids are always even; the relocated base stays even
         for cm in (10000, 10002, 12344, 17798):
             assert NativeKFXGenerator._section_base(cm) % 2 == 0
+
+
+# --- #15/#9: attach conversion opts to the OEB so Stylizer can construct ---
+# Calibre's OutputFormatPlugin.convert() passes `opts` as a separate arg; the
+# OEBBook has no `.opts` on this pipeline, so both the per-element style
+# resolver and @font-face extraction (which build a Stylizer needing opts)
+# silently degraded until this shim.
+
+
+@pytest.mark.unit
+def test_ensure_oeb_opts_attaches_when_missing():
+    class _Oeb:
+        pass
+
+    oeb = _Oeb()
+    opts = object()
+    _conv._ensure_oeb_opts(oeb, opts)
+    assert oeb.opts is opts
+
+
+@pytest.mark.unit
+def test_ensure_oeb_opts_preserves_existing():
+    class _Oeb:
+        pass
+
+    oeb = _Oeb()
+    existing = object()
+    oeb.opts = existing
+    _conv._ensure_oeb_opts(oeb, object())
+    assert oeb.opts is existing
+
+
+@pytest.mark.unit
+def test_ensure_oeb_opts_tolerates_unsettable_object():
+    class _Frozen:
+        __slots__ = ()
+
+    # Must not raise even if the OEB rejects attribute assignment.
+    _conv._ensure_oeb_opts(_Frozen(), object())
+
+
+# --- #15: computed CSS value must include inheritance (font-family on <body>) ---
+
+
+class _FakeStyle:
+    """Mimics Calibre's Style: .get() returns element-local only (None when
+    inherited); [prop] returns the fully computed value."""
+
+    def __init__(self, own, computed):
+        self._own = own
+        self._computed = computed
+
+    def get(self, k, default=None):
+        return self._own.get(k, default)
+
+    def __getitem__(self, k):
+        if k in self._computed:
+            return self._computed[k]
+        raise KeyError(k)
+
+
+@pytest.mark.unit
+def test_computed_value_prefers_getitem_for_inherited():
+    # font-family inherited from <body>: .get() is None, getitem has the value.
+    st = _FakeStyle(own={}, computed={"font-family": '"Charis SIL", serif'})
+    assert _conv._computed_value(st, "font-family") == '"Charis SIL", serif'
+
+
+@pytest.mark.unit
+def test_computed_value_falls_back_to_get_when_getitem_missing():
+    st = _FakeStyle(own={"font-family": "Georgia"}, computed={})
+    assert _conv._computed_value(st, "font-family") == "Georgia"

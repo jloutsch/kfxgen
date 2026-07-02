@@ -124,6 +124,11 @@ class NativeKFXGenerator:
         # ($585, $490, $538, $410, $419 all use fid=348)
         self.next_entity_id = 349
         self.field_403_counter = 10  # Global counter for Fragment 259 Field $403
+        # Empty by default (#15): storyline builders may run without a full
+        # generate_full_book call. generate_full_book overrides this per book.
+        from .font_table import FontTable  # noqa: PLC0415
+
+        self.font_table = FontTable([])
 
     def generate_metadata_only(self, title, author, asin=None, output_path=None):
         """
@@ -326,6 +331,45 @@ class NativeKFXGenerator:
             fid=IS(location_name), ftype=IS("$417"), value=IonBLOB(image_data)
         )
 
+    def build_fragment_418(self, location_name, font_data):
+        """Raw font BLOB ($418) — analog of $417 for images.
+
+        The fid MUST match the $165 value of the paired $262 fragment.
+        """
+        self.symtab.create_local_symbol(location_name)
+        return YJFragment(
+            fid=IS(location_name), ftype=IS("$418"), value=IonBLOB(font_data)
+        )
+
+    def build_fragment_262(self, emitted_family, location_name, weight, italic):
+        """@font-face declaration ($262) — analog of $164 for images.
+
+        $11 (family) is the join key a $157 style sets to apply this face.
+        $12/$13 (style/weight) reflect the actual face; omitted when default
+        ($350), matching observed KDP output. $15 (stretch) omitted in v1.
+
+        In a final (non-KPF-prepub) KFX, $262 is a ROOT fragment and MUST be
+        keyed by its own type — fid="$262" — not the family name (kfxlib
+        kpf_book.py re-keys prepub family-named $262 fragments to "$262" on the
+        way to final KFX). The family name lives only in $11; multiple faces
+        are separate $262 fragments all sharing fid="$262".
+        """
+        from .font_table import BOLD_WEIGHT_THRESHOLD  # noqa: PLC0415
+
+        self.symtab.create_local_symbol(emitted_family)
+        self.symtab.create_local_symbol(location_name)
+        value = IonStruct(
+            IS("$11"),
+            emitted_family,  # font-family (plain string)
+            IS("$165"),
+            location_name,  # location -> $418 fid (plain string)
+        )
+        if weight >= BOLD_WEIGHT_THRESHOLD:
+            value[IS("$13")] = IS("$361")  # font-weight: bold
+        if italic:
+            value[IS("$12")] = IS("$382")  # font-style: italic
+        return YJFragment(fid=IS("$262"), ftype=IS("$262"), value=value)
+
     def build_fragment_490(
         self,
         title,
@@ -416,7 +460,16 @@ class NativeKFXGenerator:
                 issue_date or "1970-01-01",
             ),
             IonStruct(IS("$492"), "language", IS("$307"), language),
-            IonStruct(IS("$492"), "override_kindle_font", IS("$307"), False),
+            # override_kindle_font: when the book embeds fonts (#15), the
+            # embedded faces must win over the device's selected font, so set
+            # True. With no embedded fonts, keep False so the device font is
+            # respected (byte-identical to pre-5.4.0 output).
+            IonStruct(
+                IS("$492"),
+                "override_kindle_font",
+                IS("$307"),
+                bool(self.font_table.faces),
+            ),
             IonStruct(IS("$492"), "publisher", IS("$307"), publisher),
             IonStruct(IS("$492"), "title", IS("$307"), title),
         ]
@@ -948,6 +1001,7 @@ class NativeKFXGenerator:
         text_indent=None,
         margin_left=None,
         margin_right=None,
+        font_family=None,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -1057,6 +1111,11 @@ class NativeKFXGenerator:
         # $12 = font-style: $382 = italic (authoritative, jhowell kfxlib)
         if italic:
             value[IS("$12")] = IS("$382")
+
+        # $11 = font-family (#15). Set only when an embedded face was matched;
+        # its absence preserves byte-identical output for non-font books.
+        if font_family:
+            value[IS("$11")] = font_family
 
         # $46 = margin-top (for visual separation before chapter headings)
         if margin_top is not None:
@@ -1655,6 +1714,7 @@ class NativeKFXGenerator:
         publisher="kfxgen",
         issue_date=None,
         images=None,
+        font_table=None,
     ):
         """
         Generates a complete KFX book with metadata and content.
@@ -1729,6 +1789,10 @@ class NativeKFXGenerator:
         self.entity_ids = {}
         self.next_entity_id = 349
         self.field_403_counter = 10
+
+        from .font_table import FontTable  # noqa: PLC0415
+
+        self.font_table = font_table if font_table is not None else FontTable([])
 
         # 1. Build metadata fragments
         self.fragments.append(self.build_fragment_585())
@@ -1832,6 +1896,17 @@ class NativeKFXGenerator:
                     self._image_basename_collisions = getattr(
                         self, "_image_basename_collisions", []
                     ) + [base]
+
+        # Embedded fonts (#15): one $418 (bytes) + one $262 (@font-face) per
+        # face, mirroring the image $417/$164 pair. Application (setting $11 on
+        # $157 styles) happens later via self.font_table.match().
+        for face in self.font_table.faces:
+            self.fragments.append(self.build_fragment_418(face.location, face.data))
+            self.fragments.append(
+                self.build_fragment_262(
+                    face.emitted_family, face.location, face.weight, face.italic
+                )
+            )
 
         # Cover-in-reading-flow (#32): make the cover image visible as the
         # first reading page by registering its resource under a synthetic
@@ -2019,6 +2094,12 @@ class NativeKFXGenerator:
         for resource_name, location_name in image_resources.values():
             all_entity_names.append(resource_name)
             all_entity_names.append(location_name)
+        # Embedded fonts (#15): register the $418 raw-font locations so the
+        # reader can resolve them (otherwise "missing from entity map" and the
+        # device font wins). $262 is a self-keyed root fragment (fid="$262"),
+        # so it is not listed here by name — only its $418 location is.
+        for face in self.font_table.faces:
+            all_entity_names.append(face.location)
         self.fragments.append(self.build_fragment_419(container_id, all_entity_names))
 
         # 15. Build $270 container info fragment (REQUIRED)
@@ -2059,6 +2140,12 @@ class NativeKFXGenerator:
         for resource_name, location_name in image_resources.values():
             entity_map.append([164, get_id(resource_name)])
             entity_map.append([417, get_id(location_name)])
+        # Embedded fonts (#15): $262 (@font-face decl, self-keyed root -> id
+        # 262) + $418 (raw bytes, keyed by location). Without these the reader
+        # can't resolve the font resources and falls back to the device font.
+        for face in self.font_table.faces:
+            entity_map.append([262, get_id("$262")])
+            entity_map.append([418, get_id(face.location)])
         entity_map.extend(
             [
                 [395, 348],
@@ -2610,12 +2697,24 @@ class NativeKFXGenerator:
 
         from .inline_style import FLAG_BOLD, FLAG_ITALIC
 
-        def _emphasis_style(flags):
-            return _allocate_style(
-                "_em",
-                italic=FLAG_ITALIC in flags,
-                bold=FLAG_BOLD in flags,
-            )
+        # Block-level emphasis (CSS `font-weight`/`font-style` on the paragraph)
+        # is composed with inline-run flags only when the book embeds fonts, so
+        # books with no embeddable fonts stay byte-identical.
+        has_fonts = bool(self.font_table.faces)
+
+        def _emphasis_style(flags, family_list, blk_bold=False, blk_italic=False):
+            # Effective emphasis = inline run flags OR the block's CSS emphasis.
+            # When a real bold/italic face exists, weight_ok/style_ok are True
+            # and we suppress synthetic bold/italic ($13/$12). With no matching
+            # family, match() returns (None, False, False) and font_family is
+            # omitted -> byte-identical to today's synthetic-only output.
+            bold = (FLAG_BOLD in flags) or blk_bold
+            italic = (FLAG_ITALIC in flags) or blk_italic
+            fam, weight_ok, style_ok = self.font_table.match(family_list, bold, italic)
+            attrs = {"italic": italic and not style_ok, "bold": bold and not weight_ok}
+            if fam:
+                attrs["font_family"] = fam
+            return _allocate_style("_em", **attrs)
 
         # With per-chapter $145 fragments (#2), each chapter's $259
         # entries address into their OWN content fragment, so $403
@@ -2677,14 +2776,34 @@ class NativeKFXGenerator:
                         attrs["margin_left"] = bs["margin_left"]
                     if bs.get("margin_right"):
                         attrs["margin_right"] = bs["margin_right"]
+                    # Body run: match the block's font-family, honouring any
+                    # block-level CSS bold/italic (only when fonts are embedded,
+                    # so no-font books keep byte-identical $157 output). A real
+                    # bold/italic face is used directly; if the family lacks it,
+                    # synthesize on the matched face.
+                    blk_bold = bool(bs.get("bold")) if has_fonts else False
+                    blk_italic = bool(bs.get("italic")) if has_fonts else False
+                    fam, w_ok, s_ok = self.font_table.match(
+                        bs.get("font_family", []), bold=blk_bold, italic=blk_italic
+                    )
+                    if fam:
+                        attrs["font_family"] = fam
+                        if blk_bold and not w_ok:
+                            attrs["bold"] = True
+                        if blk_italic and not s_ok:
+                            attrs["italic"] = True
                     entry_styles.append(_allocate_style("", **attrs))
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)
                 chunk_spans = chunk.get("spans", [])
+                _cbs = chunk.get("block_style") or {}
+                chunk_fam = _cbs.get("font_family", [])
+                _blk_b = bool(_cbs.get("bold")) if has_fonts else False
+                _blk_i = bool(_cbs.get("italic")) if has_fonts else False
                 entry_emphasis_spans.append(
                     [
-                        (s, length, _emphasis_style(flags))
+                        (s, length, _emphasis_style(flags, chunk_fam, _blk_b, _blk_i))
                         for (s, length, flags) in chunk_spans
                     ]
                 )
@@ -2706,6 +2825,16 @@ class NativeKFXGenerator:
             )
             storyline_names.append(sl_name)
             self.fragments.append(frag_259)
+
+        # Register every allocated $157 style. _allocate_style only auto-tracks
+        # the chapter body (story_names) and _em/heading/link styles; per-chunk
+        # body styles (distinct block CSS or font-family) also produce $157
+        # fragments and would otherwise be orphaned ("missing from entity map").
+        registered = set(story_names) | set(extra_style_names)
+        for name in style_cache.values():
+            if name not in registered:
+                extra_style_names.append(name)
+                registered.add(name)
 
         return {
             "story_names": story_names,
