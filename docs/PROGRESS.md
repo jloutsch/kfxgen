@@ -23,10 +23,15 @@ Living pick-up-where-we-left-off note. Last updated: 2026-07-01.
 
 ## Open issues + next steps
 
-### #15 — Embed `@font-face` fonts in native KFX output (the big one; unblocked by #16)
+### #15 — Embed `@font-face` fonts in native KFX output (DEVICE-VERIFIED; PR pending)
 
-**Code complete on `feat/15-native-font-embed` — device gate is the only thing
-left before release.** Plan: `docs/superpowers/plans/2026-07-01-native-font-embed.md`.
+**Done and device-verified on `feat/15-native-font-embed` (2026-07-02).** Embedded
+faces render on a physical Kindle across every case: inline `<b>`/`<i>`, block-level
+CSS bold/italic, inherited `body { font-family }`, real bold/italic/bold-italic
+faces, regular-only-family faux bold, and non-embedded fallback. No `$593` needed.
+495 tests green, tier3_strict byte-identical, both ruff gates clean. 25 commits
+ahead of main, not yet pushed. Plan: `docs/superpowers/plans/2026-07-01-native-font-embed.md`;
+outcome + fixes recorded in `docs/kfx-embedded-fonts-reference.md`.
 
 Implemented (Tasks 0–11, all committed, 482 tests green, no-font output
 byte-identical via tier3_strict goldens):
@@ -43,14 +48,16 @@ byte-identical via tier3_strict goldens):
   and `tests/integration/test_font_integration.py` (real four-face fixture at
   `test_books/font-matching-test/`, Charis SIL under OFL).
 
-**Remaining before merge/release:**
-1. **Device gate (only on physical Kindle).** Sideload a font-embedded conversion;
-   confirm the embedded face renders (not the device default), that real bold/italic
-   render distinctly, that a regular-only family with a `<b>` run shows faux bold,
-   and that a no-font book is unchanged. Decide whether a `$593` capability flag is
-   needed — the #16 reference did not observe it as required; verify on-device and
-   record the outcome in `docs/kfx-embedded-fonts-reference.md`.
-2. `/tech-debt-review`, then open the PR (held pending the device gate).
+**Key fixes found via kfxlib decode (KFX Input.zip is installed locally — decode
+kfxgen output to structurally validate):** `_ensure_oeb_opts` (OEB has no `.opts`
+in the output-plugin path, so the Stylizer never ran), inherited font-family via
+`Style[prop]` not `.get()`, `$262` keyed `fid="$262"` (root fragment), font
+fragments registered in the `$270`/`$419` maps, `override_kindle_font=True` when
+embedding, per-chunk `$157` styles registered, block-level CSS bold/italic
+composed into face matching. `/tech-debt-review` done.
+
+**Remaining:** push branch + open PR (bump already at 5.4.0). Follow-up: #33
+(verify #9 block CSS in real conversions — same root cause as `_ensure_oeb_opts`).
 
 ### #30 follow-through (low priority)
 
