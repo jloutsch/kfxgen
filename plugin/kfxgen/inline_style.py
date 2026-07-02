@@ -7,6 +7,8 @@ spans. See docs/superpowers/specs/2026-06-28-inline-emphasis-css-typography-desi
 
 import re
 
+from .font_table import BOLD_WEIGHT_THRESHOLD, parse_style, parse_weight
+
 FLAG_ITALIC = "italic"
 FLAG_BOLD = "bold"
 
@@ -138,4 +140,9 @@ def compute_block_style(css):
         "margin_left": margin_left,
         "margin_right": margin_right,
         "font_family": _parse_font_family(css.get("font-family")),
+        # Block-level emphasis: a paragraph made bold/italic via CSS
+        # (e.g. `p.lead { font-weight: bold }`) rather than an inline tag.
+        # Used to select the embedded bold/italic face for the whole block.
+        "bold": parse_weight(css.get("font-weight")) >= BOLD_WEIGHT_THRESHOLD,
+        "italic": parse_style(css.get("font-style")),
     }

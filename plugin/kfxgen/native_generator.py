@@ -354,6 +354,8 @@ class NativeKFXGenerator:
         way to final KFX). The family name lives only in $11; multiple faces
         are separate $262 fragments all sharing fid="$262".
         """
+        from .font_table import BOLD_WEIGHT_THRESHOLD  # noqa: PLC0415
+
         self.symtab.create_local_symbol(emitted_family)
         self.symtab.create_local_symbol(location_name)
         value = IonStruct(
@@ -362,7 +364,7 @@ class NativeKFXGenerator:
             IS("$165"),
             location_name,  # location -> $418 fid (plain string)
         )
-        if weight >= 600:
+        if weight >= BOLD_WEIGHT_THRESHOLD:
             value[IS("$13")] = IS("$361")  # font-weight: bold
         if italic:
             value[IS("$12")] = IS("$382")  # font-style: italic
@@ -2695,14 +2697,19 @@ class NativeKFXGenerator:
 
         from .inline_style import FLAG_BOLD, FLAG_ITALIC
 
-        def _emphasis_style(flags, family_list):
-            # Resolve the run's (family, bold, italic) to an embedded face.
+        # Block-level emphasis (CSS `font-weight`/`font-style` on the paragraph)
+        # is composed with inline-run flags only when the book embeds fonts, so
+        # books with no embeddable fonts stay byte-identical.
+        has_fonts = bool(self.font_table.faces)
+
+        def _emphasis_style(flags, family_list, blk_bold=False, blk_italic=False):
+            # Effective emphasis = inline run flags OR the block's CSS emphasis.
             # When a real bold/italic face exists, weight_ok/style_ok are True
             # and we suppress synthetic bold/italic ($13/$12). With no matching
             # family, match() returns (None, False, False) and font_family is
             # omitted -> byte-identical to today's synthetic-only output.
-            bold = FLAG_BOLD in flags
-            italic = FLAG_ITALIC in flags
+            bold = (FLAG_BOLD in flags) or blk_bold
+            italic = (FLAG_ITALIC in flags) or blk_italic
             fam, weight_ok, style_ok = self.font_table.match(family_list, bold, italic)
             attrs = {"italic": italic and not style_ok, "bold": bold and not weight_ok}
             if fam:
@@ -2769,23 +2776,34 @@ class NativeKFXGenerator:
                         attrs["margin_left"] = bs["margin_left"]
                     if bs.get("margin_right"):
                         attrs["margin_right"] = bs["margin_right"]
-                    # Body run: match the block's font-family at regular
-                    # weight/style. Only added when a face matched, so no-font
-                    # books keep byte-identical $157 output and style caching.
-                    fam, _w, _s = self.font_table.match(
-                        bs.get("font_family", []), bold=False, italic=False
+                    # Body run: match the block's font-family, honouring any
+                    # block-level CSS bold/italic (only when fonts are embedded,
+                    # so no-font books keep byte-identical $157 output). A real
+                    # bold/italic face is used directly; if the family lacks it,
+                    # synthesize on the matched face.
+                    blk_bold = bool(bs.get("bold")) if has_fonts else False
+                    blk_italic = bool(bs.get("italic")) if has_fonts else False
+                    fam, w_ok, s_ok = self.font_table.match(
+                        bs.get("font_family", []), bold=blk_bold, italic=blk_italic
                     )
                     if fam:
                         attrs["font_family"] = fam
+                        if blk_bold and not w_ok:
+                            attrs["bold"] = True
+                        if blk_italic and not s_ok:
+                            attrs["italic"] = True
                     entry_styles.append(_allocate_style("", **attrs))
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)
                 chunk_spans = chunk.get("spans", [])
-                chunk_fam = (chunk.get("block_style") or {}).get("font_family", [])
+                _cbs = chunk.get("block_style") or {}
+                chunk_fam = _cbs.get("font_family", [])
+                _blk_b = bool(_cbs.get("bold")) if has_fonts else False
+                _blk_i = bool(_cbs.get("italic")) if has_fonts else False
                 entry_emphasis_spans.append(
                     [
-                        (s, length, _emphasis_style(flags, chunk_fam))
+                        (s, length, _emphasis_style(flags, chunk_fam, _blk_b, _blk_i))
                         for (s, length, flags) in chunk_spans
                     ]
                 )

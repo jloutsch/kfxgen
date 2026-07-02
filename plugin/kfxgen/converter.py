@@ -58,12 +58,14 @@ def _build_style_resolver(oeb_book, item, log):
                     "text-indent": st.get("text-indent"),
                     "margin-left": st.get("margin-left"),
                     "margin-right": st.get("margin-right"),
-                    # font-family is an INHERITED CSS property, usually set on
-                    # <body> and inherited by paragraphs. Calibre's Style.get()
-                    # returns only element-local values (None when inherited),
-                    # while Style[prop] returns the fully computed value. Use
-                    # getitem so embedded fonts declared on an ancestor apply.
+                    # font-family/-weight/-style are INHERITED CSS properties,
+                    # usually set on <body> and inherited by paragraphs.
+                    # Style.get() returns only element-local values (None when
+                    # inherited); Style[prop] returns the computed value. Use
+                    # getitem so ancestor-declared emphasis/fonts apply.
                     "font-family": _computed_value(st, "font-family"),
+                    "font-weight": _computed_value(st, "font-weight"),
+                    "font-style": _computed_value(st, "font-style"),
                 }
             except Exception:
                 return None

@@ -1455,3 +1455,57 @@ def test_per_chunk_body_styles_registered_in_entity_map():
     registered = {str(s) for s in frag419.value[IS("$252")][0][IS("$181")]}
     missing = style_fids - registered
     assert not missing, f"$157 styles missing from $419 entity index: {missing}"
+
+
+def test_block_level_bold_selects_bold_face():
+    # A paragraph made bold via CSS (block_style bold=True), no inline tags,
+    # must resolve to the embedded bold face (#15 follow-up: #34).
+    from kfxgen.font_table import Face, FontTable
+
+    g = NativeKFXGenerator()
+    face_r = Face("foo", 400, False, b"\x00\x01\x00\x00r", "foo-400", "resource/font0")
+    face_b = Face("foo", 700, False, b"\x00\x01\x00\x00b", "foo-700", "resource/font1")
+    chapter = {
+        "title": "C1",
+        "text": "Bold para.",
+        "blocks": [
+            {
+                "text": "Bold para.",
+                "spans": [],
+                "block_style": {
+                    "font_family": ["foo"],
+                    "bold": True,
+                    "italic": False,
+                },
+            }
+        ],
+    }
+    g.generate_full_book(
+        title="T",
+        author="A",
+        chapters=[chapter],
+        font_table=FontTable([face_r, face_b]),
+    )
+    styles = [f for f in g.fragments if str(f.ftype) == "$157"]
+    fams = {f.value[IS("$11")] for f in styles if IS("$11") in f.value}
+    assert "foo-700" in fams  # block-level bold -> real bold face
+
+
+def test_block_level_bold_no_font_table_unchanged():
+    # No embedded fonts: block bold must NOT synthesize (preserve byte-identity).
+    g = NativeKFXGenerator()
+    chapter = {
+        "title": "C1",
+        "text": "Bold para.",
+        "blocks": [{"text": "Bold para.", "spans": [], "block_style": {"bold": True}}],
+    }
+    g.generate_full_book(title="T", author="A", chapters=[chapter])
+    # body style (kind "") must not carry synthetic bold ($13:$361) from a
+    # block-level CSS bold when there is no font table.
+    body = [
+        f
+        for f in g.fragments
+        if str(f.ftype) == "$157" and not str(f.fid).endswith(("_em", "_h", "_link"))
+    ]
+    assert body, "expected a body style"
+    assert all(f.value.get(IS("$13")) != IS("$361") for f in body)

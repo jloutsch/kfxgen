@@ -589,6 +589,8 @@ def test_blocks_block_style_from_resolver():
         "margin_left": None,
         "margin_right": None,
         "font_family": [],
+        "bold": False,
+        "italic": False,
     }
     assert blocks[1]["block_style"] == {
         "align": None,
@@ -596,6 +598,8 @@ def test_blocks_block_style_from_resolver():
         "margin_left": None,
         "margin_right": None,
         "font_family": [],
+        "bold": False,
+        "italic": False,
     }
 
 

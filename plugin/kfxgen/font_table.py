@@ -11,6 +11,11 @@ from dataclasses import dataclass
 # excluded — Kindle cannot embed them and decoding needs deps we don't carry.
 _TTF_OTF_MAGIC = (b"\x00\x01\x00\x00", b"OTTO", b"true", b"ttcf")
 
+#: CSS font-weight at or above which a face counts as "bold". Shared by face
+#: matching, the $262 weight descriptor, and block-style capture so the cutoff
+#: is defined once.
+BOLD_WEIGHT_THRESHOLD = 600
+
 
 @dataclass
 class Face:
@@ -166,14 +171,16 @@ class FontTable:
         want_italic = bool(italic)
         # Exact face: weight side (>=600 == bold) and italic side both match.
         for f in fam_faces:
-            if (f.weight >= 600) == want_bold and f.italic == want_italic:
+            if (
+                f.weight >= BOLD_WEIGHT_THRESHOLD
+            ) == want_bold and f.italic == want_italic:
                 return (f.emitted_family, True, True)
         # Fallback: regular face (weight<600, upright), else any face.
         regular = next(
-            (f for f in fam_faces if f.weight < 600 and not f.italic),
+            (f for f in fam_faces if f.weight < BOLD_WEIGHT_THRESHOLD and not f.italic),
             fam_faces[0],
         )
-        weight_ok = (regular.weight >= 600) == want_bold
+        weight_ok = (regular.weight >= BOLD_WEIGHT_THRESHOLD) == want_bold
         style_ok = regular.italic == want_italic
         return (regular.emitted_family, weight_ok, style_ok)
 
