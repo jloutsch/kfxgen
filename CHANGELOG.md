@@ -36,9 +36,9 @@ Kindle ignore embedded fonts; all are fixed:
 
 **Verified on a physical Kindle:** embedded faces render (regular / bold /
 italic / bold-italic), non-embedded families fall back to the device font, and
-no `$593` capability flag is required. **Known limitation:** paragraph bold/italic
-expressed via CSS class (`p { font-weight: bold }`) is not carried — only inline
-`<b>`/`<i>`/`<strong>`/`<em>` runs are (the #9 run model).
+no `$593` capability flag is required. Both inline emphasis (`<b>`/`<i>`) and
+block-level CSS emphasis (`p { font-weight: bold }`) select the correct embedded
+face.
 
 **Scope:** TrueType/OpenType only (WOFF/WOFF2 are skipped with a warning; no new
 dependencies). Books with no embeddable fonts produce byte-identical output to

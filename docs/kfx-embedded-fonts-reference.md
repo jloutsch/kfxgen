@@ -146,6 +146,8 @@ device):
    latter returns `None` for values inherited from `<body>`, which is where most
    books declare the family.
 
-**Known limitation:** paragraph-level bold/italic set via CSS class
-(`p.foo { font-weight: bold }`) is not carried onto the font match — only inline
-`<b>`/`<i>`/`<strong>`/`<em>` runs are (shared #9 run model). Tracked separately.
+Both inline emphasis (`<b>`/`<i>`/`<strong>`/`<em>`) and block-level CSS emphasis
+(`p { font-weight: bold }`) select the correct embedded face: `compute_block_style`
+captures computed block weight/style (read inheritance-aware via `_computed_value`),
+and the body run and each emphasis span compose block emphasis with inline flags
+before matching (#15, was #34).
