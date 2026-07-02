@@ -1090,3 +1090,36 @@ def test_ensure_oeb_opts_tolerates_unsettable_object():
 
     # Must not raise even if the OEB rejects attribute assignment.
     _conv._ensure_oeb_opts(_Frozen(), object())
+
+
+# --- #15: computed CSS value must include inheritance (font-family on <body>) ---
+
+
+class _FakeStyle:
+    """Mimics Calibre's Style: .get() returns element-local only (None when
+    inherited); [prop] returns the fully computed value."""
+
+    def __init__(self, own, computed):
+        self._own = own
+        self._computed = computed
+
+    def get(self, k, default=None):
+        return self._own.get(k, default)
+
+    def __getitem__(self, k):
+        if k in self._computed:
+            return self._computed[k]
+        raise KeyError(k)
+
+
+@pytest.mark.unit
+def test_computed_value_prefers_getitem_for_inherited():
+    # font-family inherited from <body>: .get() is None, getitem has the value.
+    st = _FakeStyle(own={}, computed={"font-family": '"Charis SIL", serif'})
+    assert _conv._computed_value(st, "font-family") == '"Charis SIL", serif'
+
+
+@pytest.mark.unit
+def test_computed_value_falls_back_to_get_when_getitem_missing():
+    st = _FakeStyle(own={"font-family": "Georgia"}, computed={})
+    assert _conv._computed_value(st, "font-family") == "Georgia"

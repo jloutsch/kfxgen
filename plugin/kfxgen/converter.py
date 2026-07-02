@@ -25,6 +25,21 @@ _BOLD_TAGS = {"strong", "b"}
 _security_log = logging.getLogger(__name__ + ".security")
 
 
+def _computed_value(style, prop):
+    """Return a Calibre Style's fully computed value for `prop`.
+
+    Calibre's `Style.get(prop)` returns only the element's own specified value
+    (None when the property is inherited from an ancestor). `Style[prop]`
+    returns the computed value including inheritance and initial defaults. For
+    inherited properties like font-family (commonly set on <body>), getitem is
+    required; fall back to .get() if getitem is unavailable.
+    """
+    try:
+        return style[prop]
+    except Exception:
+        return style.get(prop)
+
+
 def _build_style_resolver(oeb_book, item, log):
     """Return a callable elem->computed-CSS-dict using Calibre's Stylizer, or
     None when Calibre/Stylizer is unavailable or construction fails. Never
@@ -43,7 +58,12 @@ def _build_style_resolver(oeb_book, item, log):
                     "text-indent": st.get("text-indent"),
                     "margin-left": st.get("margin-left"),
                     "margin-right": st.get("margin-right"),
-                    "font-family": st.get("font-family"),
+                    # font-family is an INHERITED CSS property, usually set on
+                    # <body> and inherited by paragraphs. Calibre's Style.get()
+                    # returns only element-local values (None when inherited),
+                    # while Style[prop] returns the fully computed value. Use
+                    # getitem so embedded fonts declared on an ancestor apply.
+                    "font-family": _computed_value(st, "font-family"),
                 }
             except Exception:
                 return None
