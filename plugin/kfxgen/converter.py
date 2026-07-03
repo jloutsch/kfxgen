@@ -40,29 +40,41 @@ def _computed_value(style, prop):
         return style.get(prop)
 
 
-def _build_style_resolver(oeb_book, item, log):
+def _default_stylizer(oeb_book, item):
+    from calibre.ebooks.oeb.stylizer import Stylizer  # noqa: PLC0415
+
+    profile = getattr(getattr(oeb_book, "opts", None), "output_profile", None)
+    return Stylizer(item.data, item.href, oeb_book, oeb_book.opts, profile)
+
+
+def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
     """Return a callable elem->computed-CSS-dict using Calibre's Stylizer, or
     None when Calibre/Stylizer is unavailable or construction fails. Never
-    raises — failure degrades to no per-element block styling."""
-    try:
-        from calibre.ebooks.oeb.stylizer import Stylizer  # noqa: PLC0415
+    raises — failure degrades to no per-element block styling.
 
-        profile = getattr(getattr(oeb_book, "opts", None), "output_profile", None)
-        stylizer = Stylizer(item.data, item.href, oeb_book, oeb_book.opts, profile)
+    `stylizer_factory(oeb_book, item)` is injectable for tests; the default
+    builds Calibre's Stylizer."""
+    try:
+        make = stylizer_factory or _default_stylizer
+        stylizer = make(oeb_book, item)
 
         def resolve(elem):
             try:
                 st = stylizer.style(elem)
                 return {
-                    "text-align": st.get("text-align"),
+                    # text-align is INHERITED (set on <body> or a wrapper
+                    # <div>), so read it inheritance-aware like font-family:
+                    # Style.get() returns None when inherited; Style[prop]
+                    # returns the computed value ('auto' when truly unset,
+                    # which ALIGN_MAP ignores). text-indent/margins stay on
+                    # .get(): margins don't inherit, and getitem drops the CSS
+                    # unit on indent (returns computed px).
+                    "text-align": _computed_value(st, "text-align"),
                     "text-indent": st.get("text-indent"),
                     "margin-left": st.get("margin-left"),
                     "margin-right": st.get("margin-right"),
-                    # font-family/-weight/-style are INHERITED CSS properties,
-                    # usually set on <body> and inherited by paragraphs.
-                    # Style.get() returns only element-local values (None when
-                    # inherited); Style[prop] returns the computed value. Use
-                    # getitem so ancestor-declared emphasis/fonts apply.
+                    # font-family/-weight/-style are also inherited, usually set
+                    # on <body> and inherited by paragraphs.
                     "font-family": _computed_value(st, "font-family"),
                     "font-weight": _computed_value(st, "font-weight"),
                     "font-style": _computed_value(st, "font-style"),

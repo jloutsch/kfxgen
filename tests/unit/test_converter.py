@@ -1127,3 +1127,59 @@ def test_computed_value_prefers_getitem_for_inherited():
 def test_computed_value_falls_back_to_get_when_getitem_missing():
     st = _FakeStyle(own={"font-family": "Georgia"}, computed={})
     assert _conv._computed_value(st, "font-family") == "Georgia"
+
+
+# --- #33: text-align inherited from <body>/<div> must not be dropped ---
+
+
+class _FakeCalibreStyle:
+    """Mimics Calibre's Style: .get() is element-local only (None when
+    inherited); [prop] returns the computed value (incl. inheritance)."""
+
+    def __init__(self, own, computed):
+        self._own, self._computed = own, computed
+
+    def get(self, k, default=None):
+        return self._own.get(k, default)
+
+    def __getitem__(self, k):
+        if k in self._computed:
+            return self._computed[k]
+        raise KeyError(k)
+
+
+class _FakeStylizer:
+    def __init__(self, style):
+        self._style = style
+
+    def style(self, elem):
+        return self._style
+
+
+@pytest.mark.unit
+def test_style_resolver_reads_inherited_text_align_via_getitem():
+    # Regression for #33: text-align set on <body>/<div> is inherited; Calibre's
+    # Style.get() returns None for it, Style[prop] returns 'center'. The resolver
+    # must use getitem so inherited alignment isn't silently dropped.
+    st = _FakeCalibreStyle(own={}, computed={"text-align": "center"})
+    resolver = _conv._build_style_resolver(
+        None,
+        None,
+        _silent_log(),
+        stylizer_factory=lambda oeb, item: _FakeStylizer(st),
+    )
+    assert resolver(object())["text-align"] == "center"
+
+
+@pytest.mark.unit
+def test_style_resolver_unstyled_align_is_auto_then_ignored():
+    # A truly unstyled paragraph: getitem returns 'auto', which compute_block_style
+    # must ignore (so getitem does not over-apply alignment).
+    st = _FakeCalibreStyle(own={}, computed={"text-align": "auto"})
+    resolver = _conv._build_style_resolver(
+        None, None, _silent_log(), stylizer_factory=lambda oeb, item: _FakeStylizer(st)
+    )
+    assert resolver(object())["text-align"] == "auto"
+    from kfxgen.inline_style import compute_block_style
+
+    assert compute_block_style({"text-align": "auto"})["align"] is None
