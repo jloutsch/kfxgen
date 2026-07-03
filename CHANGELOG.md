@@ -1,5 +1,22 @@
 # Changelog
 
+## 5.4.1 — Fix dropped inherited text-align (#33)
+
+Block-level `text-align` set on `<body>` or a wrapping `<div>` (centered title
+pages, centered verse, `<div class="center">`, …) was silently dropped in real
+Calibre conversions and fell back to justify. The style resolver read it via
+Calibre's `Style.get()`, which returns `None` for inherited values; it now reads
+`text-align` inheritance-aware via `Style[prop]` (like font-family), with the
+`auto` default ignored so unstyled paragraphs are unaffected. Margins and
+`text-indent` are unchanged (margins don't inherit; getitem drops the CSS unit on
+indent).
+
+`_build_style_resolver` gained an injectable stylizer factory so the inheritance
+behavior is unit-tested without Calibre — closing the gap that let this hide
+(no test exercised the real Stylizer). Device-verified: direct and inherited
+centering both render on a physical Kindle. No-font/no-style output is
+byte-identical (tier3_strict golden corpus unchanged).
+
 ## 5.4.0 — Embedded font support (#15)
 
 Fonts declared in a source EPUB via `@font-face` now travel inside the `.kfx`
