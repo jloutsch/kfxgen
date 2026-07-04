@@ -231,13 +231,25 @@ def build_manifest_lookup(oeb_book):
     return lookup
 
 
+def build_stylizer(oeb_book, item):
+    """Construct Calibre's Stylizer for one OEB spine item.
+
+    Single home for the version-sensitive `Stylizer(tree, path, oeb, opts,
+    profile)` signature (#41) — shared by @font-face extraction here and the
+    per-element style resolver in converter.py, so a Calibre-side signature
+    change only needs updating in one place. Raises if Calibre is unavailable;
+    callers decide how to degrade.
+    """
+    from calibre.ebooks.oeb.stylizer import Stylizer  # noqa: PLC0415
+
+    profile = getattr(getattr(oeb_book, "opts", None), "output_profile", None)
+    return Stylizer(item.data, item.href, oeb_book, oeb_book.opts, profile)
+
+
 def _default_stylizer_factory(oeb_book, log):
     def make(item):
         try:
-            from calibre.ebooks.oeb.stylizer import Stylizer  # noqa: PLC0415
-
-            profile = getattr(getattr(oeb_book, "opts", None), "output_profile", None)
-            return Stylizer(item.data, item.href, oeb_book, oeb_book.opts, profile)
+            return build_stylizer(oeb_book, item)
         except Exception as e:
             log.warning(f"  Stylizer unavailable for fonts ({e})")
             return None

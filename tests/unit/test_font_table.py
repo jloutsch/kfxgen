@@ -327,3 +327,21 @@ def test_emitted_name_non_ascii_bases_are_distinct_not_counter_suffixed():
     b = emitted_name("고딕", 700, False, taken)
     assert a != b
     assert not b.endswith("-1")  # distinct by identity, not the dedup counter
+
+
+# --- #41: single Stylizer builder; factory degrades cleanly without Calibre ---
+
+
+def test_build_stylizer_and_factory_degrade_without_calibre():
+    from kfxgen.font_table import _default_stylizer_factory
+
+    class _Item:
+        data = None
+        href = "c.xhtml"
+
+    log = _Log()
+    make = _default_stylizer_factory(object(), log)
+    # No Calibre in the test env -> build_stylizer raises -> factory returns None
+    # and warns, rather than propagating.
+    assert make(_Item()) is None
+    assert log.warns
