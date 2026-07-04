@@ -345,3 +345,39 @@ def test_build_stylizer_and_factory_degrade_without_calibre():
     # and warns, rather than propagating.
     assert make(_Item()) is None
     assert log.warns
+
+
+# --- #47: cap embedded font size (resource-exhaustion defense) ---
+
+
+def test_faces_from_rules_skips_oversized_font():
+    log = _Log()
+    big = b"\x00\x01\x00\x00" + b"x" * 200  # valid TTF magic, 204 bytes
+    rules = [{"font-family": "Foo", "src": "url(f.ttf)"}]
+    manifest = _mk_manifest({"f.ttf": big})
+    faces = faces_from_rules(rules, manifest, log, max_font_bytes=100)
+    assert faces == []
+    assert any(
+        "large" in w.lower() or "exceed" in w.lower() or "cap" in w.lower()
+        for w in log.warns
+    )
+
+
+def test_faces_from_rules_accepts_font_within_cap():
+    log = _Log()
+    ok = b"\x00\x01\x00\x00yy"
+    faces = faces_from_rules(
+        rules=[{"font-family": "Foo", "src": "url(f.ttf)"}],
+        manifest_lookup=_mk_manifest({"f.ttf": ok}),
+        log=log,
+        max_font_bytes=1000,
+    )
+    assert len(faces) == 1
+
+
+def test_default_max_font_bytes_allows_large_cjk_faces():
+    # Must not reject legitimate large CJK fonts (tens of MB). Default cap must
+    # sit well above a real CJK face.
+    from kfxgen.font_table import MAX_FONT_BYTES
+
+    assert MAX_FONT_BYTES >= 30 * 1024 * 1024

@@ -5,8 +5,27 @@ without Calibre. Calibre only appears in build_font_table (Task 4).
 """
 
 import hashlib
+import os
 import re
 from dataclasses import dataclass
+
+
+def _int_env(name, default):
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+#: Per-face cap on embedded font bytes (#47). Blocks resource exhaustion from a
+#: valid-magic but oversized "font" in an untrusted EPUB. 50 MB sits well above
+#: any legitimate face — even full-coverage CJK fonts run ~10-20 MB — while
+#: bounding the pathological case. Override via KFXGEN_MAX_FONT_BYTES.
+MAX_FONT_BYTES = _int_env("KFXGEN_MAX_FONT_BYTES", 50 * 1024 * 1024)
 
 # TrueType/OpenType magic bytes. WOFF (wOFF) / WOFF2 (wOF2) are intentionally
 # excluded — Kindle cannot embed them and decoding needs deps we don't carry.
@@ -114,11 +133,12 @@ def rule_field(rule, key):
     return None
 
 
-def faces_from_rules(rules, manifest_lookup, log):
+def faces_from_rules(rules, manifest_lookup, log, max_font_bytes=MAX_FONT_BYTES):
     """Turn @font-face rule dicts + a manifest byte-lookup into Face objects.
 
-    Skips (with a warning) rules whose family is missing or whose only
-    resolvable src bytes are not TTF/OTF. Dedups by resolved href.
+    Skips (with a warning) rules whose family is missing, whose only resolvable
+    src bytes are not TTF/OTF, or whose font exceeds `max_font_bytes` (#47 —
+    resource-exhaustion defense). Dedups by resolved href.
     """
     faces = []
     taken_names = set()
@@ -134,9 +154,17 @@ def faces_from_rules(rules, manifest_lookup, log):
         chosen_data = None
         for href in extract_src_urls(rule_field(rule, "src")):
             data = manifest_lookup(href)
-            if data and is_ttf_otf(data):
-                chosen_href, chosen_data = href, data
-                break
+            if not (data and is_ttf_otf(data)):
+                continue
+            if len(data) > max_font_bytes:
+                log.warn(
+                    f"  Skipping @font-face {family!r} src {href!r}: "
+                    f"{len(data)} bytes exceeds the {max_font_bytes}-byte cap "
+                    f"(KFXGEN_MAX_FONT_BYTES)"
+                )
+                continue
+            chosen_href, chosen_data = href, data
+            break
         if chosen_data is None:
             log.warn(
                 f"  Skipping @font-face {family!r}: no embeddable TTF/OTF src "
