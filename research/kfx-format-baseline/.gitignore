@@ -1,0 +1,6 @@
+# Amazon converter output + downloaded source stay local (see README).
+*.kpf
+*.kfx
+*.epub
+out/
+__pycache__/
