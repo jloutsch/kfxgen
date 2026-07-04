@@ -41,10 +41,10 @@ def _computed_value(style, prop):
 
 
 def _default_stylizer(oeb_book, item):
-    from calibre.ebooks.oeb.stylizer import Stylizer  # noqa: PLC0415
+    # Single source of the Stylizer signature lives in font_table (#41).
+    from .font_table import build_stylizer  # noqa: PLC0415
 
-    profile = getattr(getattr(oeb_book, "opts", None), "output_profile", None)
-    return Stylizer(item.data, item.href, oeb_book, oeb_book.opts, profile)
+    return build_stylizer(oeb_book, item)
 
 
 def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
