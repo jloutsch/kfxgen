@@ -17,6 +17,14 @@ _TTF_OTF_MAGIC = (b"\x00\x01\x00\x00", b"OTTO", b"true", b"ttcf")
 #: is defined once.
 BOLD_WEIGHT_THRESHOLD = 600
 
+#: Highest ASCII code point; family names with any char above this are non-ASCII
+#: (CJK, Cyrillic, …) and need a hash suffix to stay distinct (see _slug).
+_ASCII_MAX = 127
+
+#: Hex chars of the family-name hash appended to non-ASCII slugs. 8 hex = 32
+#: bits of space, ample to keep the handful of embedded families per book apart.
+_SLUG_HASH_LEN = 8
+
 
 @dataclass
 class Face:
@@ -78,8 +86,8 @@ def _slug(name):
     # would collapse to the same base and rely only on emitted_name's dedup
     # counter to stay apart. Append a short, stable hash of the full name so
     # distinct families get distinct slug bases. Pure-ASCII names are unchanged.
-    if any(ord(c) > 127 for c in norm):
-        h = hashlib.sha1(norm.encode("utf-8")).hexdigest()[:8]
+    if any(ord(c) > _ASCII_MAX for c in norm):
+        h = hashlib.sha1(norm.encode("utf-8")).hexdigest()[:_SLUG_HASH_LEN]
         out = f"{out}-{h}" if out else f"font-{h}"
     return out or "font"
 
