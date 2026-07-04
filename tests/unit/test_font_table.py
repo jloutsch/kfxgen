@@ -9,6 +9,7 @@ from kfxgen.font_table import (
     faces_from_rules,
     is_ttf_otf,
     normalize_family,
+    _slug,
     parse_style,
     parse_weight,
 )
@@ -294,3 +295,35 @@ def test_build_font_table_empty_when_no_fonts():
     oeb = _Oeb([], spine=[object()])
     table = build_font_table(oeb, _Log(), stylizer_factory=lambda item: _Stylizer([]))
     assert table.faces == []
+
+
+# --- #36: non-ASCII @font-face family names must yield distinct, stable slugs ---
+
+
+def test_slug_ascii_names_unchanged():
+    assert _slug("KoPubBatang") == "kopubbatang"
+    assert _slug('"Merriweather"') == "merriweather"
+    assert _slug("Times New Roman") == "times-new-roman"
+    assert _slug("") == "font"
+
+
+def test_slug_non_ascii_families_distinct_and_stable():
+    a, b = _slug("명조"), _slug("고딕")  # Korean: Myeongjo (serif) / Gothic (sans)
+    assert a != b  # was: both collapse to "font"
+    assert a != "font" and b != "font"
+    assert a == _slug("명조")  # deterministic across calls
+    assert a.startswith("font-")
+
+
+def test_slug_mixed_ascii_cjk_keeps_ascii_base_but_disambiguates():
+    m1, m2 = _slug("KoPub 명조"), _slug("KoPub 고딕")
+    assert m1 != m2
+    assert m1.startswith("kopub-") and m2.startswith("kopub-")
+
+
+def test_emitted_name_non_ascii_bases_are_distinct_not_counter_suffixed():
+    taken = set()
+    a = emitted_name("명조", 700, False, taken)
+    b = emitted_name("고딕", 700, False, taken)
+    assert a != b
+    assert not b.endswith("-1")  # distinct by identity, not the dedup counter

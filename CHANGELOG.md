@@ -1,5 +1,18 @@
 # Changelog
 
+## 5.4.2 — Distinct slugs for non-ASCII embedded fonts (#36)
+
+Fixes internal font-family names for embedded fonts whose `@font-face` family is
+non-ASCII (CJK, Cyrillic, …). The slug builder kept only `[a-z0-9]`, so such
+names lost all identity and collapsed to a generic `font` base — distinct
+families (e.g. Korean 명조 serif vs 고딕 sans) were separated only by an
+incrementing dedup counter, a fragile scheme where a font shared under two
+family names could mis-map. Names containing non-ASCII characters now get a
+short stable hash of the full name appended, so distinct families get distinct
+slug bases. Pure-ASCII names are unchanged (byte-identical output for the common
+case; tier3_strict golden corpus unchanged). Rendering was already correct on
+device — this hardens correctness and makes decoded output legible.
+
 ## 5.4.1 — Fix dropped inherited text-align (#33)
 
 Block-level `text-align` set on `<body>` or a wrapping `<div>` (centered title
