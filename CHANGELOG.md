@@ -1,5 +1,18 @@
 # Changelog
 
+## 5.4.3 — Cap embedded font size (#47)
+
+Security hardening surfaced by a whole-project review. Embedded fonts had no size
+limit — `build_fragment_418` wrapped raw manifest font bytes in a BLOB and
+`faces_from_rules` only checked TTF/OTF magic bytes. A valid-magic but oversized
+"font" in an untrusted EPUB was embedded wholesale (memory spike during conversion
++ oversized `.kfx`). `faces_from_rules` now skips + warns any face exceeding
+`max_font_bytes` (default 50 MB, override via `KFXGEN_MAX_FONT_BYTES`) — generous
+enough for large CJK faces (~10-20 MB) while bounding the pathological case. Brings
+the font pipeline in line with the image pipeline's existing input cap. Low
+severity under the single-user threat model; no impact on legitimate books
+(verified a real Korean book still embeds all four KoPub faces).
+
 ## 5.4.2 — Distinct slugs for non-ASCII embedded fonts (#36)
 
 Fixes internal font-family names for embedded fonts whose `@font-face` family is
