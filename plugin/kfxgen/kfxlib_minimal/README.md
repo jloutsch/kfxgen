@@ -5,6 +5,21 @@ runs inside Calibre's bundled Python interpreter without pulling in
 heavy upstream dependencies (pypdf, PIL, etc.). Only the Ion structures
 and serialization utilities needed for KFX generation are kept.
 
+## Upstream baseline (#18)
+
+Derived from jhowell's `kfxlib` (bundled in the *KFX Input* Calibre plugin;
+copyright "2016-2025, John Howell"). Update this on every re-sync.
+
+| Field | Value |
+|-------|-------|
+| Fork baseline (approx.) | jhowell `kfxlib` ≈ late-2025; the fork carries no `version.py` |
+| Latest upstream compared | `kfxlib` **20260520** (KFX Input 2.33.0) — measured 2026-07-04 |
+| Drift at that comparison | 13 catalog symbols behind (`$835`–`$846`, `$851`); `YJ_symbols` table version **10** (unchanged); `ROOT_FRAGMENT_TYPES` identical. **Benign for generation** — kfxgen emits none of the missing symbols. |
+
+Drift detection + re-sync procedure: `research/kfx-format-baseline/`
+(a fixed Amazon-engine conversion whose symbol/fragment inventory is diffed
+across Kindle Previewer / `kfxlib` versions).
+
 ## Local modifications (vendored fork — track upstream sync cost)
 
 Each entry below is a local modification that creates merge friction
