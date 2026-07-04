@@ -4,6 +4,7 @@ Isolated from the generator so the risky parsing/matching logic is unit-tested
 without Calibre. Calibre only appears in build_font_table (Task 4).
 """
 
+import hashlib
 import re
 from dataclasses import dataclass
 
@@ -70,7 +71,16 @@ def extract_src_urls(src):
 
 
 def _slug(name):
-    out = re.sub(r"[^a-z0-9]+", "-", normalize_family(name)).strip("-")
+    norm = normalize_family(name)
+    out = re.sub(r"[^a-z0-9]+", "-", norm).strip("-")
+    # Non-ASCII family names (CJK, Cyrillic, ...) lose all identity to the
+    # ASCII-only slug, so distinct families (e.g. Korean 명조 serif vs 고딕 sans)
+    # would collapse to the same base and rely only on emitted_name's dedup
+    # counter to stay apart. Append a short, stable hash of the full name so
+    # distinct families get distinct slug bases. Pure-ASCII names are unchanged.
+    if any(ord(c) > 127 for c in norm):
+        h = hashlib.sha1(norm.encode("utf-8")).hexdigest()[:8]
+        out = f"{out}-{h}" if out else f"font-{h}"
     return out or "font"
 
 
