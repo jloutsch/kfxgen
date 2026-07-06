@@ -58,12 +58,12 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
             ),
         ),
         OptionRecommendation(
-            name="kfxgen_embed_fonts",
-            recommended_value=True,
+            name="kfxgen_disable_font_embedding",
+            recommended_value=False,
             help=(
-                "Embed the book's own @font-face fonts into the KFX so its "
-                "typography renders on-device. Turn OFF to use the font "
-                "installed/selected on the Kindle instead."
+                "Do not embed the book's own @font-face fonts. Embedding is on "
+                "by default (so the book's typography renders on-device); enable "
+                "this to use the font installed/selected on the Kindle instead."
             ),
         ),
     }

@@ -1066,20 +1066,23 @@ def _ensure_oeb_opts(oeb_book, opts):
 
 
 def _font_table_for(oeb_book, opts, log):
-    """Build the embedded-font table, or an empty one when the user disabled
-    embedding via the `kfxgen_embed_fonts` output option (#15 escape hatch).
+    """Build the embedded-font table, or an empty one when the user opted out of
+    embedding via the `kfxgen_disable_font_embedding` output option (#15 escape
+    hatch).
 
-    An empty FontTable means no `$262`/`$418` fragments, no `$11` on `$157`
-    styles, and `override_kindle_font=False` — so the font installed/selected on
-    the Kindle is used. Defaults to embedding when the option is absent (opts is
-    None or lacks the attr), preserving behavior for non-plugin callers.
+    Opt-out (default False) rather than a default-on toggle: Calibre renders a
+    default-True boolean's checkbox unchecked and inverts its CLI flag, which is
+    confusing. An empty FontTable means no `$262`/`$418` fragments, no `$11` on
+    `$157` styles, and `override_kindle_font=False` — so the font
+    installed/selected on the Kindle is used. Absent option (opts None or
+    lacking the attr) embeds, preserving behavior for non-plugin callers.
     """
     from .font_table import FontTable, build_font_table  # noqa: PLC0415
 
-    if getattr(opts, "kfxgen_embed_fonts", True):
-        return build_font_table(oeb_book, log)
-    log.info("  Font embedding disabled (kfxgen_embed_fonts=False)")
-    return FontTable([])
+    if getattr(opts, "kfxgen_disable_font_embedding", False):
+        log.info("  Font embedding disabled (kfxgen_disable_font_embedding=True)")
+        return FontTable([])
+    return build_font_table(oeb_book, log)
 
 
 def convert_oeb_to_kfx(oeb_book, output_path, opts, log):

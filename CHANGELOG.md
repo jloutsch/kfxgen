@@ -2,13 +2,15 @@
 
 ## 5.5.0 — Font-embedding toggle (#15)
 
-New **Embed fonts** output option (`kfxgen_embed_fonts`, default on) — a checkbox
-in the conversion dialog's KFX Output tab, and `--kfxgen-embed-fonts` on the CLI.
-Leave it on (default) to embed the book's own `@font-face` fonts so its
-typography renders on-device; turn it off to use the font installed/selected on
-the Kindle instead. Off means no `$262`/`$418` font fragments and
-`override_kindle_font=False` — the font embedding is fully bypassed. Books
-without embeddable fonts are unaffected either way.
+New **Do not embed fonts** output option (`kfxgen_disable_font_embedding`, off by
+default) — a checkbox in the conversion dialog's KFX Output tab, and
+`--kfxgen-disable-font-embedding` on the CLI. Font embedding stays **on by
+default** (the book's own `@font-face` fonts embed so its typography renders
+on-device); enable this option to use the font installed/selected on the Kindle
+instead. When disabled there are no `$262`/`$418` font fragments and
+`override_kindle_font=False` — embedding is fully bypassed. Books without
+embeddable fonts are unaffected either way. (Modelled as an opt-out because
+Calibre renders a default-on checkbox unchecked and inverts its CLI flag.)
 
 ## 5.4.3 — Cap embedded font size (#47)
 

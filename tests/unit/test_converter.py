@@ -1185,7 +1185,7 @@ def test_style_resolver_unstyled_align_is_auto_then_ignored():
     assert compute_block_style({"text-align": "auto"})["align"] is None
 
 
-# --- kfxgen_embed_fonts toggle: gate the font table on the option (#15 Phase 6) ---
+# --- font-embedding toggle: opt-out via kfxgen_disable_font_embedding (#15) ---
 
 
 @pytest.mark.unit
@@ -1196,7 +1196,7 @@ def test_font_table_for_disabled_returns_empty_without_building(monkeypatch):
     monkeypatch.setattr(_ft, "build_font_table", lambda *a, **k: called.append(1))
 
     class _Opts:
-        kfxgen_embed_fonts = False
+        kfxgen_disable_font_embedding = True
 
     ft = _conv._font_table_for(object(), _Opts(), _silent_log())
     assert isinstance(ft, _ft.FontTable) and ft.faces == []
@@ -1204,18 +1204,18 @@ def test_font_table_for_disabled_returns_empty_without_building(monkeypatch):
 
 
 @pytest.mark.unit
-def test_font_table_for_enabled_delegates_to_build(monkeypatch):
+def test_font_table_for_default_embeds_delegating_to_build(monkeypatch):
     import kfxgen.font_table as _ft
 
     sentinel = _ft.FontTable([])
     monkeypatch.setattr(_ft, "build_font_table", lambda oeb, log: sentinel)
 
-    class _On:
-        kfxgen_embed_fonts = True
+    class _NotDisabled:  # explicit opt-out = False -> embed
+        kfxgen_disable_font_embedding = False
 
-    class _Absent:  # option missing -> default True
+    class _Absent:  # option missing -> default is to embed
         pass
 
-    assert _conv._font_table_for(object(), _On(), _silent_log()) is sentinel
+    assert _conv._font_table_for(object(), _NotDisabled(), _silent_log()) is sentinel
     assert _conv._font_table_for(object(), _Absent(), _silent_log()) is sentinel
     assert _conv._font_table_for(object(), None, _silent_log()) is sentinel
