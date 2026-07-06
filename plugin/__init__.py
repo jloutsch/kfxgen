@@ -57,6 +57,15 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
                 "larger KFX files for illustrated books."
             ),
         ),
+        OptionRecommendation(
+            name="kfxgen_embed_fonts",
+            recommended_value=True,
+            help=(
+                "Embed the book's own @font-face fonts into the KFX so its "
+                "typography renders on-device. Turn OFF to use the font "
+                "installed/selected on the Kindle instead."
+            ),
+        ),
     }
 
     def convert(self, oeb_book, output_path, input_plugin, opts, log):
