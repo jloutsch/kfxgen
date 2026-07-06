@@ -37,9 +37,25 @@ OptionRecommendation(
 )
 ```
 
-Calibre auto-renders this as a checkbox in the conversion dialog's **KFX Output**
-tab and exposes it to `ebook-convert` as `--kfxgen-disable-font-embedding`. No
-custom config widget — same as the image option.
+Calibre exposes this to `ebook-convert` as `--kfxgen-disable-font-embedding`.
+**Note:** Calibre does *not* render third-party output-plugin options in the GUI
+conversion dialog (there is no auto-generated tab, and no built-in `kfx_output`
+widget). So the CLI flag is the only conversion-dialog surface. The GUI toggle is
+provided separately via the plugin **Customize** dialog (below).
+
+### 1b. Customize-dialog widget (GUI toggle)
+
+Since output-plugin options are CLI-only, the GUI toggle lives in
+Preferences → Plugins → kfxgen → **Customize**:
+
+- `prefs.py` — Qt-free `JSONConfig('plugins/kfxgen')`, `disable_font_embedding`
+  default `False` (safe to import from the conversion worker).
+- `config.py` — a Qt `ConfigWidget` (one "Do not embed fonts" checkbox),
+  imported only from `config_widget()`.
+- The plugin wrapper implements `is_customizable() -> True`, `config_widget()`,
+  `save_settings()`, and folds the saved setting into the conversion `opts` in
+  `convert()` (OR'd with the CLI option — either disables). This is a persistent,
+  **global** setting; the CLI flag remains per-conversion.
 
 ### 2. Converter gate (`converter.py::convert_oeb_to_kfx`)
 

@@ -68,6 +68,35 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
         ),
     }
 
+    # --- Customization (Preferences -> Plugins -> Customize) ---
+
+    def is_customizable(self):
+        return True
+
+    def config_widget(self):
+        from calibre_plugins.kfxgen.config import ConfigWidget
+
+        return ConfigWidget()
+
+    def save_settings(self, config_widget):
+        config_widget.save_settings()
+
+    def _apply_prefs(self, opts, log):
+        """Fold the persistent Customize setting into the conversion opts.
+
+        The Customize-dialog checkbox and the per-conversion
+        `--kfxgen-disable-font-embedding` option are OR'd: either disables
+        font embedding. Default (both off) embeds.
+        """
+        try:
+            from calibre_plugins.kfxgen.prefs import prefs
+
+            if prefs["disable_font_embedding"]:
+                opts.kfxgen_disable_font_embedding = True
+                log.info("  Font embedding disabled by plugin setting")
+        except Exception as e:
+            log.warn("Could not read kfxgen plugin settings ({})".format(e))
+
     def convert(self, oeb_book, output_path, input_plugin, opts, log):
         """
         Main conversion method called by Calibre.
@@ -83,6 +112,7 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
             log: Calibre's logger object
         """
         log.info("kfxgen v{}.{}.{} - Starting conversion".format(*self.version))
+        self._apply_prefs(opts, log)
 
         # Try native generation first
         try:
