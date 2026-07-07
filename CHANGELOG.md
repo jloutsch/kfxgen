@@ -1,6 +1,15 @@
 # Changelog
 
-## 5.5.0 — Font-embedding toggle (#15)
+## 5.5.0 — Font-embedding toggle (#15) + bold/italic face fix (#50)
+
+**Fixed (#50):** bold and italic embedded faces now render on-device. The applied
+style (`$157`) referenced the correct face family but carried *normal* weight, so
+the Kindle — which matches a run by family + weight + style against the `@font-face`
+(`$262`) descriptor — couldn't find the face and fell back to regular. The applied
+style now carries the run's actual weight/style, matching the face (verified
+against Amazon's own output). Affected 5.4.0–5.4.3; no-font books are unchanged.
+
+
 
 You can now turn off font embedding. Font embedding stays **on by default** (a
 book's own `@font-face` fonts embed so its typography renders on-device); disable
