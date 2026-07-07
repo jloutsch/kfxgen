@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:title>Font Matching Test Book</dc:title>
+    <dc:title>kfxgen Font Face Test — 5.5.0 (#50 fix)</dc:title>
     <dc:creator>kfxgen Contributors</dc:creator>
     <dc:language>en</dc:language>
-    <dc:identifier id="bookid">kfxgen-test-font-matching-001</dc:identifier>
+    <dc:identifier id="bookid">kfxgen-test-font-matching-550</dc:identifier>
     <dc:rights>Charis SIL fonts (c) SIL International, 1997-2007, under the SIL Open Font License 1.1. See OEBPS/fonts/OFL.txt.</dc:rights>
-    <meta property="dcterms:modified">2025-01-28T00:00:00Z</meta>
+    <meta property="dcterms:modified">2026-07-06T00:00:00Z</meta>
   </metadata>
 
   <manifest>
