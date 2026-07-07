@@ -190,58 +190,53 @@ def _face(fam, w, it):
 
 def test_match_no_embedded_family_returns_none():
     t = FontTable([_face("foo", 400, False)])
-    assert t.match(["bar", "serif"], bold=False, italic=False) == (None, False, False)
-    assert t.match([], bold=True, italic=False) == (None, False, False)
+    assert t.match(["bar", "serif"], bold=False, italic=False) is None
+    assert t.match([], bold=True, italic=False) is None
 
 
 def test_match_exact_regular():
     t = FontTable([_face("foo", 400, False)])
-    assert t.match(["foo"], bold=False, italic=False) == ("foo-400", True, True)
+    assert t.match(["foo"], bold=False, italic=False) == "foo-400"
 
 
 def test_match_exact_bold_face():
     t = FontTable([_face("foo", 400, False), _face("foo", 700, False)])
-    assert t.match(["foo"], bold=True, italic=False) == ("foo-700", True, True)
+    assert t.match(["foo"], bold=True, italic=False) == "foo-700"
 
 
-def test_match_bold_requested_only_regular_embedded_falls_back_synthetic():
+def test_match_bold_requested_only_regular_embedded_falls_back():
     t = FontTable([_face("foo", 400, False)])
-    # regular family applied, but weight not satisfied -> caller synthesizes bold
-    assert t.match(["foo"], bold=True, italic=False) == ("foo-400", False, True)
+    # No bold face -> fall back to the regular family; the caller sets the $157
+    # weight so the Kindle synthesizes bold on it (#50).
+    assert t.match(["foo"], bold=True, italic=False) == "foo-400"
 
 
 def test_match_italic_requested_only_regular_embedded():
     t = FontTable([_face("foo", 400, False)])
-    assert t.match(["foo"], bold=False, italic=True) == ("foo-400", True, False)
+    assert t.match(["foo"], bold=False, italic=True) == "foo-400"
 
 
 def test_match_exact_bold_italic():
     t = FontTable([_face("foo", 400, False), _face("foo", 700, True)])
-    assert t.match(["foo"], bold=True, italic=True) == ("foo-700i", True, True)
+    assert t.match(["foo"], bold=True, italic=True) == "foo-700i"
 
 
 def test_match_family_list_uses_first_embedded():
     t = FontTable([_face("bar", 400, False)])
     # "foo" not embedded, "bar" is -> use bar
-    assert t.match(["foo", "bar"], bold=False, italic=False) == ("bar-400", True, True)
+    assert t.match(["foo", "bar"], bold=False, italic=False) == "bar-400"
 
 
-def test_match_family_with_only_bold_italic_face_no_double_bold():
+def test_match_family_with_only_bold_italic_face():
     # Family embeds ONLY a bold-italic face; caller wants bold+upright.
     t = FontTable([_face("foo", 700, True)])
-    fam, w_ok, s_ok = t.match(["foo"], bold=True, italic=False)
-    assert fam == "foo-700i"
-    assert w_ok is True  # face already bold -> do NOT faux-bold
-    assert s_ok is False  # face is italic but upright requested -> flag mismatch
+    assert t.match(["foo"], bold=True, italic=False) == "foo-700i"
 
 
 def test_match_family_with_only_bold_face_plain_text():
     # Family embeds ONLY a bold face; caller wants plain regular text.
     t = FontTable([_face("foo", 700, False)])
-    fam, w_ok, s_ok = t.match(["foo"], bold=False, italic=False)
-    assert fam == "foo-700"
-    assert w_ok is False  # face is bold, regular requested -> mismatch signalled
-    assert s_ok is True
+    assert t.match(["foo"], bold=False, italic=False) == "foo-700"
 
 
 # --- Task 4: build_font_table / build_manifest_lookup (Calibre integration) ---
