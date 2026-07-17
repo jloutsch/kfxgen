@@ -2704,14 +2704,15 @@ class NativeKFXGenerator:
 
         def _emphasis_style(flags, family_list, blk_bold=False, blk_italic=False):
             # Effective emphasis = inline run flags OR the block's CSS emphasis.
-            # When a real bold/italic face exists, weight_ok/style_ok are True
-            # and we suppress synthetic bold/italic ($13/$12). With no matching
-            # family, match() returns (None, False, False) and font_family is
-            # omitted -> byte-identical to today's synthetic-only output.
+            # The applied $157 always carries the run's own weight/style ($13/$12)
+            # so it matches the $262 face descriptor the Kindle resolves against
+            # (#50): a real face is used when present, synthesized otherwise. With
+            # no embedded family, font_family is omitted and bold/italic still
+            # drive synthetic rendering -> byte-identical to today's output.
             bold = (FLAG_BOLD in flags) or blk_bold
             italic = (FLAG_ITALIC in flags) or blk_italic
-            fam, weight_ok, style_ok = self.font_table.match(family_list, bold, italic)
-            attrs = {"italic": italic and not style_ok, "bold": bold and not weight_ok}
+            fam = self.font_table.match(family_list, bold, italic)
+            attrs = {"italic": italic, "bold": bold}
             if fam:
                 attrs["font_family"] = fam
             return _allocate_style("_em", **attrs)
@@ -2778,19 +2779,20 @@ class NativeKFXGenerator:
                         attrs["margin_right"] = bs["margin_right"]
                     # Body run: match the block's font-family, honouring any
                     # block-level CSS bold/italic (only when fonts are embedded,
-                    # so no-font books keep byte-identical $157 output). A real
-                    # bold/italic face is used directly; if the family lacks it,
-                    # synthesize on the matched face.
+                    # so no-font books keep byte-identical $157 output). The entry
+                    # $157 carries the block's own weight/style ($13/$12) so it
+                    # matches the $262 face descriptor the Kindle resolves against
+                    # (#50) — the real face when present, synthesized otherwise.
                     blk_bold = bool(bs.get("bold")) if has_fonts else False
                     blk_italic = bool(bs.get("italic")) if has_fonts else False
-                    fam, w_ok, s_ok = self.font_table.match(
+                    fam = self.font_table.match(
                         bs.get("font_family", []), bold=blk_bold, italic=blk_italic
                     )
                     if fam:
                         attrs["font_family"] = fam
-                        if blk_bold and not w_ok:
+                        if blk_bold:
                             attrs["bold"] = True
-                        if blk_italic and not s_ok:
+                        if blk_italic:
                             attrs["italic"] = True
                     entry_styles.append(_allocate_style("", **attrs))
                     entry_link_targets.append(None)

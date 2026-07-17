@@ -198,12 +198,14 @@ class FontTable:
             self._by_family.setdefault(f.css_family, []).append(f)
 
     def match(self, family_list, bold, italic):
-        """Resolve (family_list, bold, italic) to a face.
+        """Resolve (family_list, bold, italic) to the emitted family of the best
+        face, or None when no listed family is embedded.
 
-        Returns (emitted_family | None, weight_ok, style_ok). *_ok True means
-        the chosen face already satisfies that axis, so the caller should NOT
-        synthesize it. When no family is embedded, returns (None, False, False)
-        so the caller reproduces today's synthetic behavior unchanged.
+        Prefers an exact (weight, style) face; otherwise falls back to the
+        regular face (else the first). The caller sets the applied `$157`'s own
+        `$13`/`$12` weight/style to the run's bold/italic so the Kindle resolves
+        the same face the `$262` declares — a real bold/italic face is used when
+        present, and synthesized on the fallback face when not (#50).
         """
         fam_faces = None
         for fam in family_list or []:
@@ -211,7 +213,7 @@ class FontTable:
                 fam_faces = self._by_family[fam]
                 break
         if not fam_faces:
-            return (None, False, False)
+            return None
 
         want_bold = bool(bold)
         want_italic = bool(italic)
@@ -220,15 +222,13 @@ class FontTable:
             if (
                 f.weight >= BOLD_WEIGHT_THRESHOLD
             ) == want_bold and f.italic == want_italic:
-                return (f.emitted_family, True, True)
+                return f.emitted_family
         # Fallback: regular face (weight<600, upright), else any face.
         regular = next(
             (f for f in fam_faces if f.weight < BOLD_WEIGHT_THRESHOLD and not f.italic),
             fam_faces[0],
         )
-        weight_ok = (regular.weight >= BOLD_WEIGHT_THRESHOLD) == want_bold
-        style_ok = regular.italic == want_italic
-        return (regular.emitted_family, weight_ok, style_ok)
+        return regular.emitted_family
 
 
 def build_manifest_lookup(oeb_book):

@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin"))
 
 from kfxgen.font_table import build_font_table  # noqa: E402
-from kfxgen.inline_style import FLAG_BOLD  # noqa: E402
+from kfxgen.inline_style import FLAG_BOLD, FLAG_ITALIC  # noqa: E402
 from kfxgen.kfxlib_minimal.ion import IS  # noqa: E402
 from kfxgen.native_generator import NativeKFXGenerator  # noqa: E402
 from tests.fixtures.oeb_shim import EpubAsOeb  # noqa: E402
@@ -165,3 +165,69 @@ def test_font_applied_to_styles_with_real_slugs(font_table):
     fams = {f.value[IS("$11")] for f in styles if IS("$11") in f.value}
     assert "charis-sil-400" in fams
     assert "charis-sil-700" in fams
+
+
+def _styles_by_family(g):
+    out = {}
+    for f in g.fragments:
+        if str(f.ftype) == "$157" and IS("$11") in f.value:
+            out.setdefault(f.value[IS("$11")], []).append(f.value)
+    return out
+
+
+def test_span_face_descriptor_matches_262(font_table):
+    # #50: a bold/italic span selecting a real face must carry the matching
+    # weight/style descriptor on its $157 ($13=$361 / $12=$382), so the Kindle
+    # resolves the same face the $262 declares. Suppressing them (normal weight)
+    # left the on-device reader unable to find the face.
+    g = NativeKFXGenerator()
+    chapter = {
+        "title": "C1",
+        "text": "Bold italic.",
+        "blocks": [
+            {
+                "text": "Bold italic.",
+                "spans": [
+                    (0, 4, frozenset({FLAG_BOLD})),
+                    (5, 6, frozenset({FLAG_ITALIC})),
+                ],
+                "block_style": {"font_family": ["charis sil"]},
+            }
+        ],
+    }
+    g.generate_full_book(
+        title="T", author="A", chapters=[chapter], font_table=font_table
+    )
+    by_fam = _styles_by_family(g)
+    assert by_fam.get("charis-sil-700"), "bold span should reference the bold face"
+    for v in by_fam["charis-sil-700"]:
+        assert IS("$13") in v and v[IS("$13")] == IS("$361")
+    assert by_fam.get("charis-sil-400i"), "italic span should reference the italic face"
+    for v in by_fam["charis-sil-400i"]:
+        assert IS("$12") in v and v[IS("$12")] == IS("$382")
+
+
+def test_block_bold_face_descriptor_matches_262(font_table):
+    # #50: block-level CSS bold (font-weight on the paragraph) selecting the real
+    # bold face must carry $13=$361 on the entry $157. This is the path that
+    # broke on-device for the four-face book — the face was assigned but the
+    # applied style had normal weight, so it never matched.
+    g = NativeKFXGenerator()
+    chapter = {
+        "title": "C1",
+        "text": "Bold para.",
+        "blocks": [
+            {
+                "text": "Bold para.",
+                "spans": [],
+                "block_style": {"font_family": ["charis sil"], "bold": True},
+            }
+        ],
+    }
+    g.generate_full_book(
+        title="T", author="A", chapters=[chapter], font_table=font_table
+    )
+    by_fam = _styles_by_family(g)
+    assert by_fam.get("charis-sil-700"), "bold paragraph should reference the bold face"
+    for v in by_fam["charis-sil-700"]:
+        assert IS("$13") in v and v[IS("$13")] == IS("$361")

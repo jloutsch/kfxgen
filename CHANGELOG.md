@@ -1,5 +1,33 @@
 # Changelog
 
+## 5.5.0 — Font-embedding toggle (#15) + bold/italic face fix (#50)
+
+**Fixed (#50):** bold and italic embedded faces now render on-device. The applied
+style (`$157`) referenced the correct face family but carried *normal* weight, so
+the Kindle — which matches a run by family + weight + style against the `@font-face`
+(`$262`) descriptor — couldn't find the face and fell back to regular. The applied
+style now carries the run's actual weight/style, matching the face (verified
+against Amazon's own output). Affected 5.4.0–5.4.3; no-font books are unchanged.
+
+
+
+You can now turn off font embedding. Font embedding stays **on by default** (a
+book's own `@font-face` fonts embed so its typography renders on-device); disable
+it to use the font installed/selected on the Kindle instead. Two ways:
+
+- **GUI:** Preferences → Plugins → **kfxgen → Customize** → check **"Do not embed
+  fonts"** (a persistent, global setting). Calibre does not surface third-party
+  output-plugin options in the conversion dialog, so the Customize dialog is the
+  GUI home for this.
+- **CLI:** `--kfxgen-disable-font-embedding` (per-conversion). OR'd with the GUI
+  setting — either one disables embedding.
+
+When disabled there are no `$262`/`$418` font fragments and
+`override_kindle_font=False` — embedding is fully bypassed. Books without
+embeddable fonts are unaffected either way. (Modelled as an opt-out: Calibre
+renders a default-on checkbox unchecked and inverts its CLI flag, so a "disable"
+toggle reads correctly.)
+
 ## 5.4.3 — Cap embedded font size (#47)
 
 Security hardening surfaced by a whole-project review. Embedded fonts had no size

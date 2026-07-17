@@ -1065,6 +1065,26 @@ def _ensure_oeb_opts(oeb_book, opts):
         pass
 
 
+def _font_table_for(oeb_book, opts, log):
+    """Build the embedded-font table, or an empty one when the user opted out of
+    embedding via the `kfxgen_disable_font_embedding` output option (#15 escape
+    hatch).
+
+    Opt-out (default False) rather than a default-on toggle: Calibre renders a
+    default-True boolean's checkbox unchecked and inverts its CLI flag, which is
+    confusing. An empty FontTable means no `$262`/`$418` fragments, no `$11` on
+    `$157` styles, and `override_kindle_font=False` — so the font
+    installed/selected on the Kindle is used. Absent option (opts None or
+    lacking the attr) embeds, preserving behavior for non-plugin callers.
+    """
+    from .font_table import FontTable, build_font_table  # noqa: PLC0415
+
+    if getattr(opts, "kfxgen_disable_font_embedding", False):
+        log.info("  Font embedding disabled (kfxgen_disable_font_embedding=True)")
+        return FontTable([])
+    return build_font_table(oeb_book, log)
+
+
 def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
     """
     Convert Calibre OEB book to KFX format using native generator.
@@ -1124,11 +1144,8 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
     log.info(f"  Chapters: {len(chapters)}")
     log.info(f"  Total content: {total_chars:,} characters")
 
-    # Build embedded-font table (#15). Empty (no faces) for books without
-    # embeddable @font-face fonts, in which case KFX output is unchanged.
-    from .font_table import build_font_table  # noqa: PLC0415
-
-    font_table = build_font_table(oeb_book, log)
+    # Build embedded-font table (#15), unless the user disabled embedding.
+    font_table = _font_table_for(oeb_book, opts, log)
 
     # Generate KFX
     log.info("Generating KFX file...")
