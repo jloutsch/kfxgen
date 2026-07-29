@@ -1391,7 +1391,10 @@ def test_blocks_carry_file_qualified_anchor_keys():
     blocks = _conv.extract_blocks_from_html(
         _doc('<p id="note1">A note</p>'), base_href="endnotes.xhtml"
     )
-    assert blocks[0]["anchor_keys"] == ["endnotes.xhtml#note1"]
+    # The bare filename is prepended to the first block so whole-file links
+    # resolve (#62); the id-qualified key is what matters here.
+    assert "endnotes.xhtml#note1" in blocks[0]["anchor_keys"]
+    assert blocks[0]["anchor_keys"] == ["endnotes.xhtml", "endnotes.xhtml#note1"]
 
 
 @pytest.mark.unit
@@ -1492,3 +1495,20 @@ def test_hidden_does_not_swallow_normal_content():
         _doc('<p hidden="hidden">gone</p><p>kept</p>')
     )
     assert [b["text"] for b in blocks] == ["kept"]
+
+
+@pytest.mark.unit
+def test_first_block_carries_bare_filename_anchor_key():
+    """#62: a TOC entry may link to a whole file with no fragment. If that file
+    declares no ids anywhere, nothing anchors it and the link is dropped."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc("<p>About the author.</p><p>More.</p>"), base_href="038_BM_006.xhtml"
+    )
+    assert "038_BM_006.xhtml" in blocks[0]["anchor_keys"]
+    assert "038_BM_006.xhtml" not in blocks[1]["anchor_keys"]
+
+
+@pytest.mark.unit
+def test_bare_filename_key_absent_without_base_href():
+    blocks = _conv.extract_blocks_from_html(_doc("<p>x</p>"))
+    assert blocks[0]["anchor_keys"] == []
