@@ -220,7 +220,13 @@ def _walk_inline(
                 )
             )
         if child.tail:
-            parts.append((child.tail, flags))
+            # The tail sits inside `elem`, so it carries `cur` — this element's
+            # accumulated flags — not the incoming `flags`. Using `flags` here
+            # dropped whatever `elem` itself contributed: text after a nested
+            # tag inside <em> lost its italic, and text between styled spans
+            # inside an <a> lost the link, leaving entries half-underlined and
+            # half-dead. (#59)
+            parts.append((child.tail, cur))
     return parts
 
 
@@ -253,6 +259,26 @@ def _dedupe_keep_order(items):
             seen.add(it)
             out.append(it)
     return out
+
+
+#: epub:type values naming navigation that is never rendered as body text.
+#: page-list is the big one: an EPUB 3 print-pagination nav holds one entry per
+#: printed page, which arrived as several hundred bare page numbers. (#60)
+_NON_RENDERED_EPUB_TYPES = {"page-list", "landmarks", "lot", "loi", "lov"}
+_EPUB_TYPE_ATTR = "{http://www.idpf.org/2007/ops}type"
+
+
+def _is_non_rendered(elem):
+    """True when `elem` heads a subtree that is markup, not reading content.
+
+    Two signals: the HTML5 `hidden` attribute (the general rule — the producer
+    said not to display this), and an `epub:type` naming a navigation kind that
+    is structural by definition, which catches producers that omit `hidden`.
+    """
+    if elem.get("hidden") is not None:
+        return True
+    raw = elem.get(_EPUB_TYPE_ATTR) or elem.get("epub:type") or ""
+    return any(part in _NON_RENDERED_EPUB_TYPES for part in raw.lower().split())
 
 
 def _attach_anchor_keys(blocks, base_href):
@@ -301,6 +327,11 @@ def extract_blocks_from_html(element, style_resolver=None, base_href=None):
         "h6",
         "blockquote",
         "li",
+        # ol/ul must count as blocks, otherwise an <li> holding a nested list
+        # looks childless and the whole sub-list is flattened into the parent's
+        # paragraph — a Part heading and all its chapters on one line. (#58)
+        "ol",
+        "ul",
         "section",
         "article",
         "figure",
@@ -312,6 +343,8 @@ def extract_blocks_from_html(element, style_resolver=None, base_href=None):
     pending_ids = []  # anchors awaiting the next leaf block (containers, standalone <a>)
 
     def _walk(elem, parent_is_block):
+        if _is_non_rendered(elem):
+            return
         is_block = elem.tag in block_tags
         has_block_child = any(child.tag in block_tags for child in elem)
 
@@ -357,8 +390,51 @@ def extract_blocks_from_html(element, style_resolver=None, base_href=None):
             return
 
         pending_ids.extend(_own_anchor_ids(elem))
+
+        # A container can hold its own inline content alongside block children —
+        # `<li>Part<ol>…</ol></li>`, `<div>lead-in<p>…</p></div>`. That inline
+        # content is real text and used to be dropped on the floor, because this
+        # branch only recursed into children. Flush each run of inline siblings
+        # as its own block, in document order. (#58)
+        inline_parts = []
+
+        def _flush_inline():
+            if not inline_parts:
+                return
+            text, spans = normalize_runs(inline_parts)
+            inline_parts.clear()
+            if not text:
+                return
+            ids = pending_ids[:]
+            pending_ids.clear()
+            blocks.append(
+                {
+                    "text": text,
+                    "spans": spans,
+                    "block_style": None,
+                    "anchor_ids": _dedupe_keep_order(ids),
+                }
+            )
+
+        if elem.text:
+            inline_parts.append((elem.text, frozenset()))
         for child in elem:
-            _walk(child, parent_is_block=is_block)
+            if child.tag in block_tags or _local_tag(child.tag) == "img":
+                _flush_inline()
+                _walk(child, parent_is_block=is_block)
+            elif not _is_non_rendered(child):
+                inline_parts.extend(
+                    _walk_inline(
+                        child,
+                        frozenset(),
+                        style_resolver,
+                        is_root=False,
+                        base_href=base_href,
+                    )
+                )
+            if child.tail:
+                inline_parts.append((child.tail, frozenset()))
+        _flush_inline()
 
     for child in body:
         _walk(child, parent_is_block=False)
