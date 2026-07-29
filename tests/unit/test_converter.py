@@ -1219,3 +1219,183 @@ def test_font_table_for_default_embeds_delegating_to_build(monkeypatch):
     assert _conv._font_table_for(object(), _NotDisabled(), _silent_log()) is sentinel
     assert _conv._font_table_for(object(), _Absent(), _silent_log()) is sentinel
     assert _conv._font_table_for(object(), None, _silent_log()) is sentinel
+
+
+# ── #52: superscript / subscript inline runs ─────────────────────────────────
+
+from kfxgen.inline_style import FLAG_SUB as Sb  # noqa: E402
+from kfxgen.inline_style import FLAG_SUPER as Sp  # noqa: E402
+
+
+@pytest.mark.unit
+def test_blocks_capture_sup_tag():
+    blocks = _conv.extract_blocks_from_html(_doc("<p>note<sup>1</sup></p>"))
+    assert blocks[0]["text"] == "note1"
+    assert blocks[0]["spans"] == [(4, 1, frozenset({Sp}))]
+
+
+@pytest.mark.unit
+def test_blocks_capture_sub_tag():
+    blocks = _conv.extract_blocks_from_html(_doc("<p>H<sub>2</sub>O</p>"))
+    assert blocks[0]["text"] == "H2O"
+    assert blocks[0]["spans"] == [(1, 1, frozenset({Sb}))]
+
+
+@pytest.mark.unit
+def test_sup_composes_with_emphasis():
+    blocks = _conv.extract_blocks_from_html(_doc("<p><em>a<sup>2</sup></em></p>"))
+    assert blocks[0]["text"] == "a2"
+    assert blocks[0]["spans"] == [
+        (0, 1, frozenset({I})),
+        (1, 1, frozenset({I, Sp})),
+    ]
+
+
+@pytest.mark.unit
+def test_css_vertical_align_super_marks_run():
+    """Publisher EPUBs get superscript from CSS, not <sup>: a noteref is
+    `<span class="EN_REF"><a ...>1</a></span>` with
+    `span.EN_REF { vertical-align: super }`. (#52)
+    """
+    doc = _doc('<p>text<span class="EN_REF"><a href="n.xhtml#n1">1</a></span></p>')
+
+    def resolver(elem):
+        if elem.get("class") == "EN_REF":
+            return {"vertical-align": "super"}
+        return {}
+
+    blocks = _conv.extract_blocks_from_html(doc, style_resolver=resolver)
+    assert blocks[0]["text"] == "text1"
+    # One run covering the marker, carrying superscript. It also carries a
+    # link flag once base_href is supplied (#53) — asserted separately in
+    # test_link_composes_with_superscript.
+    assert len(blocks[0]["spans"]) == 1
+    start, length, flags = blocks[0]["spans"][0]
+    assert (start, length) == (4, 1)
+    assert Sp in flags
+
+
+@pytest.mark.unit
+def test_css_vertical_align_on_block_does_not_mark_whole_paragraph():
+    """vertical-align resolved on the block element itself must not turn the
+    entire paragraph into a superscript run."""
+    doc = _doc("<p>whole paragraph</p>")
+
+    def resolver(elem):
+        return {"vertical-align": "super"}
+
+    blocks = _conv.extract_blocks_from_html(doc, style_resolver=resolver)
+    assert blocks[0]["spans"] == []
+
+
+@pytest.mark.unit
+def test_style_resolver_reports_vertical_align():
+    """The Stylizer-backed resolver must expose vertical-align so inline runs
+    can see it. It does not inherit, so .get() is the correct accessor."""
+    import logging
+
+    class _Style:
+        def get(self, prop):
+            return "super" if prop == "vertical-align" else None
+
+        def __getitem__(self, prop):
+            return "auto"
+
+    class _Stylizer:
+        def style(self, elem):
+            return _Style()
+
+    r = _conv._build_style_resolver(
+        object(), object(), logging.getLogger("t"), lambda o, i: _Stylizer()
+    )
+    assert r(_doc("<p>x</p>"))["vertical-align"] == "super"
+
+
+# ── #53: in-body <a href> links and their anchor targets ─────────────────────
+
+from kfxgen.inline_style import link_target  # noqa: E402
+
+
+def _spans_link_targets(block):
+    return [link_target(flags) for _, _, flags in block["spans"]]
+
+
+@pytest.mark.unit
+def test_anchor_href_becomes_link_span():
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<p>text<a href="endnotes.xhtml#note1">1</a></p>'),
+        base_href="chapter_001.xhtml",
+    )
+    assert blocks[0]["text"] == "text1"
+    assert len(blocks[0]["spans"]) == 1
+    start, length, flags = blocks[0]["spans"][0]
+    assert (start, length) == (4, 1)
+    assert link_target(flags) == "endnotes.xhtml#note1"
+
+
+@pytest.mark.unit
+def test_bare_fragment_href_resolves_against_base_file():
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<p>see <a href="#later">this</a></p>'), base_href="chapter_001.xhtml"
+    )
+    assert _spans_link_targets(blocks[0]) == ["chapter_001.xhtml#later"]
+
+
+@pytest.mark.unit
+def test_link_composes_with_superscript():
+    """The real noteref shape: a CSS-superscripted span wrapping a link."""
+    doc = _doc('<p>x<span class="EN_REF"><a href="endnotes.xhtml#n1">1</a></span></p>')
+
+    def resolver(elem):
+        if elem.get("class") == "EN_REF":
+            return {"vertical-align": "super"}
+        return {}
+
+    blocks = _conv.extract_blocks_from_html(
+        doc, style_resolver=resolver, base_href="chapter_001.xhtml"
+    )
+    _, _, flags = blocks[0]["spans"][0]
+    assert Sp in flags
+    assert link_target(flags) == "endnotes.xhtml#n1"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "href",
+    [
+        "http://example.com/x",
+        "https://example.com/x",
+        "mailto:a@b.c",
+        "../../../etc/passwd",
+        "/absolute/path.xhtml",
+    ],
+)
+def test_external_and_unsafe_hrefs_produce_no_link(href):
+    blocks = _conv.extract_blocks_from_html(
+        _doc(f'<p>a<a href="{href}">b</a></p>'), base_href="chapter_001.xhtml"
+    )
+    assert _spans_link_targets(blocks[0]) in ([], [None])
+
+
+@pytest.mark.unit
+def test_href_without_fragment_targets_the_file():
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<p><a href="chapter_002.xhtml">Next</a></p>'),
+        base_href="chapter_001.xhtml",
+    )
+    assert _spans_link_targets(blocks[0]) == ["chapter_002.xhtml"]
+
+
+@pytest.mark.unit
+def test_blocks_carry_file_qualified_anchor_keys():
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<p id="note1">A note</p>'), base_href="endnotes.xhtml"
+    )
+    assert blocks[0]["anchor_keys"] == ["endnotes.xhtml#note1"]
+
+
+@pytest.mark.unit
+def test_anchor_keys_absent_base_href_falls_back_to_bare_ids():
+    blocks = _conv.extract_blocks_from_html(_doc('<p id="note1">A note</p>'))
+    assert blocks[0]["anchor_ids"] == ["note1"]
+    assert blocks[0]["anchor_keys"] == []

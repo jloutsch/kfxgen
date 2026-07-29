@@ -631,6 +631,82 @@ class TestInlineHyperlinks:
         finally:
             os.unlink(path)
 
+    def test_anchors_carry_180_self_name(self, load_kfx_fragments):
+        """Issue #51: $266 anchors must declare their own name in $180.
+
+        Every $266 in a Calibre KFX Output build and in Amazon-produced KFX is
+        shaped ($180, $183) or ($180, $186) — 100% carry $180, and none carry
+        $143 inside $183. Without $180 the anchor has no name to resolve, so
+        the $179 in a link span points at nothing and Kindle renders the run
+        as plain text.
+        """
+        from kfxgen.kfxlib_minimal.ion import IS
+
+        path = self._generate_with_toc_links()
+        try:
+            frags = load_kfx_fragments(path)
+            anchors = [f for f in frags if str(f.ftype) == "$266"]
+            assert anchors, "Expected $266 anchor fragments; none found"
+
+            for f in anchors:
+                v = f.value.value if hasattr(f.value, "value") else f.value
+                name = v.get(IS("$180"))
+                assert name is not None, (
+                    f"Anchor {f.fid!s} missing $180 self-name. Value: {dict(v.items())}"
+                )
+                assert str(name) == str(f.fid), (
+                    f"Anchor $180 is {name!s} but fragment id is {f.fid!s}; "
+                    "reference KFX always matches the two."
+                )
+                position = v.get(IS("$183"))
+                assert position is not None, f"Anchor {f.fid!s} missing $183"
+                assert position.get(IS("$155")) is not None, (
+                    f"Anchor {f.fid!s} $183 missing $155 (target eid)"
+                )
+                # No reference anchor carries $143 inside $183.
+                assert position.get(IS("$143")) is None, (
+                    f"Anchor {f.fid!s} has $143 inside $183; no reference KFX does."
+                )
+        finally:
+            os.unlink(path)
+
+    def test_every_link_span_resolves_to_an_anchor(self, load_kfx_fragments):
+        """Issue #51: each $179 in a link span must name a real $266 anchor."""
+        from kfxgen.kfxlib_minimal.ion import IS
+
+        path = self._generate_with_toc_links()
+        try:
+            frags = load_kfx_fragments(path)
+            anchor_names = set()
+            for f in frags:
+                if str(f.ftype) != "$266":
+                    continue
+                v = f.value.value if hasattr(f.value, "value") else f.value
+                name = v.get(IS("$180"))
+                if name is not None:
+                    anchor_names.add(str(name))
+
+            targets = []
+            for f in frags:
+                if str(f.ftype) != "$259":
+                    continue
+                v = f.value.value if hasattr(f.value, "value") else f.value
+                for e in v.get(IS("$146")) or []:
+                    if not hasattr(e, "get"):
+                        continue
+                    for span in e.get(IS("$142")) or []:
+                        target = span.get(IS("$179"))
+                        if target is not None:
+                            targets.append(str(target))
+
+            assert targets, "Expected at least one $179 link target"
+            dangling = sorted(set(targets) - anchor_names)
+            assert not dangling, (
+                f"Link spans reference anchors that declare no $180: {dangling}"
+            )
+        finally:
+            os.unlink(path)
+
 
 class TestCoverInReadingFlow:
     """Issue #32: when a cover_image is provided, it must appear as a $259
@@ -1509,3 +1585,266 @@ def test_block_level_bold_no_font_table_unchanged():
     ]
     assert body, "expected a body style"
     assert all(f.value.get(IS("$13")) != IS("$361") for f in body)
+
+
+# ── #52: superscript / subscript character styles ────────────────────────────
+
+
+@pytest.mark.unit
+def test_build_157_emits_31_baseline_shift():
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    gen = NativeKFXGenerator()
+    frag = gen.build_fragment_157(entity_name="sup0", baseline_shift=("35", "$314"))
+    assert IS("$31") in frag.value, "baseline_shift did not emit $31"
+    shift = frag.value[IS("$31")]
+    assert str(shift[IS("$307")]) == "35"
+    assert shift[IS("$306")] == IS("$314")
+
+
+@pytest.mark.unit
+def test_build_157_omits_31_by_default():
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    gen = NativeKFXGenerator()
+    frag = gen.build_fragment_157(entity_name="plain0")
+    assert IS("$31") not in frag.value
+
+
+@pytest.mark.unit
+def test_superscript_span_produces_raised_small_style(tmp_path):
+    """Reference noteref styles are reduced font-size plus a positive $31.
+    A FLAG_SUPER run must produce one. (#52)"""
+    from kfxgen.kfxlib_minimal.ion import IS
+    from kfxgen.inline_style import FLAG_SUPER
+
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "Ch",
+            "text": "note1",
+            "blocks": [{"text": "note1", "spans": [(4, 1, frozenset({FLAG_SUPER}))]}],
+        }
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    raised = [f for f in styles if IS("$31") in f.value]
+    assert raised, "No $157 carries $31 (baseline shift) for a superscript run"
+    for f in raised:
+        assert float(str(f.value[IS("$31")][IS("$307")])) > 0, (
+            "Superscript $31 must be positive (raised)"
+        )
+        assert IS("$16") in f.value, "Superscript style must reduce font-size ($16)"
+        assert float(str(f.value[IS("$16")][IS("$307")])) < 1.0
+
+
+@pytest.mark.unit
+def test_subscript_span_produces_lowered_style(tmp_path):
+    from kfxgen.kfxlib_minimal.ion import IS
+    from kfxgen.inline_style import FLAG_SUB
+
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "Ch",
+            "text": "H2O",
+            "blocks": [{"text": "H2O", "spans": [(1, 1, frozenset({FLAG_SUB}))]}],
+        }
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    lowered = [f for f in styles if IS("$31") in f.value]
+    assert lowered, "No $157 carries $31 for a subscript run"
+    for f in lowered:
+        assert float(str(f.value[IS("$31")][IS("$307")])) < 0, (
+            "Subscript $31 must be negative (lowered)"
+        )
+
+
+@pytest.mark.unit
+def test_superscript_composes_with_italic(tmp_path):
+    from kfxgen.kfxlib_minimal.ion import IS
+    from kfxgen.inline_style import FLAG_ITALIC, FLAG_SUPER
+
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "Ch",
+            "text": "a2",
+            "blocks": [
+                {"text": "a2", "spans": [(1, 1, frozenset({FLAG_ITALIC, FLAG_SUPER}))]}
+            ],
+        }
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
+    assert any(
+        IS("$31") in f.value
+        and IS("$12") in f.value
+        and f.value[IS("$12")] == IS("$382")
+        for f in styles
+    ), "Expected one $157 carrying both italic ($12) and baseline shift ($31)"
+
+
+# ── #53: in-body links resolve to $266 anchors ───────────────────────────────
+
+
+def _link_book_chapters():
+    """Chapter 1 carries a noteref pointing into the endnotes chapter, which
+    carries the matching anchor — the real footnote shape."""
+    from kfxgen.inline_style import FLAG_SUPER, make_link_flag
+
+    marker_flags = frozenset({FLAG_SUPER, make_link_flag("endnotes.xhtml#note1")})
+    return [
+        {
+            "title": "Chapter One",
+            "text": "Body text1",
+            "blocks": [
+                {
+                    "text": "Body text1",
+                    "spans": [(9, 1, marker_flags)],
+                    "anchor_keys": ["chapter_001.xhtml#ref1"],
+                }
+            ],
+        },
+        {
+            "title": "Endnotes",
+            "text": "1 The note itself.",
+            "blocks": [
+                {
+                    "text": "1 The note itself.",
+                    "spans": [],
+                    "anchor_keys": ["endnotes.xhtml#note1"],
+                }
+            ],
+        },
+    ]
+
+
+def _anchor_index(gen):
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    out = {}
+    for f in gen.fragments:
+        if str(f.ftype) != "$266":
+            continue
+        v = f.value.value if hasattr(f.value, "value") else f.value
+        out[str(v[IS("$180")])] = v[IS("$183")][IS("$155")]
+    return out
+
+
+def _link_spans(gen):
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    found = []
+    for f in gen.fragments:
+        if str(f.ftype) != "$259":
+            continue
+        v = f.value.value if hasattr(f.value, "value") else f.value
+        for e in v.get(IS("$146")) or []:
+            for span in e.get(IS("$142")) or []:
+                if IS("$179") in span:
+                    found.append((e, span))
+    return found
+
+
+@pytest.mark.unit
+def test_body_link_emits_anchor_and_resolving_span(tmp_path):
+    gen = NativeKFXGenerator()
+    gen.generate_full_book(
+        title="T",
+        author="A",
+        chapters=_link_book_chapters(),
+        output_path=str(tmp_path / "o.kfx"),
+    )
+    anchors = _anchor_index(gen)
+    spans = _link_spans(gen)
+    assert spans, "Noteref produced no $179 link span"
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    for _entry, span in spans:
+        assert str(span[IS("$179")]) in anchors, (
+            f"Link span targets {span[IS('$179')]!s}, which is not a declared anchor"
+        )
+
+
+@pytest.mark.unit
+def test_body_link_anchor_points_at_the_target_chapter(tmp_path):
+    """The anchor for endnotes.xhtml#note1 must land on a position inside the
+    endnotes chapter, not the chapter the marker lives in."""
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    gen = NativeKFXGenerator()
+    gen.generate_full_book(
+        title="T",
+        author="A",
+        chapters=_link_book_chapters(),
+        output_path=str(tmp_path / "o.kfx"),
+    )
+    anchors = _anchor_index(gen)
+    spans = _link_spans(gen)
+    target_pos = anchors[str(spans[0][1][IS("$179")])]
+
+    # Collect the eids belonging to each $259 storyline.
+    per_story = {}
+    for f in gen.fragments:
+        if str(f.ftype) != "$259":
+            continue
+        v = f.value.value if hasattr(f.value, "value") else f.value
+        per_story[str(f.fid)] = [e[IS("$155")] for e in v.get(IS("$146")) or []]
+
+    owning = [name for name, eids in per_story.items() if target_pos in eids]
+    assert owning == ["l1"], (
+        f"Anchor position {target_pos} belongs to {owning}; expected the "
+        f"endnotes storyline l1"
+    )
+
+
+@pytest.mark.unit
+def test_unresolvable_link_target_emits_no_dangling_reference(tmp_path):
+    from kfxgen.inline_style import make_link_flag
+
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "Ch",
+            "text": "a b",
+            "blocks": [
+                {
+                    "text": "a b",
+                    "spans": [(2, 1, frozenset({make_link_flag("missing.xhtml#x")}))],
+                    "anchor_keys": [],
+                }
+            ],
+        }
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    assert not _link_spans(gen), "Emitted a $179 for a target with no anchor"
+
+
+@pytest.mark.unit
+def test_unreferenced_anchor_ids_emit_no_anchor_fragments(tmp_path):
+    """Every id in the source would be thousands of $266 fragments. Only ids
+    something actually links to are worth emitting."""
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "Ch",
+            "text": "text",
+            "blocks": [
+                {"text": "text", "spans": [], "anchor_keys": ["c.xhtml#unused"]}
+            ],
+        }
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    assert _anchor_index(gen) == {}

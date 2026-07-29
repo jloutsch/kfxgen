@@ -1,5 +1,53 @@
 # Changelog
 
+## 5.6.0 — Working footnotes: anchors, superscript, in-body links (#51, #52, #53)
+
+Footnote markers now render as superscripts and jump to their notes, and the
+Contents page links work. Three separate defects, found by diffing a generated
+book against one Calibre KFX Output build and three Amazon-produced KFX files.
+
+**Fixed (#51):** every internal link was dead, including the synthesized Contents
+page — chapter titles rendered as plain lines. The link *spans* were already
+correct; the `$266` anchors they pointed at were not. An anchor's name lives in
+`$180`, and `build_fragment_266` never emitted it, so `$179` resolved against
+nothing. Every anchor in all four reference files is `($180, $183)` or
+`($180, $186)` — 100% carry `$180`, and none carry the `$143` kfxgen was adding
+inside `$183`. Anchors now match that shape. (kfxgen already self-named styles
+this way — `$173` on every `$157` — so this was an oversight, not a design.)
+
+**Fixed (#52):** superscript was dropped entirely, so endnote reference numbers
+sat on the baseline at full size. The inline model had exactly two flags, bold and
+italic; `<sup>`/`<sub>` were flattened to text. Worse for real books: publisher
+EPUBs get superscript from CSS, not markup — a marker is a `<span>` whose class
+carries `vertical-align`, with no `<sup>` anywhere. Both routes are now
+recognized, including the raw-length form (`vertical-align: 0.25em`) publishers
+use as often as the `super` keyword. A raised run becomes a `$157` character style
+with reduced `$16` font-size plus a `$31` baseline shift, matching the reference
+noteref styles. Subscript is the same mechanism with a negative shift; unlike the
+superscript value it has no reference to copy and is not device-verified.
+
+**Fixed (#53):** `<a href>` in body text never became a link — the element was
+flattened to its text and the href discarded, and no `$266` anchor was ever
+emitted for the ids the notes declared. Both halves of a footnote link were
+missing. Link runs are now captured with their targets resolved across spine
+files (`endnotes.xhtml#note23` from a chapter, `#frag` against the file it appears
+in), and anchors are emitted for the ids something actually links to — not for
+every id in the book, which would be thousands of fragments for no reading
+benefit. Unresolvable and external targets (`http:`, `mailto:`, traversal,
+absolute paths) are dropped rather than emitted as dangling references.
+
+On a 975-noteref book this takes the output from 24 link spans (all Contents) to
+4654 with zero dangling targets, and from 24 anchors to 2388 — in the same range
+as the Amazon reference files (802–3228). Generation time and file size are
+essentially unchanged.
+
+**Verification limits:** raw `.kfx` can't be rendered locally, so on-device
+behavior needs a physical sideload. The CSS `vertical-align` route also depends on
+Calibre's Stylizer, which only exists inside Calibre — the local end-to-end run
+uses the test shim and so only exercises the `<sup>` tag route. The resolver
+contract is unit-tested with an injected stylizer, as with the other CSS
+properties.
+
 ## 5.5.0 — Font-embedding toggle (#15) + bold/italic face fix (#50)
 
 **Fixed (#50):** bold and italic embedded faces now render on-device. The applied

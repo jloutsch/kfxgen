@@ -29,6 +29,16 @@ _security_log = logging.getLogger(__name__ + ".security")
 # is TOCTOU-vulnerable but adequate for the single-user threat model.
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
+# Superscript/subscript character metrics (#52). Amazon-produced noteref
+# styles are {$16: 0.75rem, $42: ~1.33, $31: 35%} — the percentage form is
+# used here so the shift tracks the reader's font size. The subscript depth
+# has no reference to copy: CSS `sub` sits roughly a fifth of the font size
+# below the baseline, so -20% is the closest equivalent. Unlike the
+# superscript value it is NOT device-verified.
+SUPERSCRIPT_FONT_SIZE = 0.75
+SUPERSCRIPT_SHIFT = ("35", "$314")  # +35% of font size
+SUBSCRIPT_SHIFT = ("-20", "$314")  # -20% of font size
+
 
 def _safe_write_bytes(path, data):
     """Write `data` to `path` with symlink and traversal defenses (#45).
@@ -1002,6 +1012,7 @@ class NativeKFXGenerator:
         margin_left=None,
         margin_right=None,
         font_family=None,
+        baseline_shift=None,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -1029,6 +1040,10 @@ class NativeKFXGenerator:
                         margin-left ($48). Default None uses 0.5% ($314).
             margin_right: If a tuple (magnitude_str, unit_symbol), emit margin-right ($50).
                          Default None omits $50.
+            baseline_shift: If a tuple (magnitude_str, unit_symbol), emit $31.
+                        Positive raises (superscript), negative lowers
+                        (subscript). Reference noteref styles pair it with a
+                        reduced $16 font-size. Default None omits $31. (#52)
 
         Returns:
             YJFragment with type $157
@@ -1129,6 +1144,17 @@ class NativeKFXGenerator:
                 IS("$307"), IonDecimal(margin_right[0]), IS("$306"), IS(margin_right[1])
             )
 
+        # $31 = baseline shift. Reference noteref character styles are
+        # {$16: 0.75rem, $42: ~1.33, $31: <shift>} — superscript is a reduced
+        # font-size plus a positive shift, not a dedicated flag. (#52)
+        if baseline_shift is not None:
+            value[IS("$31")] = IonStruct(
+                IS("$307"),
+                IonDecimal(baseline_shift[0]),
+                IS("$306"),
+                IS(baseline_shift[1]),
+            )
+
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_fragment_157_image(self, entity_name, kind="inline"):
@@ -1211,9 +1237,20 @@ class NativeKFXGenerator:
 
         Returns:
             YJFragment with type $266
+
+        $180 is the anchor's own name and is what a link span's $179 resolves
+        against — the fragment id alone is not enough. Every $266 in a Calibre
+        KFX Output build and in Amazon-produced KFX is shaped ($180, $183) or
+        ($180, $186); none carries $143 inside $183. Omitting $180 left every
+        link dangling, so Kindle rendered linked runs as plain text. (#51)
         """
         self.symtab.create_local_symbol(anchor_name)
-        value = IonStruct(IS("$183"), IonStruct(IS("$155"), position_id, IS("$143"), 0))
+        value = IonStruct(
+            IS("$180"),
+            IS(anchor_name),
+            IS("$183"),
+            IonStruct(IS("$155"), position_id),
+        )
         return YJFragment(fid=IS(anchor_name), ftype=IS("$266"), value=value)
 
     def build_fragment_259(
@@ -1369,18 +1406,22 @@ class NativeKFXGenerator:
 
             if emphasis_spans and i < len(emphasis_spans) and emphasis_spans[i]:
                 existing = entry.get(IS("$142"), [])
-                for start, length, style_name in emphasis_spans[i]:
-                    self.symtab.create_local_symbol(style_name)
-                    existing.append(
-                        IonStruct(
-                            IS("$143"),
-                            start,
-                            IS("$144"),
-                            length,
-                            IS("$157"),
-                            IS(style_name),
-                        )
-                    )
+                for span_spec in emphasis_spans[i]:
+                    # (start, length, style_name) for emphasis-only runs;
+                    # (start, length, style_name|None, anchor|None) once a run
+                    # can also be a link (#53). Either arity is accepted.
+                    start, length, style_name = span_spec[:3]
+                    anchor_name = span_spec[3] if len(span_spec) > 3 else None
+                    if style_name is None and anchor_name is None:
+                        continue
+                    span = IonStruct(IS("$143"), start, IS("$144"), length)
+                    if anchor_name:
+                        self.symtab.create_local_symbol(anchor_name)
+                        span[IS("$179")] = IS(anchor_name)
+                    if style_name:
+                        self.symtab.create_local_symbol(style_name)
+                        span[IS("$157")] = IS(style_name)
+                    existing.append(span)
                 entry[IS("$142")] = existing
 
             children.append(entry)
@@ -2382,7 +2423,9 @@ class NativeKFXGenerator:
                 pos += self.CHUNK_SIZE
             return chunks
 
-        def _append_text_with_spans(chunk_text, para_text, para_spans, block_style):
+        def _append_text_with_spans(
+            chunk_text, para_text, para_spans, block_style, anchor_keys=None
+        ):
             """Split chunk_text by CHUNK_SIZE and attach the slice of
             para_spans covering each piece, offsets rebased to the piece.
             The chunk_text is a (stripped) substring of para_text; find its
@@ -2413,14 +2456,17 @@ class NativeKFXGenerator:
                     b = min(s + length, p_end)
                     if b > a:
                         pspans.append((a - p_start, b - a, flags))
-                all_chunks.append(
-                    {
-                        "type": "text",
-                        "text": piece,
-                        "spans": pspans,
-                        "block_style": block_style,
-                    }
-                )
+                chunk = {
+                    "type": "text",
+                    "text": piece,
+                    "spans": pspans,
+                    "block_style": block_style,
+                }
+                # A block's anchor ids belong to its first piece — that's the
+                # position a link to the block should land on. (#53)
+                if anchor_keys and pos == 0:
+                    chunk["anchor_keys"] = anchor_keys
+                all_chunks.append(chunk)
                 pos += self.CHUNK_SIZE
 
         for ch_idx, chapter in enumerate(chapters):
@@ -2511,13 +2557,21 @@ class NativeKFXGenerator:
                             continue
                         para_spans = block.get("spans", [])
                         block_style = block.get("block_style")
+                        block_anchor_keys = block.get("anchor_keys") or []
                         for chunk in _emit_text_chunks(para):
                             if chunk["type"] == "image":
                                 all_chunks.append(chunk)
                             else:
                                 _append_text_with_spans(
-                                    chunk["text"], para, para_spans, block_style
+                                    chunk["text"],
+                                    para,
+                                    para_spans,
+                                    block_style,
+                                    block_anchor_keys,
                                 )
+                                # Only the first text chunk of the block owns
+                                # the anchors.
+                                block_anchor_keys = []
 
             # Guarantee every chapter contributes at least one chunk so it
             # owns a navigable content position and the per-chapter arrays
@@ -2578,6 +2632,45 @@ class NativeKFXGenerator:
             self.fragments.append(self.build_fragment_266(anchor_name, target_pos))
             chunk_anchor_map[chunk_idx] = anchor_name
             anchor_names.append(anchor_name)
+
+        # Build $266 anchors for in-body link targets (#53). Only ids that
+        # something actually links to get an anchor — a book's markup carries
+        # thousands of ids, and emitting one fragment each would bloat the
+        # container for no reading benefit. First collect what is referenced,
+        # then walk the chunks that declare those ids.
+        from .inline_style import link_target as _link_target
+
+        referenced_targets = set()
+        for chunk in all_chunks:
+            for _s, _length, flags in chunk.get("spans") or []:
+                target = _link_target(flags)
+                if target:
+                    referenced_targets.add(target)
+
+        body_anchor_map = {}  # anchor key -> anchor name
+        if referenced_targets:
+            # Where each declared id lives, and where each file first appears.
+            # A link may name a whole file ("chapter_002.xhtml") with no
+            # fragment, which resolves to the earliest position known for it.
+            key_to_chunk = {}
+            file_to_chunk = {}
+            for chunk_idx, chunk in enumerate(all_chunks):
+                for key in chunk.get("anchor_keys") or []:
+                    key_to_chunk.setdefault(key, chunk_idx)
+                    file_to_chunk.setdefault(key.split("#", 1)[0], chunk_idx)
+
+            for target in sorted(referenced_targets):
+                chunk_idx = key_to_chunk.get(target)
+                if chunk_idx is None and "#" not in target:
+                    chunk_idx = file_to_chunk.get(target)
+                if chunk_idx is None:
+                    continue  # nothing declares it — leave the run unlinked
+                anchor_name = f"body_anchor_{len(body_anchor_map)}"
+                self.fragments.append(
+                    self.build_fragment_266(anchor_name, chunk_positions[chunk_idx])
+                )
+                body_anchor_map[target] = anchor_name
+                anchor_names.append(anchor_name)
 
         # Build one $145 fragment per chapter from its chunk-range slice.
         # Image chunks are filtered out — $145 holds only text paragraphs;
@@ -2695,7 +2788,7 @@ class NativeKFXGenerator:
             kind = _classify(w, h)
             return image_style_names.get(kind) or image_style_names.get("inline")
 
-        from .inline_style import FLAG_BOLD, FLAG_ITALIC
+        from .inline_style import FLAG_BOLD, FLAG_ITALIC, FLAG_SUB, FLAG_SUPER
 
         # Block-level emphasis (CSS `font-weight`/`font-style` on the paragraph)
         # is composed with inline-run flags only when the book embeds fonts, so
@@ -2715,6 +2808,15 @@ class NativeKFXGenerator:
             attrs = {"italic": italic, "bold": bold}
             if fam:
                 attrs["font_family"] = fam
+            # Superscript/subscript: reduced font-size plus a $31 baseline
+            # shift, matching the reference noteref character styles. <sup>
+            # wins if a run is somehow marked both. (#52)
+            if FLAG_SUPER in flags:
+                attrs["font_size"] = SUPERSCRIPT_FONT_SIZE
+                attrs["baseline_shift"] = SUPERSCRIPT_SHIFT
+            elif FLAG_SUB in flags:
+                attrs["font_size"] = SUPERSCRIPT_FONT_SIZE
+                attrs["baseline_shift"] = SUBSCRIPT_SHIFT
             return _allocate_style("_em", **attrs)
 
         # With per-chapter $145 fragments (#2), each chapter's $259
@@ -2803,12 +2905,27 @@ class NativeKFXGenerator:
                 chunk_fam = _cbs.get("font_family", [])
                 _blk_b = bool(_cbs.get("bold")) if has_fonts else False
                 _blk_i = bool(_cbs.get("italic")) if has_fonts else False
-                entry_emphasis_spans.append(
-                    [
-                        (s, length, _emphasis_style(flags, chunk_fam, _blk_b, _blk_i))
-                        for (s, length, flags) in chunk_spans
-                    ]
-                )
+                # A run may be emphasis, a link, or both. Its visual style is
+                # whatever the flags say; its $179 is the resolved anchor, or
+                # None when nothing in the book declares the target — an
+                # unresolvable href is dropped rather than emitted dangling.
+                # A run that is ONLY a link gets no $157: reference KFX leaves
+                # link spans unstyled and lets the reader render them. (#53)
+                spans_out = []
+                for s, length, flags in chunk_spans:
+                    target = _link_target(flags)
+                    anchor = body_anchor_map.get(target) if target else None
+                    has_emphasis = any(
+                        f in flags
+                        for f in (FLAG_BOLD, FLAG_ITALIC, FLAG_SUPER, FLAG_SUB)
+                    )
+                    style = (
+                        _emphasis_style(flags, chunk_fam, _blk_b, _blk_i)
+                        if has_emphasis or not anchor
+                        else None
+                    )
+                    spans_out.append((s, length, style, anchor))
+                entry_emphasis_spans.append(spans_out)
 
             frag_259 = self.build_fragment_259(
                 entry_styles,
