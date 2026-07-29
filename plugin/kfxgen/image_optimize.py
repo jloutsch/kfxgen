@@ -12,6 +12,20 @@ import struct
 DEFAULT_MAX_DIM = 2048
 DEFAULT_JPEG_QUALITY = 85
 
+#: Byte ceiling above which an image is re-encoded even when its pixel
+#: dimensions are already acceptable (#55). Dimensions alone are a poor proxy
+#: for weight: a 1161x1800 cover encoded near-lossless, with EXIF + Photoshop
+#: + ICC baggage attached, ran to 2.25 MB and sailed through the dimension
+#: gate untouched — as did every other image in that book, 7.7 MB in total.
+#:
+#: Measured against the reference corpus (212 images across three
+#: Amazon-produced KFX files): the largest is 466 KB and not one exceeds
+#: 512 KB. 1 MiB is therefore deliberately generous — roughly twice the
+#: observed ceiling — so it catches the pathological tail without
+#: re-compressing images that are merely large. Lower it via
+#: KFXGEN_IMAGE_MAX_BYTES to track Amazon's own output more tightly.
+DEFAULT_MAX_BYTES = 1024 * 1024
+
 _PNG_SIG = b"\x89PNG\r\n\x1a\n"
 # JPEG Start-Of-Frame markers that carry image dimensions.
 _SOF_MARKERS = {
@@ -81,9 +95,23 @@ def _read_env_int(name, default, lo, hi, log):
 
 
 def optimize_image(
-    data, *, max_dim=DEFAULT_MAX_DIM, jpeg_quality=DEFAULT_JPEG_QUALITY, log=None
+    data,
+    *,
+    max_dim=DEFAULT_MAX_DIM,
+    max_bytes=DEFAULT_MAX_BYTES,
+    jpeg_quality=DEFAULT_JPEG_QUALITY,
+    log=None,
 ):
     """Downscale + recompress an over-size JPEG/PNG.
+
+    Two independent triggers: pixel dimensions over `max_dim`, or encoded
+    weight over `max_bytes`. An image can be well inside the dimension budget
+    and still be far too heavy — near-lossless encoding plus EXIF/Photoshop/ICC
+    baggage — which is the case the dimension gate alone missed entirely (#55).
+
+    When only the byte trigger fires the image is re-encoded at its existing
+    dimensions: it is too heavy, not too big, and shrinking it would lose
+    detail for no reason.
 
     Returns optimized bytes, or the original bytes unchanged when no
     optimization applies, calibre is unavailable, or anything fails.
@@ -92,8 +120,12 @@ def optimize_image(
     size = _read_image_size(data)
     if size is None:
         return data
-    if max(size) <= max_dim:
+    over_dim = max(size) > max_dim
+    over_bytes = len(data) > max_bytes
+    if not over_dim and not over_bytes:
         return data
+    # Fit into the dimension box only when the dimensions are the problem.
+    target_w, target_h = (max_dim, max_dim) if over_dim else size
     is_png = data[:8] == _PNG_SIG
     try:
         from calibre.utils.img import scale_image
@@ -109,8 +141,8 @@ def optimize_image(
         # back to the original bytes for every image (#11).
         _w, _h, out = scale_image(
             data,
-            width=max_dim,
-            height=max_dim,
+            width=target_w,
+            height=target_h,
             as_png=is_png,
             compression_quality=jpeg_quality,
         )
@@ -124,6 +156,9 @@ def optimize_image(
 
 
 _MIN_MAX_DIM, _MAX_MAX_DIM = 16, 20000
+# 1 KB floor (below it every image would be re-encoded pointlessly); 1 GB
+# ceiling mirrors the guardrail style used for the decode-size cap.
+_MIN_MAX_BYTES, _MAX_MAX_BYTES = 1024, 1024 * 1024 * 1024
 
 
 def optimize_images(cover_image, images, log):
@@ -131,19 +166,28 @@ def optimize_images(cover_image, images, log):
     max_dim = _read_env_int(
         "KFXGEN_IMAGE_MAX_DIM", DEFAULT_MAX_DIM, _MIN_MAX_DIM, _MAX_MAX_DIM, log
     )
+    max_bytes = _read_env_int(
+        "KFXGEN_IMAGE_MAX_BYTES", DEFAULT_MAX_BYTES, _MIN_MAX_BYTES, _MAX_MAX_BYTES, log
+    )
     quality = _read_env_int("KFXGEN_IMAGE_QUALITY", DEFAULT_JPEG_QUALITY, 1, 100, log)
     before = after = 0
     new_images = {}
     for href, data in images.items():
         before += len(data)
-        opt = optimize_image(data, max_dim=max_dim, jpeg_quality=quality, log=log)
+        opt = optimize_image(
+            data, max_dim=max_dim, max_bytes=max_bytes, jpeg_quality=quality, log=log
+        )
         after += len(opt)
         new_images[href] = opt
     new_cover = cover_image
     if cover_image:
         before += len(cover_image)
         new_cover = optimize_image(
-            cover_image, max_dim=max_dim, jpeg_quality=quality, log=log
+            cover_image,
+            max_dim=max_dim,
+            max_bytes=max_bytes,
+            jpeg_quality=quality,
+            log=log,
         )
         after += len(new_cover)
     if before and after < before:

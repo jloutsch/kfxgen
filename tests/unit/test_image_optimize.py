@@ -179,9 +179,11 @@ def test_optimize_images_reads_env_overrides(monkeypatch):
     seen = {}
     monkeypatch.setenv("KFXGEN_IMAGE_MAX_DIM", "1600")
     monkeypatch.setenv("KFXGEN_IMAGE_QUALITY", "70")
+    monkeypatch.setenv("KFXGEN_IMAGE_MAX_BYTES", "300000")
 
-    def spy(data, *, max_dim, jpeg_quality, log):
+    def spy(data, *, max_dim, max_bytes, jpeg_quality, log):
         seen["max_dim"] = max_dim
+        seen["max_bytes"] = max_bytes
         seen["q"] = jpeg_quality
         return data
 
@@ -189,3 +191,94 @@ def test_optimize_images_reads_env_overrides(monkeypatch):
     io.optimize_images(b"COVER", {"a.jpg": b"AAAA"}, _Log())
     assert seen["max_dim"] == 1600
     assert seen["q"] == 70
+    assert seen["max_bytes"] == 300000
+
+
+# ── #55: byte-size gate ──────────────────────────────────────────────────────
+
+
+def _fake_calibre(monkeypatch, calls):
+    """Install a stub calibre.utils.img whose scale_image records its args."""
+    fake = types.ModuleType("calibre.utils.img")
+
+    def scale_image(data, width, height, as_png=False, compression_quality=90):
+        calls["args"] = (width, height, as_png, compression_quality)
+        return (width, height, b"x" * 1000)
+
+    fake.scale_image = scale_image
+    monkeypatch.setitem(sys.modules, "calibre", types.ModuleType("calibre"))
+    monkeypatch.setitem(sys.modules, "calibre.utils", types.ModuleType("calibre.utils"))
+    monkeypatch.setitem(sys.modules, "calibre.utils.img", fake)
+    return calls
+
+
+@pytest.mark.unit
+def test_heavy_image_under_max_dim_is_optimized(monkeypatch):
+    """The #55 case: modest dimensions, near-lossless encoding. 1161x1800 is
+    under the 2048 dimension gate, so before this it passed through untouched
+    no matter how many bytes it was."""
+    _fake_calibre(monkeypatch, {})
+    heavy = _jpeg(1161, 1800) + b"\x00" * 2_000_000
+    out = io.optimize_image(
+        heavy, max_dim=2048, max_bytes=1_000_000, jpeg_quality=85, log=_Log()
+    )
+    assert out != heavy, "over-size-in-bytes image was not optimized"
+    assert len(out) < len(heavy)
+
+
+@pytest.mark.unit
+def test_byte_trigger_reencodes_at_original_dimensions(monkeypatch):
+    """When only the byte gate fires, dimensions must be preserved — the image
+    is too heavy, not too big."""
+    calls = _fake_calibre(monkeypatch, {})
+    heavy = _jpeg(1161, 1800) + b"\x00" * 2_000_000
+    io.optimize_image(heavy, max_dim=2048, max_bytes=1_000_000, log=_Log())
+    assert calls["args"][:2] == (1161, 1800), (
+        f"expected re-encode at original dims, got {calls['args'][:2]}"
+    )
+
+
+@pytest.mark.unit
+def test_dimension_trigger_still_downscales_to_max_dim(monkeypatch):
+    """The existing behaviour must not regress: too-wide images still shrink."""
+    calls = _fake_calibre(monkeypatch, {})
+    big = _jpeg(4000, 3000) + b"\x00" * 2_000_000
+    io.optimize_image(big, max_dim=2048, max_bytes=1_000_000, log=_Log())
+    assert calls["args"][:2] == (2048, 2048)
+
+
+@pytest.mark.unit
+def test_light_image_under_both_gates_untouched(monkeypatch):
+    _fake_calibre(monkeypatch, {})
+    light = _jpeg(800, 600)
+    assert io.optimize_image(light, max_dim=2048, max_bytes=1_000_000) is light
+
+
+@pytest.mark.unit
+def test_byte_gate_respects_env_override(monkeypatch):
+    monkeypatch.setenv("KFXGEN_IMAGE_MAX_BYTES", "500000")
+    log = _Log()
+    assert (
+        io._read_env_int(
+            "KFXGEN_IMAGE_MAX_BYTES", io.DEFAULT_MAX_BYTES, 1, 1 << 30, log
+        )
+        == 500000
+    )
+
+
+@pytest.mark.unit
+def test_reencode_larger_than_original_is_discarded(monkeypatch):
+    """Existing guard must still hold on the byte path — never grow an image."""
+    fake = types.ModuleType("calibre.utils.img")
+    fake.scale_image = (
+        lambda data, width, height, as_png=False, compression_quality=90: (
+            width,
+            height,
+            b"y" * (len(data) + 10),
+        )
+    )
+    monkeypatch.setitem(sys.modules, "calibre", types.ModuleType("calibre"))
+    monkeypatch.setitem(sys.modules, "calibre.utils", types.ModuleType("calibre.utils"))
+    monkeypatch.setitem(sys.modules, "calibre.utils.img", fake)
+    heavy = _jpeg(1161, 1800) + b"\x00" * 2_000_000
+    assert io.optimize_image(heavy, max_dim=2048, max_bytes=1_000_000) == heavy
