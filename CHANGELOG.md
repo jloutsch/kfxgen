@@ -79,12 +79,20 @@ the pathological tail without recompressing images that are merely large. Set
 On the book that surfaced this: 7,677,756 → 4,350,071 bytes (43% smaller, no
 dimension changes), cover 2,254,253 → 490,594.
 
-**Not claimed:** that this fixes the reported "cover does not display on Kindle".
-That symptom is what surfaced the defect, and the sizes are conspicuous, but the
-causal link is unconfirmed — the competing explanation is the unusual
-EXIF/Photoshop/ICC header stack rather than the byte count. Both are resolved by
-re-encoding, so the fix is the same either way. A controlled A/B (identical
-build, single env var) is pending a device sideload to settle it.
+**Device-verified.** Sideloading a controlled pair (identical build and book,
+differing only by `KFXGEN_IMAGE_MAX_BYTES`, with distinct titles and ASINs so the
+Kindle could not dedupe them) confirmed it: the 2.25 MB cover does not render, the
+490 KB one does.
+
+The failure turned out to be narrower than expected. The **library thumbnail
+displays for both** — it is only the full-page in-book cover render that fails on
+the heavy image, so that path is evidently on a tighter decode budget than
+whatever generates thumbnails.
+
+One thing this does *not* isolate: re-encoding changed two variables at once, the
+byte count and the ~20 KB of EXIF/Photoshop/ICC/Adobe headers the original
+carried. Either could be the mechanism. The fix resolves both, but a small
+image bloated only by headers would slip past a byte-size gate.
 
 
 ## 5.5.0 — Font-embedding toggle (#15) + bold/italic face fix (#50)
