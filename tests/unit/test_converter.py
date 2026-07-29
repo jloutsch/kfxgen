@@ -512,7 +512,7 @@ from kfxgen.inline_style import FLAG_ITALIC as I  # noqa: E402, N816
 
 def _doc(body_inner):
     return etree.fromstring(
-        f'<html xmlns="http://www.w3.org/1999/xhtml"><body>{body_inner}</body></html>'.encode()
+        f'<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body>{body_inner}</body></html>'.encode()
     )
 
 
@@ -1399,3 +1399,96 @@ def test_anchor_keys_absent_base_href_falls_back_to_bare_ids():
     blocks = _conv.extract_blocks_from_html(_doc('<p id="note1">A note</p>'))
     assert blocks[0]["anchor_ids"] == ["note1"]
     assert blocks[0]["anchor_keys"] == []
+
+
+# ── #58/#59/#60: TOC extraction defects ──────────────────────────────────────
+
+
+@pytest.mark.unit
+def test_nested_list_inside_li_is_not_flattened():
+    """#58: <li> whose child is a nested <ol> must not be treated as a leaf.
+    A Part heading and its chapters collapsed into one run-on paragraph."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc("<ol><li>Part<ol><li>Ch1</li><li>Ch2</li></ol></li></ol>")
+    )
+    assert [b["text"] for b in blocks] == ["Part", "Ch1", "Ch2"]
+
+
+@pytest.mark.unit
+def test_nested_ul_inside_li_is_not_flattened():
+    blocks = _conv.extract_blocks_from_html(
+        _doc("<ul><li>Top<ul><li>Sub</li></ul></li></ul>")
+    )
+    assert [b["text"] for b in blocks] == ["Top", "Sub"]
+
+
+@pytest.mark.unit
+def test_tail_after_nested_tag_keeps_enclosing_italic():
+    """#59: ' gamma' sits inside <em> and must stay italic. It was getting the
+    *incoming* flags instead of the enclosing element's."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc("<p><em>alpha <b>beta</b> gamma</em></p>")
+    )
+    text = blocks[0]["text"]
+    assert text == "alpha beta gamma"
+    covered = {}
+    for s, length, flags in blocks[0]["spans"]:
+        for i in range(s, s + length):
+            covered[i] = flags
+    tail_start = text.index("gamma")
+    assert all(
+        I in covered.get(i, frozenset()) for i in range(tail_start, len(text))
+    ), "tail text inside <em> lost its italic"
+
+
+@pytest.mark.unit
+def test_tail_after_nested_tag_keeps_enclosing_link():
+    """#59, link form: the real TOC shape — <a> wrapping styled spans with bare
+    text between them. Every character of the anchor must carry the link."""
+    doc = _doc(
+        '<p><a href="c.xhtml#t"><span>PART I</span> T<span>he</span> End</a></p>'
+    )
+    blocks = _conv.extract_blocks_from_html(doc, base_href="toc.xhtml")
+    text = blocks[0]["text"]
+    covered = {}
+    for s, length, flags in blocks[0]["spans"]:
+        for i in range(s, s + length):
+            covered[i] = flags
+    assert all(
+        link_target(covered.get(i, frozenset())) == "c.xhtml#t"
+        for i in range(len(text))
+    ), (
+        f"anchor text only partly linked: "
+        f"{[(i, text[i], link_target(covered.get(i, frozenset()))) for i in range(len(text))]}"
+    )
+
+
+@pytest.mark.unit
+def test_hidden_attribute_subtree_is_skipped():
+    """#60: hidden='hidden' content is not rendered content."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<p>visible</p><nav hidden="hidden"><p>SHOULD NOT APPEAR</p></nav>')
+    )
+    assert [b["text"] for b in blocks] == ["visible"]
+
+
+@pytest.mark.unit
+def test_page_list_nav_is_skipped_even_without_hidden():
+    """#60: page-list/landmarks are navigation, never body text — some
+    producers omit the hidden attribute."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            "<p>real</p>"
+            '<nav epub:type="page-list"><ol><li><a href="a.xhtml#p1">1</a></li></ol></nav>'
+            '<nav epub:type="landmarks"><ol><li><a href="a.xhtml">Begin</a></li></ol></nav>'
+        )
+    )
+    assert [b["text"] for b in blocks] == ["real"]
+
+
+@pytest.mark.unit
+def test_hidden_does_not_swallow_normal_content():
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<p hidden="hidden">gone</p><p>kept</p>')
+    )
+    assert [b["text"] for b in blocks] == ["kept"]
