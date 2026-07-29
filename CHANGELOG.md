@@ -1,6 +1,6 @@
 # Changelog
 
-## 5.6.0 — Working footnotes: anchors, superscript, in-body links (#51, #52, #53)
+## 5.6.0 — Working footnotes, TOC extraction, and image weight
 
 Footnote markers now render as superscripts and jump to their notes, and the
 Contents page links work. Three separate defects, found by diffing a generated
@@ -94,6 +94,64 @@ byte count and the ~20 KB of EXIF/Photoshop/ICC/Adobe headers the original
 carried. Either could be the mechanism. The fix resolves both, but a small
 image bloated only by headers would slip past a byte-size gate.
 
+
+### TOC extraction: nested lists, tail flags, hidden navs (#58, #59, #60)
+
+Three defects that a device report of a broken contents page exposed. All three
+predate this release — verified by extracting the same damage from an older
+`.kfx` — and the in-body link work above only made them visible, by rendering
+them as underlined links instead of anonymous text.
+
+**#58** `ol`/`ul` were missing from the block-tag set, so an `<li>` holding a
+nested list looked childless and the whole sub-list flattened into one
+paragraph: a Part heading and every chapter under it on a single line. Fixing
+that exposed the other half of the same bug — a container's own inline text was
+*dropped* whenever it also had block children, so `<div>lead-in<p>…</p></div>`
+silently lost "lead-in". Inline runs now flush as their own blocks in document
+order.
+
+**#59** is the broadest fix here and had nothing to do with tables of contents.
+A child's tail text was given the *incoming* flags instead of the enclosing
+element's, so anything after a nested tag lost what its parent contributed —
+` gamma` in `<em>alpha <b>beta</b> gamma</em>` was never italic. Emphasis has
+been quietly wrong since inline emphasis shipped; a missing italic is just
+easier to overlook than a half-underlined link.
+
+**#60** `hidden="hidden"` navs were extracted as body text. An EPUB 3
+`page-list` holds one entry per printed page, which arrived as several hundred
+blocks of bare page numbers after the contents.
+
+### Back-matter and whole-file link targets (#62)
+
+Six TOC entries were inert on device — Afterword, Bibliography, Notes, Also by,
+About the Author, Discover More. Extraction was correct in every case; the
+anchors were lost between the chapter list and the chunk list, so `$179` had
+nothing to resolve. Three paths: a back-matter file opening with a heading equal
+to its chapter title had that block elided as redundant, taking the linked id
+with it; image blocks never carried their anchor ids, so figure links resolved
+to nothing; and whole-file targets (`<a href="about.xhtml">`) only resolved when
+the target file happened to declare some id.
+
+### Corpus verification
+
+The Gutenberg top-90 was converted through both a 5.5.0 baseline and this
+release, in isolated Calibre configurations — 180 conversions, no failures.
+
+| | 5.5.0 | 5.6.0 |
+|---|---|---|
+| anchors carrying `$180` | 0 | 64,820 |
+| link spans | 48,498 | 74,606 |
+| dangling targets | 48,498 (all) | 0 |
+| books losing text | — | 0 |
+
+Every internal link kfxgen has ever emitted resolved against nothing. Seven
+books also *gained* text, verified as recovery rather than duplication (no block
+duplicated, none lost): one had 44% of its body text silently discarded by the
+container bug in #58.
+
+All of the above is device-verified on a physical Kindle. Subscript (a negative
+`$31` shift) is the one exception — no reference file uses one, so it remains
+unverified.
 
 ## 5.5.0 — Font-embedding toggle (#15) + bold/italic face fix (#50)
 
