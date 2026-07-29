@@ -48,6 +48,45 @@ uses the test shim and so only exercises the `<sup>` tag route. The resolver
 contract is unit-tested with an injected stylizer, as with the other CSS
 properties.
 
+### Image optimization gates on byte size (#55)
+
+Image optimization only ever triggered on pixel dimensions:
+
+```python
+if max(size) <= max_dim:   # DEFAULT_MAX_DIM = 2048
+    return data
+```
+
+An image can sit well inside that budget and still be far too heavy — encoded
+near-lossless, with EXIF, Photoshop and ICC blocks attached. A 1161x1800 cover
+ran to 2.25 MB and passed through untouched, and because *every* image in that
+book was under 2048px, **not one of its 16 images was optimized — 7.7 MB
+embedded verbatim.**
+
+`optimize_image` now has two independent triggers: dimensions over `max_dim`, or
+encoded weight over `max_bytes` (default 1 MiB, override with
+`KFXGEN_IMAGE_MAX_BYTES`). When only the byte trigger fires the image is
+re-encoded **at its existing dimensions** — it is too heavy, not too big, and
+shrinking it would lose detail for no reason. The existing guard against
+returning something larger than the input still applies.
+
+The default is deliberately generous. Measured across the reference corpus (212
+images in three Amazon-produced KFX files) the largest single image is 466 KB and
+none exceeds 512 KB, so 1 MiB is roughly twice the observed ceiling: it catches
+the pathological tail without recompressing images that are merely large. Set
+`KFXGEN_IMAGE_MAX_BYTES=512000` to track Amazon's own output more tightly.
+
+On the book that surfaced this: 7,677,756 → 4,350,071 bytes (43% smaller, no
+dimension changes), cover 2,254,253 → 490,594.
+
+**Not claimed:** that this fixes the reported "cover does not display on Kindle".
+That symptom is what surfaced the defect, and the sizes are conspicuous, but the
+causal link is unconfirmed — the competing explanation is the unusual
+EXIF/Photoshop/ICC header stack rather than the byte count. Both are resolved by
+re-encoding, so the fix is the same either way. A controlled A/B (identical
+build, single env var) is pending a device sideload to settle it.
+
+
 ## 5.5.0 — Font-embedding toggle (#15) + bold/italic face fix (#50)
 
 **Fixed (#50):** bold and italic embedded faces now render on-device. The applied
