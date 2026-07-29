@@ -1848,3 +1848,107 @@ def test_unreferenced_anchor_ids_emit_no_anchor_fragments(tmp_path):
         title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
     )
     assert _anchor_index(gen) == {}
+
+
+# ── #62: anchors on elided/image blocks must survive ─────────────────────────
+
+
+@pytest.mark.unit
+def test_anchor_on_title_duplicate_block_survives_elision(tmp_path):
+    """A back-matter file often opens with a heading equal to the chapter title.
+    That block is elided as redundant — but it carries the id the TOC links to,
+    so dropping its anchor_keys silently killed the link. (#62)"""
+    from kfxgen.inline_style import make_link_flag
+
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "Contents",
+            "text": "Notes",
+            "blocks": [
+                {
+                    "text": "Notes",
+                    "spans": [
+                        (0, 5, frozenset({make_link_flag("notes.xhtml#toc_55")}))
+                    ],
+                    "anchor_keys": [],
+                }
+            ],
+        },
+        {
+            "title": "Notes",
+            "text": "NOTES\n\nFirst note.",
+            "blocks": [
+                {"text": "NOTES", "spans": [], "anchor_keys": ["notes.xhtml#toc_55"]},
+                {"text": "First note.", "spans": [], "anchor_keys": []},
+            ],
+        },
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    anchors = {
+        str((f.value.value if hasattr(f.value, "value") else f.value)[IS_180()])
+        for f in gen.fragments
+        if str(f.ftype) == "$266"
+    }
+    targets = _collect_link_targets(gen)
+    assert targets, "link to an elided-heading anchor was dropped entirely"
+    assert set(targets) <= anchors
+
+
+@pytest.mark.unit
+def test_anchor_on_image_block_survives(tmp_path):
+    """Figure ids live on image blocks; those chunks were appended without
+    anchor_keys, so links to figures resolved to nothing. (#62)"""
+    from kfxgen.inline_style import make_link_flag
+
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "Ch",
+            "text": "see figure",
+            "blocks": [
+                {
+                    "text": "see figure",
+                    "spans": [(0, 3, frozenset({make_link_flag("c.xhtml#fig3")}))],
+                    "anchor_keys": [],
+                },
+                {
+                    "text": "\x00IMG\x01img.jpg\x01alt\x00",
+                    "spans": [],
+                    "anchor_keys": ["c.xhtml#fig3"],
+                },
+            ],
+        }
+    ]
+    gen.generate_full_book(
+        title="T",
+        author="A",
+        chapters=chapters,
+        images={"img.jpg": b"\xff\xd8\xff\xe0" + b"\x00" * 100},
+        output_path=str(tmp_path / "o.kfx"),
+    )
+    targets = _collect_link_targets(gen)
+    assert targets, "link to a figure anchor was dropped entirely"
+
+
+def IS_180():
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    return IS("$180")
+
+
+def _collect_link_targets(gen):
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    out = []
+    for f in gen.fragments:
+        if str(f.ftype) != "$259":
+            continue
+        v = f.value.value if hasattr(f.value, "value") else f.value
+        for e in v.get(IS("$146")) or []:
+            for sp in e.get(IS("$142")) or []:
+                if IS("$179") in sp:
+                    out.append(str(sp[IS("$179")]))
+    return out

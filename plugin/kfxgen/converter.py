@@ -292,6 +292,13 @@ def _attach_anchor_keys(blocks, base_href):
             if normalized
             else []
         )
+    # A TOC entry may link to a whole file with no fragment
+    # (`<a href="about.xhtml">About the Author</a>`). Give the document's first
+    # block a bare-filename key so such links have something to resolve to —
+    # otherwise a file that declares no ids anywhere is unreachable and the
+    # link is silently dropped. (#62)
+    if normalized and blocks:
+        blocks[0]["anchor_keys"] = [normalized] + blocks[0]["anchor_keys"]
     return blocks
 
 

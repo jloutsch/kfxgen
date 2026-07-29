@@ -40,6 +40,17 @@ SUPERSCRIPT_SHIFT = ("35", "$314")  # +35% of font size
 SUBSCRIPT_SHIFT = ("-20", "$314")  # -20% of font size
 
 
+def _dedupe_keys(keys):
+    """Order-preserving dedupe for anchor-key lists."""
+    seen = set()
+    out = []
+    for k in keys:
+        if k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
 def _safe_write_bytes(path, data):
     """Write `data` to `path` with symlink and traversal defenses (#45).
 
@@ -2471,6 +2482,10 @@ class NativeKFXGenerator:
 
         for ch_idx, chapter in enumerate(chapters):
             start_idx = len(all_chunks)
+            # Anchor ids belonging to blocks this chapter drops (a heading that
+            # duplicates the chapter title). Re-attached to the chapter's first
+            # chunk below so links to those ids still resolve. (#62)
+            carried_anchor_keys = []
             title = chapter["title"]
             toc_links = chapter.get("toc_links")
 
@@ -2544,6 +2559,15 @@ class NativeKFXGenerator:
                                         "spans": rebased_spans,
                                     }
                                 else:
+                                    # The block is gone, but its ids are what
+                                    # the TOC links to — a back-matter file
+                                    # opening with a heading equal to its
+                                    # chapter title is the common shape. Carry
+                                    # them onto the chapter's first chunk so
+                                    # the link still lands here. (#62)
+                                    carried_anchor_keys.extend(
+                                        first.get("anchor_keys") or []
+                                    )
                                     iter_blocks = iter_blocks[1:]
                         para_iter = iter_blocks
                     else:
@@ -2560,6 +2584,11 @@ class NativeKFXGenerator:
                         block_anchor_keys = block.get("anchor_keys") or []
                         for chunk in _emit_text_chunks(para):
                             if chunk["type"] == "image":
+                                # Figure ids live on image blocks; without this
+                                # a link to a figure resolved to nothing. (#62)
+                                if block_anchor_keys:
+                                    chunk["anchor_keys"] = block_anchor_keys
+                                    block_anchor_keys = []
                                 all_chunks.append(chunk)
                             else:
                                 _append_text_with_spans(
@@ -2584,6 +2613,12 @@ class NativeKFXGenerator:
             # chapter silently pointed its TOC entry at the next chapter.
             if len(all_chunks) == start_idx:
                 all_chunks.append({"type": "text", "text": " "})
+
+            if carried_anchor_keys:
+                first_chunk = all_chunks[start_idx]
+                first_chunk["anchor_keys"] = _dedupe_keys(
+                    (first_chunk.get("anchor_keys") or []) + carried_anchor_keys
+                )
 
             chapter_chunk_ranges.append((start_idx, len(all_chunks)))
 
