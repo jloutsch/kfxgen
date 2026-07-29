@@ -156,3 +156,53 @@ def test_compute_block_style_captures_italic_from_font_style():
     assert ist.compute_block_style({"font-style": "oblique"})["italic"] is True
     assert ist.compute_block_style({"font-style": "normal"})["italic"] is False
     assert ist.compute_block_style({})["italic"] is False
+
+
+# --- #52: superscript / subscript ------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("super", "super"),
+        ("SUPER", "super"),
+        ("  super  ", "super"),
+        ("text-top", "super"),
+        ("sub", "sub"),
+        ("text-bottom", "sub"),
+        # Publisher CSS commonly uses a raw length instead of the keyword.
+        ("0.25em", "super"),
+        ("30%", "super"),
+        ("2pt", "super"),
+        ("-0.25em", "sub"),
+        ("-20%", "sub"),
+    ],
+)
+def test_parse_vertical_align_recognized(value, expected):
+    assert ist.parse_vertical_align(value) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "value",
+    ["", None, "baseline", "middle", "top", "bottom", "inherit", "0", "0em", "0%"],
+)
+def test_parse_vertical_align_rejects(value):
+    assert ist.parse_vertical_align(value) is None
+
+
+@pytest.mark.unit
+def test_super_and_sub_flags_are_distinct():
+    assert ist.FLAG_SUPER != ist.FLAG_SUB
+    assert ist.FLAG_SUPER not in (ist.FLAG_BOLD, ist.FLAG_ITALIC)
+    assert ist.FLAG_SUB not in (ist.FLAG_BOLD, ist.FLAG_ITALIC)
+
+
+@pytest.mark.unit
+def test_normalize_runs_carries_super_flag():
+    text, spans = ist.normalize_runs(
+        [("word", frozenset()), ("1", frozenset({ist.FLAG_SUPER}))]
+    )
+    assert text == "word1"
+    assert spans == [(4, 1, frozenset({ist.FLAG_SUPER}))]

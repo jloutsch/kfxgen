@@ -11,6 +11,8 @@ from .font_table import BOLD_WEIGHT_THRESHOLD, parse_style, parse_weight
 
 FLAG_ITALIC = "italic"
 FLAG_BOLD = "bold"
+FLAG_SUPER = "super"
+FLAG_SUB = "sub"
 
 #: CSS length unit -> KFX $306 unit symbol.
 _CSS_UNIT_TO_KFX = {
@@ -100,6 +102,66 @@ def parse_css_length(value):
     if "." in mag:
         mag = mag.rstrip("0").rstrip(".")
     return (mag, _CSS_UNIT_TO_KFX[unit])
+
+
+#: Marker for the link element of a run's flag set. A run's flags are a
+#: frozenset, so carrying the target as ("link", target) means normalize_runs
+#: splits and merges link runs by target for free — two adjacent <a>s to
+#: different notes stay separate runs, one <a> split by a nested tag rejoins.
+#: (#53)
+LINK_FLAG = "link"
+
+
+def make_link_flag(target):
+    """Build the flag-set member that marks a run as a link to `target`."""
+    return (LINK_FLAG, target)
+
+
+def link_target(flags):
+    """Return the link target carried by a run's flag set, or None."""
+    for flag in flags:
+        if isinstance(flag, tuple) and len(flag) == 2 and flag[0] == LINK_FLAG:
+            return flag[1]
+    return None
+
+
+#: vertical-align keywords that mean "raise"/"lower" without a length.
+_VALIGN_UP = {"super", "text-top"}
+_VALIGN_DOWN = {"sub", "text-bottom"}
+
+_VALIGN_LENGTH_RE = re.compile(
+    r"^\s*([+-]?[0-9]*\.?[0-9]+)\s*(em|rem|%|pt|px|mm)\s*$", re.I
+)
+
+
+def parse_vertical_align(value):
+    """Classify a CSS vertical-align value as "super", "sub", or None.
+
+    Publisher EPUBs rarely use `<sup>`; they wrap the marker in a span whose
+    class carries `vertical-align`, and the value is as often a raw length
+    (`0.25em`) as the `super` keyword — so both forms have to be recognized.
+    A positive offset raises, a negative one lowers. `baseline`/`middle`/
+    `top`/`bottom` and a zero offset mean no shift. (#52)
+    """
+    if not value:
+        return None
+    raw = str(value).strip().lower()
+    if raw in _VALIGN_UP:
+        return "super"
+    if raw in _VALIGN_DOWN:
+        return "sub"
+    m = _VALIGN_LENGTH_RE.match(raw)
+    if not m:
+        return None
+    try:
+        magnitude = float(m.group(1))
+    except ValueError:
+        return None
+    if magnitude > 0:
+        return "super"
+    if magnitude < 0:
+        return "sub"
+    return None
 
 
 #: CSS text-align keyword -> KFX $34 value symbol.

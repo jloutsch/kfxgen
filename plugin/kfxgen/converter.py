@@ -16,11 +16,22 @@ from ._img_tokens import (
     IMG_TOKEN_SPACE as _IMG_TOKEN_SPACE,
 )
 from .image_optimize import optimize_images
-from .inline_style import FLAG_BOLD, FLAG_ITALIC, compute_block_style, normalize_runs
+from .inline_style import (
+    FLAG_BOLD,
+    FLAG_ITALIC,
+    FLAG_SUB,
+    FLAG_SUPER,
+    compute_block_style,
+    make_link_flag,
+    normalize_runs,
+    parse_vertical_align,
+)
 from .native_generator import NativeKFXGenerator
 
 _ITALIC_TAGS = {"em", "i"}
 _BOLD_TAGS = {"strong", "b"}
+_SUPER_TAGS = {"sup"}
+_SUB_TAGS = {"sub"}
 
 _security_log = logging.getLogger(__name__ + ".security")
 
@@ -78,6 +89,11 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     "font-family": _computed_value(st, "font-family"),
                     "font-weight": _computed_value(st, "font-weight"),
                     "font-style": _computed_value(st, "font-style"),
+                    # vertical-align does NOT inherit, so .get() is right here:
+                    # it returns the declared value, or None when the element
+                    # has no rule of its own. Read for inline runs (#52); the
+                    # block path ignores it.
+                    "vertical-align": st.get("vertical-align"),
                 }
             except Exception:
                 return None
@@ -119,16 +135,74 @@ def _make_img_token(href, alt):
     )
 
 
-def _walk_inline(elem, flags=frozenset()):
+_URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:")
+
+
+def _resolve_link_target(href, base_href):
+    """Normalize an in-book `<a href>` to a "<file>#<fragment>" anchor key.
+
+    Returns None for anything that can't be an in-book target: empty hrefs,
+    URL schemes, absolute paths, and traversal — all rejected by the shared
+    `_normalize_href` defenses. A bare "#frag" resolves against `base_href`,
+    the spine file the markup came from, so note markers in a chapter and
+    the notes they point at agree on one key. (#53)
+    """
+    if not href:
+        return None
+    href = href.strip()
+    if not href:
+        return None
+    # Any scheme at all (mailto:, tel:, http:, ...) means this leaves the book.
+    # _is_unsafe_href only knows the schemes that are a security concern; an
+    # in-book target simply never has one, so reject the whole shape here.
+    if _URL_SCHEME_RE.match(href):
+        return None
+    fragment = _href_fragment(href)
+    file_part = href.split("#", 1)[0]
+    if file_part:
+        target_file = _normalize_href(file_part)
+    else:
+        # Same-file link: "#frag" is relative to the document it appears in.
+        target_file = _normalize_href(base_href) if base_href else ""
+    if not target_file:
+        return None
+    return f"{target_file}#{fragment}" if fragment else target_file
+
+
+def _walk_inline(
+    elem, flags=frozenset(), style_resolver=None, is_root=True, base_href=None
+):
     """Yield (segment, flags) pairs for inline content, accumulating italic/
-    bold from ancestor <em>/<i>/<strong>/<b>. <img> becomes an IMG token
-    segment with empty flags so the generator still splits on it."""
+    bold from ancestor <em>/<i>/<strong>/<b> and superscript/subscript from
+    <sup>/<sub> or a CSS `vertical-align`. <img> becomes an IMG token
+    segment with empty flags so the generator still splits on it.
+
+    `style_resolver` (elem -> css dict|None) is consulted only for inline
+    descendants, never for the block element itself: a paragraph carrying
+    `vertical-align` would otherwise turn its whole text into one raised
+    run. (#52)"""
     local = _local_tag(elem.tag)
     cur = set(flags)
     if local in _ITALIC_TAGS:
         cur.add(FLAG_ITALIC)
     if local in _BOLD_TAGS:
         cur.add(FLAG_BOLD)
+    if local in _SUPER_TAGS:
+        cur.add(FLAG_SUPER)
+    if local in _SUB_TAGS:
+        cur.add(FLAG_SUB)
+    if local == "a":
+        target = _resolve_link_target(elem.get("href"), base_href)
+        if target:
+            cur.add(make_link_flag(target))
+    if style_resolver is not None and not is_root:
+        css = style_resolver(elem)
+        if css:
+            shift = parse_vertical_align(css.get("vertical-align"))
+            if shift == "super":
+                cur.add(FLAG_SUPER)
+            elif shift == "sub":
+                cur.add(FLAG_SUB)
     cur = frozenset(cur)
     parts = []
     if elem.text:
@@ -140,7 +214,11 @@ def _walk_inline(elem, flags=frozenset()):
             alt = child.get("alt", "") or ""
             parts.append((_make_img_token(href, alt), frozenset()))
         else:
-            parts.extend(_walk_inline(child, cur))
+            parts.extend(
+                _walk_inline(
+                    child, cur, style_resolver, is_root=False, base_href=base_href
+                )
+            )
         if child.tail:
             parts.append((child.tail, flags))
     return parts
@@ -177,13 +255,33 @@ def _dedupe_keep_order(items):
     return out
 
 
-def extract_blocks_from_html(element, style_resolver=None):
+def _attach_anchor_keys(blocks, base_href):
+    """Qualify each block's anchor ids with the file they live in, so a link
+    target normalized to "<file>#<id>" can be matched across spine files.
+    Stays empty when the caller didn't say which file this is. (#53)"""
+    normalized = _normalize_href(base_href) if base_href else ""
+    for block in blocks:
+        block["anchor_keys"] = (
+            [f"{normalized}#{aid}" for aid in block.get("anchor_ids", ())]
+            if normalized
+            else []
+        )
+    return blocks
+
+
+def extract_blocks_from_html(element, style_resolver=None, base_href=None):
     """Like extract_text_from_html but returns structured blocks:
     [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None,
-    "anchor_ids": list[str]}],
+    "anchor_ids": list[str], "anchor_keys": list[str]}],
     preserving inline emphasis as spans and inline <img> as IMG tokens in `text`.
     When style_resolver is given, it is called per block element (elem -> css_dict|None)
-    and the result is passed to compute_block_style to populate block_style."""
+    and the result is passed to compute_block_style to populate block_style.
+
+    `base_href` is the spine file this markup came from. It qualifies both
+    sides of an in-book link: `anchor_keys` are the block's ids as
+    "<file>#<id>", and a link run's target is normalized to the same form, so
+    the generator can match them across files. Without it, links can't be
+    resolved and `anchor_keys` stays empty. (#53)"""
     body = element.find(".//{http://www.w3.org/1999/xhtml}body")
     if body is None:
         body = element.find(".//body")
@@ -218,7 +316,9 @@ def extract_blocks_from_html(element, style_resolver=None):
         has_block_child = any(child.tag in block_tags for child in elem)
 
         if is_block and not has_block_child:
-            text, spans = normalize_runs(_walk_inline(elem))
+            text, spans = normalize_runs(
+                _walk_inline(elem, style_resolver=style_resolver, base_href=base_href)
+            )
             ids = pending_ids[:]
             pending_ids.clear()
             ids.extend(_subtree_anchor_ids(elem))
@@ -273,7 +373,7 @@ def extract_blocks_from_html(element, style_resolver=None):
         )
 
     if blocks:
-        return blocks
+        return _attach_anchor_keys(blocks, base_href)
 
     # Fallback: no block elements — flat extraction, no spans (unchanged rule).
     text = body.xpath("string()")
@@ -281,14 +381,17 @@ def extract_blocks_from_html(element, style_resolver=None):
     text = " ".join(line for line in lines if line)
     if not text:
         return []
-    return [
-        {
-            "text": text,
-            "spans": [],
-            "block_style": None,
-            "anchor_ids": _dedupe_keep_order(pending_ids),
-        }
-    ]
+    return _attach_anchor_keys(
+        [
+            {
+                "text": text,
+                "spans": [],
+                "block_style": None,
+                "anchor_ids": _dedupe_keep_order(pending_ids),
+            }
+        ],
+        base_href,
+    )
 
 
 def extract_text_from_html(element):
@@ -656,7 +759,11 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
             if not hasattr(item, "data") or item.data is None:
                 continue
             resolver = _build_style_resolver(oeb_book, item, log)
-            blocks = extract_blocks_from_html(item.data, style_resolver=resolver)
+            blocks = extract_blocks_from_html(
+                item.data,
+                style_resolver=resolver,
+                base_href=getattr(item, "href", "") or "",
+            )
             text = "\n\n".join(b["text"] for b in blocks)
         except Exception as e:
             href_for_log = getattr(item, "href", "") or "<unknown>"
