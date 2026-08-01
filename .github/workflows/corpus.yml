@@ -1,0 +1,76 @@
+name: Corpus Sweep
+
+# Runs the public-domain corpus invariants on a schedule so they gate
+# something rather than waiting to be remembered (#70).
+#
+# The corpus is not committed — it is fetched at run time from Project
+# Gutenberg, which serves these EPUBs freely. Only the invariant mode runs
+# here: baseline diffing needs a recorded JSON from a prior run, which is
+# inherently local and stays a manual pre-release step.
+#
+# Why this exists: the unit suite and the synthetic golden corpus both passed
+# while kfxgen was discarding 44% of one book's body text and emitting
+# exclusively dead links. Neither surfaces without real books.
+
+on:
+  schedule:
+    # Weekly, Monday 06:00 UTC. Drift here is slow-moving; daily would be noise.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      book_count:
+        description: "How many Gutenberg books to fetch"
+        required: false
+        default: "20"
+
+permissions:
+  contents: read
+
+jobs:
+  corpus:
+    name: Public-domain corpus invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      # Gutenberg's top-100 ids. Fetching by id keeps this independent of any
+      # local corpus and of book titles, which must not appear in this repo.
+      - name: Fetch corpus
+        run: |
+          mkdir -p corpus
+          COUNT="${{ github.event.inputs.book_count || '20' }}"
+          IDS="1342 84 11 1661 2701 98 1952 174 345 1080 5200 43 76 2542 4300 1400 16 25344 2554 74 1260 30254 6130 158 45"
+          n=0
+          for id in $IDS; do
+            [ "$n" -ge "$COUNT" ] && break
+            if curl -fsSL --max-time 60 \
+                 "https://www.gutenberg.org/ebooks/${id}.epub.noimages" \
+                 -o "corpus/${id}.epub"; then
+              n=$((n+1))
+            else
+              echo "::warning::could not fetch id ${id}, skipping"
+              rm -f "corpus/${id}.epub"
+            fi
+          done
+          echo "fetched $n books"
+          # A shrunken corpus silently weakens the sweep, so fail loudly
+          # rather than passing on two books.
+          if [ "$n" -lt 5 ]; then
+            echo "::error::only $n books fetched; corpus too small to be meaningful"
+            exit 1
+          fi
+
+      - name: Run corpus invariants
+        env:
+          KFXGEN_CORPUS_DIR: corpus
+        run: |
+          pytest tests/integration/test_public_corpus.py -m slow -k invariants -v

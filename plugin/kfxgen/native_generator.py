@@ -36,8 +36,41 @@ _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 # below the baseline, so -20% is the closest equivalent. Unlike the
 # superscript value it is NOT device-verified.
 SUPERSCRIPT_FONT_SIZE = 0.75
-SUPERSCRIPT_SHIFT = ("35", "$314")  # +35% of font size
-SUBSCRIPT_SHIFT = ("-20", "$314")  # -20% of font size
+SUPERSCRIPT_SHIFT_PCT = 35  # +35% of font size (device-verified)
+SUBSCRIPT_SHIFT_PCT = -20  # -20% (see #67 — not device-verified)
+
+
+def _env_number(name, default):
+    """Read a numeric env override, falling back to `default` when unset or
+    unparseable. Resolved per call, not at import, so a conversion can be run
+    with a different value without reloading the plugin. (#68)"""
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        return float(raw) if "." in raw else int(raw)
+    except (TypeError, ValueError):
+        _security_log.warning("ignoring invalid %s=%r; using %r", name, raw, default)
+        return default
+
+
+def superscript_metrics():
+    """(font_size, baseline_shift) for a superscript run, env-overridable.
+
+    These are rendering values recovered from a handful of reference files and
+    confirmed on one device model. Exposing them means a Kindle that renders
+    superscripts too high or too small can be corrected without a rebuild. (#68)
+    """
+    size = _env_number("KFXGEN_SUPERSCRIPT_FONT_SIZE", SUPERSCRIPT_FONT_SIZE)
+    pct = _env_number("KFXGEN_SUPERSCRIPT_SHIFT_PCT", SUPERSCRIPT_SHIFT_PCT)
+    return size, (str(pct), "$314")
+
+
+def subscript_metrics():
+    """(font_size, baseline_shift) for a subscript run, env-overridable."""
+    size = _env_number("KFXGEN_SUPERSCRIPT_FONT_SIZE", SUPERSCRIPT_FONT_SIZE)
+    pct = _env_number("KFXGEN_SUBSCRIPT_SHIFT_PCT", SUBSCRIPT_SHIFT_PCT)
+    return size, (str(pct), "$314")
 
 
 #: How many leading blocks may be consumed as a split chapter opener. Two
@@ -2897,11 +2930,9 @@ class NativeKFXGenerator:
             # shift, matching the reference noteref character styles. <sup>
             # wins if a run is somehow marked both. (#52)
             if FLAG_SUPER in flags:
-                attrs["font_size"] = SUPERSCRIPT_FONT_SIZE
-                attrs["baseline_shift"] = SUPERSCRIPT_SHIFT
+                attrs["font_size"], attrs["baseline_shift"] = superscript_metrics()
             elif FLAG_SUB in flags:
-                attrs["font_size"] = SUPERSCRIPT_FONT_SIZE
-                attrs["baseline_shift"] = SUBSCRIPT_SHIFT
+                attrs["font_size"], attrs["baseline_shift"] = subscript_metrics()
             return _allocate_style("_em", **attrs)
 
         # With per-chapter $145 fragments (#2), each chapter's $259
