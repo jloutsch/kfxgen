@@ -8,8 +8,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  unit-tests:
-    name: Unit Tests
+  tests:
+    name: Unit + Integration Tests
     runs-on: ubuntu-latest
     # kfxgen runs as a Calibre plugin inside Calibre's bundled Python
     # interpreter — currently 3.14. Testing one Linux × one recent
