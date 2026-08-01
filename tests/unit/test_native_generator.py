@@ -1110,7 +1110,7 @@ def test_emphasis_spans_emit_142():
     gen = NativeKFXGenerator()
     frag = gen.build_fragment_259(
         ["s0"],
-        content_name="content_1",
+        content_refs=[("content_1", 0)],
         entity_name="l0",
         positions=[1001],
         outer_position=1000,
@@ -2086,3 +2086,118 @@ def test_invalid_env_falls_back_to_default(monkeypatch):
 
     monkeypatch.setenv("KFXGEN_SUPERSCRIPT_SHIFT_PCT", "not-a-number")
     assert ng.superscript_metrics()[1] == ("35", "$314")
+
+
+# --- $145 content-fragment size cap (#37) ----------------------------------
+#
+# Upstream kfxlib enforces the cap in `yj_structure.py`:
+#
+#     content_bytes = 0
+#     for content in fragment.value["$146"][:-1]:
+#         content_bytes += len(content.encode("utf8"))
+#     if content_bytes >= MAX_CONTENT_FRAGMENT_SIZE:   # 8192
+#         log.error("Content %s: %d bytes exceeds maximum ...")
+#
+# Two details drive every test below and were not in the original #37 design:
+# the LAST string of a fragment is excluded from the total, and the comparison
+# is `>=`, so a fragment measuring exactly 8192 is already an error.
+
+
+def _upstream_content_bytes(strings):
+    """The metric upstream kfxlib actually applies: sum of UTF-8 bytes over
+    every string except the last."""
+    return sum(len(s.encode("utf-8")) for s in strings[:-1])
+
+
+@pytest.mark.unit
+def test_pack_content_keeps_every_group_under_the_cap():
+    from kfxgen.native_generator import pack_content_fragments
+
+    strings = ["x" * 1000] * 40  # 40 KB, far over one fragment's budget
+    groups, refs = pack_content_fragments(strings, start_index=1)
+
+    assert len(groups) > 1, "40 KB of text must not land in a single fragment"
+    for name, group in groups:
+        assert _upstream_content_bytes(group) < 8192, (
+            f"{name} is {_upstream_content_bytes(group)} bytes — upstream errors at >= 8192"
+        )
+
+
+@pytest.mark.unit
+def test_pack_content_refs_address_the_original_strings():
+    """Every input string must be reachable through its ref, in order — a
+    packer that loses or reorders content silently corrupts the book."""
+    from kfxgen.native_generator import pack_content_fragments
+
+    strings = [f"para {i} " + "y" * 600 for i in range(30)]
+    groups, refs = pack_content_fragments(strings, start_index=1)
+
+    by_name = dict(groups)
+    assert len(refs) == len(strings)
+    for original, (name, local_index) in zip(strings, refs):
+        assert by_name[name][local_index] == original
+
+
+@pytest.mark.unit
+def test_pack_content_budgets_on_bytes_not_characters():
+    """CJK is 3 bytes/char. A character-budgeted packer passes this and still
+    emits fragments upstream rejects."""
+    from kfxgen.native_generator import pack_content_fragments
+
+    strings = ["月" * 1000] * 6  # 3000 bytes each
+    groups, _refs = pack_content_fragments(strings, start_index=1)
+
+    for name, group in groups:
+        assert _upstream_content_bytes(group) < 8192, f"{name} over cap on CJK"
+
+
+@pytest.mark.unit
+def test_pack_content_splits_at_exactly_the_cap():
+    """Boundary: upstream uses `>=`, so a non-final total of exactly 8192 is
+    an error, not the last passing value."""
+    from kfxgen.native_generator import pack_content_fragments
+
+    # Two strings of 4096 bytes then a third: if both 4096s were kept as
+    # non-final in one group the total is exactly 8192 — must not happen.
+    groups, _refs = pack_content_fragments(["z" * 4096] * 3, start_index=1)
+    for name, group in groups:
+        assert _upstream_content_bytes(group) < 8192, (
+            f"{name} totals exactly the cap; upstream errors at >= 8192"
+        )
+
+
+@pytest.mark.unit
+def test_pack_content_keeps_an_oversized_single_string():
+    """A single chunk larger than the cap is still conformant alone, because
+    the final string is not counted. It must never be dropped or truncated."""
+    from kfxgen.native_generator import pack_content_fragments
+
+    giant = "q" * 50000
+    groups, refs = pack_content_fragments([giant], start_index=1)
+
+    assert len(groups) == 1
+    assert dict(groups)[refs[0][0]][refs[0][1]] == giant
+    assert _upstream_content_bytes(dict(groups)[refs[0][0]]) < 8192
+
+
+@pytest.mark.unit
+def test_pack_content_single_group_keeps_the_base_name():
+    """A chapter that fits in one fragment must still be named `content_N`
+    with no suffix, so short books stay byte-identical to today's output."""
+    from kfxgen.native_generator import pack_content_fragments
+
+    groups, refs = pack_content_fragments(["short para"], start_index=7)
+    assert [name for name, _ in groups] == ["content_7"]
+    assert refs == [("content_7", 0)]
+
+
+@pytest.mark.unit
+def test_pack_content_still_yields_a_fragment_for_a_textless_chapter():
+    """An image-only chapter (a synthetic cover) has owned an empty $145 since
+    #2. Returning no group would drop that fragment and move bytes in
+    device-verified output for a reason unrelated to the size cap."""
+    from kfxgen.native_generator import pack_content_fragments
+
+    groups, refs = pack_content_fragments([], start_index=3)
+    assert groups == [("content_3", [])]
+    assert refs == []

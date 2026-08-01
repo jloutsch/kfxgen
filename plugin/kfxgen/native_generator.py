@@ -120,6 +120,84 @@ def _dedupe_keys(keys):
     return out
 
 
+#: Per-`$145` content-fragment byte ceiling enforced by the format. Upstream
+#: kfxlib (`yj_structure.py`) errors at `>=`, not `>`, so a fragment measuring
+#: exactly this is already a violation.
+MAX_CONTENT_FRAGMENT_SIZE = 8192
+
+
+def pack_content_fragments(text_strings, start_index, limit=MAX_CONTENT_FRAGMENT_SIZE):
+    """Group a chapter's chunk strings into `$145` fragments under the cap (#37).
+
+    One `$145` per chapter overflowed the format's per-fragment maximum on
+    ordinary trade books — a 121 KB fragment against a 8192-byte ceiling. The
+    reference KDP layout splits a chapter's content across several ~8 KB
+    fragments instead, which is what this reproduces.
+
+    The cap is measured the way upstream kfxlib measures it, which is not
+    obvious and not what #37's original design assumed:
+
+        sum(len(s.encode("utf8")) for s in strings[:-1]) >= 8192  -> error
+
+    The **last** string of a fragment is excluded from the total, and the
+    comparison is `>=`. Two consequences shape this function: a group is
+    charged only for the strings that are not currently last, and a group
+    holding a single string is always conformant no matter how long that
+    string is — so there is no unsplittable input and the loop always makes
+    progress.
+
+    Budgeting is on encoded bytes, not characters: CJK runs 3 bytes/char, and
+    a character budget would emit fragments upstream rejects.
+
+    Args:
+        text_strings: The chapter's chunk strings, in reading order.
+        start_index: 1-based number for this chapter's first fragment. Names
+            are allocated sequentially from here (`content_<n>`), so a chapter
+            fitting in one fragment keeps the plain `content_N` name it had
+            before this change and short books stay byte-identical.
+        limit: Byte ceiling, exposed for tests.
+
+    Returns:
+        (groups, refs) where `groups` is [(fragment_name, [strings])] and
+        `refs` is one (fragment_name, local_index) per input string, in input
+        order. `refs` is what `$259` entries address content through.
+
+        Always at least one group, even for a chapter with no text at all —
+        an image-only chapter (a synthetic cover) has owned an empty `$145`
+        since #2, and dropping it here would move bytes in device-verified
+        output for a reason unrelated to the size cap.
+    """
+    if not text_strings:
+        return [(f"content_{start_index}", [])], []
+
+    groups = []
+    refs = []
+    current = []
+    # Bytes of every string in `current` except the last — the total upstream
+    # will charge this fragment if nothing more is appended.
+    committed = 0
+    name = f"content_{start_index}"
+
+    for s in text_strings:
+        if current:
+            # Appending makes the present last string a non-final one, so it
+            # starts counting against the budget.
+            projected = committed + len(current[-1].encode("utf-8"))
+            if projected >= limit:
+                groups.append((name, current))
+                start_index += 1
+                name = f"content_{start_index}"
+                current = []
+                committed = 0
+            else:
+                committed = projected
+        refs.append((name, len(current)))
+        current.append(s)
+
+    groups.append((name, current))
+    return groups, refs
+
+
 def _safe_write_bytes(path, data):
     """Write `data` to `path` with symlink and traversal defenses (#45).
 
@@ -1336,10 +1414,9 @@ class NativeKFXGenerator:
     def build_fragment_259(
         self,
         story_names,
-        content_name,
+        content_refs,
         entity_name=None,
         positions=None,
-        content_index_offset=0,
         link_targets=None,
         link_styles=None,
         link_text_lengths=None,
@@ -1368,11 +1445,15 @@ class NativeKFXGenerator:
 
         Args:
             story_names: List of $157 fragment local symbol names per chunk.
-            content_name: Name of the $145 content fragment.
+            content_refs: One (content_fragment_name, index_into_$146) per
+                        entry, or None for entries that hold no text (image
+                        entries). A chapter's text may span several $145
+                        fragments once it exceeds the per-fragment byte cap,
+                        so the reference is per entry rather than one
+                        fragment name plus a running index (#37).
             entity_name: Local symbol name for this fragment (e.g., "l0").
                         Auto-generated if None.
             positions: List of position IDs, one per story_name (children).
-            content_index_offset: Base offset for $403 indices into $145.$146.
             link_targets: Optional list of $266 anchor names (or None) per child.
                          When set, the entry gets a $142 character-span marking
                          text [0:link_text_lengths[i]] as a hyperlink to the
@@ -1399,10 +1480,11 @@ class NativeKFXGenerator:
             entity_name = f"l{self.next_entity_id}"
             self.next_entity_id += 1
         self.symtab.create_local_symbol(entity_name)
-        self.symtab.create_local_symbol(content_name)
+        for ref in content_refs or ():
+            if ref:
+                self.symtab.create_local_symbol(ref[0])
 
         children = []
-        text_index = content_index_offset
         for i, story_name in enumerate(story_names):
             position = positions[i] if positions and i < len(positions) else 1000 + i
             kind = chunk_kinds[i] if chunk_kinds and i < len(chunk_kinds) else "text"
@@ -1430,14 +1512,15 @@ class NativeKFXGenerator:
                 )
                 if resource_name:
                     entry[IS("$175")] = IS(resource_name)
-                # Image entries don't consume a $145 $403 slot — text_index
-                # is unchanged.
+                # Image entries hold no text, so they carry no content
+                # reference — their slot in content_refs is None.
                 if i == 0:
                     entry[IS("$790")] = 1
                 children.append(entry)
                 continue
 
             # Text entry
+            ref_name, ref_index = content_refs[i]
             entry = IonStruct(
                 IS("$155"),
                 position,
@@ -1446,9 +1529,8 @@ class NativeKFXGenerator:
                 IS("$159"),
                 IS("$269"),
                 IS("$145"),
-                IonStruct(IS("$4"), IS(content_name), IS("$403"), text_index),
+                IonStruct(IS("$4"), IS(ref_name), IS("$403"), ref_index),
             )
-            text_index += 1
             if i == 0:
                 entry[IS("$790")] = 1
 
@@ -2443,12 +2525,12 @@ class NativeKFXGenerator:
                 anchor_names: List of $266 anchor entity names (for entity map/index)
                 extra_style_names: List of additional $157 style names (headings, links)
         """
-        # Per-chapter $145 fragments (#2): each chapter owns its own
-        # content fragment instead of all chapters sharing a singleton
-        # content_1. Reference Calibre KFX emits 149 $145 fragments on
-        # the test corpus; the singleton walked a 1.3MB array on every nav
-        # lookup. Numbering matches reference (1-based content_1...N).
-        content_names = [f"content_{i + 1}" for i in range(len(chapters))]
+        # Per-chapter $145 fragments (#2): each chapter owns its own content
+        # fragment instead of all chapters sharing a singleton content_1.
+        # Reference Calibre KFX emits 149 $145 fragments on the test corpus;
+        # the singleton walked a 1.3MB array on every nav lookup. The names
+        # are allocated further down, once chunk text exists to measure — a
+        # chapter over the per-fragment byte cap takes more than one (#37).
 
         # Phase 4b: chunks are typed dicts so a chapter's reading flow can
         # interleave text paragraphs and inline image entries.
@@ -2790,19 +2872,40 @@ class NativeKFXGenerator:
                 body_anchor_map[target] = anchor_name
                 anchor_names.append(anchor_name)
 
-        # Build one $145 fragment per chapter from its chunk-range slice.
-        # Image chunks are filtered out — $145 holds only text paragraphs;
-        # images are referenced from $259 via $175 against $164 resources.
+        # Build the $145 content fragments for each chapter's chunk-range
+        # slice. Image chunks are filtered out — $145 holds only text
+        # paragraphs; images are referenced from $259 via $175 against $164
+        # resources.
+        #
+        # A chapter yields one fragment when its text fits the format's
+        # per-fragment cap and several when it does not (#37). Names are
+        # allocated sequentially across the whole book, so a book whose
+        # chapters each fit produces exactly content_1..content_N as before
+        # and its bytes do not move.
+        content_names = []
+        content_refs_per_chapter = []
+        next_content_index = 1
         for ch_idx, (start, end) in enumerate(chapter_chunk_ranges):
-            chapter_text_chunks = [
-                all_chunks[i]["text"]
-                for i in range(start, end)
-                if all_chunks[i].get("type") == "text"
+            text_positions = [
+                i for i in range(start, end) if all_chunks[i].get("type") == "text"
             ]
-            self.fragments.append(
-                self.build_fragment_145(
-                    chapter_text_chunks, content_name=content_names[ch_idx]
+            groups, refs = pack_content_fragments(
+                [all_chunks[i]["text"] for i in text_positions],
+                start_index=next_content_index,
+            )
+            for name, strings in groups:
+                content_names.append(name)
+                self.fragments.append(
+                    self.build_fragment_145(strings, content_name=name)
                 )
+            next_content_index += len(groups)
+
+            # Align refs with every chunk in the chapter, text and image
+            # alike: $259 walks the full range and image entries carry no
+            # content reference.
+            ref_by_chunk = dict(zip(text_positions, refs))
+            content_refs_per_chapter.append(
+                [ref_by_chunk.get(i) for i in range(start, end)]
             )
 
         # Build $157 styles. Identical attribute fingerprints share one fragment
@@ -2935,11 +3038,6 @@ class NativeKFXGenerator:
                 attrs["font_size"], attrs["baseline_shift"] = subscript_metrics()
             return _allocate_style("_em", **attrs)
 
-        # With per-chapter $145 fragments (#2), each chapter's $259
-        # entries address into their OWN content fragment, so $403
-        # indices reset to 0 at the start of every chapter.
-        chapter_text_offsets = [0] * len(chapters)
-
         # Build multi-entry $259 storylines (one entry per chunk per chapter)
         storyline_names = []
         for ch_idx in range(len(chapters)):
@@ -3045,10 +3143,9 @@ class NativeKFXGenerator:
 
             frag_259 = self.build_fragment_259(
                 entry_styles,
-                content_name=content_names[ch_idx],
+                content_refs=content_refs_per_chapter[ch_idx],
                 entity_name=sl_name,
                 positions=chunk_positions[start:end],
-                content_index_offset=chapter_text_offsets[ch_idx],
                 link_targets=entry_link_targets,
                 link_styles=entry_link_styles,
                 link_text_lengths=entry_link_text_lengths,

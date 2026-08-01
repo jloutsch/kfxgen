@@ -327,6 +327,61 @@ def make_publisher_structure(out_dir: Path) -> Path:
     return builder.build(out_dir, "publisher_structure")
 
 
+#: One paragraph of ordinary prose. Repeated to build a chapter whose text
+#: exceeds the per-`$145` byte cap several times over.
+_LONG_PARA = (
+    "The quick brown fox jumps over the lazy dog, and then continues on past "
+    "the hedgerow toward the river where the light falls in long bars across "
+    "the water and the afternoon draws itself out into evening once more. "
+)
+
+#: The same, in a script that costs 3 bytes per character. A packer that
+#: budgets on `len(str)` rather than encoded bytes passes the ASCII chapter
+#: and still overflows on this one.
+_LONG_PARA_CJK = "月明かりが川の上に長く伸びて、夕暮れがゆっくりと訪れる。" * 4
+
+
+def make_long_chapter(out_dir: Path) -> Path:
+    """Chapters whose text exceeds the per-`$145` content-fragment cap (#37).
+
+    One `$145` per chapter overflowed the format's 8192-byte per-fragment
+    maximum on ordinary trade books — upstream `kfxlib` reported single
+    fragments of ~121 KB, 15x the ceiling. Every other fixture here is small
+    enough to fit one fragment, so nothing in the corpus could see it.
+
+    The cap is measured the way upstream measures it, which is not obvious:
+
+        sum(len(s.encode("utf8")) for s in fragment["$146"][:-1]) >= 8192
+
+    The **last** string is excluded and the comparison is `>=`, so a fragment
+    totalling exactly 8192 is already a violation. Both chapters here are far
+    enough over that an off-by-one in the budget still fails the assertion.
+
+    The CJK chapter is not decoration: at 3 bytes/character a packer budgeting
+    on character count clears the ASCII chapter and still emits fragments
+    upstream rejects.
+    """
+    ascii_body = "".join(f"<p>{_LONG_PARA}</p>\n" for _ in range(120))
+    cjk_body = "".join(f"<p>{_LONG_PARA_CJK}</p>\n" for _ in range(60))
+    return (
+        EpubBuilder()
+        .set_metadata(title="Long Chapter Golden", author="Golden Author")
+        .add_chapter(
+            "Long Chapter",
+            _xhtml_page(
+                "Long Chapter", f"<h1>Long Chapter</h1>\n{ascii_body}"
+            ).encode(),
+        )
+        .add_chapter(
+            "Long Chapter CJK",
+            _xhtml_page(
+                "Long Chapter CJK", f"<h1>Long Chapter CJK</h1>\n{cjk_body}"
+            ).encode(),
+        )
+        .build(out_dir, "long_chapter")
+    )
+
+
 # Registry consumed by both regenerate.py and test_golden_corpus.py.
 #
 # Each fixture is paired with a structural-fingerprint check in
@@ -341,4 +396,5 @@ GOLDEN_INPUTS: list[tuple[str, callable]] = [
     ("multi_chapter", make_multi_chapter),
     ("linked_toc", make_linked_toc),
     ("publisher_structure", make_publisher_structure),
+    ("long_chapter", make_long_chapter),
 ]
