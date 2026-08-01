@@ -33,9 +33,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Run unit tests
+      # Integration runs alongside unit: the golden-file corpus is a real
+      # regression gate and was never gating anything, because CI only ever
+      # ran tests/unit. Suites whose inputs are absent (vendored kfxlib, the
+      # public-domain corpus) skip cleanly, so this adds coverage without
+      # adding required inputs.
+      - name: Run unit + integration tests
         run: |
-          pytest tests/unit -v
+          pytest tests/unit tests/integration -v
 
   ruff-lint:
     # Enforce ruff for outside contributors who don't have pre-commit
