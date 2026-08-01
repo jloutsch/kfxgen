@@ -296,6 +296,13 @@ def test_fixture_publisher_structure_shape(tmp_path):
     assert any("Lead-in text" in t for t in texts), (
         "inline text of a container with block children was dropped"
     )
+    # #64: the chapter whose nav title is "3. Split Opener" prints the numeral
+    # and title as separate blocks; the synthesized heading must replace them,
+    # not sit on top of them.
+    assert "Split Opener" not in [t.strip() for t in texts], (
+        f"split chapter opener duplicated below the heading: {texts}"
+    )
+    assert "3. Split Opener" in [t.strip() for t in texts], "heading missing"
     # #60: hidden landmarks/page-list navs are markup, not reading content.
     assert not any(t.strip() in ("Page List", "Begin Reading") for t in texts), (
         f"hidden nav leaked into the body: {texts}"

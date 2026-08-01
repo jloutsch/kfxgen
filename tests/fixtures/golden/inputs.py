@@ -211,6 +211,7 @@ def make_publisher_structure(out_dir: Path) -> Path:
     * two documents sharing a basename in different folders — anchor keys
       were basenames, so the first one silently won every link (#69)
     * a superscripted note marker linking cross-folder, via `<sup>`
+    * a chapter whose nav title is reconstructed by two body blocks (#64)
 
     The CSS route to superscript (`vertical-align` on a span) is deliberately
     not used here: it resolves through Calibre's Stylizer, which golden
@@ -264,10 +265,21 @@ def make_publisher_structure(out_dir: Path) -> Path:
     )
     # Heading equal to the chapter title — the elision case.
     afterword = _xhtml_page("Afterword", "<h1>Afterword</h1>\n<p>Closing remarks.</p>")
+    # A chapter whose nav title is "3. Split Opener" while the page prints the
+    # numeral and the title as separate blocks. The synthesized heading used to
+    # land on top of the book's own opener and the name rendered twice (#64);
+    # this only exercises that path now that fixtures get nav-derived titles
+    # (#74).
+    split_opener = _xhtml_page(
+        "3. Split Opener",
+        '<p class="num">3</p>\n<p class="ttl">Split Opener</p>\n'
+        "<p>Chapter body prose.</p>",
+    )
     builder = (
         EpubBuilder()
         .set_metadata(title="Publisher Structure Golden", author="Golden Author")
         .add_chapter("Contents", toc.encode())
+        .add_chapter("3. Split Opener", split_opener.encode())
     )
     for item_id, href, page in (
         ("part1", "text/part1.xhtml", part),
