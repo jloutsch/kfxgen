@@ -169,3 +169,35 @@ project root. If you change anything that touches `$259`, `$260`, `$264`,
 before merging. Tier-1 invariant tests (issue 43)
 encode many of these rules, but not all of them — when in doubt, test on
 device.
+
+## Public-domain corpus sweep
+
+`tests/integration/test_public_corpus.py` runs real books through the whole
+pipeline and checks invariants that the unit suite cannot. It exists because
+unit tests and the synthetic golden corpus both passed while kfxgen was silently
+discarding 44% of one book's body text, and while every internal link it emitted
+resolved against nothing. Each assertion maps to a bug that shipped.
+
+The corpus is not committed — point the test at a local directory of `.epub`
+files (the Gutenberg top-90 set is what it was built against):
+
+```bash
+export KFXGEN_CORPUS_DIR=/path/to/corpus
+pytest tests/integration/test_public_corpus.py -m slow
+```
+
+Without `KFXGEN_CORPUS_DIR` the tests skip, so a normal run is unaffected.
+
+Invariants alone will not catch text quietly going missing. For that, record a
+baseline before a change and diff against it after:
+
+```bash
+KFXGEN_CORPUS_WRITE_BASELINE=1 KFXGEN_CORPUS_BASELINE=corpus-baseline.json \
+  pytest tests/integration/test_public_corpus.py -m slow -k baseline   # record
+
+KFXGEN_CORPUS_BASELINE=corpus-baseline.json \
+  pytest tests/integration/test_public_corpus.py -m slow -k baseline   # compare
+```
+
+The baseline is keyed by filename and is a local artifact — keep it out of the
+repo, alongside the corpus itself.

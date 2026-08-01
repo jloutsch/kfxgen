@@ -1952,3 +1952,109 @@ def _collect_link_targets(gen):
                 if IS("$179") in sp:
                     out.append(str(sp[IS("$179")]))
     return out
+
+
+# ── #64: chapter opener split across blocks ──────────────────────────────────
+
+
+def _first_texts(gen, storyline):
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    txt = {}
+    for f in gen.fragments:
+        if str(f.ftype) == "$145":
+            v = f.value.value if hasattr(f.value, "value") else f.value
+            txt[str(f.fid)] = [
+                x for x in (v.get(IS("$146")) or []) if isinstance(x, str)
+            ]
+    for f in gen.fragments:
+        if str(f.ftype) != "$259" or str(f.fid) != storyline:
+            continue
+        v = f.value.value if hasattr(f.value, "value") else f.value
+        out = []
+        for e in v.get(IS("$146")) or []:
+            if IS("$145") not in e:
+                continue
+            ref = e[IS("$145")]
+            key = IS("$4") if IS("$4") in ref else IS("name")
+            n = str(ref[key])
+            i = ref[IS("$403")]
+            out.append(txt[n][i] if i < len(txt[n]) else "")
+        return out
+    return []
+
+
+@pytest.mark.unit
+def test_split_number_and_title_not_repeated_after_heading(tmp_path):
+    """#64: publishers often put the numeral and the title in separate elements.
+    The single-block strip missed that, so the synthesized heading was added on
+    top of the book's own opener and the chapter name appeared twice."""
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "3. Chapter Title Here",
+            "text": "3\n\nChapter Title Here\n\nBody text follows.",
+            "blocks": [
+                {"text": "3", "spans": [], "anchor_keys": []},
+                {"text": "Chapter Title Here", "spans": [], "anchor_keys": []},
+                {"text": "Body text follows.", "spans": [], "anchor_keys": []},
+            ],
+        }
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    texts = _first_texts(gen, "l0")
+    assert texts[0] == "3. Chapter Title Here", "heading missing"
+    assert "Chapter Title Here" not in texts[1:], (
+        f"chapter title repeated in body: {texts}"
+    )
+    assert "Body text follows." in texts, "body text was eaten"
+
+
+@pytest.mark.unit
+def test_single_block_title_strip_still_works(tmp_path):
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "Chapter One",
+            "text": "Chapter One\n\nBody.",
+            "blocks": [
+                {"text": "Chapter One", "spans": [], "anchor_keys": []},
+                {"text": "Body.", "spans": [], "anchor_keys": []},
+            ],
+        }
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    texts = _first_texts(gen, "l0")
+    assert texts.count("Chapter One") == 1, texts
+
+
+@pytest.mark.unit
+def test_body_text_matching_title_words_is_not_eaten(tmp_path):
+    """Guard against over-eager consumption: leading blocks must reconstruct the
+    title exactly, not merely start with the same words."""
+    gen = NativeKFXGenerator()
+    chapters = [
+        {
+            "title": "5. War",
+            "text": "5\n\nWar and its causes were debated.",
+            "blocks": [
+                {"text": "5", "spans": [], "anchor_keys": []},
+                {
+                    "text": "War and its causes were debated.",
+                    "spans": [],
+                    "anchor_keys": [],
+                },
+            ],
+        }
+    ]
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    texts = _first_texts(gen, "l0")
+    assert "War and its causes were debated." in texts, (
+        f"body paragraph was wrongly consumed as part of the title: {texts}"
+    )
