@@ -40,6 +40,42 @@ SUPERSCRIPT_SHIFT = ("35", "$314")  # +35% of font size
 SUBSCRIPT_SHIFT = ("-20", "$314")  # -20% of font size
 
 
+#: How many leading blocks may be consumed as a split chapter opener. Two
+#: covers the common numeral+title shape; three allows a subtitle line. Beyond
+#: that the risk of eating real body text outweighs the tidier heading.
+_MAX_SPLIT_TITLE_BLOCKS = 3
+
+
+def _normalize_title(text):
+    """Case-fold and drop punctuation/whitespace for title comparison.
+
+    A split opener writes "3" and "Chapter Title Here" where the TOC says
+    "3. Chapter Title Here" — the separator lives only in the TOC form, so the
+    comparison has to ignore it.
+    """
+    return "".join(ch for ch in text.lower() if ch.isalnum())
+
+
+def _consume_split_title(blocks, title):
+    """Number of leading blocks that together reconstruct `title` exactly.
+
+    Returns 0 when they do not, so ordinary body text is never eaten. The match
+    must be complete: a prefix is not enough, or a chapter whose first paragraph
+    happens to open with the title's words would lose it. (#64)
+    """
+    target = _normalize_title(title)
+    if not target:
+        return 0
+    acc = ""
+    for i, blk in enumerate(blocks[:_MAX_SPLIT_TITLE_BLOCKS]):
+        acc += _normalize_title(blk.get("text", ""))
+        if acc == target:
+            return i + 1
+        if not target.startswith(acc):
+            return 0
+    return 0
+
+
 def _dedupe_keys(keys):
     """Order-preserving dedupe for anchor-key lists."""
     seen = set()
@@ -2569,6 +2605,20 @@ class NativeKFXGenerator:
                                         first.get("anchor_keys") or []
                                     )
                                     iter_blocks = iter_blocks[1:]
+                            else:
+                                # Publishers routinely split the opener across
+                                # elements — the numeral in one, the title in
+                                # the next. The single-block test above misses
+                                # that, so the synthesized heading landed on top
+                                # of the book's own opener and the chapter name
+                                # rendered twice. (#64)
+                                eaten = _consume_split_title(iter_blocks, title)
+                                if eaten:
+                                    for blk in iter_blocks[:eaten]:
+                                        carried_anchor_keys.extend(
+                                            blk.get("anchor_keys") or []
+                                        )
+                                    iter_blocks = iter_blocks[eaten:]
                         para_iter = iter_blocks
                     else:
                         para_iter = [
