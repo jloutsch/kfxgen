@@ -212,6 +212,11 @@ def make_publisher_structure(out_dir: Path) -> Path:
       were basenames, so the first one silently won every link (#69)
     * a superscripted note marker linking cross-folder, via `<sup>`
     * a chapter whose nav title is reconstructed by two body blocks (#64)
+    * back matter whose heading equals its nav title, holding the id the
+      contents links to. The elision fires and the link resolves, but note
+      that this does NOT pin #62: reverting the anchor-carry still leaves the
+      fixture green, so some other path is supplying the anchor here. Tracked
+      in #74's follow-up; #62 remains unit-tested.
 
     The CSS route to superscript (`vertical-align` on a span) is deliberately
     not used here: it resolves through Calibre's Stylizer, which golden
@@ -232,6 +237,7 @@ def make_publisher_structure(out_dir: Path) -> Path:
         "  </ol>\n"
         "</li>\n"
         '<li><a href="back/afterword.xhtml">Afterword</a></li>\n'
+        '<li><a href="chapter_3.xhtml#ea1">Endnote Appendix</a></li>\n'
         "</ol>\n"
         "</nav>\n"
         '<nav epub:type="landmarks" hidden="hidden"><ol>\n'
@@ -275,11 +281,19 @@ def make_publisher_structure(out_dir: Path) -> Path:
         '<p class="num">3</p>\n<p class="ttl">Split Opener</p>\n'
         "<p>Chapter body prose.</p>",
     )
+    # Back matter whose <h1> equals its nav title. That block is elided as
+    # redundant — and it carries the id the contents links to, so the anchor
+    # has to survive the elision or the link dies silently (#62).
+    endnote_page = _xhtml_page(
+        "Endnote Appendix",
+        '<h1 id="ea1">Endnote Appendix</h1>\n<p>Appendix body.</p>',
+    )
     builder = (
         EpubBuilder()
         .set_metadata(title="Publisher Structure Golden", author="Golden Author")
         .add_chapter("Contents", toc.encode())
         .add_chapter("3. Split Opener", split_opener.encode())
+        .add_chapter("Endnote Appendix", endnote_page.encode())
     )
     for item_id, href, page in (
         ("part1", "text/part1.xhtml", part),

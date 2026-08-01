@@ -303,6 +303,28 @@ def test_fixture_publisher_structure_shape(tmp_path):
         f"split chapter opener duplicated below the heading: {texts}"
     )
     assert "3. Split Opener" in [t.strip() for t in texts], "heading missing"
+    # Every link must resolve. This covers the general invariant; it does not
+    # pin #62 specifically — reverting the anchor-carry leaves it green, so
+    # another path supplies that anchor. Verified, not assumed.
+    anchors = {
+        str(val(x)[IS("$180")]) for x in by_type(frags, "$266") if IS("$180") in val(x)
+    }
+    targets = [
+        str(sp[IS("$179")])
+        for x in by_type(frags, "$259")
+        for e in (val(x).get(IS("$146")) or [])
+        for sp in (e.get(IS("$142")) or [])
+        if IS("$179") in sp
+    ]
+    assert targets, "no link spans emitted"
+    assert not (set(targets) - anchors), (
+        f"links resolve to nothing: {sorted(set(targets) - anchors)}"
+    )
+    # It legitimately appears twice — once as a contents entry, once as the
+    # chapter heading. Duplication looks like two *adjacent* copies.
+    assert not any(
+        a.strip() == b.strip() == "Endnote Appendix" for a, b in zip(texts, texts[1:])
+    ), f"back-matter heading duplicated below its own title: {texts}"
     # #60: hidden landmarks/page-list navs are markup, not reading content.
     assert not any(t.strip() in ("Page List", "Begin Reading") for t in texts), (
         f"hidden nav leaked into the body: {texts}"
