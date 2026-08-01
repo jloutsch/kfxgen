@@ -262,7 +262,24 @@ def test_fixture_multi_chapter_shape():
 
 #: Link spans publisher_structure must emit. An exact number so a silently
 #: dropped link fails; update deliberately when the fixture gains a link.
+#:
+#: Five from the navigation document (both part1 ids, the note, the whole-file
+#: afterword href, and the endnote appendix) plus two from part1's body (the
+#: <sup> marker and the cross-folder prose link, which share a target and so
+#: resolve to one anchor between them).
+#:
+#: Deleting the anchor-carry in `native_generator` drops this to 5, not 6: the
+#: appendix link dies (its target id is on the elided heading — the #62 case),
+#: and so does the whole-file `back/afterword.xhtml` link, because that
+#: chapter's `<h1>Afterword</h1>` is elided too and takes the bare-filename
+#: key with it. The carry protects whole-file targets as well as fragments.
 EXPECTED_PUBLISHER_LINKS = 7
+
+#: Distinct `$266` anchors those links resolve to — one per unique target.
+#: Asserted alongside the link count because a link and its anchor are emitted
+#: from different code paths; a count that moves without the other moving is a
+#: resolution bug, not a fixture edit.
+EXPECTED_PUBLISHER_ANCHORS = 5
 
 
 @pytest.mark.integration
@@ -308,9 +325,14 @@ def test_fixture_publisher_structure_shape(tmp_path):
         f"split chapter opener duplicated below the heading: {texts}"
     )
     assert "3. Split Opener" in [t.strip() for t in texts], "heading missing"
-    # Every link must resolve. This covers the general invariant; it does not
-    # pin #62 specifically — reverting the anchor-carry leaves it green, so
-    # another path supplies that anchor. Verified, not assumed.
+    # #60: hidden landmarks/page-list navs are markup, not reading content.
+    # Live only because the nav document is not titled "Contents" — under that
+    # title its blocks are discarded wholesale and this passes vacuously (#76).
+    assert not any(t.strip() in ("Page List", "Begin Reading") for t in texts), (
+        f"hidden nav leaked into the body: {texts}"
+    )
+    # Every link must resolve, and the anchor for the elided appendix heading
+    # must be among them — reverting the anchor-carry drops it (#62, #76).
     anchors = {
         str(val(x)[IS("$180")]) for x in by_type(frags, "$266") if IS("$180") in val(x)
     }
@@ -332,12 +354,12 @@ def test_fixture_publisher_structure_shape(tmp_path):
     assert not (set(targets) - anchors), (
         f"links resolve to nothing: {sorted(set(targets) - anchors)}"
     )
-    # It legitimately appears twice — once as a contents entry, once as the
+    assert len(anchors) == EXPECTED_PUBLISHER_ANCHORS, (
+        f"expected {EXPECTED_PUBLISHER_ANCHORS} anchors, got {len(anchors)}. "
+        "An anchor lost without a link lost means a target stopped resolving."
+    )
+    # It legitimately appears twice — once as a navigation entry, once as the
     # chapter heading. Duplication looks like two *adjacent* copies.
     assert not any(
         a.strip() == b.strip() == "Endnote Appendix" for a, b in zip(texts, texts[1:])
     ), f"back-matter heading duplicated below its own title: {texts}"
-    # #60: hidden landmarks/page-list navs are markup, not reading content.
-    assert not any(t.strip() in ("Page List", "Begin Reading") for t in texts), (
-        f"hidden nav leaked into the body: {texts}"
-    )
