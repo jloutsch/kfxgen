@@ -128,6 +128,24 @@ Kindle Previewer*.app/
 VERSION_*.md
 TEMPLATE_APPROACH_PLAN.md
 
+# Throwaway analysis of the local research corpus. These scripts open books
+# from the maintainer's gitignored research/ directory, so they carry real
+# titles and author names in hardcoded paths — exactly what must not reach a
+# public repo. They normally live outside the tree entirely (a scratch dir
+# under /tmp); these rules are the backstop for when one gets copied in.
+# Root-anchored like the block above, so real source keeps its names free:
+# tools/inspect_font_face_rules.py is unaffected.
+# `scratchpad/` is the reliable one — name-based patterns only catch the
+# common shapes, so put throwaway scripts in a scratchpad dir rather than
+# trusting the list below to have guessed the filename.
+scratchpad/
+/inspect*.py
+/*probe*.py
+/dump_*.py
+/check_*.py
+/*_check.py
+/*-investigation.md
+
 # Gutenberg baseline corpus (large; not for git)
 research/gutenberg-top-90/
 research/gutenberg-top-90-baseline/*/
