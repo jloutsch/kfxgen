@@ -129,6 +129,48 @@ def _xhtml_page(title: str, body_html: str) -> str:
     )
 
 
+def make_linked_toc(out_dir: Path) -> Path:
+    """A Contents page linking to chapters, and a note marker linking into an
+    endnotes page that links back.
+
+    Exercises the anchor/link subsystem: `$266` anchors carrying `$180`,
+    span-level `$179` link references, cross-file target resolution, and a
+    superscript run. No previous fixture emitted a single `$266`, so the
+    entire linking layer had zero golden coverage — every internal link
+    kfxgen produced was dead and no committed fixture could see it (#51).
+    """
+    contents = _xhtml_page(
+        "Contents",
+        "<h1>Contents</h1>\n"
+        "<ol>\n"
+        '<li><a href="chapter_2.xhtml#c1">Part One</a>\n'
+        '  <ol><li><a href="chapter_2.xhtml#s1">A Nested Entry</a></li></ol>\n'
+        "</li>\n"
+        '<li><a href="chapter_3.xhtml">Endnotes</a></li>\n'
+        "</ol>",
+    )
+    chapter = _xhtml_page(
+        "Part One",
+        '<h1 id="c1">Part One</h1>\n'
+        '<p id="s1">Body text with a marker'
+        '<span style="vertical-align: super"><a href="chapter_3.xhtml#n1">1</a></span>'
+        " and more prose after it.</p>",
+    )
+    notes = _xhtml_page(
+        "Endnotes",
+        "<h1>Endnotes</h1>\n"
+        '<p id="n1"><a href="chapter_2.xhtml#s1">1.</a> The note text.</p>',
+    )
+    return (
+        EpubBuilder()
+        .set_metadata(title="Linked TOC Golden", author="Golden Author")
+        .add_chapter("Contents", contents.encode())
+        .add_chapter("Part One", chapter.encode())
+        .add_chapter("Endnotes", notes.encode())
+        .build(out_dir, "linked_toc")
+    )
+
+
 # Registry consumed by both regenerate.py and test_golden_corpus.py.
 #
 # Each fixture is paired with a structural-fingerprint check in
@@ -141,4 +183,5 @@ GOLDEN_INPUTS: list[tuple[str, callable]] = [
     ("body_images", make_body_images),
     ("with_cover", make_with_cover),
     ("multi_chapter", make_multi_chapter),
+    ("linked_toc", make_linked_toc),
 ]
