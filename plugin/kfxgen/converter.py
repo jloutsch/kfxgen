@@ -6,6 +6,7 @@ Uses NativeKFXGenerator to produce KFX with working TOC navigation.
 
 import logging
 import os
+import posixpath
 import re
 from urllib.parse import unquote
 
@@ -138,6 +139,35 @@ def _make_img_token(href, alt):
 _URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:")
 
 
+def _resolve_doc_path(base_href, href):
+    """Resolve `href` against the document it appears in, as a book-internal key.
+
+    Anchor keys used to be bare basenames, so `text/notes.xhtml` and
+    `back/notes.xhtml` produced the same key and the first one silently won
+    every link aimed at either. Keeping the directory makes them distinct. (#69)
+
+    A leading `../` is a normal cross-folder link inside an EPUB, so it is
+    resolved rather than rejected — but anything that escapes the book root, is
+    absolute, or fails the shared traversal defenses still returns "". These
+    keys are internal identifiers and never reach the filesystem; the escape
+    check keeps them from naming anything outside the book regardless.
+    """
+    if href and _is_unsafe_href(href) and not href.startswith(".."):
+        _security_log.warning("rejected unsafe href in _resolve_doc_path: %r", href)
+        return ""
+    base = (base_href or "").replace("\\", "/")
+    # An empty href means "this document" — the file itself, not its folder.
+    joined = (
+        posixpath.join(posixpath.dirname(base), href.replace("\\", "/"))
+        if href
+        else base
+    )
+    resolved = posixpath.normpath(joined)
+    if resolved.startswith("..") or resolved.startswith("/") or resolved == ".":
+        return ""
+    return resolved
+
+
 def _resolve_link_target(href, base_href):
     """Normalize an in-book `<a href>` to a "<file>#<fragment>" anchor key.
 
@@ -160,10 +190,10 @@ def _resolve_link_target(href, base_href):
     fragment = _href_fragment(href)
     file_part = href.split("#", 1)[0]
     if file_part:
-        target_file = _normalize_href(file_part)
+        target_file = _resolve_doc_path(base_href, file_part)
     else:
         # Same-file link: "#frag" is relative to the document it appears in.
-        target_file = _normalize_href(base_href) if base_href else ""
+        target_file = _resolve_doc_path(base_href, "") if base_href else ""
     if not target_file:
         return None
     return f"{target_file}#{fragment}" if fragment else target_file
@@ -285,7 +315,7 @@ def _attach_anchor_keys(blocks, base_href):
     """Qualify each block's anchor ids with the file they live in, so a link
     target normalized to "<file>#<id>" can be matched across spine files.
     Stays empty when the caller didn't say which file this is. (#53)"""
-    normalized = _normalize_href(base_href) if base_href else ""
+    normalized = _resolve_doc_path(base_href, "") if base_href else ""
     for block in blocks:
         block["anchor_keys"] = (
             [f"{normalized}#{aid}" for aid in block.get("anchor_ids", ())]

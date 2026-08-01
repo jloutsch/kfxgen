@@ -2058,3 +2058,31 @@ def test_body_text_matching_title_words_is_not_eaten(tmp_path):
     assert "War and its causes were debated." in texts, (
         f"body paragraph was wrongly consumed as part of the title: {texts}"
     )
+
+
+@pytest.mark.unit
+def test_superscript_metrics_env_override(monkeypatch):
+    """#68: rendering values must be tunable without a rebuild."""
+    from kfxgen import native_generator as ng
+
+    assert ng.superscript_metrics() == (0.75, ("35", "$314"))
+    monkeypatch.setenv("KFXGEN_SUPERSCRIPT_SHIFT_PCT", "50")
+    monkeypatch.setenv("KFXGEN_SUPERSCRIPT_FONT_SIZE", "0.8")
+    assert ng.superscript_metrics() == (0.8, ("50", "$314"))
+
+
+@pytest.mark.unit
+def test_subscript_metrics_env_override(monkeypatch):
+    from kfxgen import native_generator as ng
+
+    assert ng.subscript_metrics() == (0.75, ("-20", "$314"))
+    monkeypatch.setenv("KFXGEN_SUBSCRIPT_SHIFT_PCT", "-30")
+    assert ng.subscript_metrics()[1] == ("-30", "$314")
+
+
+@pytest.mark.unit
+def test_invalid_env_falls_back_to_default(monkeypatch):
+    from kfxgen import native_generator as ng
+
+    monkeypatch.setenv("KFXGEN_SUPERSCRIPT_SHIFT_PCT", "not-a-number")
+    assert ng.superscript_metrics()[1] == ("35", "$314")

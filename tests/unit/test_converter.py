@@ -1512,3 +1512,60 @@ def test_first_block_carries_bare_filename_anchor_key():
 def test_bare_filename_key_absent_without_base_href():
     blocks = _conv.extract_blocks_from_html(_doc("<p>x</p>"))
     assert blocks[0]["anchor_keys"] == []
+
+
+# ── #69: anchor keys must be directory-aware ─────────────────────────────────
+
+
+@pytest.mark.unit
+def test_anchor_keys_keep_the_documents_directory():
+    """#69: two files sharing a basename in different folders must not collide."""
+    a = _conv.extract_blocks_from_html(
+        _doc('<p id="n1">front</p>'), base_href="front/notes.xhtml"
+    )
+    b = _conv.extract_blocks_from_html(
+        _doc('<p id="n1">back</p>'), base_href="back/notes.xhtml"
+    )
+    assert a[0]["anchor_keys"] != b[0]["anchor_keys"], (
+        f"same-basename files collided: {a[0]['anchor_keys']}"
+    )
+
+
+@pytest.mark.unit
+def test_link_target_resolves_relative_to_its_own_document():
+    """A sibling href resolves within the linking document's directory."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<p><a href="notes.xhtml#n1">x</a></p>'), base_href="text/ch1.xhtml"
+    )
+    assert link_target(blocks[0]["spans"][0][2]) == "text/notes.xhtml#n1"
+
+
+@pytest.mark.unit
+def test_link_target_resolves_parent_directory_reference():
+    """`../back/notes.xhtml` from `text/ch1.xhtml` is a normal cross-folder
+    link and must resolve, not be discarded as traversal."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<p><a href="../back/notes.xhtml#n1">x</a></p>'),
+        base_href="text/ch1.xhtml",
+    )
+    assert link_target(blocks[0]["spans"][0][2]) == "back/notes.xhtml#n1"
+
+
+@pytest.mark.unit
+def test_link_target_escaping_the_book_root_is_rejected():
+    """Traversal above the book root stays rejected (SECURITY.md, #44/#60)."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<p><a href="../../../etc/passwd">x</a></p>'), base_href="text/ch1.xhtml"
+    )
+    assert (
+        link_target(blocks[0]["spans"][0][2] if blocks[0]["spans"] else frozenset())
+        is None
+    )
+
+
+@pytest.mark.unit
+def test_same_document_fragment_still_resolves():
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<p><a href="#later">x</a></p>'), base_href="text/ch1.xhtml"
+    )
+    assert link_target(blocks[0]["spans"][0][2]) == "text/ch1.xhtml#later"
