@@ -104,6 +104,33 @@ class EpubBuilder:
         self._extra_manifest_items.append((item_id, href, media_type, data, in_spine))
         return self
 
+    def _ncx(self) -> str:
+        """An NCX naming each add_chapter() entry.
+
+        Without this every fixture's chapters were titled `Section 1`,
+        `Section 2`, … because the converter had no table of contents to read.
+        Two code paths key off a nav-derived chapter title — suppressing a
+        duplicated opener (#64) and eliding a back-matter heading that equals
+        its title (#62) — and neither could be exercised by a fixture. (#74)
+        """
+        points = []
+        for idx, (chap_title, _body) in enumerate(self._chapters, start=1):
+            points.append(
+                f'    <navPoint id="np{idx}" playOrder="{idx}">\n'
+                f"      <navLabel><text>{html.escape(chap_title)}</text></navLabel>\n"
+                f'      <content src="chapter_{idx}.xhtml"/>\n'
+                "    </navPoint>"
+            )
+        nav = "\n".join(points)
+        return (
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">\n'
+            f'  <head><meta name="dtb:uid" content="test-{html.escape(self._title)}"/></head>\n'
+            f"  <docTitle><text>{html.escape(self._title)}</text></docTitle>\n"
+            f"  <navMap>\n{nav}\n  </navMap>\n"
+            "</ncx>\n"
+        )
+
     def build(self, out_dir: Path, name: str) -> Path:
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -120,6 +147,7 @@ class EpubBuilder:
 
             # 3. content.opf
             zf.writestr("OEBPS/content.opf", self._render_opf().encode("utf-8"))
+            zf.writestr("OEBPS/toc.ncx", self._ncx().encode("utf-8"))
 
             # 4. chapter files
             for idx, (chap_title, body) in enumerate(self._chapters, start=1):
@@ -192,6 +220,9 @@ class EpubBuilder:
             if in_spine:
                 spine_items.append(f'    <itemref idref="{html.escape(item_id)}"/>')
 
+        manifest_items.append(
+            '    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
+        )
         manifest_block = "\n".join(manifest_items)
         spine_block = "\n".join(spine_items)
 
@@ -210,7 +241,7 @@ class EpubBuilder:
   <manifest>
 {manifest_block}
   </manifest>
-  <spine>
+  <spine toc="ncx">
 {spine_block}
   </spine>
 </package>

@@ -12,7 +12,7 @@ converter.py reads (verified by Task 2 audit, grep run 2026-05-03):
     oeb_book.manifest.hrefs               (dict[str, item], getattr None-default)
     oeb_book.manifest.hrefs.get(href)     (lookup)
     oeb_book.spine                        (iterable + len)
-    oeb_book.toc                          (hasattr-guarded — shim omits)
+    oeb_book.toc                          (parsed from the NCX; see _TocNode)
     oeb_book.guide                        (hasattr-guarded — shim omits)
     manifest_item.href                    (str)
     manifest_item.id                      (str)
@@ -236,7 +236,69 @@ class EpubAsOeb:
         return self._manifest
 
     @property
+    def toc(self):
+        """Chapter titles parsed from the NCX, as the converter expects.
+
+        Returns [] when the EPUB has no NCX, which keeps fixtures that predate
+        one behaving exactly as before. (#74)
+        """
+        self._ensure_parsed()
+        import zipfile
+
+        with zipfile.ZipFile(self._epub_path) as zf:
+            for name in zf.namelist():
+                if name.lower().endswith(".ncx"):
+                    return _parse_ncx(zf.read(name))
+        return []
+
+    @property
     def spine(self) -> _Spine:
         self._ensure_parsed()
         assert self._spine is not None
         return self._spine
+
+
+class _TocNode:
+    """Minimal TOC node: title, href, and iterable children.
+
+    Matches what `converter.extract_chapters_from_oeb` reads. The shim used to
+    omit `.toc` entirely, so every fixture's chapters fell back to `Section N`
+    and no fixture could exercise the two paths that key off a nav-derived
+    chapter title (#64, #62). (#74)
+    """
+
+    def __init__(self, title: str, href: str, children=()):
+        self.title = title
+        self.href = href
+        self._children = list(children)
+
+    def __iter__(self):
+        return iter(self._children)
+
+
+def _parse_ncx(data: bytes):
+    """Return a list of _TocNode from NCX bytes, or [] if unparseable."""
+    from lxml import etree
+
+    try:
+        root = etree.fromstring(data)
+    except Exception:
+        return []
+    ns = {"n": "http://www.daisy.org/z3986/2005/ncx/"}
+
+    def walk(el):
+        out = []
+        for np in el.findall("n:navPoint", ns):
+            label = np.find("n:navLabel/n:text", ns)
+            content = np.find("n:content", ns)
+            out.append(
+                _TocNode(
+                    (label.text or "").strip() if label is not None else "",
+                    content.get("src", "") if content is not None else "",
+                    walk(np),
+                )
+            )
+        return out
+
+    navmap = root.find("n:navMap", ns)
+    return walk(navmap) if navmap is not None else []

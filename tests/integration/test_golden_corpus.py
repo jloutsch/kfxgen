@@ -260,6 +260,11 @@ def test_fixture_multi_chapter_shape():
     )
 
 
+#: Link spans publisher_structure must emit. An exact number so a silently
+#: dropped link fails; update deliberately when the fixture gains a link.
+EXPECTED_PUBLISHER_LINKS = 7
+
+
 @pytest.mark.integration
 def test_fixture_publisher_structure_shape(tmp_path):
     """Content assertions for the publisher_structure fixture.
@@ -296,6 +301,42 @@ def test_fixture_publisher_structure_shape(tmp_path):
     assert any("Lead-in text" in t for t in texts), (
         "inline text of a container with block children was dropped"
     )
+    # #64: the chapter whose nav title is "3. Split Opener" prints the numeral
+    # and title as separate blocks; the synthesized heading must replace them,
+    # not sit on top of them.
+    assert "Split Opener" not in [t.strip() for t in texts], (
+        f"split chapter opener duplicated below the heading: {texts}"
+    )
+    assert "3. Split Opener" in [t.strip() for t in texts], "heading missing"
+    # Every link must resolve. This covers the general invariant; it does not
+    # pin #62 specifically — reverting the anchor-carry leaves it green, so
+    # another path supplies that anchor. Verified, not assumed.
+    anchors = {
+        str(val(x)[IS("$180")]) for x in by_type(frags, "$266") if IS("$180") in val(x)
+    }
+    targets = [
+        str(sp[IS("$179")])
+        for x in by_type(frags, "$259")
+        for e in (val(x).get(IS("$146")) or [])
+        for sp in (e.get(IS("$142")) or [])
+        if IS("$179") in sp
+    ]
+    # An exact count, not just "none dangling". kfxgen DROPS a link whose
+    # target will not resolve rather than emitting a dangling $179, so
+    # `set(targets) - anchors` stays empty even if every link vanishes — the
+    # absence check alone is satisfied by emitting nothing at all (#79).
+    assert len(targets) == EXPECTED_PUBLISHER_LINKS, (
+        f"expected {EXPECTED_PUBLISHER_LINKS} link spans, got {len(targets)}. "
+        "A drop shows up here and nowhere else."
+    )
+    assert not (set(targets) - anchors), (
+        f"links resolve to nothing: {sorted(set(targets) - anchors)}"
+    )
+    # It legitimately appears twice — once as a contents entry, once as the
+    # chapter heading. Duplication looks like two *adjacent* copies.
+    assert not any(
+        a.strip() == b.strip() == "Endnote Appendix" for a, b in zip(texts, texts[1:])
+    ), f"back-matter heading duplicated below its own title: {texts}"
     # #60: hidden landmarks/page-list navs are markup, not reading content.
     assert not any(t.strip() in ("Page List", "Begin Reading") for t in texts), (
         f"hidden nav leaked into the body: {texts}"
