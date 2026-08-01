@@ -260,6 +260,11 @@ def test_fixture_multi_chapter_shape():
     )
 
 
+#: Link spans publisher_structure must emit. An exact number so a silently
+#: dropped link fails; update deliberately when the fixture gains a link.
+EXPECTED_PUBLISHER_LINKS = 7
+
+
 @pytest.mark.integration
 def test_fixture_publisher_structure_shape(tmp_path):
     """Content assertions for the publisher_structure fixture.
@@ -316,7 +321,14 @@ def test_fixture_publisher_structure_shape(tmp_path):
         for sp in (e.get(IS("$142")) or [])
         if IS("$179") in sp
     ]
-    assert targets, "no link spans emitted"
+    # An exact count, not just "none dangling". kfxgen DROPS a link whose
+    # target will not resolve rather than emitting a dangling $179, so
+    # `set(targets) - anchors` stays empty even if every link vanishes — the
+    # absence check alone is satisfied by emitting nothing at all (#79).
+    assert len(targets) == EXPECTED_PUBLISHER_LINKS, (
+        f"expected {EXPECTED_PUBLISHER_LINKS} link spans, got {len(targets)}. "
+        "A drop shows up here and nowhere else."
+    )
     assert not (set(targets) - anchors), (
         f"links resolve to nothing: {sorted(set(targets) - anchors)}"
     )

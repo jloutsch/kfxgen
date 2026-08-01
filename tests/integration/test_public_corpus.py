@@ -131,6 +131,15 @@ def test_corpus_book_invariants(epub, tmp_path):
     )
     # #53/#62: a link must never reference an anchor that does not exist.
     assert m["dangling"] == 0, f"{m['dangling']} link targets resolve to nothing"
+    # ...but that alone is nearly vacuous: kfxgen DROPS an unresolvable link
+    # rather than emitting a dangling one, so the check above is satisfied by
+    # emitting no links whatsoever. A book that declares internal targets must
+    # actually produce spans for them (#79).
+    if m["anchors"]:
+        assert m["links"] > 0, (
+            f"{m['anchors']} anchors emitted but zero link spans — every link "
+            "was dropped, which 'dangling == 0' cannot see"
+        )
     # #60: hidden page-list/landmarks navs are markup, never reading content.
     assert m["nav_junk"] == 0, f"{m['nav_junk']} navigation blocks leaked into the body"
 
