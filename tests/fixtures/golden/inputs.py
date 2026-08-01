@@ -171,6 +171,120 @@ def make_linked_toc(out_dir: Path) -> Path:
     )
 
 
+def _epub3_page(title: str, body_html: str) -> str:
+    """Like `_xhtml_page` but declaring the `epub:` namespace.
+
+    Kept separate rather than added to `_xhtml_page` so the existing golden
+    fixtures' bytes do not churn.
+    """
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        "<!DOCTYPE html>\n"
+        '<html xmlns="http://www.w3.org/1999/xhtml" '
+        'xmlns:epub="http://www.idpf.org/2007/ops">\n'
+        f"<head><title>{title}</title></head>\n"
+        f"<body>\n{body_html}\n</body>\n"
+        "</html>\n"
+    )
+
+
+def make_publisher_structure(out_dir: Path) -> Path:
+    """The shapes commercial EPUBs have and Project Gutenberg does not.
+
+    Every one of these was found by a device report rather than by a test,
+    because no fixture and no book in the public-domain corpus exercised
+    them — Gutenberg regenerates every title through one pipeline, so its
+    output is uniformly flat: no nested navigation, no `page-list`, no
+    `hidden` navs, one directory.
+
+    Pins, in order:
+
+    * nested ``<ol>`` inside ``<li>`` — was flattening a Part heading and
+      every chapter under it into one paragraph (#58)
+    * a container holding inline text *and* block children — the inline text
+      was silently dropped, costing 44% of one book's body (#58)
+    * ``hidden="hidden"`` ``page-list`` and ``landmarks`` navs — arrived as
+      hundreds of blocks of bare page numbers (#60)
+    * back matter whose heading equals its chapter title — that block is
+      elided as redundant and used to take the id the TOC links to with it,
+      killing the link (#62)
+    * two documents sharing a basename in different folders — anchor keys
+      were basenames, so the first one silently won every link (#69)
+    * a superscripted note marker linking cross-folder, via `<sup>`
+
+    The CSS route to superscript (`vertical-align` on a span) is deliberately
+    not used here: it resolves through Calibre's Stylizer, which golden
+    generation runs without, so it would silently produce no span. That route
+    is covered by unit tests with an injected stylizer. The #64 split-opener
+    elision likewise needs a chapter title from the nav, which these
+    manifest-only spine items do not have; it is unit-tested instead.
+    """
+    toc = _epub3_page(
+        "Contents",
+        "<h1>Contents</h1>\n"
+        '<nav epub:type="toc">\n'
+        "<ol>\n"
+        '<li><a href="text/part1.xhtml#p1">PART I</a>\n'
+        "  <ol>\n"
+        '  <li><a href="text/part1.xhtml#c1">1. First Chapter</a></li>\n'
+        '  <li><a href="back/notes.xhtml#n1">Notes</a></li>\n'
+        "  </ol>\n"
+        "</li>\n"
+        '<li><a href="back/afterword.xhtml">Afterword</a></li>\n'
+        "</ol>\n"
+        "</nav>\n"
+        '<nav epub:type="landmarks" hidden="hidden"><ol>\n'
+        '<li><a href="text/part1.xhtml">Begin Reading</a></li></ol></nav>\n'
+        '<nav epub:type="page-list" hidden="hidden"><h2>Page List</h2><ol>\n'
+        '<li><a href="text/part1.xhtml#pg1">1</a></li>\n'
+        '<li><a href="text/part1.xhtml#pg2">2</a></li>\n'
+        '<li><a href="text/part1.xhtml#pg3">3</a></li></ol></nav>',
+    )
+    # Container with its own text alongside block children, plus a chapter
+    # opener split into numeral and title.
+    part = _xhtml_page(
+        "PART I",
+        '<h1 id="p1">PART I</h1>\n'
+        "<div>Lead-in text that belongs to the div itself.<p>A nested paragraph.</p></div>\n"
+        '<p id="c1" class="num">1</p>\n'
+        "<p>First Chapter</p>\n"
+        '<p><span id="pg1"/>Body prose with a marker'
+        '<sup><a href="back/notes.xhtml#n1">1</a></sup>'
+        " and a cross-folder link to "
+        '<a href="../back/notes.xhtml#n1">the notes</a>.</p>',
+    )
+    # Same basename as text/notes.xhtml below — the collision case.
+    back_notes = _xhtml_page(
+        "Notes",
+        '<h1>Notes</h1>\n<p id="n1">1. The note text, in back/notes.xhtml.</p>',
+    )
+    text_notes = _xhtml_page(
+        "Front Notes",
+        '<h1>Front Notes</h1>\n<p id="n1">A different n1, in text/notes.xhtml.</p>',
+    )
+    # Heading equal to the chapter title — the elision case.
+    afterword = _xhtml_page("Afterword", "<h1>Afterword</h1>\n<p>Closing remarks.</p>")
+    builder = (
+        EpubBuilder()
+        .set_metadata(title="Publisher Structure Golden", author="Golden Author")
+        .add_chapter("Contents", toc.encode())
+    )
+    for item_id, href, page in (
+        ("part1", "text/part1.xhtml", part),
+        ("textnotes", "text/notes.xhtml", text_notes),
+        ("backnotes", "back/notes.xhtml", back_notes),
+        ("afterword", "back/afterword.xhtml", afterword),
+    ):
+        builder = builder.add_manifest_item(
+            item_id=item_id,
+            href=href,
+            media_type="application/xhtml+xml",
+            data=page.encode(),
+            in_spine=True,
+        )
+    return builder.build(out_dir, "publisher_structure")
+
+
 # Registry consumed by both regenerate.py and test_golden_corpus.py.
 #
 # Each fixture is paired with a structural-fingerprint check in
@@ -184,4 +298,5 @@ GOLDEN_INPUTS: list[tuple[str, callable]] = [
     ("with_cover", make_with_cover),
     ("multi_chapter", make_multi_chapter),
     ("linked_toc", make_linked_toc),
+    ("publisher_structure", make_publisher_structure),
 ]

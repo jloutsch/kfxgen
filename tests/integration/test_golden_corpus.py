@@ -258,3 +258,45 @@ def test_fixture_multi_chapter_shape():
     assert len(by_type(frags, "$260")) == 8, (
         "multi_chapter must have 8 $260 sections — fixture rotted"
     )
+
+
+@pytest.mark.integration
+def test_fixture_publisher_structure_shape(tmp_path):
+    """Content assertions for the publisher_structure fixture.
+
+    The structural fingerprint above compares fragment-type counts and key
+    sets, and deliberately tolerates text changes — which is exactly why the
+    golden corpus passed straight through a regression that discarded 44% of a
+    book's body text (#58). Text-level damage needs asserting directly.
+    """
+    from kfxgen.kfxlib_minimal.ion import IS
+    from tests._kfx_introspect import by_type, load_fragments, val
+    from tests.fixtures.golden.inputs import make_publisher_structure
+
+    # Build from the CURRENT code, not the committed golden — otherwise a
+    # regression in the converter would leave the golden untouched and this
+    # test would pass while the product was broken.
+    fresh = _build_fresh("publisher_structure", make_publisher_structure, tmp_path)
+    written = tmp_path / "fresh_ps.kfx"
+    written.write_bytes(fresh)
+    frags = load_fragments(written)
+    texts = [
+        x
+        for f in by_type(frags, "$145")
+        for x in (val(f).get(IS("$146")) or [])
+        if isinstance(x, str)
+    ]
+    # #58: each TOC entry is its own block. Flattening merges a Part heading
+    # and every child entry into one run-on paragraph.
+    assert not any("PART I" in t and "First Chapter" in t for t in texts), (
+        f"nested list flattened into one block: {texts}"
+    )
+    # #58 (second half): a container's own inline text must survive alongside
+    # its block children.
+    assert any("Lead-in text" in t for t in texts), (
+        "inline text of a container with block children was dropped"
+    )
+    # #60: hidden landmarks/page-list navs are markup, not reading content.
+    assert not any(t.strip() in ("Page List", "Begin Reading") for t in texts), (
+        f"hidden nav leaked into the body: {texts}"
+    )
