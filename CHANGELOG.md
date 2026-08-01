@@ -1,5 +1,67 @@
 # Changelog
 
+## 5.6.1 — Chapter openers, link targeting, and the tests that were missing
+
+Follow-ups to 5.6.0, all found by reading real device output rather than by
+the test suite — which is why half of this release is testing infrastructure.
+
+**Fixed (#64):** every numbered chapter rendered its number and title twice,
+once in the heading font and again below in the chapter font. kfxgen
+synthesizes a heading from the TOC title and strips that title from the body,
+but only when the *first* block starts with it. Publishers routinely split the
+opener across elements — numeral in one, title in the next — so the strip never
+fired and the heading landed on top of the book's own opener. The strip now
+consumes the leading blocks that together reconstruct the title, matched on a
+normalized form so `3` + `Title` matches `3. Title`. Bounded to three blocks and
+requiring a complete reconstruction, so a paragraph that merely opens with the
+title's words is never eaten. Not a 5.6.0 regression — 15 affected chapters in
+5.5.0 and 5.6.0 alike.
+
+**Fixed (#69):** anchor keys were bare basenames, so `text/notes.xhtml` and
+`back/notes.xhtml` produced the same key and the first document silently won
+every link aimed at either. This failed *quietly*: the link resolved, so nothing
+reported as dangling while the reader landed in the wrong chapter. Keys now
+resolve against the containing document's directory, and a leading `../` is
+treated as the ordinary cross-folder link it is rather than discarded. Traversal
+out of the book root stays rejected. No book tested so far had colliding
+basenames, so this fix is unit- and corpus-verified but not device-verified.
+
+**Changed (#68):** the superscript and subscript rendering values are now
+readable from `KFXGEN_SUPERSCRIPT_FONT_SIZE`, `KFXGEN_SUPERSCRIPT_SHIFT_PCT`
+and `KFXGEN_SUBSCRIPT_SHIFT_PCT`, resolved per conversion. They are recovered
+from a handful of reference files and confirmed on one device model; a Kindle
+that disagrees can now be corrected without a rebuild. Defaults unchanged.
+
+**Verified (#67):** the subscript baseline shift shipped in 5.6.0 as a reasoned
+guess — no reference KFX in the corpus uses a negative `$31`. Device testing
+confirms it: a negative `$31` is valid and renders correctly. No unverified
+rendering constants remain.
+
+### Testing
+
+Three gaps that let the 5.6.0 bugs ship, all closed:
+
+- **CI never ran an integration test.** It ran `pytest tests/unit` only, so the
+  golden-file corpus — which exists to be a regression gate — gated nothing.
+  Now runs unit and integration on every PR.
+- **The golden fixtures contained no links.** All four had zero `$266` anchors
+  between them, which is why rewriting the anchor builder left the corpus
+  byte-identical while every internal link in every book was dead. A
+  `linked_toc` fixture now covers anchors, cross-file links and superscript.
+- **No fixture had publisher structure.** Project Gutenberg cannot supply it —
+  measured across 13 structurally complex candidates, all were flat: no nested
+  navigation, no `page-list`, no hidden navs, one directory. A synthetic
+  `publisher_structure` fixture now pins nested lists, hidden navs, colliding
+  basenames and cross-folder links, verified by reverting each fix and
+  confirming the fixture fails.
+
+Also adds an opt-in public-domain corpus sweep (`KFXGEN_CORPUS_DIR`) with
+invariant and baseline-diff modes, and a weekly workflow that runs it. It exists
+because the unit suite and the golden corpus both passed while kfxgen was
+discarding 44% of one book's body text: the structural fingerprint the golden
+diff uses deliberately tolerates text changes, so text-level damage needs
+asserting directly.
+
 ## 5.6.0 — Working footnotes, TOC extraction, and image weight
 
 Footnote markers now render as superscripts and jump to their notes, and the
