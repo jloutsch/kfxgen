@@ -30,6 +30,11 @@ jobs:
   corpus:
     name: Public-domain corpus invariants
     runs-on: ubuntu-latest
+    # The fetch loop retries per id, so an unreachable Gutenberg would
+    # otherwise spend over an hour timing out one book at a time before the
+    # completeness guard could fire. A gate that hangs is worse than one that
+    # fails: bound it and let it go red (#78).
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -42,30 +47,92 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      # Gutenberg throttles scrapers, so a run that gets rate-limited reuses
+      # the last good corpus rather than quietly sweeping a smaller one. The
+      # key includes this file's hash, so editing the id list below builds a
+      # fresh corpus instead of restoring a stale one.
+      - name: Restore corpus cache
+        uses: actions/cache@v4
+        with:
+          path: corpus
+          key: gutenberg-corpus-v1-${{ hashFiles('.github/workflows/corpus.yml') }}-${{ github.event.inputs.book_count || '20' }}
+          restore-keys: |
+            gutenberg-corpus-v1-${{ hashFiles('.github/workflows/corpus.yml') }}-
+            gutenberg-corpus-v1-
+
       # Gutenberg's top-100 ids. Fetching by id keeps this independent of any
       # local corpus and of book titles, which must not appear in this repo.
+      #
+      # The list is deliberately longer than the default count: the loop walks
+      # it until it has COUNT valid books, so a couple of dud ids cost nothing
+      # instead of shrinking the sweep.
       - name: Fetch corpus
+        timeout-minutes: 12
         run: |
           mkdir -p corpus
           COUNT="${{ github.event.inputs.book_count || '20' }}"
           IDS="1342 84 11 1661 2701 98 1952 174 345 1080 5200 43 76 2542 4300 1400 16 25344 2554 74 1260 30254 6130 158 45"
+
+          # curl -f only rejects 4xx/5xx. Gutenberg can answer 200 with an HTML
+          # error or maintenance page, which lands on disk as a .epub that is
+          # not a zip — the failure that returned a 9 KB HTML page for a
+          # Standard Ebooks download (#78). Validate the bytes, not the status.
+          # Kept to one line: an indented -c program is an IndentationError.
+          is_epub() {
+            python -c 'import sys, zipfile; p = sys.argv[1]; sys.exit(0 if zipfile.is_zipfile(p) and "META-INF/container.xml" in zipfile.ZipFile(p).namelist() else 1)' "$1" 2>/dev/null
+          }
+
           n=0
+          cached=0
+          fetched=0
+          failed=""
           for id in $IDS; do
             [ "$n" -ge "$COUNT" ] && break
-            if curl -fsSL --max-time 60 \
-                 "https://www.gutenberg.org/ebooks/${id}.epub.noimages" \
-                 -o "corpus/${id}.epub"; then
+            f="corpus/${id}.epub"
+
+            if [ -f "$f" ] && is_epub "$f"; then
+              cached=$((cached+1))
+              n=$((n+1))
+              continue
+            fi
+
+            rm -f "$f"
+            # Bounded deliberately: --connect-timeout stops a black-holed host
+            # from eating the full --max-time, and two retries is enough to
+            # ride out throttling without turning an outage into a long hang.
+            if curl -fsSL --connect-timeout 15 --max-time 45 \
+                 --retry 2 --retry-delay 3 --retry-all-errors \
+                 "https://www.gutenberg.org/ebooks/${id}.epub.noimages" -o "$f" \
+               && is_epub "$f"; then
+              fetched=$((fetched+1))
               n=$((n+1))
             else
-              echo "::warning::could not fetch id ${id}, skipping"
-              rm -f "corpus/${id}.epub"
+              echo "::warning::id ${id} unavailable or not a valid EPUB, skipping"
+              failed="$failed $id"
+              rm -f "$f"
             fi
           done
-          echo "fetched $n books"
-          # A shrunken corpus silently weakens the sweep, so fail loudly
-          # rather than passing on two books.
-          if [ "$n" -lt 5 ]; then
-            echo "::error::only $n books fetched; corpus too small to be meaningful"
+
+          {
+            echo "### Corpus"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| requested | $COUNT |"
+            echo "| usable | $n |"
+            echo "| from cache | $cached |"
+            echo "| downloaded | $fetched |"
+            echo "| skipped ids |${failed:- none} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "usable=$n cached=$cached downloaded=$fetched skipped:${failed:- none}"
+
+          # A short corpus is the failure this gate exists to prevent: the
+          # sweep would pass green having exercised a fraction of the books.
+          # The id list carries enough slack to absorb a few bad ids, and the
+          # cache covers a throttled run, so anything short of the full count
+          # is a real problem and fails rather than degrading quietly (#78).
+          if [ "$n" -lt "$COUNT" ]; then
+            echo "::error::only $n of $COUNT books usable; corpus incomplete"
             exit 1
           fi
 
