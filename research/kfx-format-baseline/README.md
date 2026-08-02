@@ -55,11 +55,41 @@ person's job.
 ./check_drift.sh --verbose  # always print what it compared
 ```
 
+It checks two independent things:
+
+1. **Installed vs baseline** (offline, reliable) — has your toolchain moved past
+   any committed baseline? Every baseline is checked and the stale ones named.
+2. **Upstream availability** (network, advisory) — has Amazon shipped a newer
+   Previewer? This exists because the first check only fires when *you* update,
+   so on its own the watch can sit quiet for months while drift accumulates
+   upstream (#88).
+
 | Exit | Meaning |
 |------|---------|
 | 0 | in sync — silent, so a monthly job is not noise |
-| 1 | a version moved; the diff below is now worth running |
+| 1 | a baseline is stale, or a newer Previewer is available |
 | 2 | cannot check (Previewer or KFX Input missing, or no baseline) |
+
+### How the upstream check works, and what it will not claim
+
+Previewer announces its own availability at the end of a run, which is an
+official signal rather than a scraped download page. The job runs `-log` (which
+validates without producing a KPF) over `test_books/minimal_test_book`, about
+8 seconds on a 2 KB book, and reads the notice from its output.
+
+`-update` is deliberately **not** used. Its own help says *"Download and install
+the latest software update"* — this job never installs anything.
+
+Absence of the notice is **not** treated as "up to date". Offline, a reworded
+notice, or a broken invocation would all look identical to good news, so the
+run is only trusted when a stable marker proves Previewer actually got to the
+end of its work. Otherwise the state is `unknown`, which is logged rather than
+reported as current. `unknown` does not raise an alert — a transient network
+failure should not nag monthly — but every run records its upstream state in
+the log, so a persistently broken check is visible there.
+
+Set `KFXGEN_DRIFT_SKIP_UPSTREAM=1` to disable the upstream check entirely and
+keep only the offline comparison.
 
 On exit 1 it prints the exact commands to run, logs to
 `~/Library/Logs/kfxgen-drift-check.log`, and posts a desktop notification.
