@@ -1,5 +1,86 @@
 # Changelog
 
+## 5.7.0 — Content fragments split to the format maximum
+
+**Fixed (#37):** every chapter's text went into a single `$145` content
+fragment, and the format caps one at 8192 bytes. On an ordinary trade book that
+produced 19 oversized fragments out of 28, the largest 99,063 bytes — twelve
+times the ceiling. Upstream `kfxlib` rejected each one on decode. A chapter's
+content is now packed into as many fragments as it needs, matching the
+reference KDP layout, and `$259` entries carry a per-entry content reference
+instead of one fragment name plus a running index.
+
+The cap is measured in a way worth writing down, because getting it wrong
+produces output that passes a naive check and still fails upstream's: the
+**last** string of a fragment is excluded from the total, and the comparison is
+`>=`. A fragment measuring exactly 8192 is already a violation. The corollary
+is convenient — a fragment holding a single string is always conformant however
+long that string is, so there is no unsplittable input. Budgeting is on encoded
+bytes, not characters; CJK runs three bytes per character and a character budget
+clears an ASCII chapter while still overflowing.
+
+Open since July 2 and deliberately not rushed: the oversized fragments were
+tolerated by current firmware, so this converts working output into conforming
+output rather than fixing a visible break. What made it safe to land was
+evidence that nothing else moved. On the test book, reading order is identical
+(3,944 paragraphs, 910,818 characters), all 3,948 position ids are identical,
+and all 4,618 links and 2,367 anchors are identical — only the `$145` count
+changes, 28 to 128. Every pre-existing golden fixture is byte-identical, so a
+book whose chapters already fit is untouched. Device-verified: three fragment
+boundaries read clean across two chapters, and two endnote links round-trip to
+the correct notes with back-navigation intact.
+
+One thing to know when diffing two builds: the container sorts `$145` fragments
+lexicographically, so `content_1, content_10, content_100, …` diverges from
+numeric order once a book has more than nine — which never happened before this
+release. Concatenating `$145` in file order will report a false difference;
+reading order must be walked through `$259`.
+
+**Verified (#77):** the directory-aware anchor keys shipped in 5.6.1 are now
+device-verified, closing the caveat in that release's notes. This needed a
+purpose-built book: of 1,318 EPUBs scanned, none exercised the fix. Nine had a
+same-basename collision across folders, but in every case the colliding file
+was outside the spine, differed only in letter case, or — the interesting one —
+was a `titlepage.xhtml` whose root copy gets consumed as the cover and so never
+becomes a chapter that registers anchor keys. Real EPUBs seem to duplicate a
+basename in the spine precisely because one copy is a cover, which is what
+makes the condition so rare. A synthetic book with both documents rendered,
+the same id in each, and the losing one first in the spine resolves to the
+correct target on device; with the fix reverted it resolves to the wrong one.
+
+### Testing
+
+**#74:** every golden fixture produced chapters titled `Section 1`, `Section 2`,
+… because the builder emitted no table of contents and the OEB shim omitted
+`.toc` entirely. Two code paths key off a nav-derived chapter title — the
+duplicated-opener fix (#64) and the elided back-matter heading (#62) — and
+neither could be reached by any fixture. Both are now exercisable.
+
+**#76:** the `publisher_structure` fixture had three assertions that could not
+fail and one bug it never reached. Any chapter titled "Contents" has its blocks
+discarded and rebuilt from chapter titles before the block extractor or the
+link resolver sees them, so the fixture's nested `<ol>`, hidden navs and link
+targets were all thrown away — the nested-list and hidden-nav checks passed
+because their text could not appear under any behaviour, and the anchor-carry
+for elided headings was never exercised. The nav document is now titled
+"Navigation" and all three are live. Also fixed a `<sup>` note marker whose
+href was wrong relative to its own document, so it rendered superscripted but
+linked nowhere while the expected-link count was calibrated to that.
+
+**#78:** the weekly corpus sweep had never run on a GitHub runner. It does, and
+Gutenberg serves CI fine — but the workflow handled failure badly enough that
+the first bad Monday would have gone unnoticed. Its guard accepted a corpus a
+quarter of the requested size, nothing checked that a download was actually a
+zip rather than a 200-with-HTML-error-page, and an unreachable host would have
+spent over an hour timing out one book at a time instead of failing. Downloads
+are now validated, the corpus is cached so a throttled run reuses the last good
+copy, the guard requires the full count, and timeouts bound the failure.
+
+**#79:** `dangling == 0` was close to vacuous as an invariant. kfxgen drops a
+link it cannot resolve rather than emitting a dangling one, so the check is
+satisfied just as well by emitting no links at all. Link and anchor counts are
+now asserted directly.
+
 ## 5.6.1 — Chapter openers, link targeting, and the tests that were missing
 
 Follow-ups to 5.6.0, all found by reading real device output rather than by
