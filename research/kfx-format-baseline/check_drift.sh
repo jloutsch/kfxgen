@@ -40,9 +40,20 @@ notify() {
   osascript -e "display notification \"$1\" with title \"kfxgen format drift\"" 2>/dev/null || true
 }
 
-# --- the newest committed baseline ------------------------------------------
-BASELINE="$(ls -1 "$DIR"/baseline-*.json 2>/dev/null | sort | tail -1)"
-if [ -z "$BASELINE" ]; then
+# --- every committed baseline ------------------------------------------------
+#
+# Each baseline is checked, not just one. Picking a single "newest" file was
+# wrong as soon as a second corpus sample landed: `sort | tail -1` orders by
+# name, so with baseline-fonts-* and baseline-gatsby-* alongside each other the
+# choice is alphabetical rather than chronological, and it fails toward a false
+# all-clear — the watch reports "in sync" off whichever name sorts last while
+# another baseline sits behind the installed toolchain (#85).
+#
+# Checking all of them also produces the more useful answer: which baselines
+# need regenerating, not merely that something moved.
+BASELINES=()
+while IFS= read -r f; do BASELINES+=("$f"); done < <(ls -1 "$DIR"/baseline-*.json 2>/dev/null)
+if [ ${#BASELINES[@]} -eq 0 ]; then
   say "no baseline-*.json in $DIR — nothing to compare against"
   log "ERROR no baseline found"
   exit 2
@@ -51,9 +62,6 @@ fi
 read_json() {  # read_json <file> <key>
   python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$1" "$2"
 }
-
-BASE_PREVIEWER="$(read_json "$BASELINE" previewer_version)"
-BASE_KFXLIB="$(read_json "$BASELINE" kfxlib_version)"
 
 # --- what is installed now ---------------------------------------------------
 if [ ! -d "$PREVIEWER_APP" ]; then
@@ -94,30 +102,41 @@ for x, y in itertools.zip_longest(pa, pb, fillvalue=0):
 sys.exit(0)' "$1" "$2"
 }
 
-DRIFTED=""
-same_version "$BASE_PREVIEWER" "$NOW_PREVIEWER" || \
-  DRIFTED="$DRIFTED Previewer $BASE_PREVIEWER -> $NOW_PREVIEWER;"
-same_version "$BASE_KFXLIB" "$NOW_KFXLIB" || \
-  DRIFTED="$DRIFTED kfxlib $BASE_KFXLIB -> $NOW_KFXLIB;"
+STALE=()
+CHECKED=()
+for bl in "${BASELINES[@]}"; do
+  name="$(basename "$bl")"
+  bp="$(read_json "$bl" previewer_version)"
+  bk="$(read_json "$bl" kfxlib_version)"
+  CHECKED+=("$name (Previewer $bp, kfxlib $bk)")
+  why=""
+  same_version "$bp" "$NOW_PREVIEWER" || why="$why Previewer $bp -> $NOW_PREVIEWER;"
+  same_version "$bk" "$NOW_KFXLIB"   || why="$why kfxlib $bk -> $NOW_KFXLIB;"
+  [ -n "$why" ] && STALE+=("$name:$why")
+done
 
-if [ -z "$DRIFTED" ]; then
-  [ "$VERBOSE" = 1 ] && say "no change — Previewer $NOW_PREVIEWER, kfxlib $NOW_KFXLIB, baseline $(basename "$BASELINE")"
-  log "ok previewer=$NOW_PREVIEWER kfxlib=$NOW_KFXLIB (matches $(basename "$BASELINE"))"
+if [ ${#STALE[@]} -eq 0 ]; then
+  if [ "$VERBOSE" = 1 ]; then
+    say "no change — Previewer $NOW_PREVIEWER, kfxlib $NOW_KFXLIB"
+    for c in "${CHECKED[@]}"; do say "  matches $c"; done
+  fi
+  log "ok previewer=$NOW_PREVIEWER kfxlib=$NOW_KFXLIB (${#BASELINES[@]} baseline(s) current)"
   exit 0
 fi
 
-say "Toolchain moved past the baseline:$DRIFTED"
+say "${#STALE[@]} of ${#BASELINES[@]} baseline(s) are behind the installed toolchain:"
 say ""
-say "The drift diff can now learn something. Run it (see README):"
+for s in "${STALE[@]}"; do say "  ${s%%:*} —${s#*:}"; done
+say ""
+say "The drift diff can now learn something for those. Re-convert each sample"
+say "with Previewer and diff it against its baseline (see README), e.g.:"
 say ""
 say "  cd $DIR"
-say "  curl -sL -o gatsby.epub https://www.gutenberg.org/ebooks/64317.epub3.images"
-say "  \"$PREVIEWER_APP/Contents/MacOS/Kindle Previewer 3\" gatsby.epub -convert -output out/"
 say "  /Applications/calibre.app/Contents/MacOS/calibre-debug kfx_inventory.py -- \\"
-say "      \"$PLUGIN_ZIP\" out/KPF/gatsby.kpf \\"
-say "      --previewer $NOW_PREVIEWER --diff $(basename "$BASELINE")"
+say "      \"$PLUGIN_ZIP\" out/KPF/<sample>.kpf \\"
+say "      --previewer $NOW_PREVIEWER --diff <baseline-above>.json"
 say ""
 say "Nothing has been installed or changed. This job only reads versions."
-log "ACTION$DRIFTED"
-notify "Toolchain moved past baseline:$DRIFTED run the drift diff"
+log "ACTION ${#STALE[@]}/${#BASELINES[@]} stale: ${STALE[*]}"
+notify "${#STALE[@]} drift baseline(s) behind the installed toolchain"
 exit 1

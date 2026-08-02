@@ -15,9 +15,26 @@ snapshot on each future Previewer release and diff.
 
 - `kfx_inventory.py` — decode a KPF/KFX (via the full `kfxlib` in the installed
   *KFX Input* plugin) → JSON inventory; `--diff` a new inventory vs a baseline.
-- `baseline-gatsby-20260520.json` — the v1 baseline.
+- `baseline-gatsby-20260520.json` — prose sample (v1 baseline).
+- `baseline-fonts-20260520.json` — embedded-font sample (#85).
 - `check_drift.sh` — monthly watch that says when running the diff is worth it.
 - `com.kfxgen.driftcheck.plist` — `launchd` job for the above.
+
+## Samples and what each one reaches
+
+The two baselines are complementary, and neither alone is the format surface.
+Diff **both** when the watch fires.
+
+| Sample | Source | Reaches |
+|---|---|---|
+| `gatsby` | Gutenberg #64317 | prose, `$145` content splitting, anchors (`$266`), and the basic image surface (`$164`/`$417`) via its cover |
+| `fonts` | `test_books/font-matching-test/` | `$262` face descriptors ×4 and `$418` font locations ×4 — one per face — plus `$11`/`$15` |
+
+The font sample was added because the prose baseline had **no** font surface at
+all: `$262`, `$418` and `$11` were absent, so drift in the family+weight+style
+matching behind #50 was invisible to this check. Note the inverse is not true —
+prose already covers basic image emission, so an "image sample" would add much
+less than it appears to (#85).
 
 ## Automated watch (#46)
 
@@ -77,14 +94,19 @@ Drift notifications go to the repository maintainer, who decides whether the new
 symbols matter to `kfxlib_minimal`. This is a heads-up, not a gate — on-device
 testing remains the real one, and a drift notice never blocks a release.
 
-## Current baseline
+## Current baselines
 
-| Field | Value |
-|-------|-------|
-| Source | *The Great Gatsby* (Project Gutenberg #64317, US public domain) |
-| Converter | Kindle Previewer **3.98.0** (`-convert` → KPF) |
-| Decoder | `kfxlib` **20260520** (KFX Input 2.33.0) |
-| Surface | 21 fragment types, 156 fragments, 160 symbols, max `$800` |
+Both taken with Kindle Previewer **3.98.0** (`-convert` → KPF) and `kfxlib`
+**20260520** (KFX Input 2.33.0).
+
+| Baseline | Source | Surface |
+|---|---|---|
+| `gatsby` | *The Great Gatsby* (Project Gutenberg #64317, US public domain) | 21 fragment types, 156 fragments, 160 symbols, max `$800` |
+| `fonts` | `test_books/font-matching-test/` (Charis SIL, OFL) | 20 fragment types, 34 fragments, 95 symbols, max `$799` |
+
+Together they cover 164 symbols. The font sample contributes `$262`, `$418`,
+`$11` and `$15`; the prose sample contributes `$164`, `$266` and `$417`, which
+the font sample lacks. Keep both.
 
 Note: Gatsby's content already splits into **36 `$145` fragments** (Amazon's
 ≤8 KB content splitting — the reference behavior for #37), and uses `$593`
@@ -113,6 +135,25 @@ curl -sL -o gatsby.epub "https://www.gutenberg.org/ebooks/64317.epub3.images"
   fold the relevant upstream `kfxlib` changes into `kfxlib_minimal`, update its
   audit table + upstream baseline, then snapshot a new
   `baseline-gatsby-<kfxlib-version>.json` and commit it.
+
+### The font sample
+
+Its source is the tracked `test_books/font-matching-test/` directory (Charis
+SIL, SIL OFL, license included), so there is nothing to download. Zip it to an
+EPUB first — `mimetype` must be stored first and uncompressed:
+
+```bash
+cd test_books/font-matching-test
+zip -X -q0 /tmp/font-matching.epub mimetype
+zip -X -q -r /tmp/font-matching.epub META-INF OEBPS -x '.*'
+```
+
+Then convert and inventory it exactly as above. Two things that will waste time
+otherwise: Previewer's `-output` folder must already exist or it exits with
+"Output should point to a valid folder", and the font sample must **not** be
+routed through the Calibre GUI — a local-only "Strip Embedded Fonts" plugin
+removes embedded faces on add, which would produce a font baseline containing
+no fonts.
 
 To snapshot a fresh baseline (drop `--diff`):
 
