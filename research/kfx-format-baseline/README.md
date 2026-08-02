@@ -91,6 +91,26 @@ the log, so a persistently broken check is visible there.
 Set `KFXGEN_DRIFT_SKIP_UPSTREAM=1` to disable the upstream check entirely and
 keep only the offline comparison.
 
+#### The upstream check is interactive-only
+
+It does not work under `launchd`, so the shipped plist disables it. Measured on
+the same machine, same script:
+
+| Context | Elapsed | Result |
+|---|---|---|
+| run by hand | ~9-16s | `current` / `available` — correct |
+| run by `launchd` | 100s | hits the 90s ceiling → `unknown`, every time |
+
+Kindle Previewer simply does not finish when a background agent launches it —
+most likely a GUI-session constraint on driving an Aqua app that way. Nothing
+appears on stderr.
+
+The timeout means this costs 90 wasted seconds rather than hanging the job, but
+a check that can only ever return `unknown` is worse than no check: it looks
+installed and healthy while reporting nothing. So the scheduled job runs the
+**offline half only** — which is the half that has actually caught drift — and
+the upstream check is something you run by hand.
+
 On exit 1 it prints the exact commands to run, logs to
 `~/Library/Logs/kfxgen-drift-check.log`, and posts a desktop notification.
 Overridable via `KFXGEN_PREVIEWER_APP`, `KFXGEN_KFX_INPUT_ZIP`,
