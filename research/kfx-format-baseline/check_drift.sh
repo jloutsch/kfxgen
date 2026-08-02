@@ -102,6 +102,59 @@ for x, y in itertools.zip_longest(pa, pb, fillvalue=0):
 sys.exit(0)' "$1" "$2"
 }
 
+# --- is a newer Previewer available upstream? --------------------------------
+#
+# The baseline comparison above fires when YOU update, not when Amazon ships,
+# so on its own the watch can sit quiet for months while drift accumulates
+# upstream (#88). Previewer announces its own availability at the end of a run,
+# which is an official signal rather than a scraped download page.
+#
+# `-update` is NOT used: its own help says "Download and install the latest
+# software update", and this job never installs anything.
+#
+# `-log` validates without producing a KPF, so a 2 KB book costs ~8s. The
+# absence of the notice is deliberately NOT treated as "up to date" — offline,
+# a reworded notice, or a broken invocation would all look identical to good
+# news. A run is only trusted when a known-stable marker proves Previewer
+# actually ran and reached the end; otherwise this reports "could not check".
+#
+#   0 = ran, no update offered   1 = update available   2 = could not check
+check_upstream() {
+  local src="$DIR/../../test_books/minimal_test_book"
+  [ -d "$src" ] || return 2
+  command -v zip >/dev/null 2>&1 || return 2
+
+  local tmp epub out
+  tmp="$(mktemp -d)" || return 2
+  epub="$tmp/probe.epub"
+  mkdir -p "$tmp/out"
+  ( cd "$src" && zip -X -q0 "$epub" mimetype && zip -X -q -r "$epub" META-INF OEBPS -x '.*' ) \
+    >/dev/null 2>&1 || { rm -rf "$tmp"; return 2; }
+
+  out="$("$PREVIEWER_APP/Contents/MacOS/Kindle Previewer 3" "$epub" -log -output "$tmp/out" 2>&1)"
+  rm -rf "$tmp"
+
+  # Proof the run happened and got far enough to have printed the notice.
+  grep -q "Post-processing in progress" <<<"$out" || return 2
+
+  grep -qiE "new version .*available|update to the latest version" <<<"$out" && return 1
+  return 0
+}
+
+UPSTREAM_MSG=""
+if [ "${KFXGEN_DRIFT_SKIP_UPSTREAM:-0}" = "1" ]; then
+  UPSTREAM_STATE="skipped"
+else
+  check_upstream
+  case $? in
+    0) UPSTREAM_STATE="current" ;;
+    1) UPSTREAM_STATE="available"
+       UPSTREAM_MSG="A newer Kindle Previewer is available upstream (installed: $NOW_PREVIEWER)." ;;
+    *) UPSTREAM_STATE="unknown"
+       UPSTREAM_MSG="Could not check for a newer Previewer — treat as unknown, not as up to date." ;;
+  esac
+fi
+
 STALE=()
 CHECKED=()
 for bl in "${BASELINES[@]}"; do
@@ -115,18 +168,38 @@ for bl in "${BASELINES[@]}"; do
   [ -n "$why" ] && STALE+=("$name:$why")
 done
 
-if [ ${#STALE[@]} -eq 0 ]; then
+if [ ${#STALE[@]} -eq 0 ] && [ "$UPSTREAM_STATE" != "available" ]; then
   if [ "$VERBOSE" = 1 ]; then
     say "no change — Previewer $NOW_PREVIEWER, kfxlib $NOW_KFXLIB"
     for c in "${CHECKED[@]}"; do say "  matches $c"; done
+    say "upstream Previewer: $UPSTREAM_STATE"
+    [ -n "$UPSTREAM_MSG" ] && say "  $UPSTREAM_MSG"
   fi
-  log "ok previewer=$NOW_PREVIEWER kfxlib=$NOW_KFXLIB (${#BASELINES[@]} baseline(s) current)"
+  log "ok previewer=$NOW_PREVIEWER kfxlib=$NOW_KFXLIB (${#BASELINES[@]} baseline(s) current, upstream=$UPSTREAM_STATE)"
   exit 0
+fi
+
+# A newer Previewer upstream while every baseline is current: nothing has
+# drifted yet, but the update is what would make a diff informative.
+if [ ${#STALE[@]} -eq 0 ]; then
+  say "$UPSTREAM_MSG"
+  say ""
+  say "Every baseline matches the installed toolchain, so there is nothing to"
+  say "diff yet. Updating Previewer is what would make one worth running:"
+  say ""
+  say "  kindlepreviewer -update     # installs; deliberately not done by this job"
+  say ""
+  say "Then re-convert each sample and diff it against its baseline (see README)."
+  say "Set KFXGEN_DRIFT_SKIP_UPSTREAM=1 to silence this check."
+  log "ACTION upstream previewer update available (installed=$NOW_PREVIEWER, baselines current)"
+  notify "A newer Kindle Previewer is available"
+  exit 1
 fi
 
 say "${#STALE[@]} of ${#BASELINES[@]} baseline(s) are behind the installed toolchain:"
 say ""
 for s in "${STALE[@]}"; do say "  ${s%%:*} —${s#*:}"; done
+[ -n "$UPSTREAM_MSG" ] && { say ""; say "$UPSTREAM_MSG"; }
 say ""
 say "The drift diff can now learn something for those. Re-convert each sample"
 say "with Previewer and diff it against its baseline (see README), e.g.:"
