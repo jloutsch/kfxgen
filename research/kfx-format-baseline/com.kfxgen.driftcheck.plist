@@ -39,6 +39,28 @@
         <string>REPLACE_WITH_ABSOLUTE_PATH/research/kfx-format-baseline/check_drift.sh</string>
     </array>
 
+    <!--
+      The upstream-availability probe is disabled on the schedule because it
+      does not work here. Kindle Previewer completes in ~9s when the script is
+      run by hand and never completes when launchd runs it — measured at 100s,
+      i.e. it hits the script's own 90s ceiling and reports `unknown` every
+      time. Most likely a GUI-session constraint on driving an Aqua app from a
+      background agent.
+
+      The bounded probe means that costs 90 wasted seconds rather than a hang,
+      but a check that can only ever return `unknown` is worse than no check —
+      it looks installed and healthy while reporting nothing. So the scheduled
+      job runs the offline half only, which is the half that has actually
+      caught drift. Run `check_drift.sh` by hand for the upstream check.
+
+      Remove this block to re-enable it once the launchd/GUI issue is solved.
+    -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>KFXGEN_DRIFT_SKIP_UPSTREAM</key>
+        <string>1</string>
+    </dict>
+
     <key>StartCalendarInterval</key>
     <dict>
         <key>Day</key>
