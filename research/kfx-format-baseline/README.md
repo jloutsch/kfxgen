@@ -16,6 +16,66 @@ snapshot on each future Previewer release and diff.
 - `kfx_inventory.py` — decode a KPF/KFX (via the full `kfxlib` in the installed
   *KFX Input* plugin) → JSON inventory; `--diff` a new inventory vs a baseline.
 - `baseline-gatsby-20260520.json` — the v1 baseline.
+- `check_drift.sh` — monthly watch that says when running the diff is worth it.
+- `com.kfxgen.driftcheck.plist` — `launchd` job for the above.
+
+## Automated watch (#46)
+
+Running the diff on a schedule learns nothing on its own: re-converting the same
+source with the same installed Previewer and `kfxlib` reports "no drift" forever.
+The informative moment is when the *installed* toolchain moves past whatever
+produced the baseline. `check_drift.sh` watches for exactly that.
+
+It is **notify-only**. It reads two version numbers — Kindle Previewer's
+`CFBundleShortVersionString` and `kfxlib/version.py` inside the installed KFX
+Input zip — and compares them to `previewer_version` / `kfxlib_version` in the
+newest committed `baseline-*.json`. It installs nothing, updates nothing, and
+converts nothing, so it is safe to run unattended. Acting on a notification is a
+person's job.
+
+```bash
+./check_drift.sh            # silent unless something moved
+./check_drift.sh --verbose  # always print what it compared
+```
+
+| Exit | Meaning |
+|------|---------|
+| 0 | in sync — silent, so a monthly job is not noise |
+| 1 | a version moved; the diff below is now worth running |
+| 2 | cannot check (Previewer or KFX Input missing, or no baseline) |
+
+On exit 1 it prints the exact commands to run, logs to
+`~/Library/Logs/kfxgen-drift-check.log`, and posts a desktop notification.
+Overridable via `KFXGEN_PREVIEWER_APP`, `KFXGEN_KFX_INPUT_ZIP`,
+`KFXGEN_DRIFT_LOG`.
+
+Note that Previewer reports `3.98` in its Info.plist while the baseline records
+`3.98.0`. Version comparison is component-wise and numeric for that reason — a
+string compare would report drift on the very first run and train you to ignore
+this job.
+
+### Installing the monthly job
+
+`launchd` does not expand `~` or `$HOME` in `ProgramArguments`, so the path must
+be edited before loading:
+
+```bash
+sed "s|REPLACE_WITH_ABSOLUTE_PATH|$(cd ../.. && pwd)|" \
+    com.kfxgen.driftcheck.plist > ~/Library/LaunchAgents/com.kfxgen.driftcheck.plist
+launchctl load ~/Library/LaunchAgents/com.kfxgen.driftcheck.plist
+
+launchctl list | grep kfxgen          # registered?
+launchctl start com.kfxgen.driftcheck # force one run now
+cat ~/Library/Logs/kfxgen-drift-check.log
+```
+
+Remove with `launchctl unload ~/Library/LaunchAgents/com.kfxgen.driftcheck.plist`.
+
+### Owner
+
+Drift notifications go to the repository maintainer, who decides whether the new
+symbols matter to `kfxlib_minimal`. This is a heads-up, not a gate — on-device
+testing remains the real one, and a drift notice never blocks a release.
 
 ## Current baseline
 
