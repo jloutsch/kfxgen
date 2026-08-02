@@ -119,20 +119,65 @@ sys.exit(0)' "$1" "$2"
 # actually ran and reached the end; otherwise this reports "could not check".
 #
 #   0 = ran, no update offered   1 = update available   2 = could not check
+
+#: Hard ceiling on the Previewer probe. An 8-second job ran for minutes when it
+#: was launched while an installer was replacing the app bundle underneath it,
+#: and a monthly job that hangs is indistinguishable from one that is slow —
+#: the same failure bounded in the corpus workflow (#78). Any unbounded
+#: external command in a scheduled job is a hang waiting to happen.
+PROBE_TIMEOUT="${KFXGEN_DRIFT_PROBE_TIMEOUT:-90}"
+
+# Run a command with a wall-clock ceiling. Returns 124 on timeout, matching
+# coreutils. Falls back to a bash watchdog because a stock macOS ships neither
+# `timeout` nor `gtimeout` — this job is meant to run on an unprepared machine.
+run_bounded() {
+  local secs="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$secs" "$@"
+  else
+    "$@" &
+    local pid=$! waited=0
+    while kill -0 "$pid" 2>/dev/null; do
+      if [ "$waited" -ge "$secs" ]; then
+        kill -TERM "$pid" 2>/dev/null
+        sleep 2
+        kill -KILL "$pid" 2>/dev/null
+        return 124
+      fi
+      sleep 1
+      waited=$((waited + 1))
+    done
+    wait "$pid" 2>/dev/null
+  fi
+}
+
 check_upstream() {
   local src="$DIR/../../test_books/minimal_test_book"
   [ -d "$src" ] || return 2
   command -v zip >/dev/null 2>&1 || return 2
 
-  local tmp epub out
+  local tmp epub rc
   tmp="$(mktemp -d)" || return 2
   epub="$tmp/probe.epub"
   mkdir -p "$tmp/out"
   ( cd "$src" && zip -X -q0 "$epub" mimetype && zip -X -q -r "$epub" META-INF OEBPS -x '.*' ) \
     >/dev/null 2>&1 || { rm -rf "$tmp"; return 2; }
 
-  out="$("$PREVIEWER_APP/Contents/MacOS/Kindle Previewer 3" "$epub" -log -output "$tmp/out" 2>&1)"
+  # Output to a file rather than a capture, so the bounded run works the same
+  # whether it goes through `timeout` or the fallback watchdog.
+  run_bounded "$PROBE_TIMEOUT" \
+    "$PREVIEWER_APP/Contents/MacOS/Kindle Previewer 3" "$epub" -log -output "$tmp/out" \
+    >"$tmp/probe.log" 2>&1
+  rc=$?
+
+  local out=""
+  [ -f "$tmp/probe.log" ] && out="$(cat "$tmp/probe.log")"
   rm -rf "$tmp"
+
+  # A timeout is "could not check", never "no update available".
+  [ "$rc" = 124 ] && return 2
 
   # Proof the run happened and got far enough to have printed the notice.
   grep -q "Post-processing in progress" <<<"$out" || return 2

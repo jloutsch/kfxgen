@@ -126,13 +126,35 @@ testing remains the real one, and a drift notice never blocks a release.
 
 ## Current baselines
 
-Both taken with Kindle Previewer **3.98.0** (`-convert` → KPF) and `kfxlib`
+Both taken with Kindle Previewer **3.106.0** (`-convert` → KPF) and `kfxlib`
 **20260520** (KFX Input 2.33.0).
 
 | Baseline | Source | Surface |
 |---|---|---|
-| `gatsby` | *The Great Gatsby* (Project Gutenberg #64317, US public domain) | 21 fragment types, 156 fragments, 160 symbols, max `$800` |
+| `gatsby` | *The Great Gatsby* (Project Gutenberg #64317, US public domain) | 21 fragment types, 157 fragments, 161 symbols, max `$800` |
 | `fonts` | `test_books/font-matching-test/` (Charis SIL, OFL) | 20 fragment types, 34 fragments, 95 symbols, max `$799` |
+
+The filenames key on the **kfxlib** version, which is what determines the
+inventory's vocabulary. Previewer 3.98.0 → 3.106.0 moved the contents without
+changing that, so these files were updated in place; git history holds the
+3.98.0 snapshots.
+
+### First real drift, Previewer 3.98.0 → 3.106.0
+
+Recorded because it is the only worked example of this machinery firing:
+
+- prose gained one fragment and one symbol, **`$23`**, appearing on exactly one
+  of 53 `$157` style fragments as `{$173: s1WF, $23: $328}`
+- the font sample was **unchanged**, which is what narrowed the finding — the
+  drift is not in the font surface
+- `kfxlib` did not move, so there were no upstream decoder changes to fold into
+  `kfxlib_minimal`; the change is purely in what Amazon's converter emits
+- kfxgen writes its own `$157` styles and never emits `$23`, so its output is
+  unaffected
+
+Decoding also warned that Previewer 3.106.0 emits `YJ_symbols` with `max_id 844`
+while the installed `kfxlib` knows 843 — Amazon extended the shared symbol
+table. Tracked separately.
 
 Together they cover 164 symbols. The font sample contributes `$262`, `$418`,
 `$11` and `$15`; the prose sample contributes `$164`, `$266` and `$417`, which

@@ -1,11 +1,11 @@
 {
   "source_epub": "gatsby.kpf",
-  "previewer_version": "3.98.0",
+  "previewer_version": "3.106.0",
   "kfxlib_version": "20260520",
-  "fragment_total": 156,
+  "fragment_total": 157,
   "fragment_types": {
     "$145": 36,
-    "$157": 52,
+    "$157": 53,
     "$164": 1,
     "$258": 1,
     "$259": 14,
@@ -26,7 +26,7 @@
     "$597": 13,
     "$ion_symbol_table": 1
   },
-  "symbol_count": 160,
+  "symbol_count": 161,
   "symbol_max": 800,
   "symbols": [
     "$1",
@@ -36,6 +36,7 @@
     "$12",
     "$13",
     "$16",
+    "$23",
     "$34",
     "$36",
     "$42",
