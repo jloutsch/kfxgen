@@ -145,6 +145,18 @@ Recorded because it is the only worked example of this machinery firing:
 
 - prose gained one fragment and one symbol, **`$23`**, appearing on exactly one
   of 53 `$157` style fragments as `{$173: s1WF, $23: $328}`
+
+  Identified rather than left as a number: `$23` is `text-decoration` and
+  `$328` is `underline` (upstream `yj_to_epub_properties.py` carries the enum —
+  `$329` double, `$330` dashed, `$331` dotted, `$349` none), and `$173` is the
+  style's own name. So the fragment is a style named `s1WF` whose only property
+  is underline — Previewer 3.106.0 began emitting an underline style for this
+  book where 3.98.0 did not, most likely for its internal links.
+
+  Note this is a symbol newly *used*, not newly invented: `$23` has always been
+  in the table, and **kfxgen already emits `$23: $328` itself** for underlined
+  TOC links (`native_generator.py`, and the `linked_toc` golden carries one).
+  Amazon started using a construct we were already producing.
 - the font sample was **unchanged**, which is what narrowed the finding — the
   drift is not in the font surface
 - `kfxlib` did not move, so there were no upstream decoder changes to fold into
