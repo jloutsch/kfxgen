@@ -225,3 +225,55 @@ def test_critical_fragments_present(name, builder, decoded_upstream):
         f"Upstream kfxlib decoded {name} but the output is missing "
         f"required fragment types: {sorted(missing)}"
     )
+
+
+@pytest.mark.tier2
+@pytest.mark.integration
+@pytest.mark.parametrize("name,builder", GOLDEN_INPUTS)
+def test_upstream_reports_no_oversized_content_fragments(
+    name, builder, upstream_kfxlib, built_kfx
+):
+    """Upstream kfxlib must log no "exceeds maximum" error for any fixture (#37).
+
+    This is the authoritative oracle for the content-size cap. The tier-3
+    assertion re-implements upstream's metric — the last string of a fragment
+    excluded, `>=` rather than `>` — and a re-implementation can drift from
+    what upstream actually enforces. Here upstream applies its own rule to our
+    bytes, so the check cannot be wrong about the rule.
+
+    Deliberately narrower than the module's blanket warning tolerance: this
+    asserts on one specific error string rather than a total count, so the
+    device-verified warning noise described above still passes through.
+    """
+    from kfxlib.message_logging import set_logger
+
+    messages: list[str] = []
+    set_logger(_MessageCollector(messages))
+    try:
+        book = upstream_kfxlib(str(built_kfx(name, builder)))
+        book.decode_book()
+    finally:
+        set_logger(None)
+
+    oversized = [m for m in messages if "exceeds maximum" in m]
+    assert not oversized, (
+        f"{name}: upstream kfxlib rejects {len(oversized)} content "
+        f"fragment(s) as oversized: {oversized[:5]}"
+    )
+
+
+class _MessageCollector:
+    """Minimal stand-in for the logger upstream kfxlib writes through.
+
+    kfxlib routes every level through `message_logging.set_logger`, so any
+    attribute access must return a callable that records.
+    """
+
+    def __init__(self, sink):
+        self.sink = sink
+
+    def _record(self, msg, *args, **kwargs):
+        self.sink.append(str(msg) % args if args else str(msg))
+
+    def __getattr__(self, _name):
+        return self._record

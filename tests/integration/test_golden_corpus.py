@@ -363,3 +363,108 @@ def test_fixture_publisher_structure_shape(tmp_path):
     assert not any(
         a.strip() == b.strip() == "Endnote Appendix" for a, b in zip(texts, texts[1:])
     ), f"back-matter heading duplicated below its own title: {texts}"
+
+
+#: The format's per-`$145` ceiling, and the metric upstream `kfxlib` applies
+#: to it (`yj_structure.py`): the LAST string of a fragment is excluded from
+#: the total, and the comparison is `>=` — a fragment measuring exactly 8192
+#: is already an error, not the last passing value. Asserting against a naive
+#: sum of every string would be both wrong and stricter than the format.
+MAX_CONTENT_FRAGMENT_SIZE = 8192
+
+
+def _upstream_content_bytes(strings) -> int:
+    return sum(len(s.encode("utf-8")) for s in strings[:-1])
+
+
+def _content_fragment_strings(frags):
+    """Every `$145` fragment's string list, in file order."""
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    return [
+        [s for s in (val(f).get(IS("$146")) or []) if isinstance(s, str)]
+        for f in by_type(frags, "$145")
+    ]
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
+@pytest.mark.parametrize("name,builder", GOLDEN_INPUTS)
+def test_no_content_fragment_exceeds_the_format_maximum(name, builder, tmp_path):
+    """No fixture may emit an oversized `$145` (#37).
+
+    Built from current code rather than the committed golden: a regression in
+    the generator leaves the golden untouched, so checking the golden would
+    pass while the product was broken.
+    """
+    fresh = _build_fresh(name, builder, tmp_path)
+    written = tmp_path / f"fresh_{name}.kfx"
+    written.write_bytes(fresh)
+
+    oversized = [
+        (i, _upstream_content_bytes(strings), len(strings))
+        for i, strings in enumerate(_content_fragment_strings(load_fragments(written)))
+        if _upstream_content_bytes(strings) >= MAX_CONTENT_FRAGMENT_SIZE
+    ]
+    assert not oversized, (
+        f"{name}: {len(oversized)} $145 fragment(s) at or over the "
+        f"{MAX_CONTENT_FRAGMENT_SIZE}-byte maximum: {oversized}"
+    )
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
+def test_fixture_long_chapter_shape(tmp_path):
+    """long_chapter must actually exceed one fragment's worth of text.
+
+    Without this the fixture could be trimmed to a short book, keep passing
+    the cap assertion above, and stop covering #37 entirely — the same
+    fixture-rot failure that let #76 sit behind three vacuous assertions.
+    """
+    from tests.fixtures.golden.inputs import make_long_chapter
+
+    fresh = _build_fresh("long_chapter", make_long_chapter, tmp_path)
+    written = tmp_path / "fresh_long.kfx"
+    written.write_bytes(fresh)
+    frags = load_fragments(written)
+
+    groups = _content_fragment_strings(frags)
+    assert len(groups) > 2, (
+        f"long_chapter emitted {len(groups)} $145 fragments — its chapters no "
+        "longer overflow the cap, so the split path is untested"
+    )
+    total = sum(len(s.encode("utf-8")) for g in groups for s in g)
+    assert total > 3 * MAX_CONTENT_FRAGMENT_SIZE, (
+        f"long_chapter holds only {total} bytes of text; it must stay several "
+        "fragments' worth so an off-by-one in the budget still shows up"
+    )
+
+    # Every text entry must address a real string. A splitter that mis-maps an
+    # index silently serves the wrong paragraph — no decoder flags that, and
+    # the byte-size assertion above would still pass.
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    # The name lives on the fragment id; the decoder does not keep a $4 copy
+    # in the value.
+    by_name = {
+        str(f.fid): [s for s in (val(f).get(IS("$146")) or []) if isinstance(s, str)]
+        for f in by_type(frags, "$145")
+    }
+    refs = 0
+    for storyline in by_type(frags, "$259"):
+        for entry in val(storyline).get(IS("$146")) or []:
+            ref = entry.get(IS("$145"))
+            if not ref:
+                continue
+            # $4 is a standard symbol, so the decoder resolves it to its text
+            # ("name"); an unresolved container still yields the raw form.
+            key = IS("$4") if IS("$4") in ref else IS("name")
+            fragment_name = str(ref[key])
+            index = ref[IS("$403")]
+            assert fragment_name in by_name, f"entry points at unknown {fragment_name}"
+            assert 0 <= index < len(by_name[fragment_name]), (
+                f"$403 index {index} out of range for {fragment_name} "
+                f"({len(by_name[fragment_name])} strings)"
+            )
+            refs += 1
+    assert refs > 0, "no text entries carried a $145 reference"
