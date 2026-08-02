@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Monthly format-drift watch (#46, variant B — notify only).
+
+  Runs check_drift.sh on the 1st of each month at 10:00 local time. The script
+  only reads two version numbers; it installs nothing and converts nothing, so
+  this job is safe to run unattended.
+
+  StartCalendarInterval (not StartInterval) so the schedule is a wall-clock
+  date rather than "every N seconds since load" — and because launchd runs a
+  missed calendar job once after wake, a machine that was asleep on the 1st
+  still gets its check instead of silently skipping the month.
+
+  EDIT THE PATH BELOW before installing: launchd does not expand ~ or $HOME in
+  ProgramArguments.
+
+  Install:
+    cp com.kfxgen.driftcheck.plist ~/Library/LaunchAgents/
+    # replace REPLACE_WITH_ABSOLUTE_PATH first
+    launchctl load ~/Library/LaunchAgents/com.kfxgen.driftcheck.plist
+
+  Verify it is registered, and force one run now:
+    launchctl list | grep kfxgen
+    launchctl start com.kfxgen.driftcheck
+    cat ~/Library/Logs/kfxgen-drift-check.log
+
+  Remove:
+    launchctl unload ~/Library/LaunchAgents/com.kfxgen.driftcheck.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.kfxgen.driftcheck</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>REPLACE_WITH_ABSOLUTE_PATH/research/kfx-format-baseline/check_drift.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Day</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>10</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- The script writes its own timestamped log; these capture anything it
+         does not (a crash, a missing interpreter) so a broken job is visible
+         rather than silent. -->
+    <key>StandardOutPath</key>
+    <string>/tmp/kfxgen-driftcheck.out</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/kfxgen-driftcheck.err</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
