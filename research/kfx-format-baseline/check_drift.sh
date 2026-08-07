@@ -217,12 +217,18 @@ PLUGIN_INDEX_URL="${KFXGEN_PLUGIN_INDEX_URL:-https://code.calibre-ebook.com/plug
 # took the Previewer probe out on the schedule (#92). It only appears where
 # `timeout` is absent, which is stock macOS: the launchd case exactly.
 read -r -d '' KFX_INPUT_INDEX_PY <<'PY'
-import bz2, json, sys, urllib.request
+import bz2, json, os, sys
 
-url, installed = sys.argv[1], sys.argv[2]
+url = os.environ.get("KFXGEN_INDEX_URL", "")
+installed = os.environ.get("KFXGEN_INDEX_INSTALLED", "")
 try:
-    with urllib.request.urlopen(url, timeout=30) as r:
-        index = json.loads(bz2.decompress(r.read()).decode("utf-8"))
+    if url.startswith("file://"):
+        with open(url[7:], "rb") as f:
+            raw = f.read()
+    else:
+        from calibre.utils.https import get_https_resource_securely
+        raw = get_https_resource_securely(url)
+    index = json.loads(bz2.decompress(raw).decode("utf-8"))
     latest = index["KFX Input"]["version"]
 except Exception:
     sys.exit(2)  # unreachable, malformed, or renamed -- never "up to date"
@@ -239,10 +245,28 @@ print(".".join(str(x) for x in a))
 sys.exit(1 if a > b else 0)
 PY
 
+# The fetch runs inside calibre, and that is not incidental: `code.calibre-
+# ebook.com` serves an incomplete certificate chain, so anything relying on the
+# OS trust store fails it. Measured on this machine — GitHub and example.com
+# return 200 while that host gives curl `(60) unable to get local issuer
+# certificate`, and Xcode's /usr/bin/python3 gives the urllib equivalent. It is
+# the host, not the network and not launchd.
+#
+# calibre ships its own CA bundle, which is why its plugin updater can reach an
+# index that curl cannot. Using `calibre.utils.https.get_https_resource_securely`
+# means this check reads the index exactly the way calibre itself does, and
+# calibre is guaranteed present on any machine where the rest of this script has
+# something to check.
+#
+# A file:// URL is read directly, bypassing the fetch, which is how all four
+# states are exercised without waiting for a release. (#91)
+CALIBRE_DEBUG="${KFXGEN_CALIBRE_DEBUG:-/Applications/calibre.app/Contents/MacOS/calibre-debug}"
+
 check_kfx_input_upstream() {
   [ -n "$NOW_KFX_INPUT" ] || return 2
-  run_bounded "$PROBE_TIMEOUT" python3 -c "$KFX_INPUT_INDEX_PY" \
-    "$PLUGIN_INDEX_URL" "$NOW_KFX_INPUT"
+  [ -x "$CALIBRE_DEBUG" ] || return 2
+  KFXGEN_INDEX_URL="$PLUGIN_INDEX_URL" KFXGEN_INDEX_INSTALLED="$NOW_KFX_INPUT" \
+    run_bounded "$PROBE_TIMEOUT" "$CALIBRE_DEBUG" -c "$KFX_INPUT_INDEX_PY"
 }
 
 KFX_INPUT_MSG=""
