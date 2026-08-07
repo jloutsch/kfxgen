@@ -1,5 +1,33 @@
 # Changelog
 
+## 5.7.2 — Output is byte-reproducible again
+
+**Fixed (#96):** converting the same book twice produced two different files.
+The image `$157` styles were allocated by iterating a **set** of size-class
+names, and CPython randomizes string hashing per interpreter — so a book using
+more than one image size class allocated `s_img`, `s_img_sm` and `s_img_page`
+in a different order each run. Every local symbol numbered after them shifted,
+which moved `$270`'s symbol ids and `$419`'s name list. Iterating a fixed
+sequence and skipping the classes not present fixes it.
+
+Reading was never affected: across runs every `$145`, `$259`, `$265` and every
+`$266` anchor was already byte-identical. What this cost was the corpus A/B
+diff, which reported a standing difference in those three fragments on any
+image-bearing book, so real churn had to be picked out of permanent noise.
+Three conversions of a 910,818-character book at different hash seeds now
+produce one identical file; before, three different ones.
+
+The single-image golden fixtures could not catch this — one size class means
+one iteration order. `referenced_targets` already sorted before iterating; this
+was the site that didn't.
+
+**Testing:** an integration test converts the same input in three subprocesses
+under different `PYTHONHASHSEED` values and compares digests. It has to cross a
+process boundary — hash randomization is per interpreter, so a same-process
+double conversion passes while the defect is still there. Its fixture pairs a
+`SOF0`-bearing JPEG with `MINIMAL_JPEG` (which has no `SOF` and so classifies
+as `inline`) to put two size classes in one book.
+
 ## 5.7.1 — Return links land on the marker, not the paragraph
 
 **Fixed (#79):** tapping a note's return link dropped you at the top of the
