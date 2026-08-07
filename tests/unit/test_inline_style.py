@@ -206,3 +206,39 @@ def test_normalize_runs_carries_super_flag():
     )
     assert text == "word1"
     assert spans == [(4, 1, frozenset({ist.FLAG_SUPER}))]
+
+
+# ── #79: anchor marks record where a marker sits inside its paragraph ────────
+
+
+@pytest.mark.unit
+def test_anchor_mark_records_offset_in_normalized_text():
+    text, spans, anchors = ist.normalize_runs_with_anchors(
+        [
+            ("Lead in ", frozenset()),
+            ist.make_anchor_mark("ref1"),
+            ("22", frozenset({ist.FLAG_SUPER})),
+        ]
+    )
+    assert text == "Lead in 22"
+    assert anchors == {"ref1": 8}
+
+
+@pytest.mark.unit
+def test_anchor_mark_contributes_no_text_or_spans():
+    plain, plain_spans = ist.normalize_runs([("a b", frozenset())])
+    text, spans, _anchors = ist.normalize_runs_with_anchors(
+        [ist.make_anchor_mark("x"), ("a b", frozenset()), ist.make_anchor_mark("y")]
+    )
+    assert (text, spans) == (plain, plain_spans)
+
+
+@pytest.mark.unit
+def test_anchor_mark_after_collapsed_trailing_space_clamps_to_text_end():
+    # Trailing whitespace is stripped, so an anchor sitting after it must not
+    # point past the end of the paragraph.
+    text, _spans, anchors = ist.normalize_runs_with_anchors(
+        [("word  ", frozenset()), ist.make_anchor_mark("tail")]
+    )
+    assert text == "word"
+    assert anchors == {"tail": 4}

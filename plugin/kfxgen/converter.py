@@ -23,8 +23,10 @@ from .inline_style import (
     FLAG_SUB,
     FLAG_SUPER,
     compute_block_style,
+    make_anchor_mark,
     make_link_flag,
     normalize_runs,
+    normalize_runs_with_anchors,
     parse_vertical_align,
 )
 from .native_generator import NativeKFXGenerator
@@ -235,11 +237,18 @@ def _walk_inline(
                 cur.add(FLAG_SUB)
     cur = frozenset(cur)
     parts = []
+    # Mark where this element starts before emitting its text, so an id can be
+    # resolved to a character offset rather than just "somewhere in this
+    # paragraph". Zero-length, so it changes no text and no span. (#79)
+    for aid in _own_anchor_ids(elem):
+        parts.append(make_anchor_mark(aid))
     if elem.text:
         parts.append((elem.text, cur))
     for child in elem:
         clocal = _local_tag(child.tag)
         if clocal == "img":
+            for aid in _own_anchor_ids(child):
+                parts.append(make_anchor_mark(aid))
             href = child.get("src", "") or ""
             alt = child.get("alt", "") or ""
             parts.append((_make_img_token(href, alt), frozenset()))
@@ -314,13 +323,26 @@ def _is_non_rendered(elem):
 def _attach_anchor_keys(blocks, base_href):
     """Qualify each block's anchor ids with the file they live in, so a link
     target normalized to "<file>#<id>" can be matched across spine files.
-    Stays empty when the caller didn't say which file this is. (#53)"""
+    Stays empty when the caller didn't say which file this is. (#53)
+
+    `anchor_offsets` is re-keyed the same way, turning {id: offset} into
+    {key: offset} so the generator can carry each offset into the anchor it
+    builds. (#79)"""
     normalized = _resolve_doc_path(base_href, "") if base_href else ""
     for block in blocks:
+        by_id = block.get("anchor_offsets") or {}
         block["anchor_keys"] = (
             [f"{normalized}#{aid}" for aid in block.get("anchor_ids", ())]
             if normalized
             else []
+        )
+        block["anchor_offsets"] = (
+            {
+                f"{normalized}#{aid}": by_id.get(aid, 0)
+                for aid in block.get("anchor_ids", ())
+            }
+            if normalized
+            else {}
         )
     # A TOC entry may link to a whole file with no fragment
     # (`<a href="about.xhtml">About the Author</a>`). Give the document's first
@@ -329,6 +351,7 @@ def _attach_anchor_keys(blocks, base_href):
     # link is silently dropped. (#62)
     if normalized and blocks:
         blocks[0]["anchor_keys"] = [normalized] + blocks[0]["anchor_keys"]
+        blocks[0]["anchor_offsets"][normalized] = 0
     return blocks
 
 
@@ -386,7 +409,7 @@ def extract_blocks_from_html(element, style_resolver=None, base_href=None):
         has_block_child = any(child.tag in block_tags for child in elem)
 
         if is_block and not has_block_child:
-            text, spans = normalize_runs(
+            text, spans, mark_offsets = normalize_runs_with_anchors(
                 _walk_inline(elem, style_resolver=style_resolver, base_href=base_href)
             )
             ids = pending_ids[:]
@@ -398,12 +421,19 @@ def extract_blocks_from_html(element, style_resolver=None, base_href=None):
                     css = style_resolver(elem)
                     if css is not None:
                         bstyle = compute_block_style(css)
+                block_ids = _dedupe_keep_order(ids)
                 blocks.append(
                     {
                         "text": text,
                         "spans": spans,
                         "block_style": bstyle,
-                        "anchor_ids": _dedupe_keep_order(ids),
+                        "anchor_ids": block_ids,
+                        # Ids inherited from an enclosing container point at
+                        # this block's start; only ids declared inside it have
+                        # a position of their own.
+                        "anchor_offsets": {
+                            aid: mark_offsets.get(aid, 0) for aid in block_ids
+                        },
                     }
                 )
             else:
@@ -416,12 +446,14 @@ def extract_blocks_from_html(element, style_resolver=None, base_href=None):
             ids.extend(_own_anchor_ids(elem))
             href = elem.get("src", "") or ""
             alt = elem.get("alt", "") or ""
+            block_ids = _dedupe_keep_order(ids)
             blocks.append(
                 {
                     "text": _make_img_token(href, alt),
                     "spans": [],
                     "block_style": None,
-                    "anchor_ids": _dedupe_keep_order(ids),
+                    "anchor_ids": block_ids,
+                    "anchor_offsets": dict.fromkeys(block_ids, 0),
                 }
             )
             return
@@ -444,12 +476,14 @@ def extract_blocks_from_html(element, style_resolver=None, base_href=None):
                 return
             ids = pending_ids[:]
             pending_ids.clear()
+            block_ids = _dedupe_keep_order(ids)
             blocks.append(
                 {
                     "text": text,
                     "spans": spans,
                     "block_style": None,
-                    "anchor_ids": _dedupe_keep_order(ids),
+                    "anchor_ids": block_ids,
+                    "anchor_offsets": dict.fromkeys(block_ids, 0),
                 }
             )
 

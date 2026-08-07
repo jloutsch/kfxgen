@@ -1382,7 +1382,7 @@ class NativeKFXGenerator:
             )
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
-    def build_fragment_266(self, anchor_name, position_id):
+    def build_fragment_266(self, anchor_name, position_id, offset=0):
         """
         Builds Fragment $266 (Anchor / Bookmark)
 
@@ -1392,6 +1392,8 @@ class NativeKFXGenerator:
         Args:
             anchor_name: Local symbol name for this anchor (e.g., "toc_anchor_0")
             position_id: Target position ID (from $259 content positions)
+            offset: Character offset within that position's paragraph. Emitted
+                    as $143; omitted when 0.
 
         Returns:
             YJFragment with type $266
@@ -1399,15 +1401,28 @@ class NativeKFXGenerator:
         $180 is the anchor's own name and is what a link span's $179 resolves
         against — the fragment id alone is not enough. Every $266 in a Calibre
         KFX Output build and in Amazon-produced KFX is shaped ($180, $183) or
-        ($180, $186); none carries $143 inside $183. Omitting $180 left every
-        link dangling, so Kindle rendered linked runs as plain text. (#51)
+        ($180, $186). Omitting $180 left every link dangling, so Kindle
+        rendered linked runs as plain text. (#51)
+
+        $143 inside $183 is the character offset within the target paragraph,
+        the same meaning it carries in a $142 link span. A position alone names
+        only the paragraph, so a note's return link landed on its first line
+        while the marker sat at the end — measured at up to 1.2 pages away on a
+        real book, and confirmed on device. Amazon carries $143 on roughly half
+        its anchors (321/676, 970/1299, 488/1015 across three reference files),
+        and every one falls within its target paragraph's length. Anchors
+        pointing at a paragraph start omit it, which is also what keeps books
+        with no mid-paragraph markers byte-identical. (#79)
         """
         self.symtab.create_local_symbol(anchor_name)
+        target = IonStruct(IS("$155"), position_id)
+        if offset:
+            target[IS("$143")] = offset
         value = IonStruct(
             IS("$180"),
             IS(anchor_name),
             IS("$183"),
-            IonStruct(IS("$155"), position_id),
+            target,
         )
         return YJFragment(fid=IS(anchor_name), ftype=IS("$266"), value=value)
 
@@ -2586,7 +2601,12 @@ class NativeKFXGenerator:
             return chunks
 
         def _append_text_with_spans(
-            chunk_text, para_text, para_spans, block_style, anchor_keys=None
+            chunk_text,
+            para_text,
+            para_spans,
+            block_style,
+            anchor_keys=None,
+            anchor_offsets=None,
         ):
             """Split chunk_text by CHUNK_SIZE and attach the slice of
             para_spans covering each piece, offsets rebased to the piece.
@@ -2607,11 +2627,14 @@ class NativeKFXGenerator:
             base = para_text.find(chunk_text)
             if base < 0:
                 base = 0
+            offsets = anchor_offsets or {}
+            assigned = set()
             pos = 0
             while pos < len(chunk_text):
                 piece = chunk_text[pos : pos + self.CHUNK_SIZE]
                 p_start = base + pos
                 p_end = p_start + len(piece)
+                is_last = pos + self.CHUNK_SIZE >= len(chunk_text)
                 pspans = []
                 for s, length, flags in para_spans:
                     a = max(s, p_start)
@@ -2624,12 +2647,29 @@ class NativeKFXGenerator:
                     "spans": pspans,
                     "block_style": block_style,
                 }
-                # A block's anchor ids belong to its first piece — that's the
-                # position a link to the block should land on. (#53)
-                if anchor_keys and pos == 0:
-                    chunk["anchor_keys"] = anchor_keys
+                # An anchor belongs to the piece that actually contains it,
+                # with its offset rebased into that piece — a marker 2,400
+                # characters into a paragraph lives in the second chunk, not
+                # the first. Anchors with no offset of their own (ids inherited
+                # from a container, or a whole-file key) sit at 0 and so land
+                # on the first piece, which is the old behaviour. (#53, #79)
+                mine = [
+                    k
+                    for k in anchor_keys or ()
+                    if p_start <= offsets.get(k, 0) < p_end
+                    # An anchor clamped to the paragraph's very end has no
+                    # character to sit before; it belongs to the last piece.
+                    or (is_last and offsets.get(k, 0) == p_end)
+                ]
+                if mine:
+                    chunk["anchor_keys"] = mine
+                    chunk["anchor_offsets"] = {
+                        k: offsets.get(k, 0) - p_start for k in mine
+                    }
+                    assigned.update(mine)
                 all_chunks.append(chunk)
                 pos += self.CHUNK_SIZE
+            return assigned
 
         for ch_idx, chapter in enumerate(chapters):
             start_idx = len(all_chunks)
@@ -2747,25 +2787,48 @@ class NativeKFXGenerator:
                         para_spans = block.get("spans", [])
                         block_style = block.get("block_style")
                         block_anchor_keys = block.get("anchor_keys") or []
+                        block_offsets = block.get("anchor_offsets") or {}
+                        block_first_chunk = len(all_chunks)
                         for chunk in _emit_text_chunks(para):
                             if chunk["type"] == "image":
                                 # Figure ids live on image blocks; without this
                                 # a link to a figure resolved to nothing. (#62)
-                                if block_anchor_keys:
-                                    chunk["anchor_keys"] = block_anchor_keys
-                                    block_anchor_keys = []
+                                at_start = [
+                                    k
+                                    for k in block_anchor_keys
+                                    if not block_offsets.get(k)
+                                ]
+                                if at_start:
+                                    chunk["anchor_keys"] = at_start
+                                    block_anchor_keys = [
+                                        k
+                                        for k in block_anchor_keys
+                                        if k not in set(at_start)
+                                    ]
                                 all_chunks.append(chunk)
                             else:
-                                _append_text_with_spans(
+                                placed = _append_text_with_spans(
                                     chunk["text"],
                                     para,
                                     para_spans,
                                     block_style,
                                     block_anchor_keys,
+                                    block_offsets,
                                 )
-                                # Only the first text chunk of the block owns
-                                # the anchors.
-                                block_anchor_keys = []
+                                block_anchor_keys = [
+                                    k for k in block_anchor_keys if k not in placed
+                                ]
+                        # Anything whose offset landed in no piece — a clamped
+                        # value, or text the chunker could not locate — belongs
+                        # to the block's first chunk rather than nowhere.
+                        if block_anchor_keys and len(all_chunks) > block_first_chunk:
+                            first = all_chunks[block_first_chunk]
+                            first["anchor_keys"] = _dedupe_keys(
+                                (first.get("anchor_keys") or []) + block_anchor_keys
+                            )
+                            first.setdefault("anchor_offsets", {}).update(
+                                dict.fromkeys(block_anchor_keys, 0)
+                            )
 
             # Guarantee every chapter contributes at least one chunk so it
             # owns a navigable content position and the per-chapter arrays
@@ -2783,6 +2846,11 @@ class NativeKFXGenerator:
                 first_chunk = all_chunks[start_idx]
                 first_chunk["anchor_keys"] = _dedupe_keys(
                     (first_chunk.get("anchor_keys") or []) + carried_anchor_keys
+                )
+                # The block these came from is gone, so its offsets went with
+                # it — they land at the chapter's start. (#62)
+                first_chunk.setdefault("anchor_offsets", {}).update(
+                    dict.fromkeys(carried_anchor_keys, 0)
                 )
 
             chapter_chunk_ranges.append((start_idx, len(all_chunks)))
@@ -2853,21 +2921,30 @@ class NativeKFXGenerator:
             # A link may name a whole file ("chapter_002.xhtml") with no
             # fragment, which resolves to the earliest position known for it.
             key_to_chunk = {}
+            key_to_offset = {}
             file_to_chunk = {}
             for chunk_idx, chunk in enumerate(all_chunks):
+                offsets = chunk.get("anchor_offsets") or {}
                 for key in chunk.get("anchor_keys") or []:
-                    key_to_chunk.setdefault(key, chunk_idx)
+                    if key not in key_to_chunk:
+                        key_to_chunk[key] = chunk_idx
+                        key_to_offset[key] = offsets.get(key, 0)
                     file_to_chunk.setdefault(key.split("#", 1)[0], chunk_idx)
 
             for target in sorted(referenced_targets):
                 chunk_idx = key_to_chunk.get(target)
+                offset = key_to_offset.get(target, 0)
                 if chunk_idx is None and "#" not in target:
+                    # A whole-file target names the file's start, not a marker.
                     chunk_idx = file_to_chunk.get(target)
+                    offset = 0
                 if chunk_idx is None:
                     continue  # nothing declares it — leave the run unlinked
                 anchor_name = f"body_anchor_{len(body_anchor_map)}"
                 self.fragments.append(
-                    self.build_fragment_266(anchor_name, chunk_positions[chunk_idx])
+                    self.build_fragment_266(
+                        anchor_name, chunk_positions[chunk_idx], offset
+                    )
                 )
                 body_anchor_map[target] = anchor_name
                 anchor_names.append(anchor_name)

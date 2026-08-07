@@ -27,6 +27,27 @@ _CSS_UNIT_TO_KFX = {
 _LENGTH_RE = re.compile(r"^\s*([+-]?[0-9]*\.?[0-9]+)\s*(em|rem|%|pt|px|mm)\s*$", re.I)
 
 
+#: Marker for an anchor's position within a paragraph's segment stream. The
+#: mark carries no text, so it passes through whitespace collapsing without
+#: shifting a single character, and comes back out as the character offset of
+#: whatever follows it. That offset is what a `$266` anchor puts in `$143` so
+#: a return link lands on the marker instead of the paragraph's first line. (#79)
+ANCHOR_MARK = "anchor-mark"
+
+
+def make_anchor_mark(anchor_id):
+    """Build the zero-length segment that marks where `anchor_id` is declared."""
+    return ("", frozenset({(ANCHOR_MARK, anchor_id)}))
+
+
+def anchor_mark_id(flags):
+    """Return the anchor id carried by an anchor-mark segment, or None."""
+    for flag in flags:
+        if isinstance(flag, tuple) and len(flag) == 2 and flag[0] == ANCHOR_MARK:
+            return flag[1]
+    return None
+
+
 def normalize_runs(
     segments: list[tuple[str, frozenset]],
 ) -> tuple[str, list[tuple[int, int, frozenset]]]:
@@ -36,10 +57,30 @@ def normalize_runs(
     single space and leading/trailing space is stripped. `spans` are maximal
     (start, length, flags) ranges with non-empty flags, offset into the text.
     """
+    text, spans, _anchors = normalize_runs_with_anchors(segments)
+    return text, spans
+
+
+def normalize_runs_with_anchors(
+    segments: list[tuple[str, frozenset]],
+) -> tuple[str, list[tuple[int, int, frozenset]], dict]:
+    """`normalize_runs`, plus {anchor_id: character offset} for any anchor
+    marks in `segments`.
+
+    An id declared twice in one paragraph keeps its first position, matching
+    the browser rule that the first occurrence wins. An anchor sitting after
+    the paragraph's last visible character clamps to the end rather than
+    pointing past it. (#79)
+    """
     chars = []
     flags_per_char = []
+    anchors = {}
     prev_space = True  # strip leading whitespace
     for text, flags in segments:
+        marked = anchor_mark_id(flags)
+        if marked is not None:
+            anchors.setdefault(marked, len(chars))
+            continue
         for ch in text:
             if ch.isspace():
                 if not prev_space:
@@ -71,7 +112,10 @@ def normalize_runs(
             j += 1
         spans.append((i, j - i, f))
         i = j
-    return text_out, spans
+    if anchors:
+        limit = len(text_out)
+        anchors = {k: min(v, limit) for k, v in anchors.items()}
+    return text_out, spans, anchors
 
 
 def parse_css_length(value):

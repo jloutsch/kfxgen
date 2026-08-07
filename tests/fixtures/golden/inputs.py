@@ -171,6 +171,44 @@ def make_linked_toc(out_dir: Path) -> Path:
     )
 
 
+def make_marker_offsets(out_dir: Path) -> Path:
+    """Notes whose markers sit at the END of long paragraphs — the shape real
+    publishers use, and the one `linked_toc` cannot cover.
+
+    In `linked_toc` the return target is an id on the `<p>` itself, so its
+    offset is 0 and the fixture passes whether or not anchors carry `$143`.
+    Here the id is on the marker's own `<a>`, hundreds of characters into the
+    paragraph, which is where a return link used to land on the first line
+    instead of the marker. One paragraph also runs past CHUNK_SIZE so the
+    offset has to rebase into a later chunk. (#79)
+    """
+    prose = "Sentence that carries the argument forward. " * 12  # ~530 chars
+    long_prose = "Filler that pushes this paragraph past the chunk size. " * 45
+    chapter = _xhtml_page(
+        "Part One",
+        '<h1 id="c1">Part One</h1>\n'
+        f"<p>{prose}"
+        '<a id="ref1" href="chapter_2.xhtml#n1">'
+        '<span style="vertical-align: super">1</span></a></p>\n'
+        f"<p>{long_prose}"
+        '<a id="ref2" href="chapter_2.xhtml#n2">'
+        '<span style="vertical-align: super">2</span></a></p>',
+    )
+    notes = _xhtml_page(
+        "Endnotes",
+        "<h1>Endnotes</h1>\n"
+        '<p id="n1"><a href="chapter_1.xhtml#ref1">1.</a> First note.</p>\n'
+        '<p id="n2"><a href="chapter_1.xhtml#ref2">2.</a> Second note.</p>',
+    )
+    return (
+        EpubBuilder()
+        .set_metadata(title="Marker Offsets Golden", author="Golden Author")
+        .add_chapter("Part One", chapter.encode())
+        .add_chapter("Endnotes", notes.encode())
+        .build(out_dir, "marker_offsets")
+    )
+
+
 def _epub3_page(title: str, body_html: str) -> str:
     """Like `_xhtml_page` but declaring the `epub:` namespace.
 
@@ -397,4 +435,5 @@ GOLDEN_INPUTS: list[tuple[str, callable]] = [
     ("linked_toc", make_linked_toc),
     ("publisher_structure", make_publisher_structure),
     ("long_chapter", make_long_chapter),
+    ("marker_offsets", make_marker_offsets),
 ]
