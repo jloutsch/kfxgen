@@ -3071,7 +3071,16 @@ class NativeKFXGenerator:
                     w, h = resource_to_dims.get(c.get("resource"), (None, None))
                     kinds_used.add(_classify(w, h))
 
-            for kind in kinds_used:
+            # Fixed order, not the set's. Iterating `kinds_used` directly made
+            # the output non-reproducible: CPython randomizes string hashing
+            # per interpreter, so a book using more than one size class
+            # allocated these $157 styles in a different order each run, and
+            # every local symbol numbered after them shifted with it — $270's
+            # symbol ids and $419's name list changed while the content was
+            # byte-identical. (#96)
+            for kind in ("small", "inline", "page"):
+                if kind not in kinds_used:
+                    continue
                 name = {"small": "s_img_sm", "inline": "s_img", "page": "s_img_page"}[
                     kind
                 ]
