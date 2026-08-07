@@ -80,6 +80,12 @@ fi
 NOW_KFXLIB="$(unzip -p "$PLUGIN_ZIP" kfxlib/version.py 2>/dev/null \
               | sed -nE 's/^__version__ *= *"([^"]+)".*/\1/p')"
 
+# The plugin's own version, distinct from the kfxlib date above. The index
+# check below compares this one, because that is what calibre publishes.
+NOW_KFX_INPUT="$(unzip -p "$PLUGIN_ZIP" __init__.py 2>/dev/null \
+                 | sed -nE 's/^[[:space:]]*version *= *\(([0-9]+), *([0-9]+), *([0-9]+)\).*/\1.\2.\3/p' \
+                 | head -1)"
+
 if [ -z "$NOW_PREVIEWER" ] || [ -z "$NOW_KFXLIB" ]; then
   say "could not read installed versions (previewer='$NOW_PREVIEWER' kfxlib='$NOW_KFXLIB')"
   log "ERROR unreadable versions"
@@ -186,6 +192,73 @@ check_upstream() {
   return 0
 }
 
+# --- is a newer KFX Input plugin available? ----------------------------------
+#
+# The vendored kfxlib pin and the drift baselines are maintained in different
+# places, so each can look fine on its own while the plugin that produced them
+# has moved (#91). Amazon grew the shared YJ_symbols table past what the pinned
+# kfxlib can name; a newer plugin is what would let us name the new symbols.
+#
+# Unlike the Previewer probe above, this needs no GUI: it reads the same JSON
+# index calibre's own plugin updater uses. That distinction is why this one
+# runs on the schedule and that one does not (#92) — a background agent cannot
+# get Kindle Previewer to finish, but it can fetch a file. Still bounded, and
+# still reports `unknown` rather than pretending an unreachable index means
+# up to date.
+#
+#   0 = index reachable, installed is current   1 = newer available   2 = could not check
+PLUGIN_INDEX_URL="${KFXGEN_PLUGIN_INDEX_URL:-https://code.calibre-ebook.com/plugins/plugins.json.bz2}"
+
+# Passed with `python3 -c`, never on stdin. `run_bounded`'s fallback watchdog
+# backgrounds the command, and a background job in a non-interactive shell has
+# its stdin redirected from /dev/null — so a heredoc-fed script arrives empty,
+# python exits 0 having done nothing, and the check reports "current" when it
+# in fact never ran. That reads as an all-clear and is the failure shape that
+# took the Previewer probe out on the schedule (#92). It only appears where
+# `timeout` is absent, which is stock macOS: the launchd case exactly.
+read -r -d '' KFX_INPUT_INDEX_PY <<'PY'
+import bz2, json, sys, urllib.request
+
+url, installed = sys.argv[1], sys.argv[2]
+try:
+    with urllib.request.urlopen(url, timeout=30) as r:
+        index = json.loads(bz2.decompress(r.read()).decode("utf-8"))
+    latest = index["KFX Input"]["version"]
+except Exception:
+    sys.exit(2)  # unreachable, malformed, or renamed -- never "up to date"
+
+def parts(v):
+    if isinstance(v, (list, tuple)):
+        return [int(x) for x in v]
+    return [int(x) if str(x).isdigit() else 0 for x in str(v).split(".")]
+
+a, b = parts(latest), parts(installed)
+a += [0] * (len(b) - len(a))
+b += [0] * (len(a) - len(b))
+print(".".join(str(x) for x in a))
+sys.exit(1 if a > b else 0)
+PY
+
+check_kfx_input_upstream() {
+  [ -n "$NOW_KFX_INPUT" ] || return 2
+  run_bounded "$PROBE_TIMEOUT" python3 -c "$KFX_INPUT_INDEX_PY" \
+    "$PLUGIN_INDEX_URL" "$NOW_KFX_INPUT"
+}
+
+KFX_INPUT_MSG=""
+if [ "${KFXGEN_DRIFT_SKIP_PLUGIN_INDEX:-0}" = "1" ]; then
+  KFX_INPUT_STATE="skipped"
+else
+  KFX_INPUT_LATEST="$(check_kfx_input_upstream)"
+  case $? in
+    0) KFX_INPUT_STATE="current" ;;
+    1) KFX_INPUT_STATE="available"
+       KFX_INPUT_MSG="KFX Input $KFX_INPUT_LATEST is available (installed: $NOW_KFX_INPUT, kfxlib $NOW_KFXLIB)." ;;
+    *) KFX_INPUT_STATE="unknown"
+       KFX_INPUT_MSG="Could not reach the calibre plugin index — treat as unknown, not as up to date." ;;
+  esac
+fi
+
 UPSTREAM_MSG=""
 if [ "${KFXGEN_DRIFT_SKIP_UPSTREAM:-0}" = "1" ]; then
   UPSTREAM_STATE="skipped"
@@ -213,15 +286,35 @@ for bl in "${BASELINES[@]}"; do
   [ -n "$why" ] && STALE+=("$name:$why")
 done
 
-if [ ${#STALE[@]} -eq 0 ] && [ "$UPSTREAM_STATE" != "available" ]; then
+if [ ${#STALE[@]} -eq 0 ] && [ "$UPSTREAM_STATE" != "available" ] \
+   && [ "$KFX_INPUT_STATE" != "available" ]; then
   if [ "$VERBOSE" = 1 ]; then
-    say "no change — Previewer $NOW_PREVIEWER, kfxlib $NOW_KFXLIB"
+    say "no change — Previewer $NOW_PREVIEWER, kfxlib $NOW_KFXLIB, KFX Input $NOW_KFX_INPUT"
     for c in "${CHECKED[@]}"; do say "  matches $c"; done
     say "upstream Previewer: $UPSTREAM_STATE"
     [ -n "$UPSTREAM_MSG" ] && say "  $UPSTREAM_MSG"
+    say "upstream KFX Input: $KFX_INPUT_STATE"
+    [ -n "$KFX_INPUT_MSG" ] && say "  $KFX_INPUT_MSG"
   fi
-  log "ok previewer=$NOW_PREVIEWER kfxlib=$NOW_KFXLIB (${#BASELINES[@]} baseline(s) current, upstream=$UPSTREAM_STATE)"
+  log "ok previewer=$NOW_PREVIEWER kfxlib=$NOW_KFXLIB kfxinput=$NOW_KFX_INPUT (${#BASELINES[@]} baseline(s) current, upstream=$UPSTREAM_STATE, index=$KFX_INPUT_STATE)"
   exit 0
+fi
+
+# A newer plugin while everything local is in sync: the vendored pin and the
+# audit table can now be brought up to the current upstream surface (#91).
+if [ ${#STALE[@]} -eq 0 ] && [ "$UPSTREAM_STATE" != "available" ]; then
+  say "$KFX_INPUT_MSG"
+  say ""
+  say "Refresh the vendored copy so the differential decode tests run against"
+  say "what upstream ships now (see CONTRIBUTING.md → Vendored kfxlib):"
+  say ""
+  say "  tests/fixtures/vendor/kfx_input_plugin.zip        # not committed"
+  say "  tests/fixtures/vendor/kfx_input_plugin.version.txt"
+  say ""
+  say "Nothing has been installed or changed. This job only reads versions."
+  log "ACTION kfx input $KFX_INPUT_LATEST available (installed=$NOW_KFX_INPUT)"
+  notify "A newer KFX Input plugin is available"
+  exit 1
 fi
 
 # A newer Previewer upstream while every baseline is current: nothing has
@@ -245,6 +338,7 @@ say "${#STALE[@]} of ${#BASELINES[@]} baseline(s) are behind the installed toolc
 say ""
 for s in "${STALE[@]}"; do say "  ${s%%:*} —${s#*:}"; done
 [ -n "$UPSTREAM_MSG" ] && { say ""; say "$UPSTREAM_MSG"; }
+[ -n "$KFX_INPUT_MSG" ] && { say ""; say "$KFX_INPUT_MSG"; }
 say ""
 say "The drift diff can now learn something for those. Re-convert each sample"
 say "with Previewer and diff it against its baseline (see README), e.g.:"

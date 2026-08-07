@@ -91,6 +91,37 @@ the log, so a persistently broken check is visible there.
 Set `KFXGEN_DRIFT_SKIP_UPSTREAM=1` to disable the upstream check entirely and
 keep only the offline comparison.
 
+### The KFX Input index check (#91)
+
+A second upstream check, independent of the Previewer one: it compares the
+installed KFX Input plugin against the version calibre publishes in its plugin
+index — the same JSON its own plugin updater reads. This exists because the
+vendored kfxlib pin and the drift baselines are maintained in different places,
+so each can look current on its own while the plugin that produced them has
+moved on. Amazon grew the shared `YJ_symbols` table past what the pinned kfxlib
+can name; a newer plugin is what would let us name the new symbols.
+
+**This one does run on the schedule.** It needs no GUI — it fetches a file — and
+that is the whole difference from the Previewer probe below. It is bounded by
+the same `KFXGEN_DRIFT_PROBE_TIMEOUT`, and an unreachable, malformed, or renamed
+index reports `unknown`, never "up to date".
+
+Set `KFXGEN_DRIFT_SKIP_PLUGIN_INDEX=1` to disable it. `KFXGEN_PLUGIN_INDEX_URL`
+overrides the index location, which is also how the check's own behaviour is
+exercised — point it at a local `file://` bz2 and you can drive all four states
+without waiting for Amazon to ship anything.
+
+One trap worth recording, because it produced a false all-clear during
+development and only under the conditions the schedule actually runs in: the
+Python for this check is passed with `python3 -c`, **not** on stdin. The
+`run_bounded` fallback backgrounds its command, and a background job in a
+non-interactive shell has stdin redirected from `/dev/null` — so a heredoc-fed
+script arrives empty, python exits 0 having done nothing, and the check reports
+`current` when it never ran. The fallback is only used where `timeout` is absent,
+which is stock macOS. By hand with Homebrew coreutils on `PATH` it worked; in a
+`launchd`-like minimal environment it silently lied. Test any change to this
+check in both.
+
 #### The upstream check is interactive-only
 
 It does not work under `launchd`, so the shipped plist disables it. Measured on
