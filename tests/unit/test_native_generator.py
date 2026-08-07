@@ -2201,3 +2201,227 @@ def test_pack_content_still_yields_a_fragment_for_a_textless_chapter():
     groups, refs = pack_content_fragments([], start_index=3)
     assert groups == [("content_3", [])]
     assert refs == []
+
+
+# ── #79: $266 anchors carry the marker's offset within its paragraph ─────────
+
+
+def _round_trip_chapters(body_text, marker_offset, note_text="1. The note."):
+    """A chapter whose marker sits at `marker_offset`, and an endnote that
+    links back to it — both halves of the round trip."""
+    from kfxgen.inline_style import FLAG_SUPER, make_link_flag
+
+    marker = frozenset({FLAG_SUPER, make_link_flag("endnotes.xhtml#note1")})
+    back = frozenset({make_link_flag("chapter_001.xhtml#ref1")})
+    return [
+        {
+            "title": "Chapter One",
+            "text": body_text,
+            "blocks": [
+                {
+                    "text": body_text,
+                    "spans": [(marker_offset, 1, marker)],
+                    "anchor_keys": ["chapter_001.xhtml#ref1"],
+                    "anchor_offsets": {"chapter_001.xhtml#ref1": marker_offset},
+                }
+            ],
+        },
+        {
+            "title": "Endnotes",
+            "text": note_text,
+            "blocks": [
+                {
+                    "text": note_text,
+                    "spans": [(0, 2, back)],
+                    "anchor_keys": ["endnotes.xhtml#note1"],
+                    "anchor_offsets": {"endnotes.xhtml#note1": 0},
+                }
+            ],
+        },
+    ]
+
+
+def _anchor_fragments(gen):
+    """{anchor name: (position, offset or None)} for every $266."""
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    out = {}
+    for f in gen.fragments:
+        if str(f.ftype) != "$266":
+            continue
+        v = f.value.value if hasattr(f.value, "value") else f.value
+        target = v[IS("$183")]
+        out[str(v[IS("$180")])] = (
+            target[IS("$155")],
+            target.get(IS("$143")),
+        )
+    return out
+
+
+def _anchor_named_by_return_link(gen):
+    """The anchor the endnote's return link points at."""
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    for _entry, span in _link_spans(gen):
+        name = str(span[IS("$179")])
+        if name.startswith("body_anchor"):
+            frags = _anchor_fragments(gen)
+            if name in frags:
+                yield name, frags[name]
+
+
+@pytest.mark.unit
+def test_anchor_carries_marker_offset_within_its_paragraph(tmp_path):
+    """A return link must land on the marker, not the paragraph's first line."""
+    body = "Prose that runs on for a while before the marker appears.X"
+    offset = len(body) - 1
+    gen = NativeKFXGenerator()
+    gen.generate_full_book(
+        title="T",
+        author="A",
+        chapters=_round_trip_chapters(body, offset),
+        output_path=str(tmp_path / "o.kfx"),
+    )
+    found = dict(_anchor_named_by_return_link(gen))
+    assert found, "No body anchor was reachable from the endnote's return link"
+    offsets = {off for _pos, off in found.values()}
+    assert offset in offsets, f"Expected an anchor at offset {offset}, got {offsets}"
+
+
+@pytest.mark.unit
+def test_anchor_at_paragraph_start_omits_the_offset_field(tmp_path):
+    """Reference KFX omits $143 when the target is a paragraph start; keeping
+    that shape leaves books without mid-paragraph markers byte-identical."""
+    gen = NativeKFXGenerator()
+    gen.generate_full_book(
+        title="T",
+        author="A",
+        chapters=_round_trip_chapters("Marker first.", 0),
+        output_path=str(tmp_path / "o.kfx"),
+    )
+    for _name, (_pos, off) in _anchor_fragments(gen).items():
+        assert off is None, f"Expected no $143 for a paragraph-start anchor, got {off}"
+
+
+@pytest.mark.unit
+def test_anchor_offset_rebases_when_the_paragraph_splits(tmp_path):
+    """A paragraph longer than CHUNK_SIZE becomes several chunks. The anchor
+    belongs to the chunk holding the marker, with the offset rebased into it."""
+    body = "x" * 2500 + "M"
+    offset = len(body) - 1
+    gen = NativeKFXGenerator()
+    gen.generate_full_book(
+        title="T",
+        author="A",
+        chapters=_round_trip_chapters(body, offset),
+        output_path=str(tmp_path / "o.kfx"),
+    )
+    found = dict(_anchor_named_by_return_link(gen))
+    assert found, "No body anchor was reachable from the endnote's return link"
+    offsets = {off for _pos, off in found.values()}
+    # The endnote's own anchor sits at a paragraph start and carries no $143,
+    # so it shows up as None alongside the rebased marker offset.
+    assert offset - NativeKFXGenerator.CHUNK_SIZE in offsets, (
+        f"Offset should rebase into the second chunk, got {offsets}"
+    )
+
+
+@pytest.mark.unit
+def test_return_links_are_reciprocal_with_their_markers(tmp_path):
+    """The invariant the #79 bug broke: wherever a return link lands must be
+    exactly where the marker that points at that note sits — same position AND
+    same offset within it. Before the fix this held only for markers that
+    happened to start their paragraph (975 of 1950 on a real book).
+
+    Two markers share one paragraph here, which is the case that made the
+    defect visible: both return links resolved to the paragraph's start, so
+    they were indistinguishable.
+    """
+    from kfxgen.inline_style import FLAG_SUPER, make_link_flag
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    prose = "Sentence carrying the argument onward. " * 8
+    body = f"{prose}A{prose}B"
+    first, second = len(prose), len(body) - 1
+    chapters = [
+        {
+            "title": "Chapter One",
+            "text": body,
+            "blocks": [
+                {
+                    "text": body,
+                    "spans": [
+                        (
+                            first,
+                            1,
+                            frozenset({FLAG_SUPER, make_link_flag("n.xhtml#a")}),
+                        ),
+                        (
+                            second,
+                            1,
+                            frozenset({FLAG_SUPER, make_link_flag("n.xhtml#b")}),
+                        ),
+                    ],
+                    "anchor_keys": ["c.xhtml#r1", "c.xhtml#r2"],
+                    "anchor_offsets": {"c.xhtml#r1": first, "c.xhtml#r2": second},
+                }
+            ],
+        },
+        {
+            "title": "Endnotes",
+            "text": "1. First note.\n\n2. Second note.",
+            "blocks": [
+                {
+                    "text": "1. First note.",
+                    "spans": [(0, 2, frozenset({make_link_flag("c.xhtml#r1")}))],
+                    "anchor_keys": ["n.xhtml#a"],
+                    "anchor_offsets": {"n.xhtml#a": 0},
+                },
+                {
+                    "text": "2. Second note.",
+                    "spans": [(0, 2, frozenset({make_link_flag("c.xhtml#r2")}))],
+                    "anchor_keys": ["n.xhtml#b"],
+                    "anchor_offsets": {"n.xhtml#b": 0},
+                },
+            ],
+        },
+    ]
+
+    gen = NativeKFXGenerator()
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+
+    anchors = {}
+    for f in gen.fragments:
+        if str(f.ftype) != "$266":
+            continue
+        v = f.value.value if hasattr(f.value, "value") else f.value
+        t = v[IS("$183")]
+        anchors[str(v[IS("$180")])] = (t[IS("$155")], t.get(IS("$143")) or 0)
+
+    # (position, offset) of every marker, keyed by the anchor it points at.
+    marker_at = {}
+    for entry, span in _link_spans(gen):
+        marker_at.setdefault(str(span[IS("$179")]), []).append(
+            (entry[IS("$155")], span.get(IS("$143")) or 0)
+        )
+
+    checked = 0
+    for anchor_name, landing in anchors.items():
+        # Which markers point back at the paragraph this anchor lands on?
+        back = [
+            name
+            for name, sites in marker_at.items()
+            if any(pos == landing[0] for pos, _off in sites)
+        ]
+        for name in back:
+            if anchors.get(name, (None,))[0] != marker_at[anchor_name][0][0]:
+                continue  # not a round trip between these two paragraphs
+            sites = [s for s in marker_at[name] if s[0] == landing[0]]
+            assert landing in sites, (
+                f"{anchor_name} lands at {landing}, but the marker pointing "
+                f"back at that paragraph sits at {sites}"
+            )
+            checked += 1
+    assert checked >= 2, f"Expected both round trips to be checked, got {checked}"

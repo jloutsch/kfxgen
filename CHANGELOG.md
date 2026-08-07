@@ -1,5 +1,49 @@
 # Changelog
 
+## 5.7.1 — Return links land on the marker, not the paragraph
+
+**Fixed (#79):** tapping a note's return link dropped you at the top of the
+paragraph holding the marker rather than at the marker itself. A `$266` anchor
+named only a position, and a position is one `$259` leaf — one paragraph. When
+the marker sat at the end of a long paragraph, the reader landed hundreds of
+characters short of it, which at a large font size is a page or more of
+scrolling to find where you were.
+
+`$183` now carries `$143`, the character offset within the target paragraph —
+the same meaning it already has in a `$142` link span. Anchors aimed at a
+paragraph start omit it, so books with no mid-paragraph markers stay
+byte-identical; all seven pre-existing golden fixtures are unchanged.
+
+This was found on a physical Kindle and is a real defect, but the earlier
+research note said the opposite — that no reference file carried `$143` inside
+`$183` — which is why the field was never emitted. Re-measuring three
+Amazon-produced files says it is carried on roughly half of all anchors
+(321/676, 970/1299, 488/1015), and every instance checked falls within its
+target paragraph's length (319/319, 234/234, 488/488). kfxgen now emits it on
+53% of anchors on the test book, in the same range. `$186`, the other anchor
+shape, appears 2–11 times per book and is not this mechanism.
+
+Measured on a 910,818-character trade book with 2,367 anchors and 1,950
+reciprocal marker/note pairs: before, 975 of 1,950 return links landed on their
+marker (only the ones that happened to sit at a paragraph start), median gap 42
+characters, 90th percentile 756, worst case 1,626. After, 1,950 of 1,950 land
+exactly on the marker. Nothing else moved — same 3,949 content positions, same
+2,367 anchors, same 129 content fragments, every `$265` offset still matching
+the real text.
+
+A marker past the chunk size rebases into the chunk that actually contains it,
+so a paragraph split across several `$145` entries anchors to the right piece
+rather than always to the first.
+
+**Testing:** a `marker_offsets` golden fixture covers the shape real publishers
+use — the id on the marker's own `<a>` at the end of a long paragraph, plus one
+paragraph that runs past `CHUNK_SIZE`. The existing `linked_toc` fixture
+declares its return target on the `<p>` itself, so its offset is 0 and it
+passed whether or not anchors carried `$143`.
+
+**Device-verified:** a physical Kindle sideload confirms the reader honors
+`$143` — return links across many notes now land on the marker they came from.
+
 ## 5.7.0 — Content fragments split to the format maximum
 
 **Fixed (#37):** every chapter's text went into a single `$145` content

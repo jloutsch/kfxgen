@@ -1569,3 +1569,44 @@ def test_same_document_fragment_still_resolves():
         _doc('<p><a href="#later">x</a></p>'), base_href="text/ch1.xhtml"
     )
     assert link_target(blocks[0]["spans"][0][2]) == "text/ch1.xhtml#later"
+
+
+# ── #79: where in its block each anchor sits ─────────────────────────────────
+
+
+class TestBlockAnchorOffsets:
+    BASE = "text/ch1.xhtml"
+
+    def _offsets(self, body_inner):
+        blocks = extract_blocks_from_html(_xhtml_raw(body_inner), base_href=self.BASE)
+        return blocks, blocks[0].get("anchor_offsets")
+
+    def test_marker_at_end_of_paragraph_records_its_offset(self):
+        blocks, offsets = self._offsets('<p>Some prose here.<a id="c9">7</a></p>')
+        assert blocks[0]["text"] == "Some prose here.7"
+        # The first block also carries the bare-filename key from #62.
+        assert offsets == {self.BASE: 0, f"{self.BASE}#c9": len("Some prose here.")}
+
+    def test_id_on_the_block_itself_is_offset_zero(self):
+        _blocks, offsets = self._offsets('<h2 id="c1">One</h2>')
+        assert offsets == {self.BASE: 0, f"{self.BASE}#c1": 0}
+
+    def test_two_markers_in_one_paragraph_get_distinct_offsets(self):
+        _blocks, offsets = self._offsets(
+            '<p>First<a id="m1">1</a> then more<a id="m2">2</a></p>'
+        )
+        assert offsets[f"{self.BASE}#m1"] == len("First")
+        assert offsets[f"{self.BASE}#m2"] == len("First1 then more")
+
+    def test_id_from_a_container_lands_at_the_following_block_start(self):
+        blocks = extract_blocks_from_html(
+            _xhtml_raw('<div id="c1"><p>First</p><p>Second</p></div>'),
+            base_href=self.BASE,
+        )
+        assert blocks[0]["anchor_offsets"] == {self.BASE: 0, f"{self.BASE}#c1": 0}
+
+    def test_whole_file_key_is_offset_zero(self):
+        blocks = extract_blocks_from_html(
+            _xhtml_raw("<p>Body</p>"), base_href=self.BASE
+        )
+        assert blocks[0]["anchor_offsets"] == {self.BASE: 0}
