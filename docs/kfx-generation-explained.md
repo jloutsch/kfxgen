@@ -389,14 +389,23 @@ which is how the same book produced two different files (#96).
 ### kfxgen identifies itself as Kindle Previewer
 
 `$490`'s audit group declares `file_creator: "KPR"` and
-`creator_version: "3.98.0"`. kfxgen is not Kindle Previewer and that is not the
-Previewer version currently installed — the values are there because readers and
-tooling expect a known producer, and an unrecognised one changes behaviour.
+`creator_version: "3.98.0"`. kfxgen is not Kindle Previewer, and 3.98.0 is not
+the Previewer version installed today.
 
-Worth knowing before you "correct" it. It is a deliberate claim, not a stale
-constant, though nothing verifies which parts of the pipeline actually depend on
-it — if you have reason to change it, that dependency is unmapped and a device
-test is the only way to find out.
+**Nobody knows whether this matters.** The honest history: these values were
+copied from a reference file during early debugging, as one of a series of
+attempts to get output a reader would accept. The debugging log records that
+attempt as *"Still fails"* — it was not the fix. The values stayed, and nothing
+since has tested removing them. `3.98.0` was simply the Previewer version in use
+at the time.
+
+So this is not a considered claim about identity, and it is not known to be load
+bearing. It is inherited. If you have reason to change it, no test will tell you
+whether it was safe — only a device will.
+
+Flagged rather than quietly fixed because the failure mode of "correcting" it is
+a book that behaves subtly differently on hardware, which is the slowest kind of
+bug this project has.
 
 The title group carries ASIN, `asset_id` (the container id), author, title, and
 `cde_content_type: "PDOC"` — personal document, which is what a sideloaded book
