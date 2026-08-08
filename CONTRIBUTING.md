@@ -169,12 +169,15 @@ itself.
 
 ## KFX correctness invariants
 
-The rules recovered from device testing are not yet collected in one place.
-Where they live today: `tests/unit/test_kfx_invariants.py` and
-`tests/unit/test_position_map.py` encode the ones that can be asserted,
-`CHANGELOG.md` records how each was found, and `plugin/kfxgen/native_generator.py`
-carries the reasoning next to the code that depends on it. Writing the missing
-explainer is tracked in issue 100.
+Start with **[docs/kfx-generation-explained.md](docs/kfx-generation-explained.md)**.
+It covers the pipeline, the fragment graph, what each symbol means and how
+confident we are of it, and the pitfalls that have already cost real debugging.
+
+The underlying sources it draws on, when you need more than the summary:
+`tests/unit/test_kfx_invariants.py` and `tests/unit/test_position_map.py` encode
+the rules that can be asserted, `CHANGELOG.md` records how each was found, and
+`plugin/kfxgen/native_generator.py` carries the reasoning next to the code that
+depends on it.
 
 (An earlier version of this file pointed at a `MEMORY.md` at the project root.
 No such file has ever existed here, so anyone who followed that pointer found
