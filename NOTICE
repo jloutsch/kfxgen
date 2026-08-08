@@ -16,7 +16,7 @@ plugin/kfxgen/kfxlib_minimal/
     Copyright (C) 2016-2025 John Howell <jhowell@acm.org>
     Licensed under the GNU General Public License v3.
 
-    kfxgen vendors and modifies this code: the library was trimmed to the
+    kfxgen includes a modified copy of this code: the library was trimmed to the
     Ion/KFX serialization surface kfxgen needs, with security and
     packaging changes on top. The list of local modifications is kept in
     plugin/kfxgen/kfxlib_minimal/README.md.
