@@ -1,6 +1,6 @@
 # kfxlib_minimal
 
-A trimmed fork of Calibre's `kfxlib`, vendored into kfxgen so the plugin
+A trimmed fork of Calibre's `kfxlib`, copied into kfxgen so the plugin
 runs inside Calibre's bundled Python interpreter without pulling in
 heavy upstream dependencies (pypdf, PIL, etc.). Only the Ion structures
 and serialization utilities needed for KFX generation are kept.
@@ -20,7 +20,7 @@ Drift detection + re-sync procedure: `research/kfx-format-baseline/`
 (a fixed Amazon-engine conversion whose symbol/fragment inventory is diffed
 across Kindle Previewer / `kfxlib` versions).
 
-## Local modifications (vendored fork — track upstream sync cost)
+## Local modifications (track upstream sync cost)
 
 Each entry below is a local modification that creates merge friction
 with future upstream syncs. Audit when bumping the upstream baseline.
@@ -44,6 +44,6 @@ git log --diff-filter=AM --pretty='%h %ad %s' --date=short -- plugin/kfxgen/kfxl
 ## Why a fork instead of pinning Calibre's `kfxlib`?
 
 Calibre ships `kfxlib` as part of its KFX *input* plugin, not as an
-installable library. Vendoring is the path of least resistance for a
-KFX *output* plugin that needs the same Ion primitives. Re-syncing
-with upstream is manual; the table above is the audit trail.
+installable library. Keeping a trimmed copy is the path of least
+resistance for a KFX *output* plugin that needs the same Ion primitives.
+Re-syncing with upstream is manual; the table above is the audit trail.

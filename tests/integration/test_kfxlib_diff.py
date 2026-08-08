@@ -37,7 +37,7 @@ What this test asserts:
       present in upstream's output. Catches "fragment got dropped
       silently" regressions.
 
-Refresh procedure: see CONTRIBUTING.md → Vendored kfxlib.
+Refresh procedure: see CONTRIBUTING.md → The upstream kfxlib copy.
 """
 
 from __future__ import annotations
@@ -75,8 +75,8 @@ def upstream_kfxlib(tmp_path_factory):
     surgery; CI on a fresh checkout always has it."""
     if not VENDOR_ZIP.exists():
         pytest.skip(
-            f"Vendored kfxlib zip not found at {VENDOR_ZIP}; "
-            f"see CONTRIBUTING.md → Vendored kfxlib for refresh procedure."
+            f"Upstream kfxlib zip not found at {VENDOR_ZIP}; "
+            f"see CONTRIBUTING.md → The upstream kfxlib copy for refresh procedure."
         )
 
     extract_dir = tmp_path_factory.mktemp("kfxlib_upstream")

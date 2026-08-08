@@ -91,6 +91,60 @@ the log, so a persistently broken check is visible there.
 Set `KFXGEN_DRIFT_SKIP_UPSTREAM=1` to disable the upstream check entirely and
 keep only the offline comparison.
 
+### The KFX Input index check (#91)
+
+A second upstream check, independent of the Previewer one: it compares the
+installed KFX Input plugin against the version calibre publishes in its plugin
+index — the same JSON its own plugin updater reads. This exists because the
+vendored kfxlib pin and the drift baselines are maintained in different places,
+so each can look current on its own while the plugin that produced them has
+moved on. Amazon grew the shared `YJ_symbols` table past what the pinned kfxlib
+can name; a newer plugin is what would let us name the new symbols.
+
+**This one does run on the schedule**, and that was verified under the real
+agent rather than assumed — see below. It is bounded by the same
+`KFXGEN_DRIFT_PROBE_TIMEOUT`, and an unreachable, malformed, or renamed index
+reports `unknown`, never "up to date".
+
+Set `KFXGEN_DRIFT_SKIP_PLUGIN_INDEX=1` to disable it. `KFXGEN_PLUGIN_INDEX_URL`
+overrides the index location, which is also how the check's own behaviour is
+exercised — point it at a local `file://` bz2 and you can drive every state
+without waiting for Amazon to ship anything. `KFXGEN_CALIBRE_DEBUG` overrides
+the path to `calibre-debug`.
+
+#### Why the fetch goes through calibre
+
+`code.calibre-ebook.com` serves an **incomplete certificate chain** — it does not
+send its intermediate — so anything trusting only the OS store fails on it.
+Measured on this machine: `api.github.com` and `example.com` return 200 while
+that host gives `curl: (60) unable to get local issuer certificate`, and Xcode's
+`/usr/bin/python3` gives the urllib equivalent. It is the host, not the network
+and not `launchd`.
+
+calibre ships its own CA bundle, which is why its plugin updater reaches an index
+`curl` cannot. The check calls `calibre.utils.https.get_https_resource_securely`
+through `calibre-debug`, so it reads the index exactly as calibre does, and
+calibre is guaranteed present wherever this script has anything to check.
+
+#### Two traps this check walked into, both silent
+
+Recorded because each produced a **false all-clear** — the "a newer plugin
+exists" case reporting `current` — and each only in the conditions the schedule
+actually runs in:
+
+1. **stdin.** The Python is passed with `-c`, never on stdin. `run_bounded`'s
+   fallback backgrounds its command, and a background job in a non-interactive
+   shell has stdin redirected from `/dev/null`, so a heredoc-fed script arrives
+   empty, python exits 0 having done nothing, and that reads as success. The
+   fallback is only reached where `timeout` is absent, which is stock macOS.
+2. **Certificates.** The first two implementations used `urllib`, then `curl`.
+   Both worked by hand and returned `unknown` on every scheduled run.
+
+The lesson for anyone changing this: run it under the installed agent
+(`launchctl kickstart -k gui/$(id -u)/com.kfxgen.driftcheck`) and read the log
+line. A hand-run proves nothing about the schedule — that is what #92 already
+cost, and this check re-learned it twice.
+
 #### The upstream check is interactive-only
 
 It does not work under `launchd`, so the shipped plist disables it. Measured on
