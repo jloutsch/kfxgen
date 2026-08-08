@@ -26,7 +26,7 @@ Tag every test with the tier of oracle it relies on, so reviewers can tell
 
 | Tier | Marker | Oracle | Cost | Where it runs |
 |------|--------|--------|------|---------------|
-| 1 | `tier1` | In-process Python invariants (entity-id uniqueness, position-map subset relations, fragment-graph consistency — derived from `MEMORY.md` rules) | < 1 s | Pre-push hook + every PR |
+| 1 | `tier1` | In-process Python invariants (entity-id uniqueness, position-map subset relations, fragment-graph consistency — encoded in `tests/unit/test_kfx_invariants.py` and `tests/unit/test_position_map.py`) | < 1 s | Pre-push hook + every PR |
 | 2 | `tier2` | Calibre `kfxlib` differential decode (round-trips our output through an independent decoder) | seconds | Every PR |
 | 3 | `tier3` | Golden-file diff against synthetic regression corpus under `tests/fixtures/golden/expected/` (see [Golden corpus](#golden-corpus) below) | seconds | Every PR |
 | 4 | `device` | Manual verification on a physical Kindle (Paperwhite/Oasis/Voyage) | minutes, manual | Release tags only |
@@ -169,12 +169,21 @@ itself.
 
 ## KFX correctness invariants
 
-The hard-won format rules from device testing are kept in `MEMORY.md` at the
-project root. If you change anything that touches `$259`, `$260`, `$264`,
-`$265`, `$550`, or `$164`/`$417`, real-device validation (tier 4) is mandatory
-before merging. Tier-1 invariant tests (issue 43)
-encode many of these rules, but not all of them — when in doubt, test on
-device.
+The rules recovered from device testing are not yet collected in one place.
+Where they live today: `tests/unit/test_kfx_invariants.py` and
+`tests/unit/test_position_map.py` encode the ones that can be asserted,
+`CHANGELOG.md` records how each was found, and `plugin/kfxgen/native_generator.py`
+carries the reasoning next to the code that depends on it. Writing the missing
+explainer is tracked in issue 100.
+
+(An earlier version of this file pointed at a `MEMORY.md` at the project root.
+No such file has ever existed here, so anyone who followed that pointer found
+nothing.)
+
+If you change anything that touches `$259`, `$260`, `$264`, `$265`, `$550`, or
+`$164`/`$417`, real-device validation (tier 4) is mandatory before merging.
+Tier-1 invariant tests (issue 43) encode many of these rules, but not all of
+them — when in doubt, test on device.
 
 ## Public-domain corpus sweep
 
