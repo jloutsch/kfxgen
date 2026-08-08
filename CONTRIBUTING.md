@@ -80,8 +80,13 @@ Composite categorization markers (`unit`, `integration`, `slow`, `benchmark`,
 The tier-2 differential decode test (`tests/integration/test_kfxlib_diff.py`)
 compares output from our vendored `kfxlib_minimal` subset against Calibre's
 upstream `kfxlib` (jhowell's KFX Input plugin). That third-party plugin is
-**not redistributed in this repository** — its license does not grant
-redistribution rights. To run the tier-2 test, supply the zip locally at
+**not redistributed in this repository**, and the reason is narrower than "the
+license forbids it": the `kfxlib` *source* inside it is marked GPL v3, which is
+the grant kfxgen already relies on to vendor a modified subset (see `NOTICE`).
+What is not redistributed is the *packaged plugin zip* — a third-party build
+artifact that ships with no `LICENSE` file and no package-level terms, so
+nothing states how it may be passed on. To run the tier-2 test, supply the zip
+locally at
 `tests/fixtures/vendor/kfx_input_plugin.zip` using the procedure below; the
 test skips cleanly when the file is absent, so CI without it still passes.
 
