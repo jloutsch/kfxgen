@@ -364,7 +364,88 @@ otherwise turn its entire text into one raised run.
 
 ---
 
-## 7. Pitfalls
+## 7. The container, and the Ion layer underneath
+
+Everything above describes fragments. This section is about the envelope they
+travel in, and the encoding that turns them into bytes.
+
+### What a container carries
+
+| Fragment | Holds |
+|---|---|
+| `$270` | Container info — **required**. Container id, chunk size (4096), compression (`0`, none), DRM scheme (`0`, none), container format, and the entity map |
+| `$419` | Entity index — container id and the names of every entity in it |
+| `$490` | Book metadata, in three groups: audit, ebook, and title |
+| `$258` | Reading order metadata |
+| `$538` | Document data / reading order |
+| `$585` | Content features |
+
+The **entity map** in `$270` is a list of `[fragment type, entity id]` pairs
+naming everything the container holds. It is not decoration — this is what a
+reader consults to find fragments, and it is also why symbol allocation order
+matters: change the order symbols are created and the ids in this map shift,
+which is how the same book produced two different files (#96).
+
+### kfxgen identifies itself as Kindle Previewer
+
+`$490`'s audit group declares `file_creator: "KPR"` and
+`creator_version: "3.98.0"`. kfxgen is not Kindle Previewer and that is not the
+Previewer version currently installed — the values are there because readers and
+tooling expect a known producer, and an unrecognised one changes behaviour.
+
+Worth knowing before you "correct" it. It is a deliberate claim, not a stale
+constant, though nothing verifies which parts of the pipeline actually depend on
+it — if you have reason to change it, that dependency is unmapped and a device
+test is the only way to find out.
+
+The title group carries ASIN, `asset_id` (the container id), author, title, and
+`cde_content_type: "PDOC"` — personal document, which is what a sideloaded book
+is.
+
+### Ion, in one paragraph
+
+KFX is [Amazon Ion](https://amzn.github.io/ion-docs/) underneath: a typed,
+self-describing serialization format with both binary and text encodings. A
+fragment is an Ion struct; `$NNN` is not kfxgen notation but an Ion **symbol
+id** — an integer standing in for a name, resolved through a symbol table.
+
+That indirection is the reason this whole document is necessary. The names exist
+in Amazon's table; we get the integers.
+
+### Symbol tables
+
+Two tables are in play:
+
+- **`YJ_symbols`**, Amazon's shared table (version 10). A file *imports* it,
+  declaring a `max_id` — how many of its symbols the file uses. kfxgen declares
+  842, which is legal: an import may name a prefix. The highest symbol kfxgen
+  actually emits is `$790`.
+- **The local symbol table**, built per file, holding names kfxgen invents —
+  `content_1`, `s0_h`, `body_anchor_427`, `toc_anchor_0`. Every name a fragment
+  references must be created here first, or the file references a symbol that
+  does not exist.
+
+Amazon has grown `YJ_symbols` past what the pinned decoder knows — Previewer
+3.106.0 emits `max_id` 844, upstream `kfxlib` 20260520 knows 843, and our own
+trimmed copy knows 842. Harmless for generation, since kfxgen emits nothing up
+there, and tracked in #91.
+
+### The encoding layer
+
+`kfxlib_minimal` is a trimmed copy of jhowell's `kfxlib`, carrying the Ion
+binary and text codecs, the symbol table machinery, and the KFX/YJ container
+readers and writers. kfxgen does not implement Ion itself.
+
+That is a deliberate boundary. Bugs in serialization are upstream's territory
+and get fixed by re-syncing the copy; bugs in *what we serialize* are ours.
+The tier-2 differential decode exists precisely to tell those apart — it parses
+kfxgen's output with both our trimmed copy and the full upstream library, on the
+theory that where two decoders of shared ancestry disagree, one of them has
+found a real bug.
+
+---
+
+## 8. Pitfalls
 
 Each of these cost real debugging. They are listed with the issue that found
 them so the full reasoning is recoverable.
@@ -442,7 +523,7 @@ links resolve to nothing. Any new elision rule needs the same treatment.
 
 ---
 
-## 8. How to verify a claim
+## 9. How to verify a claim
 
 **Raw `.kfx` cannot be rendered locally.** Kindle Previewer rejects it and KFX
 Input fails on the position map, so structural checks predict and only a
@@ -470,7 +551,7 @@ Two techniques worth knowing:
 
 ---
 
-## 9. Where the rest of it lives
+## 10. Where the rest of it lives
 
 - `CHANGELOG.md` — how each rule was found, in the order it was found
 - `plugin/kfxgen/native_generator.py` — the reasoning, next to the code that depends on it
