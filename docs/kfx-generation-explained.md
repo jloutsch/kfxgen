@@ -392,20 +392,38 @@ which is how the same book produced two different files (#96).
 `creator_version: "3.98.0"`. kfxgen is not Kindle Previewer, and 3.98.0 is not
 the Previewer version installed today.
 
-**Nobody knows whether this matters.** The honest history: these values were
-copied from a reference file during early debugging, as one of a series of
-attempts to get output a reader would accept. The debugging log records that
-attempt as *"Still fails"* — it was not the fix. The values stayed, and nothing
-since has tested removing them. `3.98.0` was simply the Previewer version in use
-at the time.
+**The history:** these values were copied from a reference file during early
+debugging, as one of a series of attempts to get output a reader would accept.
+The debugging log records that attempt as *"Still fails"* — it was not the fix.
+The values stayed. `3.98.0` was simply the Previewer version in use at the time.
 
-So this is not a considered claim about identity, and it is not known to be load
-bearing. It is inherited. If you have reason to change it, no test will tell you
-whether it was safe — only a device will.
+**What testing shows (2026-08-07):** they appear not to be load bearing.
 
-Flagged rather than quietly fixed because the failure mode of "correcting" it is
-a book that behaves subtly differently on hardware, which is the slowest kind of
-bug this project has.
+Two builds of the same book, differing in exactly one fragment — the `$490`
+audit group present in one and absent in the other, 2,617 fragments each,
+verified identical elsewhere:
+
+| Check | With fields | Without |
+|---|---|---|
+| Upstream `kfxlib` decode | identical messages, features, warnings | identical |
+| Opens on device | yes | yes |
+| Note links, both directions | work | work |
+| TOC navigation | works | works |
+| Page Flip | works | works |
+| Reading progress | normal | normal |
+
+**What that does and does not establish.** It covers the visible reading surface
+on one device and one firmware. It does not cover Amazon-side features a
+sideloaded personal document never reaches — store integration, X-Ray, Word
+Wise, cross-device sync — nor any behaviour gated on `creator_version` in a
+firmware not tested. Upstream `kfxlib` never reads either field, so the decode
+comparison is weak evidence by itself; the device run is what carries weight
+here.
+
+So the values are inherited and, on everything that can be observed from a
+sideload, unnecessary. They are still emitted, because "no observed difference"
+and "safe to remove" are not the same claim, and the cost of keeping them is 54
+bytes.
 
 The title group carries ASIN, `asset_id` (the container id), author, title, and
 `cde_content_type: "PDOC"` — personal document, which is what a sideloaded book
