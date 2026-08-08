@@ -96,7 +96,80 @@ and the reader silently renders the run as plain text or jumps somewhere else.
 
 ---
 
-## 3. Symbols, and how much to trust each one
+## 3. The table of contents
+
+The TOC does more work here than its name suggests. It is not only what the
+reader taps — **it decides where chapters begin.** Get it wrong and the book's
+structure is wrong, not merely its navigation.
+
+### Where it comes from
+
+Calibre parses the EPUB's nav document or NCX and exposes `oeb_book.toc`.
+`_extract_toc_with_hrefs` walks that tree recursively and keeps three things per
+entry: `title`, `href`, and `level`. Nothing else survives, and nothing is
+invented — a book with no TOC yields an empty list and the caller falls back to
+one chapter per spine file.
+
+### How it becomes chapter boundaries
+
+`_assemble_chapters_by_coordinate` resolves every TOC entry to a
+`(spine file, block index)` coordinate, then slices the flattened block stream
+between consecutive coordinates. Each slice is a chapter.
+
+Consequences worth internalising:
+
+- **Two TOC entries pointing into the same file split that file.** This is how a
+  single `chapter.xhtml` containing three sections becomes three chapters (#23).
+- **An entry whose href is not in the spine is dropped**, with a warning. It
+  cannot become a chapter because there is no content to slice.
+- **An entry whose fragment does not exist snaps forward** to the block after
+  the previous entry's, rather than being discarded. The log records the snap.
+- **Content before the first TOC coordinate** is kept only if it carries an
+  anchor the TOC references, or is not image-only. A cover image sitting ahead
+  of the first entry is dropped rather than becoming a phantom chapter.
+
+### The Contents page kfxgen builds
+
+kfxgen synthesizes its own Contents chapter rather than passing the source's
+through. Each chapter title becomes an entry linking to a `toc_anchor_N` `$266`,
+which names that chapter's start position.
+
+**Those anchors must target a leaf `$259` child** — one with a `$145` content
+reference and, for the first, `$790: 1`. Kindle treats the outer wrapper
+position as non-navigable, so a TOC entry pointing at a wrapper is not a broken
+link; it is a link that does nothing at all when tapped, which is considerably
+harder to notice.
+
+Chapter titles also drive the synthesized heading, which is where two elision
+rules come from: a body heading duplicating the chapter title is stripped
+(#62), and an opener split across several blocks — numeral in one, title in the
+next — is consumed as a unit (#64). Both remove blocks, and both must carry any
+anchors on those blocks forward or the links die.
+
+### `$389`, the navigation fragment
+
+The shape matches real Kindle books: the value is a **list** containing one
+struct, carrying `$178: $351` (reading-order reference) and `$392` (navigation
+containers). Two containers are emitted — the TOC (`$235: $212`) and landmarks
+(`$235: $236`).
+
+### What TOC extraction must ignore
+
+Navigation documents contain markup that is structure, not reading content, and
+treating it as text is a visible defect. Two signals are honoured:
+
+- the HTML5 `hidden` attribute — the producer said not to display this
+- an `epub:type` naming a non-rendered navigation kind: `page-list`,
+  `landmarks`, `lot`, `loi`, `lov`
+
+`page-list` is the one that bites. An EPUB 3 print-pagination nav holds one
+entry per printed page, which arrived as several hundred bare page numbers in
+the body text (#60). Nested lists and tail flags were the other two extraction
+bugs (#58, #59).
+
+---
+
+## 4. Symbols, and how much to trust each one
 
 The bundled `yj_symbol_catalog.py` names almost nothing — 284 of its entries are
 `$NNN?` placeholders. Meaning is recovered empirically, so each entry below
@@ -146,7 +219,152 @@ structure, never confirmed.
 
 ---
 
-## 4. Pitfalls
+## 5. Notes and internal links
+
+A footnote is two halves that must agree: a **marker** in the chapter that links
+to the note, and an **anchor** on the note that the marker resolves to. Most of
+the ways this breaks are one half being right while the other is missing, which
+looks like nothing at all on screen — the run renders as plain text.
+
+### Resolving a target
+
+`_resolve_link_target` normalises every in-book `<a href>` to one key shape,
+`"<file>#<fragment>"`, so both halves agree on a single string:
+
+- `#frag` alone resolves against **the file the markup came from**, so a marker
+  in a chapter and the note it points at agree.
+- `notes.xhtml#n1` resolves against **the containing document's directory**.
+  Keys were once bare basenames, so `text/notes.xhtml` and `back/notes.xhtml`
+  produced the same key and the first document silently won every link aimed at
+  either. That failed quietly — the link resolved, nothing reported as dangling,
+  and the reader simply landed in the wrong chapter (#69).
+- A leading `../` is an ordinary cross-folder link, not something to discard.
+- Any URL scheme, absolute path, or traversal out of the book root is rejected.
+  These leave the book and cannot be anchors.
+
+A TOC entry may name a whole file with no fragment, so the first block of every
+document also gets a bare-filename key. Without it, a file that declares no ids
+anywhere is unreachable and the link is dropped (#62).
+
+### Emitting the anchors
+
+Only ids that something **actually links to** get a `$266`. A real book's markup
+carries thousands of ids — `kobo.4.2`, `ji_364`, one per sentence in some
+producers — and emitting a fragment each would bloat the container for no
+reading benefit.
+
+Targets that nothing declares are dropped rather than emitted dangling. An
+anchor that resolves to nothing is worse than an unlinked run, because the
+reader has no way to tell you it failed.
+
+### Where the anchor points
+
+The anchor carries the marker's character offset within its paragraph (`$143`),
+so the return link lands on the marker rather than the paragraph's first line.
+When a paragraph is longer than `CHUNK_SIZE` and splits across several chunks,
+the offset rebases into the chunk that actually contains the marker.
+
+Two markers in one paragraph therefore get **distinct** anchors — before `$143`
+they collapsed to the same position and were indistinguishable (#79).
+
+### Rendering the marker
+
+A raised run is a `$157` with a reduced `$16` **and** a `$31` baseline shift.
+Defaults, all device-confirmed and overridable per conversion (#68):
+
+| Value | Default | Environment variable |
+|---|---|---|
+| Font size | 0.75 rem | `KFXGEN_SUPERSCRIPT_FONT_SIZE` |
+| Superscript shift | +35% | `KFXGEN_SUPERSCRIPT_SHIFT_PCT` |
+| Subscript shift | −20% | `KFXGEN_SUBSCRIPT_SHIFT_PCT` |
+
+They are overridable because they were recovered from a handful of reference
+files and confirmed on one device model; a Kindle that disagrees can be
+corrected without a rebuild.
+
+Publisher EPUBs rarely use `<sup>`. They wrap the marker in a `<span>` whose
+class carries `vertical-align`, and the value is as often a raw length
+(`0.25em`) as the `super` keyword — both routes have to be recognised. Note
+that the CSS route depends on Calibre's Stylizer, which only exists inside
+Calibre: the local end-to-end shim exercises the tag route only, so the CSS
+route is unit-tested against an injected resolver rather than end to end.
+
+A run that is **only** a link gets no `$157`. Reference KFX leaves link spans
+unstyled and lets the reader render them.
+
+### The invariant that catches regressions
+
+Wherever a return link lands must be exactly where the marker pointing at that
+note sits — same position **and** same offset. That is the property that broke
+in #79 and it is now a standing test.
+
+Measured on a trade book with 2,367 anchors and 1,950 reciprocal pairs: before
+the fix, 975 of 1,950 return links landed on their marker — only the ones that
+happened to sit at a paragraph start. After, 1,950 of 1,950.
+
+---
+
+## 6. Images, fonts, and styling
+
+### Images
+
+Body images become their own `$259` entries — `$159: $271`, a `$175` naming the
+resource, and `$584` carrying alt text — paired with a `$164` describing the
+resource and a `$417` holding the bytes. They hold no text, so they carry no
+`$145` reference.
+
+They still occupy a position. Image entries get a synthetic one-character
+offset in `$265` so they receive their own entry without colliding with
+adjacent text. Excluding them broke navigation in image-heavy chapters: the
+surrounding storyline had unmapped positions and the reader bailed out to the
+start of the book.
+
+Each image is classified by pixel size, and the class picks the `$157`:
+
+| Class | Test | Style |
+|---|---|---|
+| `page` | ≥ 600 × 600 | `s_img_page` |
+| `small` | ≤ 300 × 300 and aspect ratio ≤ 1.4 | `s_img_sm` |
+| `inline` | anything else, including unknown dimensions | `s_img` |
+
+Optimization gates on **both** dimensions and bytes (`DEFAULT_MAX_DIM` 2048,
+`DEFAULT_MAX_BYTES` 1 MB). It once triggered on dimensions alone, so an image
+well inside the pixel budget but enormous in bytes passed through untouched
+(#55).
+
+Anything under 100 bytes, or without a JPEG/PNG magic number, is not treated as
+an image at all.
+
+### Fonts
+
+`$418` holds the font bytes and `$262` the `@font-face` declaration — the exact
+analogues of `$417` and `$164` for images. `$11` is the family, `$13` the weight
+(`$361` bold), `$12` the style (`$382` italic).
+
+The matching model is the thing to understand: **Kindle matches a run to a face
+by family, weight, and style together.** The `$157` applied to a run must carry
+that run's own weight and style, or a bold run resolves against the regular face
+descriptor and falls back to a synthesized face (#50).
+
+`docs/kfx-embedded-fonts-reference.md` covers this subsystem in detail.
+
+### Block styling
+
+Block styles come from Calibre's Stylizer, which computes CSS per element. That
+matters for testing: **Stylizer only exists inside Calibre**, so any CSS-driven
+behaviour is unit-tested against an injected resolver and cannot be exercised by
+the local end-to-end shim.
+
+What is carried: alignment (`$34`), text-indent, and left/right margins. Inline
+emphasis becomes character spans rather than block properties.
+
+One asymmetry worth knowing: `vertical-align` is consulted **only** for inline
+descendants, never for the block element itself. A paragraph carrying it would
+otherwise turn its entire text into one raised run.
+
+---
+
+## 7. Pitfalls
 
 Each of these cost real debugging. They are listed with the issue that found
 them so the full reasoning is recoverable.
@@ -224,7 +442,7 @@ links resolve to nothing. Any new elision rule needs the same treatment.
 
 ---
 
-## 5. How to verify a claim
+## 8. How to verify a claim
 
 **Raw `.kfx` cannot be rendered locally.** Kindle Previewer rejects it and KFX
 Input fails on the position map, so structural checks predict and only a
@@ -252,7 +470,7 @@ Two techniques worth knowing:
 
 ---
 
-## 6. Where the rest of it lives
+## 9. Where the rest of it lives
 
 - `CHANGELOG.md` — how each rule was found, in the order it was found
 - `plugin/kfxgen/native_generator.py` — the reasoning, next to the code that depends on it
