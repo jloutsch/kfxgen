@@ -91,6 +91,12 @@ To run the tier-2 test, supply the zip locally at
 `tests/fixtures/vendor/kfx_input_plugin.zip` using the procedure below; the
 test skips cleanly when the file is absent, so CI without it still passes.
 
+Running it also needs `Pillow` and `beautifulsoup4`, which upstream `kfxlib`
+imports and kfxgen does not. Both are in `requirements-dev.txt`; if you set up
+before they were added, re-run `pip install -r requirements-dev.txt` or the
+suite errors at setup rather than skipping. That gap went unnoticed for as long
+as nobody ran tier-2, which is the point #99 is about.
+
 **Setup / refresh procedure** (supply the zip, or refresh it when upstream
 Calibre's KFX Input plugin ships a new version worth diffing against):
 
