@@ -23,6 +23,26 @@ sphinx-rtd-theme>=2.0.0
 # HarfBuzz (text shaping - will be critical for Phase 2)
 uharfbuzz>=0.38.0
 
+# Needed to IMPORT jhowell's kfxlib in the tier-2 differential decode
+# (tests/integration/test_kfxlib_diff.py). kfxgen itself uses neither.
+#
+# Pillow is not a re-add of the dependency #104 removed: that was kfxgen's own
+# unused import. This is upstream kfxlib's, and removing ours quietly broke a
+# suite nobody runs — following CONTRIBUTING's tier-2 procedure produced 32
+# setup errors instead of a result, and had for as long as nobody looked (#99).
+#
+# The "#104" that removed it lives in this project's PRIVATE tracker, not here.
+# Do not chase it in this repo: numbering has grown past it and #104 now
+# resolves to an unrelated pull request.
+#
+# beautifulsoup4 is the second option in upstream's soup-parser fallback chain
+# (calibre.utils.soupparser -> bs4 -> BeautifulSoup). With it present, tier-2
+# runs outside Calibre's interpreter; without it, the chain exhausts and the
+# error surfaces as "No module named 'calibre'", which reads as "this can only
+# run inside Calibre" and is misleading.
+Pillow>=10.0.0
+beautifulsoup4>=4.12.0
+
 # Development tools (optional, Python 3.10+ only)
 # ipython>=8.20.0
 # ipdb>=0.13.13
