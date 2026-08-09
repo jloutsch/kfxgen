@@ -2189,6 +2189,44 @@ class NativeKFXGenerator:
             chapters = [cover_chapter] + chapters
 
         ch_data = self._build_chapter_content(chapters)
+
+        # Drop image resources no chunk displays (#102). Resources are emitted
+        # from the manifest before chunks exist, so what is actually referenced
+        # is only knowable now: publishers ship unused assets, and content
+        # kfxgen elides takes its <img> references with it. Left in, the $164
+        # and its $417 bytes are dead weight that upstream grades ERROR, and
+        # Amazon-produced files carry none.
+        #
+        # The cover is exempt and must be: it is referenced through $490's
+        # cover_image value, not a $259 entry, so a rule that only consulted
+        # $259 would delete it on any book whose cover is not also in the
+        # reading flow. `image_resources` maps the cover's basename to the same
+        # names, so the exemption is by name rather than by entry.
+        _displayed = {
+            c.get("resource")
+            for c in ch_data["all_chunks"]
+            if isinstance(c, dict) and c.get("type") == "image"
+        }
+        _orphans = {
+            (res, loc)
+            for base, (res, loc) in image_resources.items()
+            if res not in _displayed and res != cover_resource_name
+        }
+        if _orphans:
+            _dead_names = {n for pair in _orphans for n in pair}
+            self.fragments = [
+                f for f in self.fragments if str(f.fid) not in _dead_names
+            ]
+            image_resources = {
+                base: pair
+                for base, pair in image_resources.items()
+                if pair not in _orphans
+            }
+            self.image_resources = image_resources
+            # Recorded rather than logged: this method has no logger, and the
+            # neighbouring basename-collision diagnostic uses the same channel.
+            self._dropped_image_resources = sorted(res for res, _loc in _orphans)
+
         story_names = ch_data["story_names"]
         storyline_names = ch_data["storyline_names"]
         content_names = ch_data["content_names"]

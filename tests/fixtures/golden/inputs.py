@@ -209,6 +209,43 @@ def make_marker_offsets(out_dir: Path) -> Path:
     )
 
 
+def make_unused_manifest_image(out_dir: Path) -> Path:
+    """A book whose manifest declares an image no `<img>` references.
+
+    Publishers ship unused assets, and content kfxgen elides takes its image
+    references with it. Either way the resource and its bytes were emitted and
+    then pointed at by nothing, which upstream grades ERROR (#102).
+
+    The cover is here deliberately: it is referenced through `$490` metadata
+    rather than a `$259` entry, so a prune that only looks at `$259` would
+    delete it. This fixture fails if that happens.
+    """
+    body = (
+        "<p>Opening paragraph.</p>\n"
+        '<p><img src="used.jpg" alt="a referenced image"/></p>\n'
+        "<p>Closing paragraph.</p>"
+    )
+    return (
+        EpubBuilder()
+        .set_metadata(title="Unused Manifest Image", author="Golden Author")
+        .set_cover(_MINIMAL_JPEG)
+        .add_chapter("Images", _xhtml_page("Images", body).encode())
+        .add_manifest_item(
+            item_id="used",
+            href="used.jpg",
+            media_type="image/jpeg",
+            data=_MINIMAL_JPEG,
+        )
+        .add_manifest_item(
+            item_id="unused",
+            href="unused.jpg",
+            media_type="image/jpeg",
+            data=_MINIMAL_JPEG,
+        )
+        .build(out_dir, "unused_manifest_image")
+    )
+
+
 def _epub3_page(title: str, body_html: str) -> str:
     """Like `_xhtml_page` but declaring the `epub:` namespace.
 
@@ -436,4 +473,5 @@ GOLDEN_INPUTS: list[tuple[str, callable]] = [
     ("publisher_structure", make_publisher_structure),
     ("long_chapter", make_long_chapter),
     ("marker_offsets", make_marker_offsets),
+    ("unused_manifest_image", make_unused_manifest_image),
 ]
