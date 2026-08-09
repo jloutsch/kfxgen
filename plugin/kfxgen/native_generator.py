@@ -2966,10 +2966,18 @@ class NativeKFXGenerator:
             text_positions = [
                 i for i in range(start, end) if all_chunks[i].get("type") == "text"
             ]
-            groups, refs = pack_content_fragments(
-                [all_chunks[i]["text"] for i in text_positions],
-                start_index=next_content_index,
-            )
+            if text_positions:
+                groups, refs = pack_content_fragments(
+                    [all_chunks[i]["text"] for i in text_positions],
+                    start_index=next_content_index,
+                )
+            else:
+                # A chapter with no text at all — a cover is the usual case —
+                # must emit no $145. Packing an empty list still returns one
+                # group, which became an empty content fragment that nothing
+                # referenced: upstream grades that ERROR and Amazon-produced
+                # files carry none. (#102)
+                groups, refs = [], []
             for name, strings in groups:
                 content_names.append(name)
                 self.fragments.append(
@@ -3015,14 +3023,28 @@ class NativeKFXGenerator:
             body_name = _allocate_style("", font_size=fs)
             story_names.append(body_name)
 
-            heading_fs = round(max(fs * self.HEADING_FONT_SIZE, 1.0), 4)
-            mt = 2.0 if i > 0 else None
-            heading_name = _allocate_style(
-                "_h", font_size=heading_fs, bold=True, margin_top=mt, is_heading=True
-            )
-            heading_style_names[i] = heading_name
-            if heading_name not in extra_style_names:
-                extra_style_names.append(heading_name)
+            # Only chapters that actually emitted a heading chunk need a
+            # heading style. A cover emits none, and allocating one anyway left
+            # a $157 nothing applied — an unreferenced fragment upstream grades
+            # ERROR (#102).
+            #
+            # Derived from what the chunk loop emitted rather than re-deriving
+            # the omit_heading condition here, which would be two copies of one
+            # rule free to drift apart.
+            ch_start, ch_end = chapter_chunk_ranges[i]
+            if any(ch_start <= h < ch_end for h in heading_chunk_indices):
+                heading_fs = round(max(fs * self.HEADING_FONT_SIZE, 1.0), 4)
+                mt = 2.0 if i > 0 else None
+                heading_name = _allocate_style(
+                    "_h",
+                    font_size=heading_fs,
+                    bold=True,
+                    margin_top=mt,
+                    is_heading=True,
+                )
+                heading_style_names[i] = heading_name
+                if heading_name not in extra_style_names:
+                    extra_style_names.append(heading_name)
 
             if chapter.get("toc_links"):
                 link_name = _allocate_style("_link", font_size=fs, underline=True)
