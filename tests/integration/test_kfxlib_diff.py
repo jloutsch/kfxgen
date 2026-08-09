@@ -277,3 +277,34 @@ class _MessageCollector:
 
     def __getattr__(self, _name):
         return self._record
+
+
+@pytest.mark.tier2
+@pytest.mark.integration
+@pytest.mark.parametrize("name,builder", GOLDEN_INPUTS)
+def test_upstream_reports_no_unreferenced_fragments(
+    name, builder, upstream_kfxlib, built_kfx
+):
+    """Every fragment kfxgen emits must be reachable (#102).
+
+    Upstream grades unreferenced fragments ERROR, and Amazon-produced files
+    carry none. They are dead weight in the container, and — more usefully —
+    a signal that something allocates a fragment it never fills.
+
+    Asserted through upstream's own rule rather than a local reimplementation:
+    a first attempt at computing "unreferenced" here reported zero on a file
+    upstream flagged four times, because $270's entity map and $419's index
+    enumerate every entity by design and make everything look referenced.
+    """
+    from kfxlib.message_logging import set_logger
+
+    messages: list[str] = []
+    set_logger(_MessageCollector(messages))
+    try:
+        book = upstream_kfxlib(str(built_kfx(name, builder)))
+        book.decode_book()
+    finally:
+        set_logger(None)
+
+    unreferenced = [m for m in messages if "Unreferenced fragments" in m]
+    assert not unreferenced, f"{name}: {unreferenced[0]}"
