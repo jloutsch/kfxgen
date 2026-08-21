@@ -84,18 +84,45 @@ with future upstream syncs. Audit when bumping the upstream baseline.
 | Date | Issue | PR | Modification |
 |---|---|---|---|
 | 2025-12-31 | — | (initial) | Trimmed upstream `kfxlib` to the minimum surface needed by kfxgen (Ion binary/text/symbol-table, kfx/yj container, message logging). Heavy deps (pypdf, PIL, lxml-only paths) removed. |
-| 2026-01-05 | — | (foundation) | `standard_symbols.py` and `yj_symbol_catalog.py` populated for native KFX generation (Phase 1 — gap fix + standard symbols). |
+| 2026-01-05 | — | (foundation) | `yj_symbol_catalog.py` populated for native KFX generation (Phase 1 — gap fix). Derived from upstream; ~97% shared with `kfxlib` 20260520. |
+| 2026-01-05 | — | (foundation) | `standard_symbols.py` added. **Not derived from upstream** — see the note below. Original kfxgen work that happens to live in this directory. |
 | 2026-02-17 | — | v5.1.0 | Lint pass: unused imports removed, lambda assignment replaced. Mechanical only. |
 | 2026-03-02 | — | v5.2.0 | TOC off-by-one fixes touched serialization paths in this directory. |
 | 2026-05-03 | issue 47 | PR 66 | `Deserializer.extract` length-field bound (`MAX_DECODE_SIZE`, default 64 MB). Negative-size and oversized-size paths raise distinct errors BEFORE the slice. Single choke point defends every length-bounded read in `ion_binary.py`. |
 | 2026-05-03 | issue 47 | (PR D) | `MAX_DECODE_SIZE` accepts `KFXGEN_MAX_DECODE_SIZE` env override at import time. Default unchanged (64 MB). See [SECURITY.md → Advanced configuration](../../../SECURITY.md). |
 | 2026-05-03 | — | PR 56/PR 67 | Pre-commit framework added at repo root; ruff format/lint may have touched files in this directory. Mechanical only. |
+| 2026-08-21 | — | PR 110 | Corrected `standard_symbols.py`'s copyright header, which a directory-wide attribution sweep (#4) had credited to John Howell. See below. |
 
 To regenerate this list:
 
 ```bash
 git log --diff-filter=AM --pretty='%h %ad %s' --date=short -- plugin/kfxgen/kfxlib_minimal/
 ```
+
+### `standard_symbols.py` is not vendored code
+
+Everything else in this directory is derived from upstream `kfxlib`. That file is
+not, and the distinction is easy to lose because of where it sits.
+
+Measured against `kfxlib` 20260520: no upstream module defines these names, no
+`standard_symbols.py` exists upstream at all, and **0 of its 247 symbols** appear
+anywhere in that source as string literals. `STANDARD_SYMBOLS` holds *local*
+symbol names — content and style names such as `c0`, `c1AJ-ad`, `s28K`, `sV5` —
+harvested by decoding Kindle Previewer output. Same provenance as the rest of
+kfxgen's format knowledge: observation of Amazon's own files, not upstream source.
+
+It lives here because `StandardSymbolTable` subclasses the vendored
+`LocalSymbolTable`. That places it in the same GPL v3 combined work, which it
+already was project-wide, but subclassing does not transfer authorship.
+
+Commit `b2a1782` (#4) added an identical attribution header to six files in this
+directory in one pass. It was right about five and wrong about this one; the
+header now names the actual author. Worth remembering when the next
+directory-wide sweep is tempting — this directory is not uniform.
+
+For contrast, `__init__.py` carries no attribution header and keeps none. It is
+original packaging work, but what it re-exports is upstream's API surface, which
+puts it closer to derived than `standard_symbols.py` rather than further.
 
 ## Why a fork instead of pinning Calibre's `kfxlib`?
 
