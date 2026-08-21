@@ -308,3 +308,100 @@ def test_upstream_reports_no_unreferenced_fragments(
 
     unreferenced = [m for m in messages if "Unreferenced fragments" in m]
     assert not unreferenced, f"{name}: {unreferenced[0]}"
+
+
+def _catalog_names(table) -> list[str]:
+    """Symbol names as the decoder sees them.
+
+    A trailing `?` in the catalog source is an annotation meaning "this id
+    exists but has never been observed in real content"; `LocalSymbolTable`
+    strips it on load (`ion_symbol_table.py:266`), so `$835?` and `$835`
+    are the same symbol at the same id. Comparing raw source strings would
+    report drift that does not exist.
+    """
+    return [s[:-1] if s.endswith("?") else s for s in table.symbols]
+
+
+@pytest.mark.tier2
+@pytest.mark.integration
+def test_yj_symbol_catalog_is_prefix_of_upstream(upstream_kfxlib):
+    """Our `YJ_symbols` catalog must be a *prefix* of upstream's (#91).
+
+    kfxgen declares `max_id = len(YJ_SYMBOLS.symbols)` when it imports the
+    shared table, and every reader — upstream kfxlib, and the device —
+    truncates its own copy to that length. So a shorter catalog is safe:
+    the ids we use resolve identically. What is *not* safe is upstream
+    renaming or renumbering an id inside the range we already declare,
+    because every `$NNN` we emit would then mean something else.
+
+    Asserting the prefix property rather than an exact symbol count is
+    deliberate. Amazon appends to this table as firmware evolves — the
+    count is expected to drift and a count assertion would fail on every
+    upstream release while telling us nothing. This assertion only fires
+    on the change that would actually corrupt generated files.
+    """
+    from kfxlib.yj_symbol_catalog import YJ_SYMBOLS as upstream_symbols
+
+    from kfxgen.kfxlib_minimal.yj_symbol_catalog import YJ_SYMBOLS as ours
+
+    assert ours.name == upstream_symbols.name
+    assert ours.version == upstream_symbols.version, (
+        f"YJ_symbols table version moved: ours v{ours.version}, "
+        f"upstream v{upstream_symbols.version}. A version bump means the "
+        f"shared table was redefined, not just extended — re-sync the fork."
+    )
+
+    mine = _catalog_names(ours)
+    theirs = _catalog_names(upstream_symbols)
+
+    assert len(mine) <= len(theirs), (
+        f"Our catalog declares {len(mine)} symbols, upstream knows only "
+        f"{len(theirs)}. We would import a max_id upstream cannot satisfy."
+    )
+
+    mismatched = [
+        (10 + i, mine[i], theirs[i]) for i in range(len(mine)) if mine[i] != theirs[i]
+    ]
+    assert not mismatched, (
+        f"YJ_symbols renumbered inside the range kfxgen emits — every "
+        f"generated file would carry wrong symbol ids. First offenders: "
+        f"{mismatched[:5]}"
+    )
+
+
+@pytest.mark.tier2
+@pytest.mark.integration
+def test_vendored_pin_matches_the_zip_it_describes():
+    """`kfx_input_plugin.version.txt` must state the zip's real version (#91).
+
+    The zip is not committed (its license does not grant redistribution), so
+    the sidecar is the *only* committed record of which upstream this repo was
+    checked against. The audit table in `kfxlib_minimal/README.md` and the
+    drift watch in `research/kfx-format-baseline/` both reason from it.
+
+    Nothing tied the two together. Refreshing the zip without the sidecar — or
+    the sidecar without the zip — leaves both files individually plausible and
+    every conclusion drawn from them wrong, which is the failure mode #91 was
+    filed to prevent.
+    """
+    version_file = VENDOR_ZIP.parent / "kfx_input_plugin.version.txt"
+    if not VENDOR_ZIP.exists():
+        pytest.skip(f"Upstream kfxlib zip not found at {VENDOR_ZIP}")
+
+    assert version_file.exists(), (
+        f"{version_file.name} is missing. It is the only committed record of "
+        f"which upstream kfxlib the vendored zip holds."
+    )
+
+    with zipfile.ZipFile(VENDOR_ZIP) as zf:
+        version_py = zf.read("kfxlib/version.py").decode("utf-8")
+
+    namespace: dict = {}
+    exec(compile(version_py, "kfxlib/version.py", "exec"), namespace)
+    actual = str(namespace["__version__"])
+    pinned = version_file.read_text().strip()
+
+    assert pinned == actual, (
+        f"Vendored pin says kfxlib {pinned}, but the zip contains {actual}. "
+        f"Refresh both together — see CONTRIBUTING.md → the upstream kfxlib copy."
+    )

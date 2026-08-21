@@ -13,8 +13,37 @@ copyright "2016-2025, John Howell"). Update this on every re-sync.
 | Field | Value |
 |-------|-------|
 | Fork baseline (approx.) | jhowell `kfxlib` ≈ late-2025; the fork carries no `version.py` |
-| Latest upstream compared | `kfxlib` **20260520** (KFX Input 2.33.0) — measured 2026-07-04 |
-| Drift at that comparison | 13 catalog symbols behind (`$835`–`$846`, `$851`); `YJ_symbols` table version **10** (unchanged); `ROOT_FRAGMENT_TYPES` identical. **Benign for generation** — kfxgen emits none of the missing symbols. |
+| Latest upstream compared | `kfxlib` **20260520** (KFX Input 2.33.0) — re-measured 2026-08-21 (#91) |
+| Drift at that comparison | `YJ_symbols` table version **10** (unchanged); `ROOT_FRAGMENT_TYPES` identical. Our catalog holds **842** symbols (`$10`–`$851`), upstream **843** (`$10`–`$852`). The one extra entry is itself an unnamed placeholder. **Benign for generation.** |
+
+### `YJ_symbols` catalog: what the numbers mean (#91)
+
+The earlier reading of this drift as "13 catalog symbols behind (`$835`–`$846`,
+`$851`)" was measuring the wrong thing. Those 13 entries differ from upstream's
+only by a trailing `?`, which is an annotation meaning "this id exists but has
+never been observed in real content" — `ion_symbol_table.py:266` strips it on
+load, so `$835?` and `$835` are the same symbol at the same id. The annotation
+has no effect on encoding or decoding. The only real difference is table length.
+
+Length is safe to lag, and deliberately not bumped. `StandardSymbolTable`
+imports the shared table with `max_id = len(YJ_SYMBOLS.symbols)` — currently
+**842** — and every reader truncates its own copy to that length, so the ids
+kfxgen emits resolve identically on a device whose table is longer. Raising it
+to 843 would shift every local symbol id by one and rewrite every generated
+file, in exchange for a placeholder kfxgen never emits. Against a format whose
+only real verification is a device sideload, that is a bad trade.
+
+For scale: Kindle Previewer 3.106 declares `max_id` **844** (`+9=853`), which is
+why upstream `kfxlib` 20260520 warns when decoding Amazon's own output. That
+warning is about upstream's table, not ours, and appears on Amazon-produced
+files only.
+
+What *would* break generation is upstream renaming or renumbering an id inside
+the range we already declare — every `$NNN` kfxgen emits would then mean
+something else. That is asserted by
+`tests/integration/test_kfxlib_diff.py::test_yj_symbol_catalog_is_prefix_of_upstream`
+(tier-2), which checks the prefix property rather than a symbol count, so it
+stays quiet when Amazon appends and fires only on the change that matters.
 
 Drift detection + re-sync procedure: `research/kfx-format-baseline/`
 (a fixed Amazon-engine conversion whose symbol/fragment inventory is diffed
