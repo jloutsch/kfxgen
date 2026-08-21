@@ -7,16 +7,81 @@ issue 42.
 ## Local setup
 
 ```sh
-pip install -r requirements-dev.txt
+python3.13 -m venv .venv                    # `.venv` at the repo root, gitignored
+.venv/bin/pip install -r requirements-dev.txt
 pre-commit install                          # pre-commit hooks (lint, format, path/binary guards)
 pre-commit install --hook-type pre-push     # pre-push hook (tier-1 unit tests)
 ```
+
+The venv path matters to more than tidiness: the tier-1 pre-push hook runs
+`.venv/bin/pytest` when that exists and falls back to `pytest` on PATH when it
+does not. A system Python usually lacks `hypothesis` (four `tests/unit`
+modules import it), so the fallback fails at collection — a missing
+environment that reads as a broken gate. If you keep your environment
+somewhere else, or work in a git worktree where `.venv` was never created,
+either symlink it to `.venv` or expect to run tier-1 by hand.
 
 The hooks (issue 56) give fast
 local feedback. They are NOT a CI replacement — outside contributors won't
 have hooks installed, so CI remains the canonical gate. Bypass with
 `SKIP=hook-id git commit` or `git push --no-verify` if you have a real
 reason; CI will still catch it.
+
+### If you have a global `core.hooksPath`
+
+`pre-commit install` refuses to run when `core.hooksPath` is set, and git
+ignores `.git/hooks` entirely while it is — so the two commands above can
+leave you believing the gate is installed when nothing runs. Check first:
+
+```sh
+git config --get core.hooksPath        # prints nothing and exits 1 when unset —
+                                       # that "failure" is the good case
+```
+
+If it prints a path, pick one of the two remedies below. Both need the install
+itself run with the setting neutralised, because `pre-commit install` refuses
+outright while it is present:
+
+```sh
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0= \
+  pre-commit install --hook-type pre-push
+```
+
+**Option A — point this repo at its own hooks.** Simplest, and needs no
+chaining:
+
+```sh
+git config --local core.hooksPath "$(git rev-parse --git-path hooks)"
+```
+
+The cost is that whatever lives in your global hooks directory no longer runs
+*for this repo*. If that directory holds something you rely on everywhere — a
+secret scanner, for instance — you want Option B instead.
+
+**Option B — chain from the global hook to the repo's.** Keeps both. Add this
+to the `pre-push` file in your global hooks directory (the `pre-commit` file
+there needs the same treatment, with `pre-push` swapped for `pre-commit`):
+
+```sh
+#!/usr/bin/env bash
+LOCAL_HOOK="$(git rev-parse --git-dir)/hooks/pre-push"
+if [[ -x "$LOCAL_HOOK" ]]; then
+  exec "$LOCAL_HOOK" "$@"
+fi
+```
+
+Forwarding `"$@"` is not optional — pre-push hooks are handed the remote name
+and URL as arguments and the ref list on stdin, and `exec` preserves both.
+
+Then verify it fires rather than assuming, because a pre-push hook that is
+present but never invoked reports nothing and looks exactly like one that
+passes:
+
+```sh
+git init --bare /tmp/hooktest.git
+git push /tmp/hooktest.git HEAD        # the tier-1 run must appear in the output
+rm -rf /tmp/hooktest.git
+```
 
 ## Oracle hierarchy
 
