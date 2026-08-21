@@ -57,19 +57,30 @@ repos:
         pass_filenames: true
         stages: [pre-commit]
 
-      # pytest-tier1 uses language: system, which requires `python3 -m pytest`
-      # resolvable from PATH. The repo CONTRIBUTING.md notes the venv setup;
-      # contributors who skip it will see the hook fail loudly rather than
-      # silently. Don't switch to language: python without first verifying
-      # the hook works in fresh clones — the venv-managed python isn't always
-      # the one pre-commit uses.
+      # pytest-tier1 uses language: system, so it runs whatever interpreter it
+      # is pointed at rather than one pre-commit manages. Plain `pytest` from
+      # PATH is the wrong one on a machine with a system Python ahead of the
+      # project venv: it resolves, collects, and then fails on missing dev
+      # dependencies (`hypothesis`), which reads as a broken gate rather than
+      # a missing environment. So prefer `.venv/bin/pytest` when it exists and
+      # fall back to PATH otherwise — a contributor with neither still sees a
+      # loud failure, which is the intended behaviour, not a silent skip.
+      #
+      # Don't switch to language: python without first verifying the hook in a
+      # fresh clone — the venv-managed python isn't always the one pre-commit
+      # uses.
       - id: pytest-tier1
         name: Run tier-1 unit tests
         description: |
           Pre-push gate per CONTRIBUTING.md oracle hierarchy. Tier-1 tests
           are in-process invariants — fast (<5s today) and never depend on
           a Kindle device. CI runs the broader `not device` set.
-        entry: pytest -m tier1
+        entry: |
+          bash -c '
+            PYTEST=.venv/bin/pytest
+            [ -x "$PYTEST" ] || PYTEST=pytest
+            exec "$PYTEST" -m tier1
+          ' --
         language: system
         pass_filenames: false
         stages: [pre-push]
