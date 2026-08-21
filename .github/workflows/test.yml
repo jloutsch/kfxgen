@@ -42,6 +42,24 @@ jobs:
         run: |
           pytest tests/unit tests/integration -v
 
+      # tier3_strict is excluded by pytest.ini's addopts, so the line above
+      # never runs it and never has. It needs its own invocation with an
+      # explicit -m, which overrides that exclusion.
+      #
+      # It was opt-in because the generator used to emit ~240 byte differences
+      # between two runs of the same input, which would have failed every run.
+      # #96 fixed that (image style symbols were allocated from an unordered
+      # set), so the layer now passes in 0.44s and is worth gating on.
+      #
+      # A failure here means the bytes moved. That is either a regression or an
+      # intentional output change that needs its goldens regenerated — see
+      # CONTRIBUTING.md → Updating goldens after an intentional generator
+      # change. Do not regenerate to make this green without confirming the
+      # drift was intended; that is the whole signal.
+      - name: Byte-identical golden diff (tier-3 strict)
+        run: |
+          pytest -m tier3_strict -v
+
   ruff-lint:
     # Enforce ruff for outside contributors who don't have pre-commit
     # installed locally. Scope is whatever ruff.toml configures (currently
