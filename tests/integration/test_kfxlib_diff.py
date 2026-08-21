@@ -367,3 +367,41 @@ def test_yj_symbol_catalog_is_prefix_of_upstream(upstream_kfxlib):
         f"generated file would carry wrong symbol ids. First offenders: "
         f"{mismatched[:5]}"
     )
+
+
+@pytest.mark.tier2
+@pytest.mark.integration
+def test_vendored_pin_matches_the_zip_it_describes():
+    """`kfx_input_plugin.version.txt` must state the zip's real version (#91).
+
+    The zip is not committed (its license does not grant redistribution), so
+    the sidecar is the *only* committed record of which upstream this repo was
+    checked against. The audit table in `kfxlib_minimal/README.md` and the
+    drift watch in `research/kfx-format-baseline/` both reason from it.
+
+    Nothing tied the two together. Refreshing the zip without the sidecar — or
+    the sidecar without the zip — leaves both files individually plausible and
+    every conclusion drawn from them wrong, which is the failure mode #91 was
+    filed to prevent.
+    """
+    version_file = VENDOR_ZIP.parent / "kfx_input_plugin.version.txt"
+    if not VENDOR_ZIP.exists():
+        pytest.skip(f"Upstream kfxlib zip not found at {VENDOR_ZIP}")
+
+    assert version_file.exists(), (
+        f"{version_file.name} is missing. It is the only committed record of "
+        f"which upstream kfxlib the vendored zip holds."
+    )
+
+    with zipfile.ZipFile(VENDOR_ZIP) as zf:
+        version_py = zf.read("kfxlib/version.py").decode("utf-8")
+
+    namespace: dict = {}
+    exec(compile(version_py, "kfxlib/version.py", "exec"), namespace)
+    actual = str(namespace["__version__"])
+    pinned = version_file.read_text().strip()
+
+    assert pinned == actual, (
+        f"Vendored pin says kfxlib {pinned}, but the zip contains {actual}. "
+        f"Refresh both together — see CONTRIBUTING.md → the upstream kfxlib copy."
+    )
