@@ -38,12 +38,39 @@ why upstream `kfxlib` 20260520 warns when decoding Amazon's own output. That
 warning is about upstream's table, not ours, and appears on Amazon-produced
 files only.
 
-What *would* break generation is upstream renaming or renumbering an id inside
-the range we already declare — every `$NNN` kfxgen emits would then mean
-something else. That is asserted by
-`tests/integration/test_kfxlib_diff.py::test_yj_symbol_catalog_is_prefix_of_upstream`
-(tier-2), which checks the prefix property rather than a symbol count, so it
-stays quiet when Amazon appends and fires only on the change that matters.
+### What is actually checked, and what still needs a human
+
+What *would* break generation is upstream renumbering an id inside the range we
+already declare — every `$NNN` kfxgen emits would then mean something else.
+`test_yj_symbol_catalog_tracks_upstream` (tier-2) narrows that window, but read
+what it can and cannot see before trusting it on a re-sync.
+
+Both catalogs are **pure positional placeholders**: entry `i` is the literal
+string `"$" + str(10 + i)`, with no semantic names anywhere in either file. So
+comparing names across the two proves nothing — they match by construction for
+any file of this shape, *including* one where Amazon inserted a symbol and
+shifted everything above it. The first version of this test compared names and
+was therefore vacuous; it could not fail.
+
+The only per-entry information that moves under a shift is the trailing `?`.
+Upstream only ever *drops* one, as symbols get observed in the wild, so a `?`
+appearing where ours has none is the signature of an insertion. Simulating an
+insertion at every one of our 842 ids, the test fires for ids **10–820** and
+stays quiet above **~821**, where our entries are uniformly `?` and a shift is
+invisible.
+
+So the guarantees, in descending strength:
+
+| Checked | Strength |
+|---|---|
+| `YJ_symbols` version equality | Real — a wholesale redefinition bumps it |
+| Our length ≤ upstream's | Real — we cannot declare a `max_id` upstream lacks |
+| Upstream still purely positional | Real — fires if names ever appear, at which point a genuine name comparison becomes possible and should replace the heuristic |
+| No `?` gained inside our range | Strong heuristic — blind above id ~821 |
+
+When bumping the upstream baseline, a green test is not by itself evidence that
+ids did not move in the top ~30 entries. Nothing kfxgen emits currently lives
+there, which is why this is acceptable rather than merely tolerated.
 
 Drift detection + re-sync procedure: `research/kfx-format-baseline/`
 (a fixed Amazon-engine conversion whose symbol/fragment inventory is diffed
