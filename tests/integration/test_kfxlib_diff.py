@@ -310,62 +310,110 @@ def test_upstream_reports_no_unreferenced_fragments(
     assert not unreferenced, f"{name}: {unreferenced[0]}"
 
 
-def _catalog_names(table) -> list[str]:
-    """Symbol names as the decoder sees them.
+def _read_vendored(member: str) -> str:
+    """Read one source file out of the vendored plugin zip.
 
-    A trailing `?` in the catalog source is an annotation meaning "this id
-    exists but has never been observed in real content"; `LocalSymbolTable`
-    strips it on load (`ion_symbol_table.py:266`), so `$835?` and `$835`
-    are the same symbol at the same id. Comparing raw source strings would
-    report drift that does not exist.
+    `zf.read` raises a bare `KeyError` for a missing member, which reads as
+    a broken test rather than "this zip cannot be used". Older or repackaged
+    KFX Input builds are the realistic way to hit that.
     """
-    return [s[:-1] if s.endswith("?") else s for s in table.symbols]
+    with zipfile.ZipFile(VENDOR_ZIP) as zf:
+        if member not in zf.namelist():
+            pytest.fail(
+                f"{VENDOR_ZIP.name} has no {member}. Either it is not a KFX "
+                f"Input plugin zip, or its layout changed — see CONTRIBUTING.md "
+                f"→ The upstream kfxlib copy."
+            )
+        return zf.read(member).decode("utf-8")
+
+
+def _exec_vendored(member: str) -> dict:
+    """Exec a self-contained module out of the vendored zip and return its
+    namespace. No new trust boundary: tier-2 already imports this same zip
+    wholesale via the `upstream_kfxlib` fixture."""
+    namespace: dict = {}
+    exec(compile(_read_vendored(member), member, "exec"), namespace)
+    return namespace
 
 
 @pytest.mark.tier2
 @pytest.mark.integration
-def test_yj_symbol_catalog_is_prefix_of_upstream(upstream_kfxlib):
-    """Our `YJ_symbols` catalog must be a *prefix* of upstream's (#91).
+def test_yj_symbol_catalog_tracks_upstream():
+    """Guard the `YJ_symbols` assumptions kfxgen's output depends on (#91).
 
     kfxgen declares `max_id = len(YJ_SYMBOLS.symbols)` when it imports the
     shared table, and every reader — upstream kfxlib, and the device —
-    truncates its own copy to that length. So a shorter catalog is safe:
-    the ids we use resolve identically. What is *not* safe is upstream
-    renaming or renumbering an id inside the range we already declare,
-    because every `$NNN` we emit would then mean something else.
+    truncates its own copy to that length. A shorter catalog is therefore
+    safe. What is *not* safe is upstream renumbering an id inside the range
+    we declare: every `$NNN` kfxgen emits would then mean something else.
 
-    Asserting the prefix property rather than an exact symbol count is
-    deliberate. Amazon appends to this table as firmware evolves — the
-    count is expected to drift and a count assertion would fail on every
-    upstream release while telling us nothing. This assertion only fires
-    on the change that would actually corrupt generated files.
+    Be clear about what can and cannot be detected here, because the first
+    version of this test got it wrong. Both catalogs are *pure positional
+    placeholders* — entry `i` is the literal string `"$" + str(10 + i)`,
+    with no semantic names anywhere in either file. Comparing names across
+    the two is therefore vacuous: they match by construction for any file of
+    this shape, including one where Amazon inserted a symbol and shifted
+    everything above it.
+
+    The only per-entry information that *does* move under a shift is the
+    trailing `?` — an annotation meaning "this id exists but has never been
+    observed in real content" (`ion_symbol_table.py:266` strips it on load,
+    so it never affects encoding). Upstream only ever *drops* a `?`, as
+    symbols get observed in the wild. A `?` appearing where ours has none is
+    the signature of an insertion.
+
+    That is a strong signal, not a proof. Simulating an insertion at every
+    one of our 842 ids, it fires for ids 10–820 and stays quiet above ~821,
+    where our entries are uniformly `?` and a shift is invisible. The
+    version assertion is the real guard against a wholesale redefinition;
+    this one narrows the window a silent renumbering could slip through.
     """
-    from kfxlib.yj_symbol_catalog import YJ_SYMBOLS as upstream_symbols
+    if not VENDOR_ZIP.exists():
+        pytest.skip(f"Upstream kfxlib zip not found at {VENDOR_ZIP}")
+
+    upstream = _exec_vendored("kfxlib/yj_symbol_catalog.py")["YJ_SYMBOLS"]
 
     from kfxgen.kfxlib_minimal.yj_symbol_catalog import YJ_SYMBOLS as ours
 
-    assert ours.name == upstream_symbols.name
-    assert ours.version == upstream_symbols.version, (
+    assert ours.name == upstream.name
+    assert ours.version == upstream.version, (
         f"YJ_symbols table version moved: ours v{ours.version}, "
-        f"upstream v{upstream_symbols.version}. A version bump means the "
-        f"shared table was redefined, not just extended — re-sync the fork."
+        f"upstream v{upstream.version}. A version bump means the shared "
+        f"table was redefined, not just extended — re-sync the fork."
     )
 
-    mine = _catalog_names(ours)
-    theirs = _catalog_names(upstream_symbols)
+    mine, theirs = ours.symbols, upstream.symbols
 
     assert len(mine) <= len(theirs), (
         f"Our catalog declares {len(mine)} symbols, upstream knows only "
         f"{len(theirs)}. We would import a max_id upstream cannot satisfy."
     )
 
-    mismatched = [
-        (10 + i, mine[i], theirs[i]) for i in range(len(mine)) if mine[i] != theirs[i]
+    # The `?`-direction check below is only meaningful while names carry no
+    # information. If upstream ever ships real symbol names, this fires and
+    # the reasoning in this docstring needs revisiting — at which point a
+    # genuine name comparison becomes possible, and worth adding.
+    named = [
+        (10 + i, s)
+        for i, s in enumerate(theirs)
+        if s.rstrip("?") != "$%d" % (10 + i)  # noqa: UP031
     ]
-    assert not mismatched, (
-        f"YJ_symbols renumbered inside the range kfxgen emits — every "
-        f"generated file would carry wrong symbol ids. First offenders: "
-        f"{mismatched[:5]}"
+    assert not named, (
+        f"Upstream YJ_symbols now carries real names, not positional "
+        f"placeholders: {named[:5]}. Name-level drift is detectable now — "
+        f"replace the annotation heuristic below with a real comparison."
+    )
+
+    shifted = [
+        (10 + i, mine[i], theirs[i])
+        for i in range(len(mine))
+        if theirs[i] != mine[i] and theirs[i] != mine[i].rstrip("?")
+    ]
+    assert not shifted, (
+        f"YJ_symbols looks renumbered inside the range kfxgen emits — every "
+        f"generated file above the first offender would carry wrong symbol "
+        f"ids. Upstream gained a '?' where ours has none, which only happens "
+        f"when entries shift. First offenders: {shifted[:5]}"
     )
 
 
@@ -393,12 +441,7 @@ def test_vendored_pin_matches_the_zip_it_describes():
         f"which upstream kfxlib the vendored zip holds."
     )
 
-    with zipfile.ZipFile(VENDOR_ZIP) as zf:
-        version_py = zf.read("kfxlib/version.py").decode("utf-8")
-
-    namespace: dict = {}
-    exec(compile(version_py, "kfxlib/version.py", "exec"), namespace)
-    actual = str(namespace["__version__"])
+    actual = str(_exec_vendored("kfxlib/version.py")["__version__"])
     pinned = version_file.read_text().strip()
 
     assert pinned == actual, (
