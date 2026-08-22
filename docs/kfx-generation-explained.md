@@ -78,7 +78,7 @@ and the reader silently renders the run as plain text or jumps somewhere else.
 | Fragment | Purpose |
 |---|---|
 | `$145` | Content strings — the book's text, as a list under `$146` |
-| `$157` | Style definition (font size, weight, alignment, baseline shift…) |
+| `$157` | Style definition (font size, weight, alignment, baseline style…) |
 | `$164` / `$417` | Image resource metadata / raw bytes |
 | `$418` / `$262` | Font blob / `@font-face` declaration — the font analogues of the two above |
 | `$258` | Reading order metadata |
@@ -211,8 +211,9 @@ structure, never confirmed.
 | `$173` | A style's own name | reference |
 | `$16` | Font size, as `{$307: magnitude, $306: unit}` | device |
 | `$306` | Unit: `$308` em, `$505` rem, `$314` %, `$318` pt, `$319` px, `$316` mm | reference |
-| `$31` | Baseline shift. Superscript is a **small `$16` plus a positive `$31`**, not a flag | device |
-| `$31` (negative) | Subscript. No reference file uses one; −20% confirmed anyway | device |
+| `$44` | Baseline style. Superscript is a **small `$16` plus `$44` = `$370`**, not a flag | device |
+| `$44` = `$371` | Subscript, same mechanism | device |
+| `$31` | Baseline shift, a numeric percentage. **No longer emitted for raised text** — replaced by `$44` in #123. Still used as a margin pull-up on small-image styles | reference |
 | `$11` / `$12` | Font family / font style (`$382` italic) | device |
 | `$23` | Text decoration (`$328` underline) | reference |
 | `$34` | Alignment: `$59` left, `$61` right, `$320` center, `$321` justify | reference |
@@ -269,26 +270,36 @@ they collapsed to the same position and were indistinguishable (#79).
 
 ### Rendering the marker
 
-A raised run is a `$157` with a reduced `$16` **and** a `$31` baseline shift.
-Defaults, all device-confirmed and overridable per conversion (#68):
+A raised run is a `$157` with a reduced `$16` **and** `$44`, the baseline-style
+enum: `$370` raises, `$371` lowers. Defaults, device-confirmed and overridable
+per conversion (#68, #123):
 
 | Value | Default | Environment variable |
 |---|---|---|
 | Superscript font size | 0.75 rem | `KFXGEN_SUPERSCRIPT_FONT_SIZE` |
-| Superscript shift | +35% | `KFXGEN_SUPERSCRIPT_SHIFT_PCT` |
 | Subscript font size | 0.75 rem | `KFXGEN_SUBSCRIPT_FONT_SIZE` |
-| Subscript shift | −20% | `KFXGEN_SUBSCRIPT_SHIFT_PCT` |
-
-They are overridable because they were recovered from a handful of reference
-files and confirmed on one device model; a Kindle that disagrees can be
-corrected without a rebuild.
+| Superscript direction | `$370` | — device-decided |
+| Subscript direction | `$371` | — device-decided |
 
 `KFXGEN_SUBSCRIPT_FONT_SIZE` falls back to `KFXGEN_SUPERSCRIPT_FONT_SIZE`
 before its own default, so setting only the superscript variable still resizes
-both — the behaviour that shipped in 5.x, kept so existing setups do not change
-under them. Until #115 that was the *only* size dial, which meant a device
-rendering subscripts badly could not be corrected without also moving every
-superscript.
+both — the behaviour that shipped in 5.x (#115).
+
+The sizes are overridable because they were recovered from a handful of
+reference files; a Kindle that disagrees can be corrected without a rebuild.
+The offset is not overridable because it is no longer kfxgen's to set.
+
+**This replaced a numeric shift.** kfxgen used to emit `$31` at +35% / −20%.
+Both forms render correctly — #67 verified the numeric one, and #123 compared
+the two on a Paperwhite running 5.19.2 with both displaying as expected. The
+enum was adopted because it states the intent and lets the reader compute the
+offset from its own font metrics, rather than hardcoding a percentage measured
+on two devices. It is also what Amazon emits: across four books converted with
+Kindle Previewer 3.106, `$44` appeared every time and `$31` never.
+
+`KFXGEN_SUPERSCRIPT_SHIFT_PCT` and `KFXGEN_SUBSCRIPT_SHIFT_PCT` were retired
+with it. Setting either now logs a warning rather than being ignored — a
+documented knob that silently does nothing is worse than one that is gone.
 
 Publisher EPUBs rarely use `<sup>`. They wrap the marker in a `<span>` whose
 class carries `vertical-align`, and the value is as often a raw length
@@ -509,11 +520,17 @@ believed for a week.
 
 ### Superscript is not a flag (#52)
 
-A raised run is a `$157` with a reduced `$16` **and** a `$31` baseline shift.
-There is no superscript property. Subscript is the same mechanism with a
-negative shift — and that is the second trap: no reference file in the corpus
-used a negative `$31`, which was taken as reason to doubt it. It works, and is
-device-confirmed at −20%.
+A raised run is a `$157` with a reduced `$16` **and** `$44`, the baseline-style
+enum. There is no superscript property. Subscript is the same mechanism with
+`$371` instead of `$370`.
+
+The heading still holds, but the mechanism changed in #123. It was a numeric
+`$31` shift, +35% / −20%, and the second trap was that no reference file in the
+corpus used a *negative* `$31`, which was taken as reason to doubt subscripts.
+They worked, and were device-confirmed at −20%. Both forms were then compared on
+a Paperwhite running 5.19.2 and both displayed correctly; `$44` was adopted
+because the device computes the offset from its own font metrics rather than
+trusting a percentage, and because it is what Amazon emits.
 
 Publisher EPUBs rarely use `<sup>`. They wrap the marker in a `<span>` whose
 class carries `vertical-align`, as often a raw length (`0.25em`) as the keyword.
