@@ -55,6 +55,31 @@ SUBSCRIPT_FONT_SIZE = 0.75
 SUBSCRIPT_SHIFT_PCT = -20  # -20% (device-verified, #67)
 
 
+#: Opt-in encoding for raised text, for the device comparison #123 needs.
+#:
+#: EXPERIMENTAL AND TEMPORARY. It exists so the two encodings can be built from
+#: the same source and read side by side on hardware; once that comparison
+#: settles which one kfxgen should emit, this switch and the branch it feeds
+#: should be deleted rather than left as a permanent second code path.
+RAISED_TEXT_ENCODING_ENV = "KFXGEN_RAISED_TEXT_ENCODING"
+
+
+def _use_baseline_style():
+    """True when raised text should use `$44` baseline-style instead of `$31`.
+
+    Amazon emits `$44` (`$370` super, `$371` sub) and never `$31` — measured
+    over four books via Kindle Previewer 3.106 (#123). kfxgen emits `$31`, and
+    that form is device-verified (#67), so the default does not move. What is
+    unknown is whether `$44` renders *as well or better*, and nothing but a
+    sideload answers it.
+    """
+    return os.environ.get(RAISED_TEXT_ENCODING_ENV, "").strip().lower() in {
+        "baseline-style",
+        "baseline_style",
+        "44",
+    }
+
+
 def _env_number(name, default):
     """Read a numeric env override, falling back to `default` when unset or
     unparseable. Resolved per call, not at import, so a conversion can be run
@@ -1343,12 +1368,21 @@ class NativeKFXGenerator:
         # {$16: 0.75rem, $42: ~1.33, $31: <shift>} — superscript is a reduced
         # font-size plus a positive shift, not a dedicated flag. (#52)
         if baseline_shift is not None:
-            value[IS("$31")] = IonStruct(
-                IS("$307"),
-                IonDecimal(baseline_shift[0]),
-                IS("$306"),
-                IS(baseline_shift[1]),
-            )
+            if _use_baseline_style():
+                # Amazon's idiom: state the intent and let the reader compute
+                # the offset. Direction comes from the sign of the shift this
+                # would otherwise have emitted, so both routes (tag and CSS)
+                # and both env overrides keep working unchanged. See #123 —
+                # opt-in only, and only so the two can be compared on device.
+                is_super = not str(baseline_shift[0]).lstrip().startswith("-")
+                value[IS("$44")] = IS("$370" if is_super else "$371")
+            else:
+                value[IS("$31")] = IonStruct(
+                    IS("$307"),
+                    IonDecimal(baseline_shift[0]),
+                    IS("$306"),
+                    IS(baseline_shift[1]),
+                )
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
