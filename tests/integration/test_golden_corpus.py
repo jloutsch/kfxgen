@@ -493,3 +493,59 @@ def test_fixture_long_chapter_shape(tmp_path):
             )
             refs += 1
     assert refs > 0, "no text entries carried a $145 reference"
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
+def test_image_entries_match_amazons_shape():
+    """Images use the plain `$271` content type, not the `$274` plugin type.
+
+    Recorded from a direct comparison rather than inference. Kindle Previewer
+    3.106 was run over `pg40739.epub` and the resulting KPF decoded with full
+    upstream `kfxlib`; both pipelines produced 8 `$164` resources, 8 `$271`
+    image entries, and **zero** plugin resources. Amazon's content types in
+    that file were `$269`, `$270`, `$279`, `$596`, `$271`, `$278`, `$454` —
+    no `$274` anywhere.
+
+    That matters because `$274` routes to `process_plugin` in upstream's
+    decoder (`yj_to_epub_misc.py:534`), which is where the "zoomable" plugin
+    lives. #118 proposed emitting it so images would respond to tap; the
+    comparison showed Amazon never emits it for EPUB conversion either, so
+    doing that would be divergence from the reference rather than conformance.
+    This test pins the shape that was verified, so a future change toward `$274`
+    has to be a deliberate decision rather than a drift.
+
+    Every referenced resource must also have a payload: a `$164` with no `$417`
+    is a declared image with no bytes behind it.
+    """
+    frags = load_fragments(EXPECTED_DIR / "captioned_images.kfx")
+    resources = {str(f.fid) for f in by_type(frags, "$164")}
+    payloads = {str(f.fid).split("/")[-1] for f in by_type(frags, "$417")}
+    assert resources, "fixture emitted no image resources"
+    assert resources <= payloads, (
+        f"image resources with no $417 payload: {sorted(resources - payloads)}"
+    )
+
+    entries = []
+    for f in by_type(frags, "$259"):
+        for outer in val(f).get(IS("$146")) or []:
+            if not hasattr(outer, "get"):
+                continue
+            for entry in [outer] + list(outer.get(IS("$146")) or []):
+                if hasattr(entry, "get") and entry.get(IS("$175")) is not None:
+                    entries.append(entry)
+
+    assert entries, "no image entries found — fixture rotted"
+    wrong = [
+        str(e.get(IS("$159"))) for e in entries if str(e.get(IS("$159"))) != "$271"
+    ]
+    assert not wrong, (
+        f"image entries must use content type $271, got {wrong}. $274 is the "
+        "plugin type; see #118 for why kfxgen deliberately does not emit it."
+    )
+    dangling = [
+        str(e.get(IS("$175")))
+        for e in entries
+        if str(e.get(IS("$175"))) not in resources
+    ]
+    assert not dangling, f"image entries reference missing resources: {dangling}"
