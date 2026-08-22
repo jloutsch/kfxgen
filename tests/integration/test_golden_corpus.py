@@ -268,6 +268,44 @@ def test_fixture_captioned_images_shape():
 
 @pytest.mark.tier3
 @pytest.mark.integration
+def test_fixture_sub_super_marks_shape(tmp_path):
+    """Both raised and lowered runs carry a $31 shift and a reduced $16 (#115).
+
+    Built from current code, not the committed golden: a change to
+    `subscript_metrics` leaves the golden untouched, so reading it would pass
+    while the metrics had moved.
+
+    Subscripts had no golden coverage at all before this fixture.
+    `publisher_structure` exercises `<sup>`, so superscript changes moved bytes
+    and were caught; nothing reached `subscript_metrics`, which is how a change
+    there could land byte-identical by assumption. Both values are
+    device-verified (#67), so this pins evidence rather than a preference.
+    """
+    from tests.fixtures.golden.inputs import make_sub_super_marks
+
+    written = tmp_path / "fresh_marks.kfx"
+    written.write_bytes(_build_fresh("sub_super_marks", make_sub_super_marks, tmp_path))
+    frags = load_fragments(written)
+
+    shifts = {}
+    for f in by_type(frags, "$157"):
+        v = val(f)
+        shift = v.get(IS("$31"))
+        if shift is None:
+            continue
+        shifts[str(shift.get(IS("$307")))] = str(v.get(IS("$16")).get(IS("$307")))
+
+    assert "35" in shifts, f"no +35% superscript shift emitted — got {sorted(shifts)}"
+    assert "-20" in shifts, (
+        f"no -20% subscript shift emitted — got {sorted(shifts)}. Before this "
+        "fixture nothing in the golden corpus reached subscript_metrics."
+    )
+    assert shifts["35"] == "0.75", f"superscript font size moved: {shifts['35']}"
+    assert shifts["-20"] == "0.75", f"subscript font size moved: {shifts['-20']}"
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
 def test_fixture_with_cover_shape():
     """with_cover: at least one $164 cover-image fragment + one $417 payload."""
     frags = load_fragments(EXPECTED_DIR / "with_cover.kfx")
