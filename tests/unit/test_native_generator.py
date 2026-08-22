@@ -2488,3 +2488,73 @@ def test_sub_and_super_defaults_are_both_device_verified_values():
 
     assert ng.superscript_metrics() == (0.75, ("35", "$314"))
     assert ng.subscript_metrics() == (0.75, ("-20", "$314"))
+
+
+# ── #123: opt-in $44 baseline-style encoding ─────────────────────────────────
+#
+# Amazon emits $44 ($370 super, $371 sub) and never $31, measured over four
+# books. kfxgen emits $31, which is device-verified (#67). Which renders better
+# is unknown and only a sideload answers it, so this exists to build the two
+# forms from one source and compare them on hardware — not as a preference.
+
+
+@pytest.mark.unit
+def test_raised_text_defaults_to_numeric_shift():
+    """Absent the flag, nothing moves. This is the device-verified form."""
+    from kfxgen import native_generator as ng
+
+    assert not ng._use_baseline_style()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "value", ["baseline-style", "baseline_style", "44", "BASELINE-STYLE", " 44 "]
+)
+def test_baseline_style_flag_accepted_forms(monkeypatch, value):
+    from kfxgen import native_generator as ng
+
+    monkeypatch.setenv(ng.RAISED_TEXT_ENCODING_ENV, value)
+    assert ng._use_baseline_style()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", ["", "shift", "31", "yes", "true", "1"])
+def test_unrecognised_values_keep_the_default(monkeypatch, value):
+    """Fails closed. A typo or a generic truthy value must not silently switch
+    the encoding to the unverified one."""
+    from kfxgen import native_generator as ng
+
+    monkeypatch.setenv(ng.RAISED_TEXT_ENCODING_ENV, value)
+    assert not ng._use_baseline_style()
+
+
+@pytest.mark.unit
+def test_baseline_style_emits_44_with_correct_direction(monkeypatch):
+    """Direction is derived from the sign of the shift, so both the tag and CSS
+    routes and both font-size overrides keep working unchanged."""
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    from kfxgen import native_generator as ng
+
+    monkeypatch.setenv(ng.RAISED_TEXT_ENCODING_ENV, "baseline-style")
+    gen = ng.NativeKFXGenerator()
+
+    sup = gen.build_fragment_157("s_sup", baseline_shift=("35", "$314"))
+    sub = gen.build_fragment_157("s_sub", baseline_shift=("-20", "$314"))
+
+    assert sup.value.get(IS("$44")) == IS("$370"), "positive shift must be super"
+    assert sub.value.get(IS("$44")) == IS("$371"), "negative shift must be sub"
+    assert sup.value.get(IS("$31")) is None, "must not emit both encodings"
+    assert sub.value.get(IS("$31")) is None, "must not emit both encodings"
+
+
+@pytest.mark.unit
+def test_default_still_emits_31_and_not_44():
+    from kfxgen.kfxlib_minimal.ion import IS
+
+    from kfxgen import native_generator as ng
+
+    gen = ng.NativeKFXGenerator()
+    frag = gen.build_fragment_157("s_sup", baseline_shift=("35", "$314"))
+    assert frag.value.get(IS("$31")) is not None
+    assert frag.value.get(IS("$44")) is None
