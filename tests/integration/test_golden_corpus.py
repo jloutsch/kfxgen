@@ -350,6 +350,36 @@ def test_fixture_table_cells_do_not_fuse(tmp_path):
 
 @pytest.mark.tier3
 @pytest.mark.integration
+def test_fixture_contents_illustration_survives(tmp_path):
+    """contents_illustration: a plate on the contents page reaches the file.
+
+    Built fresh rather than read from the committed golden, for the usual
+    reason and one specific one: the generator's `toc_links` branch ignores
+    `chapter["text"]` entirely, so a converter-side fix alone leaves the image
+    dropped further downstream. Only a full build crosses both halves.
+
+    Confirmed non-vacuous, which matters more than usual here. #76 records a
+    fixture whose pins never ran because a page titled "Contents" has its
+    blocks discarded upstream. With the preservation removed this fixture emits
+    zero `$164` and zero `$417`; with it, one of each.
+    """
+    from tests.fixtures.golden.inputs import make_contents_illustration
+
+    written = tmp_path / "fresh_contents_img.kfx"
+    written.write_bytes(
+        _build_fresh("contents_illustration", make_contents_illustration, tmp_path)
+    )
+    frags = load_fragments(written)
+
+    assert len(by_type(frags, "$164")) == 1, (
+        "the illustration printed in the contents section was dropped with the "
+        "section's text (#117)"
+    )
+    assert len(by_type(frags, "$417")) == 1, "image resource emitted with no payload"
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
 def test_fixture_with_cover_shape():
     """with_cover: at least one $164 cover-image fragment + one $417 payload."""
     frags = load_fragments(EXPECTED_DIR / "with_cover.kfx")

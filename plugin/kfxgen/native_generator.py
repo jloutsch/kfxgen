@@ -2809,6 +2809,14 @@ class NativeKFXGenerator:
                     chunk_idx = len(all_chunks)
                     all_chunks.append({"type": "text", "text": link["text"]})
                     toc_link_chunks[chunk_idx] = link["target_chapter_idx"]
+                # Illustrations the source printed in its contents section.
+                # This branch ignores `chapter["text"]` entirely, so they
+                # arrive as their own key rather than inside it. Emitted after
+                # the entries, since the listing is the page's purpose and a
+                # plate that sat mid-section has no position to return to once
+                # the surrounding text is gone. (#117)
+                for token in chapter.get("preserved_images") or []:
+                    all_chunks.extend(_emit_text_chunks(token))
             else:
                 text = chapter["text"]
                 stripped = text.lstrip()

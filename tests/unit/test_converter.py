@@ -1915,3 +1915,69 @@ def test_cell_does_not_fuse_onto_following_text():
         _doc("<table><tr><td>a</td>tail<td>b</td></tr></table>")
     )
     assert blocks[0]["text"] == "a tail b"
+
+
+# --- illustrations inside a discarded contents section (#117) ---------------
+#
+# The source contents section is replaced because its *text* duplicates the
+# navigation KFX carries itself. That reasoning does not extend to pictures
+# printed in the same region, and two corpus books lost decorative plates to
+# it: pg1400 emitted 31 image resources for 32 inline refs, pg37106 204 for
+# 206. Both are whole after the fix.
+
+
+def _img(href, alt=""):
+    return _conv._make_img_token(href, alt)
+
+
+@pytest.mark.unit
+def test_contents_section_illustrations_are_kept():
+    chapters = [
+        {
+            "title": "Contents",
+            "text": "old toc",
+            "blocks": [
+                {"text": "Contents"},
+                {"text": _img("plate.png", "[Illustration]")},
+                {"text": "I. First Chapter    1"},
+            ],
+        },
+        {"title": "Chapter 1", "text": "body one"},
+    ]
+    _replace_title_page(chapters, {"title": "B", "author": "A"}, _silent_log())
+    assert chapters[0]["preserved_images"] == [_img("plate.png", "[Illustration]")]
+
+
+@pytest.mark.unit
+def test_contents_section_text_is_still_discarded():
+    # The images survive; the listing text they sat in does not. Losing this
+    # distinction would reintroduce the duplicated table of contents that
+    # replacing the page exists to remove.
+    chapters = [
+        {
+            "title": "Contents",
+            "text": "old toc",
+            "blocks": [
+                {"text": "I. First Chapter    1"},
+                {"text": _img("plate.png")},
+            ],
+        },
+        {"title": "Chapter 1", "text": "body one"},
+    ]
+    _replace_title_page(chapters, {"title": "B", "author": "A"}, _silent_log())
+    contents = chapters[0]
+    assert "blocks" not in contents
+    assert "I. First Chapter" not in contents["text"]
+    assert contents["preserved_images"] == [_img("plate.png")]
+
+
+@pytest.mark.unit
+def test_contents_without_illustrations_sets_no_key():
+    # The common case must not grow an empty key, so the generator branch
+    # stays untaken for books that never had the problem.
+    chapters = [
+        {"title": "Contents", "text": "old", "blocks": [{"text": "I. One    1"}]},
+        {"title": "Chapter 1", "text": "body"},
+    ]
+    _replace_title_page(chapters, {"title": "B", "author": "A"}, _silent_log())
+    assert "preserved_images" not in chapters[0]
