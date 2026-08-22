@@ -380,6 +380,58 @@ def test_fixture_contents_illustration_survives(tmp_path):
 
 @pytest.mark.tier3
 @pytest.mark.integration
+def test_contents_illustration_survives_an_empty_rebuilt_listing(tmp_path):
+    """The preserved plate must not depend on the rebuilt listing being non-empty.
+
+    `_rebuild_contents_page` skips every chapter in `CONTENTS_SKIP_TITLES`, so a
+    book whose only other chapter is front matter rebuilds to *no* links at all.
+    The generator emits preserved images outside its `toc_links` branch for
+    exactly this case; handling them inside it dropped the image again while the
+    converter logged that it had kept one — a false reassurance in the log,
+    which is worse than a silent drop.
+
+    Built inline rather than as a registry fixture: this pins one branch, not a
+    file shape, and does not need a byte-level golden to be meaningful.
+    """
+    from tests._helpers import MINIMAL_PNG
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.golden.inputs import _xhtml_page
+
+    epub = (
+        EpubBuilder()
+        .set_metadata(title="Empty Listing", author="A. Author")
+        .add_chapter(
+            "Contents",
+            _xhtml_page(
+                "Contents",
+                '<h2>Contents</h2><p><img src="plate.png" alt="plate"/></p>',
+            ).encode("utf-8"),
+        )
+        # In CONTENTS_SKIP_TITLES, so the rebuilt listing comes out empty.
+        .add_chapter("Title Page", "Title Page")
+        .add_manifest_item(
+            item_id="plate",
+            href="plate.png",
+            media_type="image/png",
+            data=MINIMAL_PNG,
+        )
+        .build(tmp_path, "empty_listing")
+    )
+    out = tmp_path / "empty_listing.kfx"
+    converter.convert_oeb_to_kfx(
+        EpubAsOeb(str(epub)), str(out), opts=None, log=_NullLog()
+    )
+    frags = load_fragments(out)
+
+    assert len(by_type(frags, "$164")) == 1, (
+        "the contents-page plate was dropped because the rebuilt listing had "
+        "no entries (#117)"
+    )
+    assert len(by_type(frags, "$417")) == 1, "image resource emitted with no payload"
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
 def test_fixture_with_cover_shape():
     """with_cover: at least one $164 cover-image fragment + one $417 payload."""
     frags = load_fragments(EXPECTED_DIR / "with_cover.kfx")
