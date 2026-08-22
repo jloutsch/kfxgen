@@ -269,17 +269,20 @@ def test_fixture_captioned_images_shape():
 @pytest.mark.tier3
 @pytest.mark.integration
 def test_fixture_sub_super_marks_shape(tmp_path):
-    """Both raised and lowered runs carry a $31 shift and a reduced $16 (#115).
+    """Both raised and lowered runs carry `$44` and a reduced `$16` (#123).
 
-    Built from current code, not the committed golden: a change to
-    `subscript_metrics` leaves the golden untouched, so reading it would pass
-    while the metrics had moved.
+    kfxgen emits `$44` (`-kfx-baseline-style`): `$370` raises, `$371` lowers.
+    That is Amazon's idiom — exclusively, across four books checked against
+    Kindle Previewer 3.106 — and it was verified on a Paperwhite running
+    5.19.2 against the previous numeric `$31` form, which #67 had verified.
+    Both render correctly; the enum wins because the device computes the
+    offset from its own metrics instead of trusting a hardcoded percentage.
 
-    Subscripts had no golden coverage at all before this fixture.
-    `publisher_structure` exercises `<sup>`, so superscript changes moved bytes
-    and were caught; nothing reached `subscript_metrics`, which is how a change
-    there could land byte-identical by assumption. Both values are
-    device-verified (#67), so this pins evidence rather than a preference.
+    Built from current code, not the committed golden: a change here leaves
+    the golden untouched, so reading it would pass while the metrics moved.
+
+    Asserts `$31` is absent as well. The numeric shift is retired, and emitting
+    both would be the hybrid state neither form expects.
     """
     from tests.fixtures.golden.inputs import make_sub_super_marks
 
@@ -287,21 +290,24 @@ def test_fixture_sub_super_marks_shape(tmp_path):
     written.write_bytes(_build_fresh("sub_super_marks", make_sub_super_marks, tmp_path))
     frags = load_fragments(written)
 
-    shifts = {}
+    styles = {}
     for f in by_type(frags, "$157"):
         v = val(f)
-        shift = v.get(IS("$31"))
-        if shift is None:
+        bs = v.get(IS("$44"))
+        if bs is None:
             continue
-        shifts[str(shift.get(IS("$307")))] = str(v.get(IS("$16")).get(IS("$307")))
+        styles[str(bs)] = str(v.get(IS("$16")).get(IS("$307")))
 
-    assert "35" in shifts, f"no +35% superscript shift emitted — got {sorted(shifts)}"
-    assert "-20" in shifts, (
-        f"no -20% subscript shift emitted — got {sorted(shifts)}. Before this "
-        "fixture nothing in the golden corpus reached subscript_metrics."
+    assert "$370" in styles, f"no superscript ($370) emitted — got {sorted(styles)}"
+    assert "$371" in styles, f"no subscript ($371) emitted — got {sorted(styles)}"
+    assert styles["$370"] == "0.75", f"superscript font size moved: {styles['$370']}"
+    assert styles["$371"] == "0.75", f"subscript font size moved: {styles['$371']}"
+
+    numeric = [f for f in by_type(frags, "$157") if val(f).get(IS("$31")) is not None]
+    assert not numeric, (
+        f"{len(numeric)} styles still carry the retired $31 numeric shift; "
+        "raised text should use $44 alone (#123)"
     )
-    assert shifts["35"] == "0.75", f"superscript font size moved: {shifts['35']}"
-    assert shifts["-20"] == "0.75", f"subscript font size moved: {shifts['-20']}"
 
 
 @pytest.mark.tier3

@@ -1591,30 +1591,33 @@ def test_block_level_bold_no_font_table_unchanged():
 
 
 @pytest.mark.unit
-def test_build_157_emits_31_baseline_shift():
+def test_build_157_emits_44_baseline_style():
     from kfxgen.kfxlib_minimal.ion import IS
 
     gen = NativeKFXGenerator()
-    frag = gen.build_fragment_157(entity_name="sup0", baseline_shift=("35", "$314"))
-    assert IS("$31") in frag.value, "baseline_shift did not emit $31"
-    shift = frag.value[IS("$31")]
-    assert str(shift[IS("$307")]) == "35"
-    assert shift[IS("$306")] == IS("$314")
+    frag = gen.build_fragment_157(entity_name="sup0", baseline_style="$370")
+    assert IS("$44") in frag.value, "baseline_style did not emit $44"
+    assert frag.value[IS("$44")] == IS("$370"), "super must emit $370"
+    assert IS("$31") not in frag.value, "numeric shift retired by #123"
+
+    sub = gen.build_fragment_157(entity_name="sub0", baseline_style="$371")
+    assert sub.value[IS("$44")] == IS("$371"), "sub must emit $371"
 
 
 @pytest.mark.unit
-def test_build_157_omits_31_by_default():
+def test_build_157_omits_baseline_style_by_default():
     from kfxgen.kfxlib_minimal.ion import IS
 
     gen = NativeKFXGenerator()
     frag = gen.build_fragment_157(entity_name="plain0")
+    assert IS("$44") not in frag.value
     assert IS("$31") not in frag.value
 
 
 @pytest.mark.unit
 def test_superscript_span_produces_raised_small_style(tmp_path):
-    """Reference noteref styles are reduced font-size plus a positive $31.
-    A FLAG_SUPER run must produce one. (#52)"""
+    """Reference noteref styles are a reduced font-size plus $44 baseline
+    style. A FLAG_SUPER run must produce $370. (#52, #123)"""
     from kfxgen.kfxlib_minimal.ion import IS
     from kfxgen.inline_style import FLAG_SUPER
 
@@ -1630,10 +1633,10 @@ def test_superscript_span_produces_raised_small_style(tmp_path):
         title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
     )
     styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
-    raised = [f for f in styles if IS("$31") in f.value]
-    assert raised, "No $157 carries $31 (baseline shift) for a superscript run"
+    raised = [f for f in styles if IS("$44") in f.value]
+    assert raised, "No $157 carries $44 (baseline style) for a superscript run"
     for f in raised:
-        assert float(str(f.value[IS("$31")][IS("$307")])) > 0, (
+        assert f.value[IS("$44")] == IS("$370"), (
             "Superscript $31 must be positive (raised)"
         )
         assert IS("$16") in f.value, "Superscript style must reduce font-size ($16)"
@@ -1657,12 +1660,10 @@ def test_subscript_span_produces_lowered_style(tmp_path):
         title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
     )
     styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
-    lowered = [f for f in styles if IS("$31") in f.value]
-    assert lowered, "No $157 carries $31 for a subscript run"
+    lowered = [f for f in styles if IS("$44") in f.value]
+    assert lowered, "No $157 carries $44 for a subscript run"
     for f in lowered:
-        assert float(str(f.value[IS("$31")][IS("$307")])) < 0, (
-            "Subscript $31 must be negative (lowered)"
-        )
+        assert f.value[IS("$44")] == IS("$371"), "Subscript must emit $371 (lowered)"
 
 
 @pytest.mark.unit
@@ -1685,11 +1686,11 @@ def test_superscript_composes_with_italic(tmp_path):
     )
     styles = [f for f in gen.fragments if str(f.ftype) == "$157"]
     assert any(
-        IS("$31") in f.value
+        IS("$44") in f.value
         and IS("$12") in f.value
         and f.value[IS("$12")] == IS("$382")
         for f in styles
-    ), "Expected one $157 carrying both italic ($12) and baseline shift ($31)"
+    ), "Expected one $157 carrying both italic ($12) and baseline style ($44)"
 
 
 # ── #53: in-body links resolve to $266 anchors ───────────────────────────────
@@ -2062,30 +2063,54 @@ def test_body_text_matching_title_words_is_not_eaten(tmp_path):
 
 @pytest.mark.unit
 def test_superscript_metrics_env_override(monkeypatch):
-    """#68: rendering values must be tunable without a rebuild."""
+    """#68: the size stays tunable without a rebuild. The offset is not ours
+    to set any more — `$44` hands that to the device (#123)."""
     from kfxgen import native_generator as ng
 
-    assert ng.superscript_metrics() == (0.75, ("35", "$314"))
-    monkeypatch.setenv("KFXGEN_SUPERSCRIPT_SHIFT_PCT", "50")
+    assert ng.superscript_metrics() == (0.75, ng.BASELINE_STYLE_SUPER)
     monkeypatch.setenv("KFXGEN_SUPERSCRIPT_FONT_SIZE", "0.8")
-    assert ng.superscript_metrics() == (0.8, ("50", "$314"))
+    assert ng.superscript_metrics() == (0.8, ng.BASELINE_STYLE_SUPER)
 
 
 @pytest.mark.unit
 def test_subscript_metrics_env_override(monkeypatch):
     from kfxgen import native_generator as ng
 
-    assert ng.subscript_metrics() == (0.75, ("-20", "$314"))
-    monkeypatch.setenv("KFXGEN_SUBSCRIPT_SHIFT_PCT", "-30")
-    assert ng.subscript_metrics()[1] == ("-30", "$314")
+    assert ng.subscript_metrics() == (0.75, ng.BASELINE_STYLE_SUB)
+    monkeypatch.setenv("KFXGEN_SUBSCRIPT_FONT_SIZE", "0.6")
+    assert ng.subscript_metrics() == (0.6, ng.BASELINE_STYLE_SUB)
 
 
 @pytest.mark.unit
 def test_invalid_env_falls_back_to_default(monkeypatch):
     from kfxgen import native_generator as ng
 
-    monkeypatch.setenv("KFXGEN_SUPERSCRIPT_SHIFT_PCT", "not-a-number")
-    assert ng.superscript_metrics()[1] == ("35", "$314")
+    monkeypatch.setenv("KFXGEN_SUPERSCRIPT_FONT_SIZE", "not-a-number")
+    assert ng.superscript_metrics()[0] == 0.75
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "name", ["KFXGEN_SUPERSCRIPT_SHIFT_PCT", "KFXGEN_SUBSCRIPT_SHIFT_PCT"]
+)
+def test_retired_shift_env_warns_instead_of_silently_doing_nothing(
+    monkeypatch, caplog, name
+):
+    """#123 removed the numeric shift, so these two can no longer change
+    anything. Ignoring them would leave a documented knob that silently does
+    nothing — the failure mode this codebase keeps paying for. It must say so.
+    """
+    import logging
+
+    from kfxgen import native_generator as ng
+
+    monkeypatch.setenv(name, "50")
+    with caplog.at_level(logging.WARNING):
+        ng.superscript_metrics()
+        ng.subscript_metrics()
+    assert name in caplog.text, (
+        f"setting {name} produced no warning; it now does nothing silently"
+    )
 
 
 # --- $145 content-fragment size cap (#37) ----------------------------------
@@ -2486,5 +2511,5 @@ def test_sub_and_super_defaults_are_both_device_verified_values():
     """
     from kfxgen import native_generator as ng
 
-    assert ng.superscript_metrics() == (0.75, ("35", "$314"))
-    assert ng.subscript_metrics() == (0.75, ("-20", "$314"))
+    assert ng.superscript_metrics() == (0.75, ng.BASELINE_STYLE_SUPER)
+    assert ng.subscript_metrics() == (0.75, ng.BASELINE_STYLE_SUB)

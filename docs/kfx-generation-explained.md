@@ -269,26 +269,36 @@ they collapsed to the same position and were indistinguishable (#79).
 
 ### Rendering the marker
 
-A raised run is a `$157` with a reduced `$16` **and** a `$31` baseline shift.
-Defaults, all device-confirmed and overridable per conversion (#68):
+A raised run is a `$157` with a reduced `$16` **and** `$44`, the baseline-style
+enum: `$370` raises, `$371` lowers. Defaults, device-confirmed and overridable
+per conversion (#68, #123):
 
 | Value | Default | Environment variable |
 |---|---|---|
 | Superscript font size | 0.75 rem | `KFXGEN_SUPERSCRIPT_FONT_SIZE` |
-| Superscript shift | +35% | `KFXGEN_SUPERSCRIPT_SHIFT_PCT` |
 | Subscript font size | 0.75 rem | `KFXGEN_SUBSCRIPT_FONT_SIZE` |
-| Subscript shift | −20% | `KFXGEN_SUBSCRIPT_SHIFT_PCT` |
-
-They are overridable because they were recovered from a handful of reference
-files and confirmed on one device model; a Kindle that disagrees can be
-corrected without a rebuild.
+| Superscript direction | `$370` | — device-decided |
+| Subscript direction | `$371` | — device-decided |
 
 `KFXGEN_SUBSCRIPT_FONT_SIZE` falls back to `KFXGEN_SUPERSCRIPT_FONT_SIZE`
 before its own default, so setting only the superscript variable still resizes
-both — the behaviour that shipped in 5.x, kept so existing setups do not change
-under them. Until #115 that was the *only* size dial, which meant a device
-rendering subscripts badly could not be corrected without also moving every
-superscript.
+both — the behaviour that shipped in 5.x (#115).
+
+The sizes are overridable because they were recovered from a handful of
+reference files; a Kindle that disagrees can be corrected without a rebuild.
+The offset is not overridable because it is no longer kfxgen's to set.
+
+**This replaced a numeric shift.** kfxgen used to emit `$31` at +35% / −20%.
+Both forms render correctly — #67 verified the numeric one, and #123 compared
+the two on a Paperwhite running 5.19.2 with both displaying as expected. The
+enum was adopted because it states the intent and lets the reader compute the
+offset from its own font metrics, rather than hardcoding a percentage measured
+on two devices. It is also what Amazon emits: across four books converted with
+Kindle Previewer 3.106, `$44` appeared every time and `$31` never.
+
+`KFXGEN_SUPERSCRIPT_SHIFT_PCT` and `KFXGEN_SUBSCRIPT_SHIFT_PCT` were retired
+with it. Setting either now logs a warning rather than being ignored — a
+documented knob that silently does nothing is worse than one that is gone.
 
 Publisher EPUBs rarely use `<sup>`. They wrap the marker in a `<span>` whose
 class carries `vertical-align`, and the value is as often a raw length

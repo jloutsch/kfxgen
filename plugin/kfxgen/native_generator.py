@@ -29,30 +29,48 @@ _security_log = logging.getLogger(__name__ + ".security")
 # is TOCTOU-vulnerable but adequate for the single-user threat model.
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
-# Superscript/subscript character metrics (#52). Amazon-produced noteref
-# styles are {$16: 0.75rem, $42: ~1.33, $31: 35%} — the percentage form is
-# used here so the shift tracks the reader's font size. The subscript depth
-# had no reference to copy: CSS `sub` sits roughly a fifth of the font size
-# below the baseline, so -20% was chosen as the closest equivalent.
+# Superscript/subscript character metrics (#52, #123). A raised run is a
+# reduced `$16` font size plus `$44` (`-kfx-baseline-style`), the semantic
+# enum: `$370` for super, `$371` for sub.
 #
-# That guess has since been confirmed. #67 was closed by a physical sideload of
-# ZZ-#67 SUB+SUPER TEST, which rendered both forms correctly — superscript at
-# $31 35% / $16 0.75, subscript at $31 -20% / $16 0.75 — over both the tag
-# route (<sup>/<sub>) and the CSS route (vertical-align). The comment here read
-# "NOT device-verified" long after that, which is the wrong direction to be
-# wrong in: it invites someone to re-litigate a value the hardware already
-# settled.
+# kfxgen used to emit `$31` instead — a numeric baseline shift of +35% / -20%.
+# Both render correctly; #67 verified the numeric form and #123 verified this
+# one on a Paperwhite running 5.19.2. The enum is preferred because it states
+# the intent and lets the reader compute the offset from its own font metrics,
+# rather than hardcoding a percentage that was only ever measured on two
+# devices. It is also what Amazon emits — exclusively, across four books
+# checked against Kindle Previewer 3.106.
+#
+# The percentages are gone with the shift. Under `$44` the device chooses the
+# offset, so `SUPERSCRIPT_SHIFT_PCT` / `SUBSCRIPT_SHIFT_PCT` and their
+# `KFXGEN_*_SHIFT_PCT` overrides no longer have anything to act on; keeping
+# them would mean a documented knob that silently does nothing.
 SUPERSCRIPT_FONT_SIZE = 0.75
-SUPERSCRIPT_SHIFT_PCT = 35  # +35% of font size (device-verified)
-#: Subscripts use the same reduced size as superscripts, and #67 checked both
-#: at 0.75 on hardware — so they agree by evidence, not by coincidence.
-#:
-#: Spelled as a literal rather than `= SUPERSCRIPT_FONT_SIZE`. An alias would
-#: mean a maintainer acting on a superscript device report and editing the line
-#: above silently moves the subscript default too — reintroducing one level
-#: down exactly the coupling #115 exists to break.
+#: Subscripts use the same reduced size as superscripts, checked together on
+#: hardware in #67. A literal rather than an alias, so editing one default on a
+#: device report does not silently move the other.
 SUBSCRIPT_FONT_SIZE = 0.75
-SUBSCRIPT_SHIFT_PCT = -20  # -20% (device-verified, #67)
+
+#: Emitted as `$44`. `$370` raises the run, `$371` lowers it.
+BASELINE_STYLE_SUPER = "$370"
+BASELINE_STYLE_SUB = "$371"
+
+#: Overrides retired by #123. Warned about rather than ignored: a variable that
+#: used to change output and now cannot is exactly the silent no-op this
+#: codebase keeps paying for elsewhere.
+_RETIRED_SHIFT_ENV = ("KFXGEN_SUPERSCRIPT_SHIFT_PCT", "KFXGEN_SUBSCRIPT_SHIFT_PCT")
+
+
+def _warn_retired_shift_env():
+    for name in _RETIRED_SHIFT_ENV:
+        if name in os.environ:
+            _security_log.warning(
+                "%s is set but no longer affects output: raised text now uses "
+                "$44 baseline-style, where the device computes the offset (#123). "
+                "Use KFXGEN_SUPERSCRIPT_FONT_SIZE / KFXGEN_SUBSCRIPT_FONT_SIZE "
+                "to change the size.",
+                name,
+            )
 
 
 def _env_number(name, default):
@@ -70,44 +88,31 @@ def _env_number(name, default):
 
 
 def superscript_metrics():
-    """(font_size, baseline_shift) for a superscript run, env-overridable.
+    """(font_size, baseline_style) for a superscript run.
 
-    These are rendering values recovered from a handful of reference files and
-    confirmed on one device model. Exposing them means a Kindle that renders
-    superscripts too high or too small can be corrected without a rebuild. (#68)
+    The size stays env-overridable — a device that renders raised text too
+    small can still be corrected without a rebuild, which is why #68 exposed
+    these. The offset is no longer ours to set: `$44` hands that to the
+    reader (#123).
     """
+    _warn_retired_shift_env()
     size = _env_number("KFXGEN_SUPERSCRIPT_FONT_SIZE", SUPERSCRIPT_FONT_SIZE)
-    pct = _env_number("KFXGEN_SUPERSCRIPT_SHIFT_PCT", SUPERSCRIPT_SHIFT_PCT)
-    return size, (str(pct), "$314")
+    return size, BASELINE_STYLE_SUPER
 
 
 def subscript_metrics():
-    """(font_size, baseline_shift) for a subscript run, env-overridable.
+    """(font_size, baseline_style) for a subscript run.
 
     `KFXGEN_SUBSCRIPT_FONT_SIZE` falls back to `KFXGEN_SUPERSCRIPT_FONT_SIZE`
-    before the built-in default, so the pre-existing single-knob behaviour is
-    unchanged: setting only the superscript variable still moves both, which is
-    what anyone already relying on it expects. What is new is that subscripts
-    can now be corrected on their own.
-
-    They could not before (#115). `superscript_metrics` promises that "a Kindle
-    that renders superscripts too high or too small can be corrected without a
-    rebuild"; subscripts had no equivalent, because the only size dial was named
-    for superscripts and moved both. Both defaults are device-verified at 0.75
-    (#67), so this changes no output unless a variable is set.
+    before the built-in default, so setting only the superscript variable still
+    moves both — the behaviour that shipped in 5.x (#115).
     """
-    # Resolved lazily. Passing the superscript lookup as the default argument
-    # evaluates it even when the subscript variable is set and wins, so a
-    # malformed superscript value would log "ignoring invalid ..." on every
-    # call — and this runs once per emphasis run, so a book with many
-    # subscripts would bury the log in warnings about a value that changed
-    # nothing.
+    _warn_retired_shift_env()
     if "KFXGEN_SUBSCRIPT_FONT_SIZE" in os.environ:
         size = _env_number("KFXGEN_SUBSCRIPT_FONT_SIZE", SUBSCRIPT_FONT_SIZE)
     else:
         size = _env_number("KFXGEN_SUPERSCRIPT_FONT_SIZE", SUBSCRIPT_FONT_SIZE)
-    pct = _env_number("KFXGEN_SUBSCRIPT_SHIFT_PCT", SUBSCRIPT_SHIFT_PCT)
-    return size, (str(pct), "$314")
+    return size, BASELINE_STYLE_SUB
 
 
 #: How many leading blocks may be consumed as a split chapter opener. Two
@@ -1207,7 +1212,7 @@ class NativeKFXGenerator:
         margin_left=None,
         margin_right=None,
         font_family=None,
-        baseline_shift=None,
+        baseline_style=None,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -1235,10 +1240,11 @@ class NativeKFXGenerator:
                         margin-left ($48). Default None uses 0.5% ($314).
             margin_right: If a tuple (magnitude_str, unit_symbol), emit margin-right ($50).
                          Default None omits $50.
-            baseline_shift: If a tuple (magnitude_str, unit_symbol), emit $31.
-                        Positive raises (superscript), negative lowers
-                        (subscript). Reference noteref styles pair it with a
-                        reduced $16 font-size. Default None omits $31. (#52)
+            baseline_style: Symbol emitted as $44 — `$370` raises
+                        (superscript), `$371` lowers (subscript). Reference
+                        noteref styles pair it with a reduced $16 font-size.
+                        Default None omits $44. Replaced the numeric $31 shift
+                        in #123. (#52)
 
         Returns:
             YJFragment with type $157
@@ -1339,16 +1345,16 @@ class NativeKFXGenerator:
                 IS("$307"), IonDecimal(margin_right[0]), IS("$306"), IS(margin_right[1])
             )
 
-        # $31 = baseline shift. Reference noteref character styles are
-        # {$16: 0.75rem, $42: ~1.33, $31: <shift>} — superscript is a reduced
-        # font-size plus a positive shift, not a dedicated flag. (#52)
-        if baseline_shift is not None:
-            value[IS("$31")] = IonStruct(
-                IS("$307"),
-                IonDecimal(baseline_shift[0]),
-                IS("$306"),
-                IS(baseline_shift[1]),
-            )
+        # $44 = baseline style, the semantic enum: $370 raises, $371 lowers.
+        # Paired with a reduced $16, this is the shape Amazon emits for noteref
+        # runs — exclusively, across four books checked against Previewer 3.106.
+        #
+        # Was $31, a numeric percentage shift. Both render correctly (#67 for
+        # the numeric form, #123 for this one on a Paperwhite / 5.19.2); the
+        # enum wins because the device computes the offset from its own font
+        # metrics instead of trusting a percentage measured on two devices.
+        if baseline_style is not None:
+            value[IS("$44")] = IS(baseline_style)
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
@@ -3212,13 +3218,13 @@ class NativeKFXGenerator:
             attrs = {"italic": italic, "bold": bold}
             if fam:
                 attrs["font_family"] = fam
-            # Superscript/subscript: reduced font-size plus a $31 baseline
-            # shift, matching the reference noteref character styles. <sup>
-            # wins if a run is somehow marked both. (#52)
+            # Superscript/subscript: reduced font-size plus a $44 baseline
+            # style, matching the reference noteref character styles. <sup>
+            # wins if a run is somehow marked both. (#52, #123)
             if FLAG_SUPER in flags:
-                attrs["font_size"], attrs["baseline_shift"] = superscript_metrics()
+                attrs["font_size"], attrs["baseline_style"] = superscript_metrics()
             elif FLAG_SUB in flags:
-                attrs["font_size"], attrs["baseline_shift"] = subscript_metrics()
+                attrs["font_size"], attrs["baseline_style"] = subscript_metrics()
             return _allocate_style("_em", **attrs)
 
         # Build multi-entry $259 storylines (one entry per chunk per chapter)
