@@ -1,8 +1,14 @@
-# Part of kfxgen's kfxlib_minimal: a modified subset of Calibre's kfxlib
-# (the KFX plugins by John Howell). See kfxlib_minimal/README.md for the
-# list of local modifications.
+# Original kfxgen work — NOT a subset of Calibre's kfxlib, despite living in
+# this directory. `STANDARD_SYMBOLS` was harvested by decoding Kindle Previewer
+# output; no upstream `kfxlib` module defines these names, and none of the 247
+# appears anywhere in that source. The file sits here because
+# `StandardSymbolTable` subclasses the vendored `LocalSymbolTable`, which places
+# it in the same GPL v3 combined work — subclassing does not transfer authorship.
+#
+# A directory-wide attribution sweep (#4) credited this file to John Howell.
+# That was wrong and is corrected here; see kfxlib_minimal/README.md.
 __license__ = "GPL v3"
-__copyright__ = "2016-2025, John Howell <jhowell@acm.org>"
+__copyright__ = "2025-2026, Justin Loutsch <justin.loutsch@gmail.com>"
 
 from .ion_symbol_table import LocalSymbolTable
 

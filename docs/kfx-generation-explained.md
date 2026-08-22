@@ -459,9 +459,11 @@ there, and tracked in #91.
 
 ### The encoding layer
 
-`kfxlib_minimal` is a trimmed copy of jhowell's `kfxlib`, carrying the Ion
-binary and text codecs, the symbol table machinery, and the KFX/YJ container
-readers and writers. kfxgen does not implement Ion itself.
+`kfxlib_minimal` is mostly a trimmed copy of jhowell's `kfxlib`, carrying the
+Ion binary and text codecs, the symbol table machinery, and the KFX/YJ container
+readers and writers. kfxgen does not implement Ion itself. (One file there,
+`standard_symbols.py`, is original kfxgen work rather than vendored — see that
+directory's README.)
 
 That is a deliberate boundary. Bugs in serialization are upstream's territory
 and get fixed by re-syncing the copy; bugs in *what we serialize* are ours.

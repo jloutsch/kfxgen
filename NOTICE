@@ -21,6 +21,14 @@ plugin/kfxgen/kfxlib_minimal/
     packaging changes on top. The list of local modifications is kept in
     plugin/kfxgen/kfxlib_minimal/README.md.
 
+    Not every file in that directory is derived from kfxlib.
+    standard_symbols.py is original kfxgen work, copyright Justin Loutsch:
+    its symbol names were harvested by decoding Kindle Previewer output,
+    and none of them appears in upstream kfxlib. It sits in that directory
+    only because it subclasses the vendored LocalSymbolTable. Per-file
+    copyright headers are authoritative where they disagree with this
+    directory-level summary.
+
     The upstream KFX plugins are available from the MobileRead forums.
     kfxgen does not redistribute jhowell's plugin packages themselves;
     only this modified source subset is included, as permitted by the
