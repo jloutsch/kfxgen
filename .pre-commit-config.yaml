@@ -43,10 +43,18 @@ repos:
           Belt-and-suspenders against `git add -f` bypassing .gitignore.
           Book binaries belong in research/ (gitignored) or external storage,
           never in the tracked tree.
+
+          One exception: tests/fixtures/golden/expected/*.kfx IS the tier-3
+          oracle and is committed on purpose (~6-61 KB each, synthetic, no
+          copyrighted source). Without this carve-out the hook blocks the
+          regeneration procedure CONTRIBUTING documents, which is how it was
+          found — adding a fixture for #113 could not be committed.
         # See no-root-test-files for the printf vs echo|tr rationale.
         entry: |
           bash -c '
-            offenders=$(printf "%s\n" "$@" | grep -E "\.(kfx|epub|azw3|mobi)$" || true)
+            offenders=$(printf "%s\n" "$@" \
+              | grep -E "\.(kfx|epub|azw3|mobi)$" \
+              | grep -v "^tests/fixtures/golden/expected/[^/]*\.kfx$" || true)
             if [ -n "$offenders" ]; then
               echo "Book binaries cannot be committed. Move to research/ or external storage:" >&2
               echo "$offenders" >&2

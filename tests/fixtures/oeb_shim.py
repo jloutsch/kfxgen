@@ -72,6 +72,7 @@ class _Metadata:
         language: str,
         date: str | None = None,
         publisher: str | None = None,
+        cover: str | None = None,
     ) -> None:
         self.title: list[_MetadataItem] = [_MetadataItem(title)] if title else []
         self.creator: list[_MetadataItem] = [_MetadataItem(creator)] if creator else []
@@ -82,6 +83,13 @@ class _Metadata:
         self.publisher: list[_MetadataItem] = (
             [_MetadataItem(publisher)] if publisher else []
         )
+        # Calibre exposes `<meta name="cover" content="<manifest-id>"/>` here,
+        # and `extract_cover_image` resolves that id against the manifest. The
+        # shim documented this attribute from the start but never populated it,
+        # so cover discovery fell through to the filename heuristic and any
+        # book whose cover is not literally named "cover.*" lost it — the file
+        # is skipped as a cover page and then never emitted as one. (#113)
+        self.cover: list[_MetadataItem] = [_MetadataItem(cover)] if cover else []
 
 
 class _ManifestItem:
@@ -184,12 +192,32 @@ class EpubAsOeb:
         language = self._dc_text(meta_el, "language")
         date = self._dc_text(meta_el, "date")
         publisher = self._dc_text(meta_el, "publisher")
+        # Two ways a book declares its cover, and Calibre honours both.
+        # EPUB 2: <meta name="cover" content="<manifest-id>"/>.
+        # EPUB 3: properties="cover-image" on the manifest <item> itself, often
+        # with no legacy meta at all. Reading only the first leaves an EPUB 3
+        # book whose cover is not named "cover.*" falling through to the
+        # filename heuristic and losing it — the same failure this fixes for
+        # EPUB 2. The Gutenberg corpus happens to emit the legacy form, which
+        # is why only that one was needed to make the sweep pass. (#113)
+        cover = ""
+        if meta_el is not None:
+            for m in meta_el.findall(f"{_OPF_NS}meta"):
+                if (m.get("name") or "").lower() == "cover":
+                    cover = m.get("content") or ""
+                    break
+        if not cover:
+            for item_el in opf.findall(f"{_OPF_NS}manifest/{_OPF_NS}item"):
+                if "cover-image" in (item_el.get("properties") or "").split():
+                    cover = item_el.get("id") or ""
+                    break
         self._metadata = _Metadata(
             title=title,
             creator=creator,
             language=language,
             date=date,
             publisher=publisher,
+            cover=cover,
         )
 
         items: dict[str, _ManifestItem] = {}

@@ -246,6 +246,28 @@ def test_fixture_body_images_shape():
 
 @pytest.mark.tier3
 @pytest.mark.integration
+def test_fixture_captioned_images_shape():
+    """captioned_images: both images survive sharing a container with a block
+    sibling (#113).
+
+    Asserts resources *and* refs. Resources alone would not catch a regression:
+    an image whose ref is lost becomes an orphan, and the #102 drop rule then
+    deletes the resource too, so the count would fall silently rather than
+    leaving evidence behind.
+    """
+    frags = load_fragments(EXPECTED_DIR / "captioned_images.kfx")
+    assert len(by_type(frags, "$164")) == 2, (
+        "captioned_images must emit exactly two $164 resources — an image "
+        "sharing a container with a caption div was dropped (#113)"
+    )
+    assert _count_image_resource_entries(frags) == 2, (
+        "captioned_images must emit two $259 entries carrying $175 — the "
+        "images are in the container but nothing draws them"
+    )
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
 def test_fixture_with_cover_shape():
     """with_cover: at least one $164 cover-image fragment + one $417 payload."""
     frags = load_fragments(EXPECTED_DIR / "with_cover.kfx")
