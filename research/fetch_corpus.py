@@ -33,6 +33,8 @@ import argparse
 import json
 import sys
 import time
+import hashlib
+import http.client
 import urllib.error
 import urllib.request
 import zipfile
@@ -65,7 +67,9 @@ def count_images(path: Path) -> int:
         return sum(1 for n in zf.namelist() if n.lower().endswith(IMAGE_SUFFIXES))
 
 
-def inspect(path: Path, expected_images: int) -> tuple[bool, str]:
+def inspect(
+    path: Path, expected_images: int, expected_sha: str = ""
+) -> tuple[bool, str]:
     """Return (ok, reason). Never raises — a corrupt file is an expected input."""
     if not path.exists():
         return False, "missing"
@@ -85,6 +89,14 @@ def inspect(path: Path, expected_images: int) -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {exc}"
     if got != expected_images:
         return False, f"image count {got}, manifest says {expected_images}"
+    if expected_sha:
+        # The structural checks above are all satisfiable by a substituted
+        # payload — and the fallback mirror is plain http, whose bytes then get
+        # parsed by the converter under test. The digest also pins the exact
+        # edition, which an image count only approximates.
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual != expected_sha:
+            return False, f"sha256 {actual[:12]}…, manifest says {expected_sha[:12]}…"
     return True, f"ok ({got} images)"
 
 
@@ -115,14 +127,25 @@ def download(book_id: int, dest: Path) -> tuple[bool, str]:
                 continue
             tmp.replace(dest)
             return True, base.split("//")[-1]
-        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        # http.client.HTTPException is NOT an OSError. A chunked response cut
+        # short raises IncompleteRead, which without this escapes download(),
+        # escapes main(), and aborts a half-hour fetch with a traceback.
+        except (
+            urllib.error.URLError,
+            http.client.HTTPException,
+            OSError,
+            TimeoutError,
+        ) as exc:
             last = f"{type(exc).__name__}: {exc}"
             tmp.unlink(missing_ok=True)
     return False, last
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument(
         "--verify-only", action="store_true", help="check disk, download nothing"
     )
@@ -139,9 +162,10 @@ def main(argv: list[str] | None = None) -> int:
     t0 = time.time()
     for i, book in enumerate(books, 1):
         bid, want = book["id"], book["epub_images"]
+        want_sha = book.get("sha256", "")
         path = dest_dir / f"pg{bid}.epub"
 
-        ok, why = inspect(path, want)
+        ok, why = inspect(path, want, want_sha)
         if ok:
             have += 1
             continue
@@ -151,8 +175,13 @@ def main(argv: list[str] | None = None) -> int:
             continue
 
         if path.exists():
+            # Deliberately not unlinked. download() stages into a .part file and
+            # only replaces the target after the Content-Length check, so a
+            # successful refetch overwrites atomically anyway. Deleting first
+            # means a failed refetch — unreachable mirror, or an upstream file
+            # whose image count has drifted from the manifest — leaves the user
+            # with nothing where they had a working book.
             print(f"[{i:>2}/{len(books)}] pg{bid}: refetching ({why})", flush=True)
-            path.unlink()
 
         got, detail = download(bid, path)
         if not got:
@@ -160,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[{i:>2}/{len(books)}] pg{bid}: FAILED {detail}", flush=True)
             continue
 
-        ok, why = inspect(path, want)
+        ok, why = inspect(path, want, want_sha)
         if ok:
             fetched += 1
             print(f"[{i:>2}/{len(books)}] pg{bid}: {why} via {detail}", flush=True)

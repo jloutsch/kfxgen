@@ -78,7 +78,15 @@ def _convert(epub_path, out_path):
     have been vacuous.
 
     `convert_oeb_to_kfx` is what `__init__.py` calls and what tier-2 already
-    uses, so the sweep now measures the shipping path rather than a subset of it.
+    uses, so the sweep now enters the pipeline where the plugin does.
+
+    Two gaps remain, so read results as "the real entry point" rather than "the
+    full shipping path". `opts=None` (the convention in the other integration
+    tests) makes Stylizer construction fail, so block CSS (#9) and `@font-face`
+    extraction (#15) degrade rather than run. And `image_optimize` is a no-op
+    outside Calibre, which is not importable here, so downscaling and
+    recompression (#11, #55) are not exercised. Image *presence* is covered;
+    image *processing* is not.
     """
     conv.convert_oeb_to_kfx(
         EpubAsOeb(str(epub_path)), str(out_path), opts=None, log=_silent_log()
@@ -141,13 +149,19 @@ def _metrics(kfx_path):
     # the resources carried in the container; `$175` refs are the places a
     # reader is told to draw one. #102 shipped with the first non-zero and the
     # second zero — every image present in the file, none of them on screen.
+    # Counts an entry carrying $175 at either level. The earlier version only
+    # looked at children once an entry had any, so a $175 on a parent that also
+    # has $146 children read as zero — the nested $259 shape native_generator
+    # explicitly contemplates (`:1607`). $181 was also in the descent and never
+    # occurs inside a $259; it is dropped rather than left as decoration.
     shown = 0
     for f in by_type(frags, "$259"):
-        v = val(f)
-        for outer in v.get(IS("$146")) or v.get(IS("$181")) or []:
+        for outer in val(f).get(IS("$146")) or []:
             if not hasattr(outer, "get"):
                 continue
-            for entry in outer.get(IS("$146")) or [outer]:
+            if outer.get(IS("$175")) is not None:
+                shown += 1
+            for entry in outer.get(IS("$146")) or []:
                 if hasattr(entry, "get") and entry.get(IS("$175")) is not None:
                     shown += 1
 
