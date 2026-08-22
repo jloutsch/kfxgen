@@ -303,6 +303,28 @@ def test_fixture_sub_super_marks_shape(tmp_path):
     assert shifts["35"] == "0.75", f"superscript font size moved: {shifts['35']}"
     assert shifts["-20"] == "0.75", f"subscript font size moved: {shifts['-20']}"
 
+    # kfxgen encodes raised text with `$31`, a numeric offset. KFX also has
+    # `$44` (`-kfx-baseline-style`), a semantic enum — `$370` super, `$371`
+    # sub — and that is the one Amazon uses. Measured across four books
+    # converted with Kindle Previewer 3.106 and decoded with upstream kfxlib
+    # 20260520, Amazon emitted `$44` every time and `$31` zero times (#123).
+    #
+    # kfxgen's choice is not wrong. #67 closed on a physical sideload
+    # confirming both forms render correctly at these exact values, over the
+    # tag route and the CSS route. Two valid encodings, one of them verified
+    # on hardware.
+    #
+    # Pinned so a switch is deliberate rather than arriving as regenerated
+    # goldens. The assertions above already fail if `$31` disappears entirely;
+    # this catches the hybrid case where both are emitted.
+    semantic = [f for f in by_type(frags, "$157") if val(f).get(IS("$44")) is not None]
+    assert not semantic, (
+        f"{len(semantic)} styles carry $44 baseline-style. That is Amazon's "
+        "idiom and may be the better one, but switching changes what the "
+        "device draws and the current values are the ones #67 verified — so "
+        "it wants a sideload first (#123)."
+    )
+
 
 @pytest.mark.tier3
 @pytest.mark.integration
