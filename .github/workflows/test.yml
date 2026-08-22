@@ -56,9 +56,13 @@ jobs:
       # CONTRIBUTING.md → Updating goldens after an intentional generator
       # change. Do not regenerate to make this green without confirming the
       # drift was intended; that is the whole signal.
+      # Scoped to the file rather than bare `-m tier3_strict`. An unscoped run
+      # replaces addopts' whole `-m` expression, losing `not device and not
+      # slow`, and collects all of `testpaths` (686 items, benchmarks included)
+      # to select 9. Naming the file collects 33 and keeps the device filter.
       - name: Byte-identical golden diff (tier-3 strict)
         run: |
-          pytest -m tier3_strict -v
+          pytest tests/integration/test_golden_corpus.py -m "tier3_strict and not device" -v
 
   ruff-lint:
     # Enforce ruff for outside contributors who don't have pre-commit

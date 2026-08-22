@@ -234,13 +234,17 @@ CI green without first confirming the drift was intended defeats the gate.
 
 ### Updating goldens after an intentional generator change
 
-If your change deliberately alters KFX output, the structural diff
-will fail until you regenerate the goldens:
+If your change deliberately alters KFX output, the goldens must be
+regenerated. Verify **both** layers afterwards — a change that moves bytes
+without moving structure passes `tier3` while the `tier3_strict` step that
+blocks the merge still fails, so checking only the first tells you nothing
+about the gate you are actually up against:
 
 ```bash
 python -m tests.fixtures.golden.regenerate
 git diff --stat tests/fixtures/golden/expected/
 pytest -m tier3
+pytest tests/integration/test_golden_corpus.py -m "tier3_strict and not device"
 git add tests/fixtures/golden/expected/ tests/fixtures/golden/inputs.py
 ```
 

@@ -14,11 +14,13 @@ Two diff layers:
   compare fragment-type multiset and per-fragment-type top-level key
   set. Tolerant of benign byte-level reorderings; fails on shape
   regressions like a missing fragment type or a renamed key.
-- **Byte-identical diff (opt-in, `tier3_strict`)** — SHA-256 the file.
-  Run with `pytest -m tier3_strict`. Verifies that the generator is
-  bit-stable across runs of the same input. Enabled by #89, which
-  replaced the random Container ID + ASIN with content-derived
-  deterministic IDs.
+- **Byte-identical diff (`tier3_strict`)** — SHA-256 the file.
+  Excluded from `pytest.ini`'s `addopts`, so a plain `pytest` skips it;
+  CI runs it as its own step and it gates every PR. Verifies that the
+  generator is bit-stable across runs of the same input. Possible
+  because Container ID and ASIN are derived from book content rather
+  than randomly (`native_generator.py:1964`), and because #96 removed
+  the last source of run-to-run drift.
 
 A third class of test, `test_fixture_exercises_target_shape`, asserts
 that each fixture still emits the structural element it was designed
@@ -176,9 +178,10 @@ def test_golden_byte_identical(name, builder, tmp_path):
     is bit-stable across runs — the strongest "this PR didn't drift
     output" signal available below device verification.
 
-    Enabled by #89 (deterministic Container ID + ASIN). If you bump
-    one of those derivations, expect this test to fail until you
-    regenerate the goldens via `python -m tests.fixtures.golden.regenerate`."""
+    Rests on Container ID and ASIN being content-derived rather than
+    random (`native_generator.py:1964`). If you bump one of those
+    derivations, expect this test to fail until you regenerate the
+    goldens via `python -m tests.fixtures.golden.regenerate`."""
     import hashlib
 
     fresh_bytes = _build_fresh(name, builder, tmp_path)
