@@ -152,7 +152,7 @@ Copyright © 2025-2026 Justin Loutsch &lt;justin.loutsch@gmail.com&gt;
 
 ## Credits
 
-- **kfxlib** by John Howell — Ion/KFX libraries, GPL v3. The `kfxlib_minimal/` directory is a modified subset of this work; see [NOTICE](NOTICE) and `plugin/kfxgen/kfxlib_minimal/README.md`.
+- **kfxlib** by John Howell — Ion/KFX libraries, GPL v3. Most of the `kfxlib_minimal/` directory is a modified subset of this work; `standard_symbols.py` is not, despite living there. See [NOTICE](NOTICE) and `plugin/kfxgen/kfxlib_minimal/README.md`.
 - **Calibre** by Kovid Goyal — plugin framework
 
 ---

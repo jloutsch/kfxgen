@@ -1,14 +1,21 @@
 # kfxlib_minimal
 
-A trimmed fork of Calibre's `kfxlib`, copied into kfxgen so the plugin
+Mostly a trimmed fork of Calibre's `kfxlib`, copied into kfxgen so the plugin
 runs inside Calibre's bundled Python interpreter without pulling in
 heavy upstream dependencies (pypdf, PIL, etc.). Only the Ion structures
 and serialization utilities needed for KFX generation are kept.
 
+**The directory is not uniform.** `standard_symbols.py` is original kfxgen work
+and `__init__.py` is original packaging; everything else is derived from
+upstream. See [`standard_symbols.py` is not vendored code](#standard_symbolspy-is-not-vendored-code)
+below before drawing any conclusion about provenance from this directory's name.
+
 ## Upstream baseline (#18)
 
-Derived from jhowell's `kfxlib` (bundled in the *KFX Input* Calibre plugin;
-copyright "2016-2025, John Howell"). Update this on every re-sync.
+The derived files come from jhowell's `kfxlib` (bundled in the *KFX Input*
+Calibre plugin; copyright "2016-2025, John Howell"). Update this on every
+re-sync. Per-file copyright headers are authoritative where they disagree with
+this directory-level summary.
 
 | Field | Value |
 |-------|-------|
@@ -101,8 +108,9 @@ git log --diff-filter=AM --pretty='%h %ad %s' --date=short -- plugin/kfxgen/kfxl
 
 ### `standard_symbols.py` is not vendored code
 
-Everything else in this directory is derived from upstream `kfxlib`. That file is
-not, and the distinction is easy to lose because of where it sits.
+Every file here except `standard_symbols.py` and `__init__.py` is derived from
+upstream `kfxlib`. Those two are not, and the distinction is easy to lose
+because of where they sit.
 
 Measured against `kfxlib` 20260520: no upstream module defines these names, no
 `standard_symbols.py` exists upstream at all, and **0 of its 247 symbols** appear
