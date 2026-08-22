@@ -30,7 +30,6 @@ import pytest
 
 from kfxgen import converter as conv
 from kfxgen.kfxlib_minimal.ion import IS
-from kfxgen.native_generator import NativeKFXGenerator
 from tests._kfx_introspect import by_type, load_fragments, val
 from tests.fixtures.oeb_shim import EpubAsOeb
 
@@ -67,16 +66,20 @@ def _silent_log():
 
 
 def _convert(epub_path, out_path):
-    log = _silent_log()
-    oeb = EpubAsOeb(str(epub_path))
-    metadata = conv.extract_metadata(oeb, log)
-    chapters = conv.extract_chapters_from_oeb(oeb, log, metadata=metadata)
-    gen = NativeKFXGenerator()
-    gen.generate_full_book(
-        title=metadata["title"],
-        author=metadata["author"],
-        chapters=chapters,
-        output_path=str(out_path),
+    """Convert through the same entry point the Calibre plugin uses.
+
+    This used to hand-roll a reduced pipeline: extract_metadata,
+    extract_chapters_from_oeb, then generate_full_book(title, author, chapters).
+    That path never passes images to the generator, so every book came out with
+    zero `$164` resources no matter what the source held — the sweep could not
+    see image handling at all, and an image assertion written against it would
+    have been vacuous.
+
+    `convert_oeb_to_kfx` is what `__init__.py` calls and what tier-2 already
+    uses, so the sweep now measures the shipping path rather than a subset of it.
+    """
+    conv.convert_oeb_to_kfx(
+        EpubAsOeb(str(epub_path)), str(out_path), opts=None, log=_silent_log()
     )
     return out_path
 
@@ -104,6 +107,20 @@ def _metrics(kfx_path):
             for span in entry.get(IS("$142")) or []:
                 if IS("$179") in span:
                     targets.append(str(span[IS("$179")]))
+    # Images have two independent counts and both matter. `$164` fragments are
+    # the resources carried in the container; `$175` refs are the places a
+    # reader is told to draw one. #102 shipped with the first non-zero and the
+    # second zero — every image present in the file, none of them on screen.
+    shown = 0
+    for f in by_type(frags, "$259"):
+        v = val(f)
+        for outer in v.get(IS("$146")) or v.get(IS("$181")) or []:
+            if not hasattr(outer, "get"):
+                continue
+            for entry in outer.get(IS("$146")) or [outer]:
+                if hasattr(entry, "get") and entry.get(IS("$175")) is not None:
+                    shown += 1
+
     return {
         "chars": sum(len(t) for t in texts),
         "blocks": len(texts),
@@ -112,6 +129,8 @@ def _metrics(kfx_path):
         "links": len(targets),
         "dangling": len(set(targets) - anchors),
         "nav_junk": sum(1 for t in texts if t.strip() in NAV_MARKERS),
+        "image_resources": len(by_type(frags, "$164")),
+        "images_shown": shown,
     }
 
 
@@ -142,6 +161,19 @@ def test_corpus_book_invariants(epub, tmp_path):
         )
     # #60: hidden page-list/landmarks navs are markup, never reading content.
     assert m["nav_junk"] == 0, f"{m['nav_junk']} navigation blocks leaked into the body"
+    # #102: a $164 resource nothing points at is weight the reader never draws.
+    # kfxgen now drops those, so any that survive mean the drop missed a path.
+    if m["image_resources"]:
+        assert m["images_shown"] > 0, (
+            f"{m['image_resources']} image resources emitted but zero $175 refs "
+            "— every image is in the file and none of them is on screen"
+        )
+    # The other direction: a $175 ref with no resource behind it is the image
+    # analogue of a dangling link, and nothing else here would notice.
+    if m["images_shown"]:
+        assert m["image_resources"] > 0, (
+            f"{m['images_shown']} image refs but no $164 resources to draw"
+        )
 
 
 @pytest.mark.integration
