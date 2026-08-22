@@ -137,6 +137,40 @@ def make_captioned_images(out_dir: Path) -> Path:
     return builder.build(out_dir, "captioned_images")
 
 
+def make_sub_super_marks(out_dir: Path) -> Path:
+    """Raised and lowered runs, via the tag route (#115).
+
+    Locks the `$157` metrics for both forms: a reduced `$16` plus a `$31`
+    baseline shift, +35% for `<sup>` and -20% for `<sub>`. Both numbers were
+    confirmed on hardware in #67.
+
+    Subscripts had no golden at all before this. `publisher_structure` covers
+    `<sup>`, so a change to superscript metrics moved bytes and was caught —
+    but nothing exercised `subscript_metrics`, so a change there could land
+    byte-identical by assumption rather than by evidence. That is the same
+    shape as the gap that let #113 sit undetected: the corpus covered the
+    variant that worked and not the one that did not.
+
+    Tag route only. The CSS route (`vertical-align` on a span) resolves
+    through Calibre's Stylizer, which golden generation runs without, so it
+    would silently emit no span — see `make_publisher_structure`. It is
+    covered by unit tests with an injected stylizer instead.
+    """
+    body = (
+        "<p>Water is H<sub>2</sub>O and the note is here.<sup>1</sup></p>\n"
+        "<p>A second line with x<sub>i</sub> and y<sup>n</sup> together.</p>"
+    )
+    return (
+        EpubBuilder()
+        .set_metadata(title="Sub Super Marks Golden", author="Golden Author")
+        .add_chapter(
+            "Marks",
+            _xhtml_page("Marks", body).encode("utf-8"),
+        )
+        .build(out_dir, "sub_super_marks")
+    )
+
+
 def make_with_cover(out_dir: Path) -> Path:
     """Book with a cover image. Locks cover-image emission ($164/$417 with
     distinct fids, $490 cover_image metadata). #32 cover-in-flow context."""
@@ -521,6 +555,7 @@ GOLDEN_INPUTS: list[tuple[str, callable]] = [
     ("minimal", make_minimal),
     ("body_images", make_body_images),
     ("captioned_images", make_captioned_images),
+    ("sub_super_marks", make_sub_super_marks),
     ("with_cover", make_with_cover),
     ("multi_chapter", make_multi_chapter),
     ("linked_toc", make_linked_toc),

@@ -2425,3 +2425,66 @@ def test_return_links_are_reciprocal_with_their_markers(tmp_path):
             )
             checked += 1
     assert checked >= 2, f"Expected both round trips to be checked, got {checked}"
+
+
+# ── #115: subscript font size is tunable on its own ──────────────────────────
+#
+# Neither test above ever set a font-size variable while checking subscripts,
+# so nothing pinned which variable subscript size followed. It followed
+# KFXGEN_SUPERSCRIPT_FONT_SIZE, meaning a device that rendered superscripts
+# too small could only be corrected by resizing every subscript too — and the
+# variable name gave no hint of it.
+
+
+@pytest.mark.unit
+def test_subscript_font_size_has_its_own_variable(monkeypatch):
+    """The gap #115 was filed for: subscripts need a dial of their own."""
+    from kfxgen import native_generator as ng
+
+    monkeypatch.setenv("KFXGEN_SUBSCRIPT_FONT_SIZE", "0.6")
+    assert ng.subscript_metrics()[0] == 0.6
+    # ...and it must not drag superscripts along with it.
+    assert ng.superscript_metrics()[0] == 0.75
+
+
+@pytest.mark.unit
+def test_superscript_variable_still_moves_both(monkeypatch):
+    """Backwards compatibility: the single-knob behaviour is unchanged.
+
+    `KFXGEN_SUPERSCRIPT_FONT_SIZE` shipped in 5.x as the only size dial, and
+    anyone using it today is implicitly resizing both. Silently narrowing it to
+    superscripts would change their output without warning.
+    """
+    from kfxgen import native_generator as ng
+
+    monkeypatch.setenv("KFXGEN_SUPERSCRIPT_FONT_SIZE", "0.8")
+    assert ng.superscript_metrics()[0] == 0.8
+    assert ng.subscript_metrics()[0] == 0.8, (
+        "the superscript variable must still move subscripts when no subscript "
+        "variable is set, or existing setups silently change behaviour"
+    )
+
+
+@pytest.mark.unit
+def test_subscript_variable_wins_over_superscript(monkeypatch):
+    """When both are set the specific one must win, or the new dial is inert."""
+    from kfxgen import native_generator as ng
+
+    monkeypatch.setenv("KFXGEN_SUPERSCRIPT_FONT_SIZE", "0.8")
+    monkeypatch.setenv("KFXGEN_SUBSCRIPT_FONT_SIZE", "0.6")
+    assert ng.superscript_metrics()[0] == 0.8
+    assert ng.subscript_metrics()[0] == 0.6
+
+
+@pytest.mark.unit
+def test_sub_and_super_defaults_are_both_device_verified_values():
+    """Both defaults were confirmed on hardware in #67 at 0.75 / +35% / -20%.
+
+    Pinned because the code comment claimed for months that the subscript
+    shift was *not* device-verified, which is the kind of stale record that
+    invites someone to change a value the hardware already settled.
+    """
+    from kfxgen import native_generator as ng
+
+    assert ng.superscript_metrics() == (0.75, ("35", "$314"))
+    assert ng.subscript_metrics() == (0.75, ("-20", "$314"))
