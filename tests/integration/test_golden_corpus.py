@@ -312,6 +312,40 @@ def test_fixture_sub_super_marks_shape(tmp_path):
 
 @pytest.mark.tier3
 @pytest.mark.integration
+def test_fixture_table_cells_do_not_fuse(tmp_path):
+    """table_cells: adjacent cells stay separate values, not one fused number.
+
+    Built fresh rather than read from the committed golden — reading the file
+    would check the file, not the generator, and the whole point here is that
+    the generator used to depend on source whitespace.
+
+    The two rows carry the same shape written differently: row 2 is
+    newline-separated, row 3 is adjacent. Asserting both forms appear proves
+    the separator is emitted where the source has none *and* not doubled where
+    the source already had it. `18018,893` is the exact corruption from #128 —
+    a number that appears nowhere in the fixture.
+    """
+    from tests.fixtures.golden.inputs import make_table_cells
+
+    written = tmp_path / "fresh_table.kfx"
+    written.write_bytes(_build_fresh("table_cells", make_table_cells, tmp_path))
+    text = " ".join(
+        s
+        for strings in _content_fragment_strings(load_fragments(written))
+        for s in strings
+    )
+
+    assert "18018,893" not in text, (
+        "adjacent cells fused into one value — the #128 corruption is back"
+    )
+    for cell in ("1801", "8,893", "1811", "12,289", "Year", "Population"):
+        assert cell in text, f"cell value {cell!r} missing from content"
+    assert "YearPopulation" not in text, "adjacent header cells fused"
+    assert "181112,289" not in text, "adjacent cells in the third row fused"
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
 def test_fixture_with_cover_shape():
     """with_cover: at least one $164 cover-image fragment + one $417 payload."""
     frags = load_fragments(EXPECTED_DIR / "with_cover.kfx")

@@ -1775,3 +1775,83 @@ def test_cover_found_via_epub3_cover_image_property(tmp_path):
     data, href = _conv.extract_cover_image(EpubAsOeb(str(epub)), log)
     assert data, "EPUB 3 cover-image property not honoured"
     assert href.split("/")[-1] == "title-page.jpg"
+
+
+# --- table cell boundaries (#128) -------------------------------------------
+#
+# kfxgen has no table structure: a <table> is walked as an ordinary container
+# and every cell lands in one paragraph. Before the fix the only thing between
+# two cells was whatever whitespace the author happened to leave between the
+# tags, so `</td><td>` with nothing between it fused the values. That is silent
+# corruption rather than bad layout — `18018,893` cannot be read back apart
+# into `1801` and `8,893`.
+#
+# The pair of tests that matters is adjacent vs. whitespace-separated: they
+# must produce the *same* text. One proves the separator is emitted, the other
+# proves it is not doubled where whitespace already did the job.
+
+
+@pytest.mark.unit
+def test_adjacent_table_cells_do_not_fuse():
+    blocks = _conv.extract_blocks_from_html(
+        _doc("<table><tr><td>1801</td><td>8,893</td></tr></table>")
+    )
+    assert blocks[0]["text"] == "1801 8,893"
+
+
+@pytest.mark.unit
+def test_adjacent_and_spaced_cells_agree():
+    adjacent = _conv.extract_blocks_from_html(
+        _doc("<table><tr><td>1801</td><td>8,893</td></tr></table>")
+    )
+    spaced = _conv.extract_blocks_from_html(
+        _doc("<table><tr>\n<td>1801</td>\n<td>8,893</td>\n</tr></table>")
+    )
+    assert adjacent[0]["text"] == spaced[0]["text"] == "1801 8,893"
+
+
+@pytest.mark.unit
+def test_adjacent_header_cells_do_not_fuse():
+    blocks = _conv.extract_blocks_from_html(
+        _doc("<table><tr><th>Year</th><th>Population</th></tr></table>")
+    )
+    assert blocks[0]["text"] == "Year Population"
+
+
+@pytest.mark.unit
+def test_cells_separate_across_row_boundary():
+    # The last cell of one row and the first of the next are adjacent too:
+    # `</td></tr><tr><td>`. The separator closes the cell, so the row boundary
+    # is covered by the same rule.
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>"
+        )
+    )
+    assert blocks[0]["text"] == "a b c d"
+
+
+@pytest.mark.unit
+def test_empty_cell_does_not_produce_double_space():
+    blocks = _conv.extract_blocks_from_html(
+        _doc("<table><tr><td>a</td><td></td><td>b</td></tr></table>")
+    )
+    assert blocks[0]["text"] == "a b"
+
+
+@pytest.mark.unit
+def test_cell_separator_preserves_span_offsets():
+    # The separator lengthens the text, so every span offset after it shifts.
+    # Emphasis inside a later cell has to still cover its own word.
+    blocks = _conv.extract_blocks_from_html(
+        _doc("<table><tr><td>ab</td><td><em>cd</em></td></tr></table>")
+    )
+    assert blocks[0]["text"] == "ab cd"
+    assert blocks[0]["spans"] == [(3, 2, frozenset({I}))]
+
+
+@pytest.mark.unit
+def test_non_table_markup_is_unaffected():
+    # The rule keys off td/th only; ordinary inline nesting keeps its spacing.
+    blocks = _conv.extract_blocks_from_html(_doc("<p>Hello <em>there</em> world.</p>"))
+    assert blocks[0]["text"] == "Hello there world."

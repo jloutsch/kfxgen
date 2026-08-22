@@ -36,6 +36,16 @@ _BOLD_TAGS = {"strong", "b"}
 _SUPER_TAGS = {"sup"}
 _SUB_TAGS = {"sub"}
 
+# Table cells run together without this. kfxgen has no table structure — a
+# <table> is walked as an ordinary container and its cells land in one
+# paragraph — so the only thing separating two cells was whatever whitespace
+# happened to sit between the tags in the source. Where an author wrote
+# `</td><td>` with nothing between, adjacent values fused: `1801` and `8,893`
+# came out as `18018,893`, a number that is not in the source and cannot be
+# read back apart. 12 of the 77 corpus books contain adjacent cell pairs, and
+# one fuses 2249 of its 4864 cells. (#128)
+_CELL_TAGS = {"td", "th"}
+
 _security_log = logging.getLogger(__name__ + ".security")
 
 
@@ -258,6 +268,12 @@ def _walk_inline(
                     child, cur, style_resolver, is_root=False, base_href=base_href
                 )
             )
+            # Close the cell with a boundary so the next one cannot fuse onto
+            # it. Emitted unconditionally rather than only when the source
+            # lacks whitespace — normalization collapses runs of whitespace, so
+            # a redundant space costs nothing and a missing one corrupts. (#128)
+            if clocal in _CELL_TAGS:
+                parts.append((" ", frozenset()))
         if child.tail:
             # The tail sits inside `elem`, so it carries `cur` — this element's
             # accumulated flags — not the incoming `flags`. Using `flags` here

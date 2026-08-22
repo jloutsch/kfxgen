@@ -544,6 +544,45 @@ def make_long_chapter(out_dir: Path) -> Path:
     )
 
 
+def make_table_cells(out_dir: Path) -> Path:
+    """Adjacent table cells, which used to fuse into one value (#128).
+
+    kfxgen has no table structure — a `<table>` is walked as an ordinary
+    container and every cell lands in one paragraph. The only thing separating
+    two cells was whatever whitespace the source happened to carry between the
+    tags, so `</td><td>` with nothing between it merged the values: `1801` and
+    `8,893` came out as `18018,893`, a number absent from the source that
+    cannot be read back apart.
+
+    Deliberately writes the two forms side by side. The first row is adjacent
+    and the second is newline-separated, with the same values in both, so the
+    golden locks them to identical spacing. A fix that emitted the separator
+    unconditionally *and* one that doubled it where whitespace already existed
+    would both move bytes here.
+
+    No existing fixture had a table at all, which is why the corpus stayed
+    green while 12 of the 77 public-domain books carried adjacent cell pairs —
+    one of them fusing 2249 of its 4864 cells.
+    """
+    body = (
+        "<table>\n"
+        "<tr><th>Year</th><th>Population</th></tr>\n"
+        "<tr>\n<td>1801</td>\n<td>8,893</td>\n</tr>\n"
+        "<tr><td>1811</td><td>12,289</td></tr>\n"
+        "</table>\n"
+        "<p>Following text, to prove the table did not swallow it.</p>"
+    )
+    return (
+        EpubBuilder()
+        .set_metadata(title="Table Cells Golden", author="Golden Author")
+        .add_chapter(
+            "Census",
+            _xhtml_page("Census", body).encode("utf-8"),
+        )
+        .build(out_dir, "table_cells")
+    )
+
+
 # Registry consumed by both regenerate.py and test_golden_corpus.py.
 #
 # Each fixture is paired with a structural-fingerprint check in
@@ -556,6 +595,7 @@ GOLDEN_INPUTS: list[tuple[str, callable]] = [
     ("body_images", make_body_images),
     ("captioned_images", make_captioned_images),
     ("sub_super_marks", make_sub_super_marks),
+    ("table_cells", make_table_cells),
     ("with_cover", make_with_cover),
     ("multi_chapter", make_multi_chapter),
     ("linked_toc", make_linked_toc),
