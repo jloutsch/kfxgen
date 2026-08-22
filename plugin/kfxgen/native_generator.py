@@ -32,12 +32,27 @@ _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 # Superscript/subscript character metrics (#52). Amazon-produced noteref
 # styles are {$16: 0.75rem, $42: ~1.33, $31: 35%} — the percentage form is
 # used here so the shift tracks the reader's font size. The subscript depth
-# has no reference to copy: CSS `sub` sits roughly a fifth of the font size
-# below the baseline, so -20% is the closest equivalent. Unlike the
-# superscript value it is NOT device-verified.
+# had no reference to copy: CSS `sub` sits roughly a fifth of the font size
+# below the baseline, so -20% was chosen as the closest equivalent.
+#
+# That guess has since been confirmed. #67 was closed by a physical sideload of
+# ZZ-#67 SUB+SUPER TEST, which rendered both forms correctly — superscript at
+# $31 35% / $16 0.75, subscript at $31 -20% / $16 0.75 — over both the tag
+# route (<sup>/<sub>) and the CSS route (vertical-align). The comment here read
+# "NOT device-verified" long after that, which is the wrong direction to be
+# wrong in: it invites someone to re-litigate a value the hardware already
+# settled.
 SUPERSCRIPT_FONT_SIZE = 0.75
 SUPERSCRIPT_SHIFT_PCT = 35  # +35% of font size (device-verified)
-SUBSCRIPT_SHIFT_PCT = -20  # -20% (see #67 — not device-verified)
+#: Subscripts use the same reduced size as superscripts, and #67 checked both
+#: at 0.75 on hardware — so they agree by evidence, not by coincidence.
+#:
+#: Spelled as a literal rather than `= SUPERSCRIPT_FONT_SIZE`. An alias would
+#: mean a maintainer acting on a superscript device report and editing the line
+#: above silently moves the subscript default too — reintroducing one level
+#: down exactly the coupling #115 exists to break.
+SUBSCRIPT_FONT_SIZE = 0.75
+SUBSCRIPT_SHIFT_PCT = -20  # -20% (device-verified, #67)
 
 
 def _env_number(name, default):
@@ -67,8 +82,30 @@ def superscript_metrics():
 
 
 def subscript_metrics():
-    """(font_size, baseline_shift) for a subscript run, env-overridable."""
-    size = _env_number("KFXGEN_SUPERSCRIPT_FONT_SIZE", SUPERSCRIPT_FONT_SIZE)
+    """(font_size, baseline_shift) for a subscript run, env-overridable.
+
+    `KFXGEN_SUBSCRIPT_FONT_SIZE` falls back to `KFXGEN_SUPERSCRIPT_FONT_SIZE`
+    before the built-in default, so the pre-existing single-knob behaviour is
+    unchanged: setting only the superscript variable still moves both, which is
+    what anyone already relying on it expects. What is new is that subscripts
+    can now be corrected on their own.
+
+    They could not before (#115). `superscript_metrics` promises that "a Kindle
+    that renders superscripts too high or too small can be corrected without a
+    rebuild"; subscripts had no equivalent, because the only size dial was named
+    for superscripts and moved both. Both defaults are device-verified at 0.75
+    (#67), so this changes no output unless a variable is set.
+    """
+    # Resolved lazily. Passing the superscript lookup as the default argument
+    # evaluates it even when the subscript variable is set and wins, so a
+    # malformed superscript value would log "ignoring invalid ..." on every
+    # call — and this runs once per emphasis run, so a book with many
+    # subscripts would bury the log in warnings about a value that changed
+    # nothing.
+    if "KFXGEN_SUBSCRIPT_FONT_SIZE" in os.environ:
+        size = _env_number("KFXGEN_SUBSCRIPT_FONT_SIZE", SUBSCRIPT_FONT_SIZE)
+    else:
+        size = _env_number("KFXGEN_SUPERSCRIPT_FONT_SIZE", SUBSCRIPT_FONT_SIZE)
     pct = _env_number("KFXGEN_SUBSCRIPT_SHIFT_PCT", SUBSCRIPT_SHIFT_PCT)
     return size, (str(pct), "$314")
 

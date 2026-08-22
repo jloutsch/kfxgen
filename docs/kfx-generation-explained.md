@@ -274,13 +274,21 @@ Defaults, all device-confirmed and overridable per conversion (#68):
 
 | Value | Default | Environment variable |
 |---|---|---|
-| Font size | 0.75 rem | `KFXGEN_SUPERSCRIPT_FONT_SIZE` |
+| Superscript font size | 0.75 rem | `KFXGEN_SUPERSCRIPT_FONT_SIZE` |
 | Superscript shift | +35% | `KFXGEN_SUPERSCRIPT_SHIFT_PCT` |
+| Subscript font size | 0.75 rem | `KFXGEN_SUBSCRIPT_FONT_SIZE` |
 | Subscript shift | −20% | `KFXGEN_SUBSCRIPT_SHIFT_PCT` |
 
 They are overridable because they were recovered from a handful of reference
 files and confirmed on one device model; a Kindle that disagrees can be
 corrected without a rebuild.
+
+`KFXGEN_SUBSCRIPT_FONT_SIZE` falls back to `KFXGEN_SUPERSCRIPT_FONT_SIZE`
+before its own default, so setting only the superscript variable still resizes
+both — the behaviour that shipped in 5.x, kept so existing setups do not change
+under them. Until #115 that was the *only* size dial, which meant a device
+rendering subscripts badly could not be corrected without also moving every
+superscript.
 
 Publisher EPUBs rarely use `<sup>`. They wrap the marker in a `<span>` whose
 class carries `vertical-align`, and the value is as often a raw length
