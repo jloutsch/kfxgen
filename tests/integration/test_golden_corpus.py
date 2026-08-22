@@ -312,6 +312,44 @@ def test_fixture_sub_super_marks_shape(tmp_path):
 
 @pytest.mark.tier3
 @pytest.mark.integration
+def test_fixture_table_cells_do_not_fuse(tmp_path):
+    """table_cells: adjacent cells stay separate values, not one fused number.
+
+    Built fresh rather than read from the committed golden — reading the file
+    would check the file, not the generator, and the whole point here is that
+    the generator used to depend on source whitespace.
+
+    Asserts the whole table's text as one exact run rather than probing for
+    individual values. A substring check for `"1801"` is satisfied by the fused
+    `18018,893` too, so it would carry no weight; the exact sequence pins cell
+    order and every boundary at once.
+
+    It does not check for a doubled separator: normalization collapses
+    whitespace runs, so a redundant space is unobservable in the output. That
+    is why the fix emits unconditionally rather than testing for existing
+    whitespace.
+    """
+    from tests.fixtures.golden.inputs import make_table_cells
+
+    written = tmp_path / "fresh_table.kfx"
+    written.write_bytes(_build_fresh("table_cells", make_table_cells, tmp_path))
+    text = " ".join(
+        s
+        for strings in _content_fragment_strings(load_fragments(written))
+        for s in strings
+    )
+
+    assert "Year Population 1801 8,893 1811 12,289" in text, (
+        f"table cells did not come out as six separate values; got: {text[:200]!r}"
+    )
+    # Named explicitly so a failure says which corruption returned, rather
+    # than only that the exact run stopped matching.
+    for fused in ("YearPopulation", "18018,893", "181112,289"):
+        assert fused not in text, f"adjacent cells fused into {fused!r} (#128)"
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
 def test_fixture_with_cover_shape():
     """with_cover: at least one $164 cover-image fragment + one $417 payload."""
     frags = load_fragments(EXPECTED_DIR / "with_cover.kfx")

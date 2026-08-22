@@ -36,6 +36,16 @@ _BOLD_TAGS = {"strong", "b"}
 _SUPER_TAGS = {"sup"}
 _SUB_TAGS = {"sub"}
 
+# Table cells run together without this. kfxgen has no table structure — a
+# <table> is walked as an ordinary container and its cells land in one
+# paragraph — so the only thing separating two cells was whatever whitespace
+# happened to sit between the tags in the source. Where an author wrote
+# `</td><td>` with nothing between, adjacent values fused: `1801` and `8,893`
+# came out as `18018,893`, a number that is not in the source and cannot be
+# read back apart. 12 of the 77 corpus books contain adjacent cell pairs, and
+# one fuses 2249 of its 4864 cells. (#128)
+_CELL_TAGS = {"td", "th"}
+
 _security_log = logging.getLogger(__name__ + ".security")
 
 
@@ -237,6 +247,13 @@ def _walk_inline(
                 cur.add(FLAG_SUB)
     cur = frozenset(cur)
     parts = []
+    # Open a cell with a boundary as well as closing one, so a cell cannot fuse
+    # onto whatever preceded it. Closing alone leaves the case where a cell
+    # follows ordinary text rather than another cell — a nested table inside a
+    # cell that already holds text ran `x<table>...<td>i` together as `xi`.
+    # (#128)
+    if local in _CELL_TAGS and not is_root:
+        parts.append((" ", frozenset()))
     # Mark where this element starts before emitting its text, so an id can be
     # resolved to a character offset rather than just "somewhere in this
     # paragraph". Zero-length, so it changes no text and no span. (#79)
@@ -266,6 +283,22 @@ def _walk_inline(
             # inside an <a> lost the link, leaving entries half-underlined and
             # half-dead. (#59)
             parts.append((child.tail, cur))
+
+    # Close a cell with a boundary so the next one cannot fuse onto it. Emitted
+    # unconditionally rather than only when the source lacks whitespace —
+    # normalization collapses runs of whitespace, so a redundant space costs
+    # nothing and a missing one corrupts.
+    #
+    # Placed here, on the cell itself, rather than in the loop above where the
+    # parent walks its children. Cells do not always arrive through that loop:
+    # `extract_blocks_from_html._walk`'s container branch calls this function
+    # on a child directly, so markup that omits `<tr>`/`<tbody>` — or puts a
+    # `<tr>` straight under `<body>` — reached the parent loop never having
+    # gone through a cell-aware step, and fused anyway. Both shapes are
+    # malformed and an html5 parser would repair them, but the OEB shim parses
+    # with plain `etree.fromstring`, which does not. (#128)
+    if local in _CELL_TAGS and not is_root:
+        parts.append((" ", frozenset()))
     return parts
 
 
