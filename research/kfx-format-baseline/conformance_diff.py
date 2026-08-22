@@ -53,7 +53,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 VENDOR_ZIP = ROOT / "tests" / "fixtures" / "vendor" / "kfx_input_plugin.zip"
 
 
-def _load_upstream_kfxlib():
+def _load_upstream_kfxlib(extract: Path):
     """Import the full upstream kfxlib out of the vendored plugin zip.
 
     Needed rather than `kfxlib_minimal` because only the full library carries
@@ -66,7 +66,6 @@ def _load_upstream_kfxlib():
         )
     import zipfile
 
-    extract = Path(tempfile.mkdtemp(prefix="kfxlib_"))
     with zipfile.ZipFile(VENDOR_ZIP) as zf:
         zf.extractall(extract)
     sys.path.insert(0, str(extract))
@@ -76,7 +75,7 @@ def _load_upstream_kfxlib():
     return YJ_Book
 
 
-def _kfxgen_fragments(epub_path: Path):
+def _kfxgen_fragments(epub_path: Path, workdir: Path):
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(ROOT / "plugin"))
     from kfxgen import converter as conv  # noqa: PLC0415
@@ -85,7 +84,7 @@ def _kfxgen_fragments(epub_path: Path):
     from tests._kfx_introspect import load_fragments  # noqa: PLC0415
     from tests.fixtures.oeb_shim import EpubAsOeb  # noqa: PLC0415
 
-    out = Path(tempfile.mkdtemp()) / "kfxgen.kfx"
+    out = workdir / "kfxgen.kfx"
     conv.convert_oeb_to_kfx(
         EpubAsOeb(str(epub_path)), str(out), opts=None, log=NullLog()
     )
@@ -101,11 +100,25 @@ def _nested_keys(fragments, ftype: str) -> set[str]:
 
     Top-level keys miss the interesting cases: `$601` and `$159` live inside
     `$259`'s nested entries, not on the fragment itself.
+
+    `IonAnnotation` has to be unwrapped explicitly. It is a plain object with
+    `.annotations` and `.value` — neither dict-like nor a list — so without the
+    first branch the walk stops dead at every annotated node and everything
+    beneath it vanishes from the comparison. That is not a corner case: the
+    `$389` nav fragment wraps its entries in `$391`/`$393` annotations, so
+    skipping them returns 2 of its 11 keys and reports the table of contents as
+    matching while never having looked at entry type, label, or position ref.
+
+    Duck-typed rather than an isinstance check because the two sides come from
+    different classes — upstream `kfxlib.ion` for Amazon, `kfxlib_minimal.ion`
+    for ours.
     """
     found: set[str] = set()
 
     def walk(node):
-        if hasattr(node, "keys"):
+        if hasattr(node, "annotations") and hasattr(node, "value"):
+            walk(node.value)
+        elif hasattr(node, "keys"):
             for k in list(node.keys()):
                 found.add(str(k))
                 walk(node[k])
@@ -133,46 +146,50 @@ def main(argv=None) -> int:
         if not path.exists():
             raise SystemExit(f"not found: {path}")
 
-    YJ_Book = _load_upstream_kfxlib()
-    amazon = YJ_Book(str(args.kpf))
-    amazon.decode_book()
-    amazon_frags = list(amazon.fragments)
-    ours_frags = _kfxgen_fragments(args.epub)
+    # Both the extracted plugin (~5 MB) and the generated KFX are scratch. The
+    # intended workflow is to re-run this often, so they get cleaned up.
+    with tempfile.TemporaryDirectory(prefix="conformance_diff_") as tmp:
+        tmpdir = Path(tmp)
+        YJ_Book = _load_upstream_kfxlib(tmpdir / "kfxlib")
+        amazon = YJ_Book(str(args.kpf))
+        amazon.decode_book()
+        amazon_frags = list(amazon.fragments)
+        ours_frags = _kfxgen_fragments(args.epub, tmpdir)
 
-    a_counts = _counts(amazon_frags)
-    o_counts = _counts(ours_frags)
+        a_counts = _counts(amazon_frags)
+        o_counts = _counts(ours_frags)
 
-    print(f"=== {args.epub.name} ===")
-    print(f"{'fragment':<10} {'kfxgen':>8} {'amazon':>8}   note")
-    for ftype in sorted(set(a_counts) | set(o_counts)):
-        o, a = o_counts.get(ftype, 0), a_counts.get(ftype, 0)
-        note = ""
-        if o and not a:
-            note = "kfxgen only"
-        elif a and not o:
-            note = "AMAZON ONLY — kfxgen never emits this"
-        print(f"{ftype:<10} {o:>8} {a:>8}   {note}")
+        print(f"=== {args.epub.name} ===")
+        print(f"{'fragment':<10} {'kfxgen':>8} {'amazon':>8}   note")
+        for ftype in sorted(set(a_counts) | set(o_counts)):
+            o, a = o_counts.get(ftype, 0), a_counts.get(ftype, 0)
+            note = ""
+            if o and not a:
+                note = "kfxgen only"
+            elif a and not o:
+                note = "AMAZON ONLY — kfxgen never emits this"
+            print(f"{ftype:<10} {o:>8} {a:>8}   {note}")
 
-    print("\n=== property keys, by fragment type ===")
-    print("(a key on one side only is a difference in what is being said)")
-    for ftype in sorted(set(a_counts) & set(o_counts)):
-        ours_keys = _nested_keys(ours_frags, ftype)
-        amz_keys = _nested_keys(amazon_frags, ftype)
-        only_amz = sorted(amz_keys - ours_keys)
-        only_ours = sorted(ours_keys - amz_keys)
-        if only_amz or only_ours:
-            print(f"\n  {ftype}")
-            if only_amz:
-                print(f"    amazon only : {only_amz}")
-            if only_ours:
-                print(f"    kfxgen only : {only_ours}")
+        print("\n=== property keys, by fragment type ===")
+        print("(a key on one side only is a difference in what is being said)")
+        for ftype in sorted(set(a_counts) & set(o_counts)):
+            ours_keys = _nested_keys(ours_frags, ftype)
+            amz_keys = _nested_keys(amazon_frags, ftype)
+            only_amz = sorted(amz_keys - ours_keys)
+            only_ours = sorted(ours_keys - amz_keys)
+            if only_amz or only_ours:
+                print(f"\n  {ftype}")
+                if only_amz:
+                    print(f"    amazon only : {only_amz}")
+                if only_ours:
+                    print(f"    kfxgen only : {only_ours}")
 
-    print(
-        "\nA difference is not a defect. Both pipelines produce valid KFX and "
-        "kfxgen\nmakes deliberate different choices. Investigate what each key "
-        "means before\nacting, and verify on a device before changing anything "
-        "that renders."
-    )
+        print(
+            "\nA difference is not a defect. Both pipelines produce valid KFX and "
+            "kfxgen\nmakes deliberate different choices. Investigate what each key "
+            "means before\nacting, and verify on a device before changing anything "
+            "that renders."
+        )
     return 0
 
 
