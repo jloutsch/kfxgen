@@ -24,13 +24,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import zipfile
 from pathlib import Path
 
 import pytest
 
 from kfxgen import converter as conv
 from kfxgen.kfxlib_minimal.ion import IS
-from kfxgen.native_generator import NativeKFXGenerator
 from tests._kfx_introspect import by_type, load_fragments, val
 from tests.fixtures.oeb_shim import EpubAsOeb
 
@@ -67,18 +68,58 @@ def _silent_log():
 
 
 def _convert(epub_path, out_path):
-    log = _silent_log()
-    oeb = EpubAsOeb(str(epub_path))
-    metadata = conv.extract_metadata(oeb, log)
-    chapters = conv.extract_chapters_from_oeb(oeb, log, metadata=metadata)
-    gen = NativeKFXGenerator()
-    gen.generate_full_book(
-        title=metadata["title"],
-        author=metadata["author"],
-        chapters=chapters,
-        output_path=str(out_path),
+    """Convert through the same entry point the Calibre plugin uses.
+
+    This used to hand-roll a reduced pipeline: extract_metadata,
+    extract_chapters_from_oeb, then generate_full_book(title, author, chapters).
+    That path never passes images to the generator, so every book came out with
+    zero `$164` resources no matter what the source held — the sweep could not
+    see image handling at all, and an image assertion written against it would
+    have been vacuous.
+
+    `convert_oeb_to_kfx` is what `__init__.py` calls and what tier-2 already
+    uses, so the sweep now enters the pipeline where the plugin does.
+
+    Two gaps remain, so read results as "the real entry point" rather than "the
+    full shipping path". `opts=None` (the convention in the other integration
+    tests) makes Stylizer construction fail, so block CSS (#9) and `@font-face`
+    extraction (#15) degrade rather than run. And `image_optimize` is a no-op
+    outside Calibre, which is not importable here, so downscaling and
+    recompression (#11, #55) are not exercised. Image *presence* is covered;
+    image *processing* is not.
+    """
+    conv.convert_oeb_to_kfx(
+        EpubAsOeb(str(epub_path)), str(out_path), opts=None, log=_silent_log()
     )
     return out_path
+
+
+#: `<img src="...">` in the source. Attribute-order tolerant, quote-agnostic.
+_IMG_SRC = re.compile(r"<img[^>]+src=[\"']([^\"']+)[\"']", re.IGNORECASE)
+
+
+def _inline_image_refs(epub_path) -> int:
+    """Distinct manifest images the source displays with an `<img>` tag.
+
+    Intersected with the manifest deliberately: an `<img>` pointing at a file
+    the EPUB never ships is the source's defect, and counting it would blame
+    the generator for a missing image it could not have emitted.
+    """
+    manifest_images = {
+        item.href.split("/")[-1]
+        for item in EpubAsOeb(str(epub_path)).manifest
+        if (item.media_type or "").startswith("image/")
+    }
+    refs = set()
+    with zipfile.ZipFile(str(epub_path)) as zf:
+        for name in zf.namelist():
+            if not name.lower().endswith((".htm", ".html", ".xhtml")):
+                continue
+            for src in _IMG_SRC.findall(zf.read(name).decode("utf-8", "replace")):
+                base = src.split("/")[-1].split("#")[0]
+                if base in manifest_images:
+                    refs.add(base)
+    return len(refs)
 
 
 def _metrics(kfx_path):
@@ -104,6 +145,26 @@ def _metrics(kfx_path):
             for span in entry.get(IS("$142")) or []:
                 if IS("$179") in span:
                     targets.append(str(span[IS("$179")]))
+    # Images have two independent counts and both matter. `$164` fragments are
+    # the resources carried in the container; `$175` refs are the places a
+    # reader is told to draw one. #102 shipped with the first non-zero and the
+    # second zero — every image present in the file, none of them on screen.
+    # Counts an entry carrying $175 at either level. The earlier version only
+    # looked at children once an entry had any, so a $175 on a parent that also
+    # has $146 children read as zero — the nested $259 shape native_generator
+    # explicitly contemplates (`:1607`). $181 was also in the descent and never
+    # occurs inside a $259; it is dropped rather than left as decoration.
+    shown = 0
+    for f in by_type(frags, "$259"):
+        for outer in val(f).get(IS("$146")) or []:
+            if not hasattr(outer, "get"):
+                continue
+            if outer.get(IS("$175")) is not None:
+                shown += 1
+            for entry in outer.get(IS("$146")) or []:
+                if hasattr(entry, "get") and entry.get(IS("$175")) is not None:
+                    shown += 1
+
     return {
         "chars": sum(len(t) for t in texts),
         "blocks": len(texts),
@@ -112,6 +173,8 @@ def _metrics(kfx_path):
         "links": len(targets),
         "dangling": len(set(targets) - anchors),
         "nav_junk": sum(1 for t in texts if t.strip() in NAV_MARKERS),
+        "image_resources": len(by_type(frags, "$164")),
+        "images_shown": shown,
     }
 
 
@@ -142,6 +205,39 @@ def test_corpus_book_invariants(epub, tmp_path):
         )
     # #60: hidden page-list/landmarks navs are markup, never reading content.
     assert m["nav_junk"] == 0, f"{m['nav_junk']} navigation blocks leaked into the body"
+    # Every image the source displays inline must survive into the container.
+    #
+    # This has to be measured against the EPUB, not within the KFX, and the
+    # reason is worth stating: the #102 drop rule deletes any `$164` nothing
+    # references (`native_generator.py:2211`), so a regression that dropped
+    # body-image *refs* would also delete the orphaned resources it created,
+    # erasing its own evidence. The KFX alone cannot tell "this book had no
+    # body images" from "this book lost all of them".
+    #
+    # Restricted to `<img>` targets that exist in the manifest, so a source
+    # pointing at a missing file is not counted against the generator.
+    refs = _inline_image_refs(epub)
+    assert m["image_resources"] >= refs, (
+        f"source displays {refs} images inline but only {m['image_resources']} "
+        f"$164 resources were emitted — {refs - m['image_resources']} are gone. "
+        "See #113: an <img> preceded by a sibling caption div is dropped."
+    )
+    # A $175 ref with no resource behind it is the image analogue of a dangling
+    # link. Cheap, and nothing else here would notice.
+    if m["images_shown"]:
+        assert m["image_resources"] > 0, (
+            f"{m['images_shown']} image refs but no $164 resources to draw"
+        )
+    # #102 in the other direction: resources nothing draws. Note this one is
+    # satisfied by the cover alone on a cover-only book — the synthetic cover
+    # chapter always emits a $175 and the drop rule exempts `cover_img` — so it
+    # guards the drop rule rather than body-image handling. The assertion above
+    # is the one that covers body images.
+    if m["image_resources"]:
+        assert m["images_shown"] > 0, (
+            f"{m['image_resources']} image resources emitted but zero $175 refs "
+            "— every image is in the file and none of them is on screen"
+        )
 
 
 @pytest.mark.integration
