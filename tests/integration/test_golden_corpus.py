@@ -493,3 +493,89 @@ def test_fixture_long_chapter_shape(tmp_path):
             )
             refs += 1
     assert refs > 0, "no text entries carried a $145 reference"
+
+
+def _iter_structs(node):
+    """Yield every dict-like node in a nested Ion tree, at any depth.
+
+    The earlier version of the image check descended one level and read only
+    `$146`, so an entry nested deeper was never content-type checked and a
+    storyline using `$181` read as "no entries at all".
+    """
+    if hasattr(node, "keys"):
+        yield node
+        for k in list(node.keys()):
+            yield from _iter_structs(node[k])
+    elif isinstance(node, list):
+        for item in node:
+            yield from _iter_structs(item)
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
+def test_image_entries_match_amazons_shape(tmp_path):
+    """Images use the plain `$271` content type, not the `$274` plugin type.
+
+    Recorded from a direct comparison rather than inference. Kindle Previewer
+    3.106 was run over `pg40739.epub` and the resulting KPF decoded with full
+    upstream `kfxlib` 20260520; both pipelines produced 8 `$164` resources, 8
+    `$271` image entries, and **zero** plugin resources. Amazon's content types
+    in that file were `$269`, `$270`, `$279`, `$596`, `$271`, `$278`, `$454` —
+    no `$274` anywhere.
+
+    That matters because `$274` is the only route into `process_plugin` in
+    upstream's decoder, which is where the "zoomable" plugin lives. #118
+    proposed emitting it so images would respond to tap; the comparison showed
+    Amazon never emits it for EPUB conversion either, so doing that would be
+    divergence from the reference rather than conformance. This pins the shape
+    that was verified, so a move toward `$274` has to be deliberate.
+
+    Built from current code, not the committed golden: a generator regression
+    leaves the golden untouched, so reading it would pass while the product was
+    broken. `test_golden_structural_diff` would not catch this either — `$159`
+    is nested, and that test compares only top-level key names.
+    """
+    from tests.fixtures.golden.inputs import make_captioned_images
+
+    written = tmp_path / "fresh_captioned.kfx"
+    written.write_bytes(
+        _build_fresh("captioned_images", make_captioned_images, tmp_path)
+    )
+    frags = load_fragments(written)
+
+    # $164 and $417 are linked by $165, not by name similarity. The location
+    # name is documented as free-form ("cover_img_raw"), so matching basenames
+    # both misses a resource whose payload is genuinely absent and breaks on a
+    # rename that is perfectly valid.
+    locations = {str(val(f).get(IS("$165"))) for f in by_type(frags, "$164")}
+    payloads = {str(f.fid) for f in by_type(frags, "$417")}
+    assert locations, "fixture emitted no image resources"
+    assert locations <= payloads, (
+        f"$164 resources whose $165 location has no $417 payload: "
+        f"{sorted(locations - payloads)}"
+    )
+
+    # Recursive: an image entry nested deeper than one level — the container
+    # case #113 was about — must still be checked, and a storyline using $181
+    # instead of $146 must not read as "no entries".
+    entries = []
+    for f in by_type(frags, "$259"):
+        for node in _iter_structs(val(f)):
+            if node.get(IS("$175")) is not None:
+                entries.append(node)
+
+    assert entries, "no image entries found — fixture rotted"
+    wrong = [
+        str(e.get(IS("$159"))) for e in entries if str(e.get(IS("$159"))) != "$271"
+    ]
+    assert not wrong, (
+        f"image entries must use content type $271, got {wrong}. $274 is the "
+        "plugin type; see #118 for why kfxgen deliberately does not emit it."
+    )
+    resources = {str(f.fid) for f in by_type(frags, "$164")}
+    dangling = [
+        str(e.get(IS("$175")))
+        for e in entries
+        if str(e.get(IS("$175"))) not in resources
+    ]
+    assert not dangling, f"image entries reference missing resources: {dangling}"
