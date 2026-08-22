@@ -22,6 +22,7 @@ from .kfxlib_minimal.yj_container import (
 _DRIVE_RELATIVE_TRAVERSAL_RE = re.compile(r"^[A-Za-z]:\.\.")
 
 _security_log = logging.getLogger(__name__ + ".security")
+_log = logging.getLogger(__name__)
 
 # O_NOFOLLOW is POSIX-only; on Windows it isn't defined. Degrade to 0 (no-op
 # flag bit) so the plugin still imports under Calibre on Windows. Symlink
@@ -62,9 +63,19 @@ _RETIRED_SHIFT_ENV = ("KFXGEN_SUPERSCRIPT_SHIFT_PCT", "KFXGEN_SUBSCRIPT_SHIFT_PC
 
 
 def _warn_retired_shift_env():
+    """Warn once per conversion, from `generate_full_book`.
+
+    Deliberately not called from the metrics functions. Those run once per
+    emphasis run, so a footnote-heavy book emitted one identical warning per
+    superscript — thousands of lines for a single stale variable. Worse in the
+    other direction: a book with no raised text never called them at all, so
+    the variable was silently ignored, which is the exact outcome retiring it
+    loudly was meant to avoid. Warning at the book level fires exactly once and
+    fires regardless of content.
+    """
     for name in _RETIRED_SHIFT_ENV:
         if name in os.environ:
-            _security_log.warning(
+            _log.warning(
                 "%s is set but no longer affects output: raised text now uses "
                 "$44 baseline-style, where the device computes the offset (#123). "
                 "Use KFXGEN_SUPERSCRIPT_FONT_SIZE / KFXGEN_SUBSCRIPT_FONT_SIZE "
@@ -95,7 +106,6 @@ def superscript_metrics():
     these. The offset is no longer ours to set: `$44` hands that to the
     reader (#123).
     """
-    _warn_retired_shift_env()
     size = _env_number("KFXGEN_SUPERSCRIPT_FONT_SIZE", SUPERSCRIPT_FONT_SIZE)
     return size, BASELINE_STYLE_SUPER
 
@@ -107,7 +117,6 @@ def subscript_metrics():
     before the built-in default, so setting only the superscript variable still
     moves both — the behaviour that shipped in 5.x (#115).
     """
-    _warn_retired_shift_env()
     if "KFXGEN_SUBSCRIPT_FONT_SIZE" in os.environ:
         size = _env_number("KFXGEN_SUBSCRIPT_FONT_SIZE", SUBSCRIPT_FONT_SIZE)
     else:
@@ -2004,6 +2013,10 @@ class NativeKFXGenerator:
         Returns:
             bytes: Serialized KFX data
         """
+        # Once per book, before anything content-dependent: a retired override
+        # must be reported even for a book with no raised text (#123).
+        _warn_retired_shift_env()
+
         # Container ID and ASIN are derived deterministically from book
         # identity rather than randomly generated (#89). Two consecutive
         # conversions of the same book now produce byte-identical output,

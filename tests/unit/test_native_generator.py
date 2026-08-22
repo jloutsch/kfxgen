@@ -1636,9 +1636,7 @@ def test_superscript_span_produces_raised_small_style(tmp_path):
     raised = [f for f in styles if IS("$44") in f.value]
     assert raised, "No $157 carries $44 (baseline style) for a superscript run"
     for f in raised:
-        assert f.value[IS("$44")] == IS("$370"), (
-            "Superscript $31 must be positive (raised)"
-        )
+        assert f.value[IS("$44")] == IS("$370"), "Superscript must emit $370 (raised)"
         assert IS("$16") in f.value, "Superscript style must reduce font-size ($16)"
         assert float(str(f.value[IS("$16")][IS("$307")])) < 1.0
 
@@ -2093,23 +2091,48 @@ def test_invalid_env_falls_back_to_default(monkeypatch):
 @pytest.mark.parametrize(
     "name", ["KFXGEN_SUPERSCRIPT_SHIFT_PCT", "KFXGEN_SUBSCRIPT_SHIFT_PCT"]
 )
-def test_retired_shift_env_warns_instead_of_silently_doing_nothing(
-    monkeypatch, caplog, name
+@pytest.mark.parametrize(
+    "has_raised_text", [True, False], ids=["with-raised-text", "no-raised-text"]
+)
+def test_retired_shift_env_warns_once_per_book(
+    monkeypatch, caplog, name, has_raised_text
 ):
     """#123 removed the numeric shift, so these two can no longer change
     anything. Ignoring them would leave a documented knob that silently does
-    nothing — the failure mode this codebase keeps paying for. It must say so.
+    nothing — the failure mode this codebase keeps paying for.
+
+    Both halves matter and an earlier draft got both wrong by warning from the
+    metrics functions instead. Those run once per emphasis run, so a
+    footnote-heavy book emitted one identical warning per superscript; and a
+    book with no raised text never called them, so the variable was ignored in
+    silence. Warning from `generate_full_book` fires exactly once and fires
+    regardless of content.
     """
     import logging
+
+    from kfxgen.inline_style import FLAG_SUPER
 
     from kfxgen import native_generator as ng
 
     monkeypatch.setenv(name, "50")
+    blocks = (
+        [{"text": "note", "spans": [(3, 1, frozenset({FLAG_SUPER}))]}] * 40
+        if has_raised_text
+        else [{"text": "plain prose", "spans": []}]
+    )
+    gen = ng.NativeKFXGenerator()
     with caplog.at_level(logging.WARNING):
-        ng.superscript_metrics()
-        ng.subscript_metrics()
-    assert name in caplog.text, (
-        f"setting {name} produced no warning; it now does nothing silently"
+        gen.generate_full_book(
+            title="T",
+            author="A",
+            chapters=[{"title": "Ch", "text": "x", "blocks": blocks}],
+        )
+
+    hits = [r for r in caplog.records if name in r.getMessage()]
+    assert hits, f"setting {name} produced no warning; it now does nothing silently"
+    assert len(hits) == 1, (
+        f"{len(hits)} warnings for one book — this used to fire once per raised "
+        "run, which buried the log on a footnote-heavy book"
     )
 
 
@@ -2503,11 +2526,14 @@ def test_subscript_variable_wins_over_superscript(monkeypatch):
 
 @pytest.mark.unit
 def test_sub_and_super_defaults_are_both_device_verified_values():
-    """Both defaults were confirmed on hardware in #67 at 0.75 / +35% / -20%.
+    """Both defaults are device-verified: size 0.75 (#67) and the `$44`
+    direction (#123, Paperwhite 5.19.2).
 
     Pinned because the code comment claimed for months that the subscript
     shift was *not* device-verified, which is the kind of stale record that
-    invites someone to change a value the hardware already settled.
+    invites someone to change a value the hardware already settled. The shift
+    percentages this once also covered were retired in #123 — the device
+    computes the offset now — so only size and direction remain to pin.
     """
     from kfxgen import native_generator as ng
 
