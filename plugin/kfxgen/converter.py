@@ -490,9 +490,18 @@ def extract_blocks_from_html(element, style_resolver=None, base_href=None):
         if elem.text:
             inline_parts.append((elem.text, frozenset()))
         for child in elem:
-            if child.tag in block_tags or _local_tag(child.tag) == "img":
+            child_is_img = _local_tag(child.tag) == "img"
+            if child.tag in block_tags or child_is_img:
                 _flush_inline()
-                _walk(child, parent_is_block=is_block)
+                # `parent_is_block` answers one question: has an enclosing
+                # `_walk_inline` already consumed this image? On this path the
+                # answer is always no. The leaf-block branch above is the only
+                # thing that calls `_walk_inline`, and it returns without
+                # recursing, so nothing reaching here has been seen. Passing
+                # `is_block` made the img branch's `not parent_is_block` guard
+                # reject every image whose container had a block sibling, and
+                # the image was dropped without a warning. (#113)
+                _walk(child, parent_is_block=False if child_is_img else is_block)
             elif not _is_non_rendered(child):
                 inline_parts.extend(
                     _walk_inline(

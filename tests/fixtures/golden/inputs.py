@@ -84,6 +84,54 @@ def make_body_images(out_dir: Path) -> Path:
     return builder.build(out_dir, "body_images")
 
 
+def make_captioned_images(out_dir: Path) -> Path:
+    """Images that share a block container with block siblings (#113).
+
+    `make_body_images` wraps each `<img>` in its own `<p>`, which is a leaf
+    block — `_walk_inline` consumes the image and it survives. That is the
+    shape that always worked, which is why the golden corpus passed for months
+    while the shape below silently lost every image in it.
+
+    A container with block children takes the other path in `_walk`, and an
+    image dispatched that way used to be dropped without a warning. Both orders
+    are covered because the corpus showed the caption position was incidental:
+    any block sibling triggers it.
+    """
+    body = (
+        "<p>Opening paragraph.</p>\n"
+        '<div class="figure">'
+        '<div class="caption">Fig. 1 — caption before the image.</div>'
+        '<img src="cap1.jpg" alt="captioned first"/>'
+        "</div>\n"
+        '<div class="figure">'
+        '<img src="cap2.jpg" alt="captioned second"/>'
+        '<div class="caption">Fig. 2 — caption after the image.</div>'
+        "</div>\n"
+        "<p>Closing paragraph.</p>"
+    )
+    builder = (
+        EpubBuilder()
+        .set_metadata(title="Captioned Images Golden", author="Golden Author")
+        .add_chapter(
+            "Figures",
+            _xhtml_page("Figures", body).encode("utf-8"),
+        )
+        .add_manifest_item(
+            item_id="cap1",
+            href="cap1.jpg",
+            media_type="image/jpeg",
+            data=_MINIMAL_JPEG,
+        )
+        .add_manifest_item(
+            item_id="cap2",
+            href="cap2.jpg",
+            media_type="image/jpeg",
+            data=_MINIMAL_JPEG,
+        )
+    )
+    return builder.build(out_dir, "captioned_images")
+
+
 def make_with_cover(out_dir: Path) -> Path:
     """Book with a cover image. Locks cover-image emission ($164/$417 with
     distinct fids, $490 cover_image metadata). #32 cover-in-flow context."""
@@ -467,6 +515,7 @@ def make_long_chapter(out_dir: Path) -> Path:
 GOLDEN_INPUTS: list[tuple[str, callable]] = [
     ("minimal", make_minimal),
     ("body_images", make_body_images),
+    ("captioned_images", make_captioned_images),
     ("with_cover", make_with_cover),
     ("multi_chapter", make_multi_chapter),
     ("linked_toc", make_linked_toc),

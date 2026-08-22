@@ -1610,3 +1610,78 @@ class TestBlockAnchorOffsets:
             _xhtml_raw("<p>Body</p>"), base_href=self.BASE
         )
         assert blocks[0]["anchor_offsets"] == {self.BASE: 0}
+
+
+# ── #113: an <img> sharing a container with block siblings ───────────────────
+#
+# `_walk` has two ways to reach an image. A block with no block children is a
+# leaf: `_walk_inline` runs over it and picks up any `<img>` inside. A block
+# that *does* have block children takes the container path instead, which never
+# calls `_walk_inline` and dispatches each child to `_walk`. Images arriving
+# that second way were dropped, because the img branch required
+# `not parent_is_block` and the container passed its own blockness down.
+#
+# The corpus surfaced this as "images after a caption div vanish", but the
+# caption is incidental — any block sibling triggers it, in either order.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "label,html",
+    [
+        (
+            "caption div before img",
+            '<div><div class="caption">Fig. 1.</div><img src="a.png"/></div>',
+        ),
+        (
+            "caption div after img",
+            '<div><img src="a.png"/><div class="caption">Fig. 1.</div></div>',
+        ),
+        ("paragraph sibling", '<div><p>Caption text</p><img src="a.png"/></div>'),
+        ("heading sibling", '<div><h2>Plate I</h2><img src="a.png"/></div>'),
+        (
+            "img between two blocks",
+            '<div><p>before</p><img src="a.png"/><p>after</p></div>',
+        ),
+        (
+            "nested one level deeper",
+            '<div><section><p>x</p><img src="a.png"/></section></div>',
+        ),
+    ],
+)
+def test_img_survives_block_siblings(label, html):
+    """An image must not depend on being the only child of its container."""
+    blocks = _conv.extract_blocks_from_html(_doc(html))
+    token = _conv._make_img_token("a.png", "")
+    assert any(b["text"] == token for b in blocks), (
+        f"{label}: image dropped — blocks were {[b['text'] for b in blocks]}"
+    )
+
+
+@pytest.mark.unit
+def test_img_emitted_exactly_once_per_occurrence():
+    """The fix must not double-emit: the leaf-block path already consumes an
+    image via `_walk_inline`, so an image whose container has no block children
+    must still appear exactly once."""
+    token = _conv._make_img_token("a.png", "")
+    for html in (
+        '<div><img src="a.png"/></div>',
+        '<img src="a.png"/>',
+        '<div><p>x</p><img src="a.png"/></div>',
+    ):
+        blocks = _conv.extract_blocks_from_html(_doc(html))
+        assert sum(1 for b in blocks if b["text"] == token) == 1, (
+            f"{html}: expected exactly one image block, got "
+            f"{[b['text'] for b in blocks]}"
+        )
+
+
+@pytest.mark.unit
+def test_block_siblings_keep_their_text_and_order():
+    """Recovering the image must not cost the surrounding text or reorder it."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<div><p>before</p><img src="a.png"/><p>after</p></div>')
+    )
+    texts = [b["text"] for b in blocks]
+    token = _conv._make_img_token("a.png", "")
+    assert texts == ["before", token, "after"]
