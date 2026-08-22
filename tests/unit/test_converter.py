@@ -1855,3 +1855,63 @@ def test_non_table_markup_is_unaffected():
     # The rule keys off td/th only; ordinary inline nesting keeps its spacing.
     blocks = _conv.extract_blocks_from_html(_doc("<p>Hello <em>there</em> world.</p>"))
     assert blocks[0]["text"] == "Hello there world."
+
+
+@pytest.mark.unit
+def test_cells_separate_without_tr_wrapper():
+    # Cells do not always reach the parent's child loop through a cell-aware
+    # step. `extract_blocks_from_html._walk`'s container branch calls
+    # `_walk_inline` on a child directly, so markup omitting <tr>/<tbody>
+    # bypassed a boundary emitted from the loop and fused anyway. Malformed,
+    # and an html5 parser would repair it — but the OEB shim parses with plain
+    # `etree.fromstring`, which does not. (#128)
+    blocks = _conv.extract_blocks_from_html(
+        _doc("<table><td>1801</td><td>8,893</td></table>")
+    )
+    assert blocks[0]["text"] == "1801 8,893"
+
+
+@pytest.mark.unit
+def test_cells_separate_with_bare_tr_under_body():
+    blocks = _conv.extract_blocks_from_html(
+        _doc("<tr><td>1801</td><td>8,893</td></tr>")
+    )
+    assert blocks[0]["text"] == "1801 8,893"
+
+
+@pytest.mark.unit
+def test_cell_does_not_fuse_onto_preceding_text():
+    # Closing a cell is not enough on its own: a cell can follow ordinary text
+    # rather than another cell. A nested table inside a cell that already held
+    # text ran `x` and `i` together as `xi`, so the boundary is emitted on both
+    # ends of a cell. (#128)
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            "<table><tr><td>x<table><tr><td>i</td><td>j</td></tr></table></td>"
+            "<td>y</td></tr></table>"
+        )
+    )
+    assert blocks[0]["text"] == "x i j y"
+
+
+@pytest.mark.unit
+def test_cells_separate_through_thead_and_tbody():
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            "<table><thead><tr><th>A</th><th>B</th></tr></thead>"
+            "<tbody><tr><td>c</td><td>d</td></tr></tbody></table>"
+        )
+    )
+    assert blocks[0]["text"] == "A B c d"
+
+
+@pytest.mark.unit
+def test_cell_does_not_fuse_onto_following_text():
+    # The mirror of the preceding-text case, and the reason the boundary is
+    # emitted on both ends rather than one. Removing either half leaves a
+    # distinct fusion here: opening-only gives 'atail b', closing-only gives
+    # 'a tailb'. (#128)
+    blocks = _conv.extract_blocks_from_html(
+        _doc("<table><tr><td>a</td>tail<td>b</td></tr></table>")
+    )
+    assert blocks[0]["text"] == "a tail b"

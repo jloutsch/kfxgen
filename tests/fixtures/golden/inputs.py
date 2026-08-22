@@ -554,11 +554,16 @@ def make_table_cells(out_dir: Path) -> Path:
     `8,893` came out as `18018,893`, a number absent from the source that
     cannot be read back apart.
 
-    Deliberately writes the two forms side by side. The first row is adjacent
-    and the second is newline-separated, with the same values in both, so the
-    golden locks them to identical spacing. A fix that emitted the separator
-    unconditionally *and* one that doubled it where whitespace already existed
-    would both move bytes here.
+    Deliberately writes both forms side by side: one row newline-separated,
+    one adjacent. Only the adjacent row exercises the fix — the other is there
+    so the golden also covers the path that already worked, and would catch a
+    change that broke it.
+
+    What this fixture cannot check is a *doubled* separator. Whitespace runs
+    are collapsed during normalization, so emitting a space next to one the
+    source already had is unobservable in the output. That is precisely why the
+    fix emits unconditionally instead of testing for existing whitespace first:
+    the redundant case cannot be detected because it cannot do harm.
 
     No existing fixture had a table at all, which is why the corpus stayed
     green while 12 of the 77 public-domain books carried adjacent cell pairs —

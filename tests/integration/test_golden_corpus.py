@@ -319,11 +319,15 @@ def test_fixture_table_cells_do_not_fuse(tmp_path):
     would check the file, not the generator, and the whole point here is that
     the generator used to depend on source whitespace.
 
-    The two rows carry the same shape written differently: row 2 is
-    newline-separated, row 3 is adjacent. Asserting both forms appear proves
-    the separator is emitted where the source has none *and* not doubled where
-    the source already had it. `18018,893` is the exact corruption from #128 —
-    a number that appears nowhere in the fixture.
+    Asserts the whole table's text as one exact run rather than probing for
+    individual values. A substring check for `"1801"` is satisfied by the fused
+    `18018,893` too, so it would carry no weight; the exact sequence pins cell
+    order and every boundary at once.
+
+    It does not check for a doubled separator: normalization collapses
+    whitespace runs, so a redundant space is unobservable in the output. That
+    is why the fix emits unconditionally rather than testing for existing
+    whitespace.
     """
     from tests.fixtures.golden.inputs import make_table_cells
 
@@ -335,13 +339,13 @@ def test_fixture_table_cells_do_not_fuse(tmp_path):
         for s in strings
     )
 
-    assert "18018,893" not in text, (
-        "adjacent cells fused into one value — the #128 corruption is back"
+    assert "Year Population 1801 8,893 1811 12,289" in text, (
+        f"table cells did not come out as six separate values; got: {text[:200]!r}"
     )
-    for cell in ("1801", "8,893", "1811", "12,289", "Year", "Population"):
-        assert cell in text, f"cell value {cell!r} missing from content"
-    assert "YearPopulation" not in text, "adjacent header cells fused"
-    assert "181112,289" not in text, "adjacent cells in the third row fused"
+    # Named explicitly so a failure says which corruption returned, rather
+    # than only that the exact run stopped matching.
+    for fused in ("YearPopulation", "18018,893", "181112,289"):
+        assert fused not in text, f"adjacent cells fused into {fused!r} (#128)"
 
 
 @pytest.mark.tier3

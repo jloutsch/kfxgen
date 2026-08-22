@@ -247,6 +247,13 @@ def _walk_inline(
                 cur.add(FLAG_SUB)
     cur = frozenset(cur)
     parts = []
+    # Open a cell with a boundary as well as closing one, so a cell cannot fuse
+    # onto whatever preceded it. Closing alone leaves the case where a cell
+    # follows ordinary text rather than another cell — a nested table inside a
+    # cell that already holds text ran `x<table>...<td>i` together as `xi`.
+    # (#128)
+    if local in _CELL_TAGS and not is_root:
+        parts.append((" ", frozenset()))
     # Mark where this element starts before emitting its text, so an id can be
     # resolved to a character offset rather than just "somewhere in this
     # paragraph". Zero-length, so it changes no text and no span. (#79)
@@ -268,12 +275,6 @@ def _walk_inline(
                     child, cur, style_resolver, is_root=False, base_href=base_href
                 )
             )
-            # Close the cell with a boundary so the next one cannot fuse onto
-            # it. Emitted unconditionally rather than only when the source
-            # lacks whitespace — normalization collapses runs of whitespace, so
-            # a redundant space costs nothing and a missing one corrupts. (#128)
-            if clocal in _CELL_TAGS:
-                parts.append((" ", frozenset()))
         if child.tail:
             # The tail sits inside `elem`, so it carries `cur` — this element's
             # accumulated flags — not the incoming `flags`. Using `flags` here
@@ -282,6 +283,22 @@ def _walk_inline(
             # inside an <a> lost the link, leaving entries half-underlined and
             # half-dead. (#59)
             parts.append((child.tail, cur))
+
+    # Close a cell with a boundary so the next one cannot fuse onto it. Emitted
+    # unconditionally rather than only when the source lacks whitespace —
+    # normalization collapses runs of whitespace, so a redundant space costs
+    # nothing and a missing one corrupts.
+    #
+    # Placed here, on the cell itself, rather than in the loop above where the
+    # parent walks its children. Cells do not always arrive through that loop:
+    # `extract_blocks_from_html._walk`'s container branch calls this function
+    # on a child directly, so markup that omits `<tr>`/`<tbody>` — or puts a
+    # `<tr>` straight under `<body>` — reached the parent loop never having
+    # gone through a cell-aware step, and fused anyway. Both shapes are
+    # malformed and an html5 parser would repair them, but the OEB shim parses
+    # with plain `etree.fromstring`, which does not. (#128)
+    if local in _CELL_TAGS and not is_root:
+        parts.append((" ", frozenset()))
     return parts
 
 
