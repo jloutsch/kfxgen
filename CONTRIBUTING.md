@@ -106,11 +106,22 @@ device today." Don't conflate them.
 | Gate | Required tiers | Command |
 |------|---------------|---------|
 | Pre-push (local) | tier1 | `pytest -m tier1` (wired up in issue 56) |
-| CI on PR | tier1 + tier2 + tier3 | `pytest -m "not device"` (already the default in `pytest.ini`) |
+| CI on PR | tier1 + tier2 + tier3 | `pytest tests/unit tests/integration` (the `pytest.ini` default `-m` applies) |
+| CI on PR | tier3_strict | `pytest -m tier3_strict` — a separate step, because `addopts` excludes it |
 | Release tag | + device | Manual device run by maintainer; release notes must reference which devices were tested |
 
 Skipping `device` in CI is intentional — the runner has no Kindle attached.
 Test failures under `device` block release tags but never block PR merges.
+
+`tier3_strict` needs its own invocation for a mechanical reason worth knowing:
+`pytest.ini` puts `-m "not slow and not device and not tier3_strict"` in
+`addopts`, and that applies to every plain `pytest` call. Only an explicit `-m`
+on the command line overrides it. A step that merely adds paths does not.
+
+Note what tier-2 does *not* contribute here. It skips whenever the vendored
+KFX Input zip is absent, which is every CI run — see issue 99. The row above
+lists it because it runs locally when the zip is present, not because CI
+verifies it.
 
 ## Marker conventions
 
@@ -202,23 +213,38 @@ a copyright + repo-bloat non-starter. Synthetic fixtures cover the
 same shapes (`$164`/`$417` cover, `$175`-bearing `$259` image
 entries, multi-section `$265` maps) at ~7 KB each.
 
-**Diff strategy:** structural only (fragment-type counts and per-type
-top-level key sets). The generator currently emits ~240 byte
-differences between two consecutive runs of the same input — a
-SHA-256-byte-identical layer would fail on every test run. Tracked
-as issue 89; once that
-lands, a `tier3_strict` byte-identical layer can be added on top of
-the structural diff.
+**Diff strategy:** two layers.
+
+1. **Structural** (`tier3`) — fragment-type counts and per-type top-level key
+   sets. Runs by default.
+2. **Byte-identical** (`tier3_strict`) — SHA-256 of the whole file against the
+   committed golden. Excluded from `pytest.ini`'s `addopts`, so a plain
+   `pytest` will not run it; CI invokes it explicitly with `-m tier3_strict`.
+
+The strict layer was opt-in because the generator used to emit ~240 byte
+differences between two consecutive runs of the same input, which would have
+failed every run. Issue 96 fixed that — image style symbols were being
+allocated by iterating an unordered set, and CPython randomizes string hashing
+per interpreter. The layer now passes in well under a second and gates every
+PR.
+
+When it fails, the bytes moved. That is either a regression or an intentional
+output change whose goldens need regenerating (see below). Regenerating to make
+CI green without first confirming the drift was intended defeats the gate.
 
 ### Updating goldens after an intentional generator change
 
-If your change deliberately alters KFX output, the structural diff
-will fail until you regenerate the goldens:
+If your change deliberately alters KFX output, the goldens must be
+regenerated. Verify **both** layers afterwards — a change that moves bytes
+without moving structure passes `tier3` while the `tier3_strict` step that
+blocks the merge still fails, so checking only the first tells you nothing
+about the gate you are actually up against:
 
 ```bash
 python -m tests.fixtures.golden.regenerate
 git diff --stat tests/fixtures/golden/expected/
 pytest -m tier3
+pytest tests/integration/test_golden_corpus.py -m "tier3_strict and not device"
 git add tests/fixtures/golden/expected/ tests/fixtures/golden/inputs.py
 ```
 
