@@ -51,7 +51,13 @@ MIRRORS = (
 # Generous: the largest book in the set is ~85 MB at ~335 KB/s. Too small a
 # value is the failure mode that produced a truncated file during development.
 TIMEOUT_S = 600
-IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp")
+# `.jfif` is here because leaving it out silently undercounts. pg12082 declares
+# 436 images in its OPF and 9 of them use that extension, so an extension list
+# without it reports 427 — which is what `baseline_runner.epub_image_count`
+# does, and why BASELINE.md appeared to show kfxgen inventing 9 images out of
+# nowhere. The generator was right and the counter was wrong. Prefer the OPF
+# media-type when you can; this list is the zip-only fallback.
+IMAGE_SUFFIXES = (".jpg", ".jpeg", ".jfif", ".png", ".gif", ".svg", ".webp")
 
 
 def count_images(path: Path) -> int:
