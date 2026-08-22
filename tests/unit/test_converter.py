@@ -5,6 +5,7 @@ Issue #6: TOC entries whose href isn't in the spine should fall back to
 matching against the manifest, instead of being silently dropped.
 """
 
+import logging
 import os
 import sys
 from unittest.mock import MagicMock
@@ -1685,3 +1686,92 @@ def test_block_siblings_keep_their_text_and_order():
     texts = [b["text"] for b in blocks]
     token = _conv._make_img_token("a.png", "")
     assert texts == ["before", token, "after"]
+
+
+# ── #113: cover discovery via <meta name="cover"> ────────────────────────────
+
+
+def _epub_with_cover(tmp_path, *, meta_cover=True, epub3_properties=False):
+    """Minimal EPUB whose cover is named so the filename heuristic cannot find it.
+
+    Neither the item id (`plate`) nor the href (`title-page.jpg`) contains the
+    substring "cover", so `extract_cover_image` Method 3 must miss it. That is
+    the point: it isolates the metadata path. Fixtures built with
+    `EpubBuilder.set_cover` cannot test this — that helper hardcodes
+    `id="cover-image"`, which the heuristic matches regardless.
+    """
+    import zipfile
+
+    from tests._helpers import MINIMAL_JPEG
+
+    meta = '<meta name="cover" content="plate"/>' if meta_cover else ""
+    props = ' properties="cover-image"' if epub3_properties else ""
+    opf = (
+        '<?xml version="1.0"?>'
+        '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="i">'
+        '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        '<dc:identifier id="i">x</dc:identifier><dc:title>T</dc:title>'
+        f"<dc:language>en</dc:language>{meta}</metadata>"
+        "<manifest>"
+        '<item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>'
+        f'<item id="plate" href="title-page.jpg" media-type="image/jpeg"{props}/>'
+        "</manifest>"
+        '<spine><itemref idref="c1"/></spine></package>'
+    )
+    path = tmp_path / "cover_by_meta.epub"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("mimetype", "application/epub+zip")
+        zf.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0" '
+            'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+            '<rootfiles><rootfile full-path="content.opf" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>',
+        )
+        zf.writestr("content.opf", opf)
+        zf.writestr(
+            "c1.xhtml",
+            '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml">'
+            "<body><p>Body text.</p></body></html>",
+        )
+        zf.writestr("title-page.jpg", MINIMAL_JPEG)
+    return path
+
+
+@pytest.mark.unit
+def test_shim_exposes_meta_name_cover(tmp_path):
+    """`EpubAsOeb.metadata.cover` must carry the manifest id Calibre exposes."""
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    oeb = EpubAsOeb(str(_epub_with_cover(tmp_path)))
+    assert [str(c) for c in oeb.metadata.cover] == ["plate"]
+
+
+@pytest.mark.unit
+def test_cover_found_when_filename_heuristic_cannot_match(tmp_path):
+    """The regression #113 hit: a cover not named `cover.*` was skipped as a
+    cover page and then never emitted as one."""
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    log = logging.getLogger("cover-test")
+    log.warn = log.warning
+    data, href = _conv.extract_cover_image(
+        EpubAsOeb(str(_epub_with_cover(tmp_path))), log
+    )
+    assert data, "cover not found — metadata.cover path is broken"
+    assert href.split("/")[-1] == "title-page.jpg"
+
+
+@pytest.mark.unit
+def test_cover_found_via_epub3_cover_image_property(tmp_path):
+    """EPUB 3 declares the cover with `properties="cover-image"` and often no
+    legacy `<meta name="cover">`. Same failure mode as above for any producer
+    that omits the EPUB 2 form."""
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    log = logging.getLogger("cover-test-3")
+    log.warn = log.warning
+    epub = _epub_with_cover(tmp_path, meta_cover=False, epub3_properties=True)
+    data, href = _conv.extract_cover_image(EpubAsOeb(str(epub)), log)
+    assert data, "EPUB 3 cover-image property not honoured"
+    assert href.split("/")[-1] == "title-page.jpg"

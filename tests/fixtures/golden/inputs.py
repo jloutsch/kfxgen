@@ -27,6 +27,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tests._helpers import MINIMAL_JPEG as _MINIMAL_JPEG
+from tests._helpers import MINIMAL_PNG as _MINIMAL_PNG
 from tests.fixtures.epub_builder import EpubBuilder
 
 
@@ -104,7 +105,7 @@ def make_captioned_images(out_dir: Path) -> Path:
         '<img src="cap1.jpg" alt="captioned first"/>'
         "</div>\n"
         '<div class="figure">'
-        '<img src="cap2.jpg" alt="captioned second"/>'
+        '<img src="cap2.png" alt="captioned second"/>'
         '<div class="caption">Fig. 2 — caption after the image.</div>'
         "</div>\n"
         "<p>Closing paragraph.</p>"
@@ -122,11 +123,15 @@ def make_captioned_images(out_dir: Path) -> Path:
             media_type="image/jpeg",
             data=_MINIMAL_JPEG,
         )
+        # Deliberately a different payload *and* format from cap1. With two
+        # identical images a `== 2` resource count stops measuring "both images
+        # survived" and starts measuring "nothing deduped them by content" —
+        # and would then report a #113 regression that had not happened.
         .add_manifest_item(
             item_id="cap2",
-            href="cap2.jpg",
-            media_type="image/jpeg",
-            data=_MINIMAL_JPEG,
+            href="cap2.png",
+            media_type="image/png",
+            data=_MINIMAL_PNG,
         )
     )
     return builder.build(out_dir, "captioned_images")

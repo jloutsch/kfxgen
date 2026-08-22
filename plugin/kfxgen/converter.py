@@ -402,7 +402,7 @@ def extract_blocks_from_html(element, style_resolver=None, base_href=None):
     blocks = []
     pending_ids = []  # anchors awaiting the next leaf block (containers, standalone <a>)
 
-    def _walk(elem, parent_is_block):
+    def _walk(elem):
         if _is_non_rendered(elem):
             return
         is_block = elem.tag in block_tags
@@ -440,7 +440,16 @@ def extract_blocks_from_html(element, style_resolver=None, base_href=None):
                 pending_ids.extend(ids)  # empty anchor block: carry ids forward
             return
 
-        if _local_tag(elem.tag) == "img" and not parent_is_block:
+        # No `parent_is_block` guard. It used to be here to avoid emitting an
+        # image a `_walk_inline` had already consumed, but no call site can
+        # deliver such an element: the leaf-block branch above returns without
+        # recursing, and the container branch below only dispatches block
+        # children and images into `_walk` — everything it hands to
+        # `_walk_inline` stays there. The guard was therefore never true when it
+        # mattered, and when it *was* true it silently discarded the image,
+        # which is exactly what #113 was. Removed rather than left dead so a
+        # future call site cannot resurrect the silent drop.
+        if _local_tag(elem.tag) == "img":
             ids = pending_ids[:]
             pending_ids.clear()
             ids.extend(_own_anchor_ids(elem))
@@ -490,18 +499,9 @@ def extract_blocks_from_html(element, style_resolver=None, base_href=None):
         if elem.text:
             inline_parts.append((elem.text, frozenset()))
         for child in elem:
-            child_is_img = _local_tag(child.tag) == "img"
-            if child.tag in block_tags or child_is_img:
+            if child.tag in block_tags or _local_tag(child.tag) == "img":
                 _flush_inline()
-                # `parent_is_block` answers one question: has an enclosing
-                # `_walk_inline` already consumed this image? On this path the
-                # answer is always no. The leaf-block branch above is the only
-                # thing that calls `_walk_inline`, and it returns without
-                # recursing, so nothing reaching here has been seen. Passing
-                # `is_block` made the img branch's `not parent_is_block` guard
-                # reject every image whose container had a block sibling, and
-                # the image was dropped without a warning. (#113)
-                _walk(child, parent_is_block=False if child_is_img else is_block)
+                _walk(child)
             elif not _is_non_rendered(child):
                 inline_parts.extend(
                     _walk_inline(
@@ -517,7 +517,7 @@ def extract_blocks_from_html(element, style_resolver=None, base_href=None):
         _flush_inline()
 
     for child in body:
-        _walk(child, parent_is_block=False)
+        _walk(child)
 
     # Trailing anchors (e.g. <a id="eof"/> after the last leaf block) never
     # reach a subsequent block to flush to; snap them onto the last emitted
