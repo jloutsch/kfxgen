@@ -82,6 +82,7 @@ def extract_kfx_text(kfx_path: Path) -> dict:
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
+
 EPUB_DIR = ROOT / "research" / "gutenberg-top-90"
 OUT_DIR = ROOT / "research" / "gutenberg-top-90-baseline"
 
@@ -224,7 +225,9 @@ def build_report(results: list, out_path: Path) -> None:
     lines.append(
         "| # | File | Status | KFX KB | s | Src words | Chapters | KFX paras | Mid retention | KFX retention | Spine | TOC | EPUB imgs | KFX imgs | Notes |"
     )
-    lines.append("|---|------|--------|--------|---|-----------|----------|-----------|----------------|----------------|-------|-----|-----------|----------|-------|")
+    lines.append(
+        "|---|------|--------|--------|---|-----------|----------|-----------|----------------|----------------|-------|-----|-----------|----------|-------|"
+    )
 
     for i, r in enumerate(results, 1):
         src = r.get("source") or {}
@@ -249,25 +252,32 @@ def build_report(results: list, out_path: Path) -> None:
 
         notes = []
         if not r["ok"]:
-            notes.append(f"FAIL @ {r.get('error_stage')}: {r.get('error','')[:60]}")
+            notes.append(f"FAIL @ {r.get('error_stage')}: {r.get('error', '')[:60]}")
         else:
             if mid_retention is not None and mid_retention < 90:
                 notes.append("intermediate loss")
             # Flag only KFX drops vs intermediate — KFX > intermediate is
             # expected when chapter title headings add words; only KFX < mid
             # is real content loss in the writer.
-            if kfx_retention is not None and mid_retention is not None and (mid_retention - kfx_retention) > 2:
+            if (
+                kfx_retention is not None
+                and mid_retention is not None
+                and (mid_retention - kfx_retention) > 2
+            ):
                 notes.append("KFX<intermediate")
-            if src.get("toc_entries", 0) and mid.get("chapter_count", 0) < src["toc_entries"] * 0.5:
+            if (
+                src.get("toc_entries", 0)
+                and mid.get("chapter_count", 0) < src["toc_entries"] * 0.5
+            ):
                 notes.append("ch<<toc")
         notes_s = "; ".join(notes)
 
         lines.append(
             f"| {i} | {r['file']} | {status} | {kfx_kb} | {r['elapsed_s']} | "
-            f"{src.get('source_words','—')} | {mid.get('chapter_count','—')} | {kfx_paras} | "
+            f"{src.get('source_words', '—')} | {mid.get('chapter_count', '—')} | {kfx_paras} | "
             f"{mid_ret_s} | {kfx_ret_s} | "
-            f"{src.get('spine_items','—')} | {src.get('toc_entries','—')} | "
-            f"{src.get('image_count_in_epub','—')} | {kfx_imgs} | {notes_s} |"
+            f"{src.get('spine_items', '—')} | {src.get('toc_entries', '—')} | "
+            f"{src.get('image_count_in_epub', '—')} | {kfx_imgs} | {notes_s} |"
         )
 
     lines.append("")
@@ -280,7 +290,9 @@ def build_report(results: list, out_path: Path) -> None:
             lines.append(f"### {r['file']}")
             lines.append(f"- Stage: `{r.get('error_stage')}`")
             lines.append(f"- Error: `{r.get('error')}`")
-            lines.append(f"- Log: `{(OUT_DIR / Path(r['file']).stem / 'convert.log').relative_to(ROOT)}`")
+            lines.append(
+                f"- Log: `{(OUT_DIR / Path(r['file']).stem / 'convert.log').relative_to(ROOT)}`"
+            )
             lines.append("")
 
     out_path.write_text("\n".join(lines))
@@ -291,7 +303,9 @@ def main():
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--smoke", action="store_true", help="Run 5 diverse picks")
     g.add_argument("--all", action="store_true", help="Run all 90")
-    g.add_argument("--files", nargs="+", help="Run files matching these prefixes (e.g. 02 05)")
+    g.add_argument(
+        "--files", nargs="+", help="Run files matching these prefixes (e.g. 02 05)"
+    )
     args = p.parse_args()
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -316,7 +330,7 @@ def main():
         print(f"  [{i}/{len(targets)}] {ep.name} ...", flush=True)
         r = run_one(ep, OUT_DIR)
         flag = "OK " if r["ok"] else "FAIL"
-        kb = f"{r['kfx_bytes']//1024}KB" if r.get("kfx_bytes") else "—"
+        kb = f"{r['kfx_bytes'] // 1024}KB" if r.get("kfx_bytes") else "—"
         print(f"      {flag} {kb} in {r['elapsed_s']}s")
         results.append(r)
 
