@@ -2040,10 +2040,38 @@ def test_leading_chapter_title_rejects_an_image_token():
 
 
 @pytest.mark.unit
-def test_leading_chapter_title_rejects_a_caption_carrying_an_image():
-    """A block mixing an image with a few words is still not a usable title."""
+def test_leading_chapter_title_keeps_a_heading_that_carries_an_ornament():
+    """An image beside real words must not cost the chapter its title.
+
+    `<h2><img/>Preface</h2>` is one block — an ornament or drop-cap glyph
+    followed by the heading text. Rejecting the whole block on sight would
+    answer #133 by throwing away a perfectly good title, so the token is
+    stripped and the ordinary guards then judge what is left.
+    """
+    token = _conv._make_img_token("ornament.png", "")
+    assert _leading_chapter_title([{"text": f"{token}Preface"}]) == "Preface"
+
+
+@pytest.mark.unit
+def test_leading_chapter_title_keeps_a_caption_beside_a_plate():
+    """Same rule with the words after a space, e.g. a captioned frontispiece."""
     token = _conv._make_img_token("plate.jpg", "Frontispiece")
-    assert _leading_chapter_title([{"text": f"{token} Frontispiece"}]) == "Front Matter"
+    assert _leading_chapter_title([{"text": f"{token} Frontispiece"}]) == "Frontispiece"
+
+
+@pytest.mark.unit
+def test_leading_chapter_title_rejects_a_block_of_only_images():
+    """Stripping must not resurrect the bug: images alone leave no title."""
+    a = _conv._make_img_token("one.png", "")
+    b = _conv._make_img_token("two.png", "")
+    assert _leading_chapter_title([{"text": f"{a}{b}"}]) == "Front Matter"
+
+
+@pytest.mark.unit
+def test_leading_chapter_title_measures_length_after_stripping():
+    """The 60-char bound applies to the words, not to the token's overhead."""
+    token = _conv._make_img_token("x" * 200, "")
+    assert _leading_chapter_title([{"text": f"{token}Preface"}]) == "Preface"
 
 
 @pytest.mark.unit

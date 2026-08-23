@@ -792,25 +792,24 @@ def _leading_chapter_title(head_blocks):
     Use the first block's text when it is short enough to be a heading,
     otherwise a neutral 'Front Matter' label.
 
-    An image token is rejected however short it is. The length-and-newline
-    guards alone let one through — `_make_img_token` emits a single run with
-    its spaces escaped, so a bare cover image reads as a brief, tidy heading.
-    The chapter was then *titled* with a picture, and because
-    `_rebuild_contents_page` skips chapters by matching literal strings, no
-    entry in `CONTENTS_SKIP_TITLES` could match it: the cover came back as a
-    contents entry, rendering the image inside the listing. Every book in the
-    corpus that builds a contents page had one. (#133)
+    Image tokens are stripped before the guards run. The guards alone let one
+    through — `_make_img_token` emits a single run with its spaces escaped, so
+    a bare cover image reads as a brief, tidy heading. The chapter was then
+    *titled* with a picture, and because `_rebuild_contents_page` skips
+    chapters by matching literal strings, no entry in `CONTENTS_SKIP_TITLES`
+    could match it: the cover came back as a contents entry. Worse, a title is
+    emitted as a heading chunk without token resolution, so both copies reached
+    the reader as raw control characters — 116 of them across the corpus. (#133)
 
-    Rejecting rather than stripping the token is deliberate. What remains after
-    stripping is alt text or a caption fragment, which names the picture rather
-    than the section — 'Front Matter' is the more honest label."""
+    Strip rather than reject the whole block. An image sits beside real words
+    often enough that rejecting on sight would answer #133 by discarding good
+    titles: `<h2><img/>Preface</h2>` is one block, and the chapter is called
+    Preface. What is left after stripping is the text a reader sees, so the
+    length and newline bounds are measured against that rather than against the
+    token's overhead."""
     if head_blocks:
-        t = (head_blocks[0].get("text") or "").strip()
-        if (
-            0 < len(t) <= _LEADING_TITLE_MAX_LEN
-            and "\n" not in t
-            and not _IMG_TOKEN_RE.search(t)
-        ):
+        t = _IMG_TOKEN_RE.sub("", head_blocks[0].get("text") or "").strip()
+        if 0 < len(t) <= _LEADING_TITLE_MAX_LEN and "\n" not in t:
             return t
     return "Front Matter"
 

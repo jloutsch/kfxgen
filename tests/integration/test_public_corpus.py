@@ -31,6 +31,7 @@ from pathlib import Path
 import pytest
 
 from kfxgen import converter as conv
+from kfxgen._img_tokens import IMG_TOKEN_RE
 from kfxgen.kfxlib_minimal.ion import IS
 from tests._kfx_introspect import by_type, load_fragments, val
 from tests.fixtures.oeb_shim import EpubAsOeb
@@ -44,11 +45,15 @@ NAV_MARKERS = frozenset(
     {"Page List", "Navigation", "Begin Reading", "Table of Contents"}
 )
 
-#: The sentinel opening `_make_img_token`. An image token is an internal
-#: placeholder: the generator is supposed to turn it into an image chunk, and
-#: any that reaches emitted text is a control-character string printed to the
-#: reader. 116 of them survived across all 77 books before #133.
-IMG_TOKEN = "\x00IMG\x01"
+#: An image token is an internal placeholder: the generator is supposed to turn
+#: it into an image chunk, and any that reaches emitted text is a
+#: control-character string printed to the reader. 116 of them survived across
+#: all 77 books before #133.
+#:
+#: Imported rather than spelled out. A local copy would still read zero after a
+#: change to the token's shape, so the check would go green on the very bug it
+#: exists to catch — `_img_tokens` is the canonical definition for exactly this
+#: reason.
 
 #: A book may legitimately shrink slightly (deduplicated headings, #64) or grow
 #: (recovered container text, #58). Only flag movement beyond this.
@@ -179,7 +184,7 @@ def _metrics(kfx_path):
         "links": len(targets),
         "dangling": len(set(targets) - anchors),
         "nav_junk": sum(1 for t in texts if t.strip() in NAV_MARKERS),
-        "raw_img_tokens": sum(1 for t in texts if IMG_TOKEN in t),
+        "raw_img_tokens": sum(1 for t in texts if IMG_TOKEN_RE.search(t)),
         "image_resources": len(by_type(frags, "$164")),
         "images_shown": shown,
     }
