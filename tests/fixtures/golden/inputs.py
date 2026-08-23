@@ -588,6 +588,52 @@ def make_table_cells(out_dir: Path) -> Path:
     )
 
 
+def make_contents_illustration(out_dir: Path) -> Path:
+    """An illustration printed inside the source contents section (#117).
+
+    The converter replaces a chapter titled "Contents" with a rebuilt listing
+    and drops its blocks, because the source listing duplicates the navigation
+    KFX carries itself. That reasoning covers the text and not the pictures, so
+    a plate printed on the contents page vanished with it. Two corpus books hit
+    this: pg1400 emitted 31 image resources for 32 inline refs, pg37106 204 for
+    206.
+
+    The chapter is titled "Contents" deliberately, and that is the part to be
+    careful with. #76 records a fixture whose assertions passed vacuously
+    precisely because a page with that title has its blocks discarded upstream,
+    so the pins never ran. This one is only meaningful if the image survives
+    *despite* the discard — verify by removing the fix and checking that this
+    golden moves, rather than trusting that it exercises the path.
+
+    A second chapter exists so the rebuilt listing has an entry to link to;
+    with none, the contents page has no reason to be rebuilt at all.
+    """
+    contents_body = (
+        "<h2>Contents</h2>\n"
+        '<p><img src="plate.png" alt="frontispiece plate"/></p>\n'
+        "<p>I. First Chapter</p>"
+    )
+    return (
+        EpubBuilder()
+        .set_metadata(title="Contents Illustration Golden", author="Golden Author")
+        .add_chapter(
+            "Contents",
+            _xhtml_page("Contents", contents_body).encode("utf-8"),
+        )
+        .add_chapter(
+            "First Chapter",
+            "Body text of the first chapter.\n\nA second paragraph.",
+        )
+        .add_manifest_item(
+            item_id="plate",
+            href="plate.png",
+            media_type="image/png",
+            data=_MINIMAL_PNG,
+        )
+        .build(out_dir, "contents_illustration")
+    )
+
+
 # Registry consumed by both regenerate.py and test_golden_corpus.py.
 #
 # Each fixture is paired with a structural-fingerprint check in
@@ -601,6 +647,7 @@ GOLDEN_INPUTS: list[tuple[str, callable]] = [
     ("captioned_images", make_captioned_images),
     ("sub_super_marks", make_sub_super_marks),
     ("table_cells", make_table_cells),
+    ("contents_illustration", make_contents_illustration),
     ("with_cover", make_with_cover),
     ("multi_chapter", make_multi_chapter),
     ("linked_toc", make_linked_toc),

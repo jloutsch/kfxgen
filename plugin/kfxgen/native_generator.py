@@ -1998,7 +1998,10 @@ class NativeKFXGenerator:
             chapters: Required list of chapter dicts with 'title' and 'text'
                 keys (text may contain inline image tokens emitted by
                 converter.extract_text_from_html). Optionally each chapter
-                may carry 'font_size' and 'toc_links'. Raises ValueError
+                may carry 'font_size', 'toc_links', and 'preserved_images'
+                (image tokens rescued from a replaced contents section,
+                which are read from their own key because the 'toc_links'
+                path ignores 'text' entirely — #117). Raises ValueError
                 if empty or None.
             asin: Optional ASIN (auto-generated if None)
             output_path: Optional path to write KFX file
@@ -2923,6 +2926,28 @@ class NativeKFXGenerator:
                             first.setdefault("anchor_offsets", {}).update(
                                 dict.fromkeys(block_anchor_keys, 0)
                             )
+
+            # Illustrations the source printed in a contents section that was
+            # replaced. They arrive as their own key rather than inside
+            # `chapter["text"]` because the `toc_links` branch above ignores
+            # that text entirely and emits one chunk per link.
+            #
+            # Outside the if/else, not inside the `toc_links` branch, because
+            # the converter sets this key whether or not any links survive.
+            # A book whose every other chapter is in `CONTENTS_SKIP_TITLES`
+            # rebuilds to an empty listing, and handling it only in the
+            # `toc_links` branch dropped the image again while the converter
+            # logged that it had been kept.
+            #
+            # Cannot double-emit: the rebuilt `text` never contains these
+            # tokens — they are read off the blocks just before those blocks
+            # are discarded.
+            #
+            # Emitted after the body, since the listing is the page's purpose
+            # and a plate that sat mid-section has no position to return to
+            # once the surrounding text is gone. (#117)
+            for token in chapter.get("preserved_images") or []:
+                all_chunks.extend(_emit_text_chunks(token))
 
             # Guarantee every chapter contributes at least one chunk so it
             # owns a navigable content position and the per-chapter arrays

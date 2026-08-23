@@ -1112,6 +1112,21 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
             continue
         toc_links.append({"text": ch["title"], "target_chapter_idx": i})
 
+    # Illustrations that happen to sit in this section are content, and are
+    # kept even though the text around them is not. The reason to discard a
+    # source contents section is that its *text* duplicates the navigation KFX
+    # carries itself; that says nothing about pictures printed there. Two
+    # corpus books lose decorative plates this way — a plate between the
+    # Contents heading and the next heading vanished with the section. (#117)
+    #
+    # Tokens only, not the blocks they came from: the surrounding text is
+    # exactly what this function exists to replace.
+    preserved_images = [
+        m.group(0)
+        for b in (contents_ch.get("blocks") or [])
+        for m in _IMG_TOKEN_RE.finditer(b.get("text") or "")
+    ]
+
     # Build display text (header + entries)
     lines = ["Contents"]
     for link in toc_links:
@@ -1121,6 +1136,16 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
 
     # Structured link data for the native generator
     contents_ch["toc_links"] = toc_links
+    if preserved_images:
+        # A separate key rather than appended to `text`, because the generator
+        # ignores `text` entirely once `toc_links` is set and emits one chunk
+        # per link — images smuggled into the text would be dropped again,
+        # silently and in a harder place to find.
+        contents_ch["preserved_images"] = preserved_images
+        log.info(
+            f"  Kept {len(preserved_images)} illustration(s) from the "
+            "discarded contents section"
+        )
     log.info(f"  Rebuilt contents page with {len(toc_links)} linked entries")
 
 
