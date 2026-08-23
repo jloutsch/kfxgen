@@ -316,3 +316,16 @@ KFXGEN_CORPUS_BASELINE=corpus-baseline.json \
 
 The baseline is keyed by filename and is a local artifact — keep it out of the
 repo, alongside the corpus itself.
+
+The invariants are also only as good as what they look for. `nav_junk` matches
+four literal strings, which turned out to report one failing book where there
+were seven, and that one was our own generated heading (#136). When an
+invariant's scope is in doubt, measure it directly before trusting the count:
+
+```bash
+python research/measure_contents_leak.py          # #132 and #133
+```
+
+Book titles and author names must stay out of committed output — this repo is
+public and the corpus is real books. That script prints structural labels and
+chapter indices only; keep anything new in `research/` to the same rule.
