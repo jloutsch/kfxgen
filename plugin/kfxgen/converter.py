@@ -790,10 +790,27 @@ def _leading_chapter_title(head_blocks):
     """Title for front matter that precedes the first TOC anchor.
 
     Use the first block's text when it is short enough to be a heading,
-    otherwise a neutral 'Front Matter' label."""
+    otherwise a neutral 'Front Matter' label.
+
+    An image token is rejected however short it is. The length-and-newline
+    guards alone let one through — `_make_img_token` emits a single run with
+    its spaces escaped, so a bare cover image reads as a brief, tidy heading.
+    The chapter was then *titled* with a picture, and because
+    `_rebuild_contents_page` skips chapters by matching literal strings, no
+    entry in `CONTENTS_SKIP_TITLES` could match it: the cover came back as a
+    contents entry, rendering the image inside the listing. Every book in the
+    corpus that builds a contents page had one. (#133)
+
+    Rejecting rather than stripping the token is deliberate. What remains after
+    stripping is alt text or a caption fragment, which names the picture rather
+    than the section — 'Front Matter' is the more honest label."""
     if head_blocks:
         t = (head_blocks[0].get("text") or "").strip()
-        if 0 < len(t) <= _LEADING_TITLE_MAX_LEN and "\n" not in t:
+        if (
+            0 < len(t) <= _LEADING_TITLE_MAX_LEN
+            and "\n" not in t
+            and not _IMG_TOKEN_RE.search(t)
+        ):
             return t
     return "Front Matter"
 

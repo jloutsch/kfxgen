@@ -23,6 +23,7 @@ from kfxgen.converter import (
     _anchor_block_index,
     _assemble_chapters_by_coordinate,
     _href_fragment,
+    _leading_chapter_title,
     _replace_title_page,
     extract_blocks_from_html,
     extract_chapters_from_oeb,
@@ -882,6 +883,34 @@ class TestCoordinateAssemblyEdges:
         chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
         # Only chapter I; no image-only "Front Matter" leading chapter.
         assert [c["title"] for c in chapters] == ["I"]
+
+    def test_head_leading_with_an_image_is_not_titled_with_the_image(self):
+        # A head that is an image token FOLLOWED BY REAL TEXT does produce a
+        # leading chapter — unlike the image-only case above, which produces
+        # none. `_leading_chapter_title` took block[0] as the title whenever it
+        # was short and newline-free, and an IMG token is both, so the chapter
+        # ended up titled with a picture. That title then reached
+        # `_rebuild_contents_page`, which matches literal strings and so could
+        # not skip it, and the cover was re-rendered as a contents entry. Every
+        # corpus book that builds a contents page had one. (#133)
+        img_token = _conv._make_img_token("cover.jpg", "")
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [
+                    (img_token, []),
+                    ("The Project Gutenberg eBook of A Book", []),
+                    ("Chapter I", ["c1"]),
+                    ("Body text", []),
+                ],
+            )
+        ]
+        toc = [{"title": "I", "href": "book.xhtml#c1"}]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert [c["title"] for c in chapters] == ["Front Matter", "I"]
+        # The image itself is content and stays in the body; only the *title*
+        # must be free of it.
+        assert img_token in chapters[0]["text"]
 
     def test_head_is_folded_when_it_carries_toc_anchor(self):
         # When the head (blocks before the first coordinate) carries an anchor
@@ -1981,3 +2010,59 @@ def test_contents_without_illustrations_sets_no_key():
     ]
     _replace_title_page(chapters, {"title": "B", "author": "A"}, _silent_log())
     assert "preserved_images" not in chapters[0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "first_block, expected",
+    [
+        ("A Short Heading", "A Short Heading"),
+        ("", "Front Matter"),
+        ("x" * 61, "Front Matter"),
+        ("line one\nline two", "Front Matter"),
+    ],
+)
+def test_leading_chapter_title_keeps_its_existing_rules(first_block, expected):
+    """The length, emptiness and newline guards must survive the #133 fix."""
+    blocks = [{"text": first_block}]
+    assert _leading_chapter_title(blocks) == expected
+
+
+@pytest.mark.unit
+def test_leading_chapter_title_rejects_an_image_token():
+    """An image is not a title, however short it is (#133).
+
+    `_make_img_token` builds a single whitespace-free run, so the old
+    `len(t) <= 60 and "\\n" not in t` guard admitted it.
+    """
+    token = _conv._make_img_token("cover.jpg", "")
+    assert _leading_chapter_title([{"text": token}]) == "Front Matter"
+
+
+@pytest.mark.unit
+def test_leading_chapter_title_rejects_a_caption_carrying_an_image():
+    """A block mixing an image with a few words is still not a usable title."""
+    token = _conv._make_img_token("plate.jpg", "Frontispiece")
+    assert _leading_chapter_title([{"text": f"{token} Frontispiece"}]) == "Front Matter"
+
+
+@pytest.mark.unit
+def test_generated_contents_never_labels_an_entry_with_an_image():
+    """The reader-visible symptom of #133, one level above the cause.
+
+    A contents entry whose label is an image token renders the picture inside
+    the listing. Asserted against `_replace_title_page` rather than the helper
+    so the fix has to hold along the path that actually produces the page.
+    """
+    token = _conv._make_img_token("cover.jpg", "")
+    chapters = [
+        {"title": _leading_chapter_title([{"text": token}]), "text": token},
+        {"title": "Contents", "text": "old"},
+        {"title": "Chapter 1", "text": "body"},
+    ]
+    _replace_title_page(chapters, {"title": "B", "author": "A"}, _silent_log())
+
+    entries = [link["text"] for link in chapters[1]["toc_links"]]
+    assert not [e for e in entries if _conv._IMG_TOKEN_RE.search(e)], (
+        f"an image token reached the contents listing: {entries}"
+    )
