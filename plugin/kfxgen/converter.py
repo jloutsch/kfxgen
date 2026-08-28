@@ -954,17 +954,27 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
 
     # Flat indices at which a contents listing was discarded, so the chapter
     # covering one can be handed to the contents rebuild (#132).
-    nav_flat = {
-        file_offset[si] + local
-        for si, s_item in enumerate(spine_items_ordered)
-        for local in (s_item.get("nav_listing_at") or ())
-    }
+    # A discarded listing occupies no block, so it records the index its first
+    # block *would* have had — that is, the index of the block now following
+    # it. A listing at the end of its file records one past the last block,
+    # which is also the next chapter's first index; left as-is, the boundary
+    # is ambiguous and the chapter *after* the listing gets flagged too. Since
+    # the rebuild takes the first heading-sized flagged chapter, that replaces
+    # a real short chapter's content with a contents page. Clamp such an index
+    # back onto the file's last block so every listing lands strictly inside
+    # the chapter that held it.
+    nav_flat = set()
+    for si, s_item in enumerate(spine_items_ordered):
+        last = len(spine_blocks[si]) - 1
+        for local in s_item.get("nav_listing_at") or ():
+            if last < 0:
+                continue
+            nav_flat.add(file_offset[si] + min(local, last))
 
     def _flag_nav(ch, start, end):
-        """Mark a chapter that held a discarded listing. `end` is exclusive,
-        but a listing sitting at the very end of a chapter records the index
-        one past its last block, so that boundary counts too."""
-        if ch and any(start <= i <= end for i in nav_flat):
+        """Mark a chapter that held a discarded listing. Half-open, matching
+        the slice the chapter was built from."""
+        if ch and any(start <= i < end for i in nav_flat):
             ch["_had_nav_listing"] = True
         return ch
 

@@ -2413,6 +2413,37 @@ class TestDiscardedListingBecomesGeneratedContents:
         assert "Front matter prose that is real content." in front_ch["text"]
         assert "Chapter I" not in front_ch["text"]
 
+    def test_listing_at_a_file_end_does_not_flag_the_next_chapter(self):
+        """A listing records the block index it would have occupied. When it
+        sits at the end of a file that index equals the *next* chapter's first
+        block, so a naive range test flags both — and since the guard picks the
+        first heading-sized flagged chapter, the short chapter after the
+        listing gets its content replaced by a contents page."""
+        front = (
+            "<p>A long stretch of genuine front matter prose that the reader "
+            "is meant to see, well beyond a heading in length.</p>"
+            '<div class="toc"><p><a href="c1.xhtml">Chapter I</a></p>'
+            '<p><a href="c2.xhtml">Chapter II</a></p></div>'
+        )
+        chapters = self._chapters(
+            [
+                _RawSpineItem("front.xhtml", front),
+                _RawSpineItem("short.xhtml", "<h1>Short</h1>"),
+            ]
+            + self._body_chapters(),
+            [
+                ("Preface", "front.xhtml"),
+                ("Short", "short.xhtml"),
+                ("Chapter I", "c1.xhtml"),
+                ("Chapter II", "c2.xhtml"),
+            ],
+        )
+        short = next(c for c in chapters if c["title"] == "Short")
+        assert not short.get("toc_links"), (
+            "a chapter after the listing was rebuilt as the contents page"
+        )
+        assert "Short" in short["text"]
+
     def test_listing_beside_real_prose_does_not_replace_that_prose(self):
         """A page that carries a listing *and* substantial content is not a
         contents page. Drop the listing; never overwrite the content."""
