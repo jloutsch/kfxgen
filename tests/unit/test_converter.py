@@ -2381,6 +2381,15 @@ class TestDiscardedListingBecomesGeneratedContents:
         ]
         # The source listing's own entry text must not survive alongside it.
         assert "Navigation" not in nav.get("text", "")
+        # The page needs a heading of its own. "Navigation" named the listing
+        # that was replaced and is a structural label, so it must not print
+        # (#60/#107) — but suppressing it and adding nothing leaves a bare list
+        # of links under no header, while the title-keyed path shows one. Name
+        # the rebuilt page for what it now is.
+        assert nav["title"] == "Contents"
+        assert not nav.get("_omit_title_heading"), (
+            "the rebuilt contents page would render with no heading at all"
+        )
 
     def test_book_does_not_get_two_contents_pages(self):
         """pg64317's shape: an inline listing in the front matter *and* a real

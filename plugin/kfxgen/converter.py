@@ -1190,6 +1190,10 @@ SMALL_FONT_SIZE = 0.75
 #: TOC labels that denote a contents listing of the book's own.
 _CONTENTS_TITLES = frozenset({"contents", "table of contents"})
 
+#: Title given to a contents page rebuilt from markup rather than from a
+#: recognised chapter title, replacing whatever the source called the listing.
+CONTENTS_PAGE_TITLE = "Contents"
+
 # TOC labels that denote the full title page (book title + author).
 TITLE_PAGE_TITLES = frozenset({"title page", "title"})
 
@@ -1256,9 +1260,14 @@ def _replace_title_page(chapters, metadata, log):
             _rebuild_contents_page(ch, chapters, log)
             ch.pop("blocks", None)
             ch["font_size"] = SMALL_FONT_SIZE
-            # The source heading ("Navigation") named the listing we replaced.
-            ch["_omit_title_heading"] = True
+            # Rename rather than suppress. The source label named the listing
+            # that was replaced — "Navigation" is structural metadata and must
+            # not print (#60/#107) — but omitting the heading instead leaves a
+            # bare list of links under no header, where the title-keyed path
+            # shows one. The page is now kfxgen's contents page, in the body
+            # heading and in the reader's navigation alike, so name it that.
             log.info(f"  Rebuilt contents from listing markup: {ch['title']}")
+            ch["title"] = CONTENTS_PAGE_TITLE
             continue
         ch_title = _normalize_title(ch["title"])
         if ch_title in TITLE_PAGE_TITLES:
