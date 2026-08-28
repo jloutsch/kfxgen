@@ -452,23 +452,26 @@ def test_fixture_multi_chapter_shape():
 #: Link spans publisher_structure must emit. An exact number so a silently
 #: dropped link fails; update deliberately when the fixture gains a link.
 #:
-#: Five from the navigation document (both part1 ids, the note, the whole-file
-#: afterword href, and the endnote appendix) plus two from part1's body (the
-#: <sup> marker and the cross-folder prose link, which share a target and so
-#: resolve to one anchor between them).
+#: Six from the contents page kfxgen generates in place of the discarded nav
+#: document (#132), plus four from part1's body: the <sup> marker and the
+#: cross-folder prose link (which share a target and so resolve to one anchor
+#: between them), the endnote-appendix link, and the whole-file afterword
+#: href. The last two moved out of the nav document when #132 made that
+#: document a recognised listing — a link pinned there would no longer be
+#: resolved at all, and this count would have passed vacuously (#76).
 #:
-#: Deleting the anchor-carry in `native_generator` drops this to 5, not 6: the
+#: Deleting the anchor-carry in `native_generator` drops this by two: the
 #: appendix link dies (its target id is on the elided heading — the #62 case),
 #: and so does the whole-file `back/afterword.xhtml` link, because that
 #: chapter's `<h1>Afterword</h1>` is elided too and takes the bare-filename
 #: key with it. The carry protects whole-file targets as well as fragments.
-EXPECTED_PUBLISHER_LINKS = 7
+EXPECTED_PUBLISHER_LINKS = 10
 
 #: Distinct `$266` anchors those links resolve to — one per unique target.
 #: Asserted alongside the link count because a link and its anchor are emitted
 #: from different code paths; a count that moves without the other moving is a
 #: resolution bug, not a fixture edit.
-EXPECTED_PUBLISHER_ANCHORS = 5
+EXPECTED_PUBLISHER_ANCHORS = 9
 
 
 @pytest.mark.integration
@@ -497,11 +500,14 @@ def test_fixture_publisher_structure_shape(tmp_path):
         for x in (val(f).get(IS("$146")) or [])
         if isinstance(x, str)
     ]
-    # #58: each TOC entry is its own block. Flattening merges a Part heading
-    # and every child entry into one run-on paragraph.
-    assert not any("PART I" in t and "First Chapter" in t for t in texts), (
+    # #58: each list entry is its own block. Flattening merges an outer entry
+    # and every child into one run-on paragraph. The list lives in body
+    # content, not in the nav document — #132 discards that document, and a
+    # pin riding on it would pass vacuously (#76).
+    assert not any("PART II" in t and "Second Chapter" in t for t in texts), (
         f"nested list flattened into one block: {texts}"
     )
+    assert any("PART II" in t for t in texts), "nested list dropped entirely"
     # #58 (second half): a container's own inline text must survive alongside
     # its block children.
     assert any("Lead-in text" in t for t in texts), (
@@ -514,11 +520,21 @@ def test_fixture_publisher_structure_shape(tmp_path):
         f"split chapter opener duplicated below the heading: {texts}"
     )
     assert "3. Split Opener" in [t.strip() for t in texts], "heading missing"
-    # #60: hidden landmarks/page-list navs are markup, not reading content.
-    # Live only because the nav document is not titled "Contents" — under that
-    # title its blocks are discarded wholesale and this passes vacuously (#76).
+    # #60: a `hidden` nav is markup, not reading content. Pinned from the body
+    # page, so the assertion survives #132 discarding the nav document.
     assert not any(t.strip() in ("Page List", "Begin Reading") for t in texts), (
         f"hidden nav leaked into the body: {texts}"
+    )
+    # #132: the nav document is a contents listing whatever its chapter is
+    # called, so its entries must not print as body text — and kfxgen must put
+    # its own contents page in their place rather than leaving the book with
+    # none. "Afterword" is listed by both, so the discriminating entry is the
+    # nav's own heading.
+    assert "Navigation" not in [t.strip() for t in texts], (
+        f"the source listing survived into the body: {texts}"
+    )
+    assert "Endnote Appendix" in [t.strip() for t in texts], (
+        "no generated contents page stands in for the discarded listing"
     )
     # Every link must resolve, and the anchor for the elided appendix heading
     # must be among them — reverting the anchor-carry drops it (#62, #76).

@@ -378,16 +378,23 @@ def make_publisher_structure(out_dir: Path) -> Path:
       navigation links to — the elided block's anchor must survive onto the
       chapter's first chunk or the link is dropped (#62)
 
-    The navigation document is titled "Navigation", not "Contents", and that
-    is load-bearing. `_rebuild_contents_page` discards the blocks of any
-    chapter titled "contents"/"table of contents" and re-emits chapter-index
-    links in their place, so a nav page under that title reaches neither the
-    block extractor nor the body-link resolver: its nested `<ol>`, its hidden
-    navs and its `<a href>` targets are all thrown away before the code they
-    are meant to exercise ever sees them. Under that title three of the pins
-    above passed vacuously and #62 was never reached at all (#76). Publisher
-    nav documents carry titles other than "Contents" routinely; that shape is
-    also where #60 was found. `linked_toc` covers the rebuild path.
+    The navigation document used to carry the nested `<ol>`, the hidden navs
+    and the link targets, under the title "Navigation" so that the
+    title-keyed contents rebuild would not throw them away before the code
+    they pin was reached (#76). #132 made the discard structural — a
+    `<nav epub:type="toc">` is recognised as a listing wherever it sits and
+    whatever its chapter is called — so the nav document is now replaced by a
+    generated contents page, and every pin riding on it would pass vacuously
+    again.
+
+    They therefore live in `text/part1.xhtml`, which is ordinary body content
+    and cannot be recognised as navigation: the nested `<ol>`, a `hidden`
+    page-list, and the cross-folder links. None of the shapes are contrived
+    there — body prose routinely carries outline lists and note references.
+
+    The nav document stays, and now pins #132 itself: its listing must be
+    discarded and a generated contents page must stand in its place, rather
+    than the book being left with no contents at all.
 
     The CSS route to superscript (`vertical-align` on a span) is deliberately
     not used here: it resolves through Calibre's Stylizer, which golden
@@ -420,10 +427,29 @@ def make_publisher_structure(out_dir: Path) -> Path:
     )
     # Container with its own text alongside block children, plus a chapter
     # opener split into numeral and title.
-    part = _xhtml_page(
+    # _epub3_page, not _xhtml_page: the page-list nav below carries epub:type,
+    # so the prefix has to be declared on this document.
+    part = _epub3_page(
         "PART I",
         '<h1 id="p1">PART I</h1>\n'
         "<div>Lead-in text that belongs to the div itself.<p>A nested paragraph.</p></div>\n"
+        # Nested <ol> inside <li>, in body content. Flattening merges the
+        # outer entry and every child into one run-on paragraph (#58). This
+        # sat in the nav document until #132 made that document a recognised
+        # listing; body prose carries outline lists routinely.
+        "<ol>\n"
+        "<li>PART II\n"
+        "  <ol>\n"
+        '  <li><a href="../chapter_3.xhtml#ea1">2. Second Chapter</a></li>\n'
+        '  <li><a href="../back/afterword.xhtml">Closing</a></li>\n'
+        "  </ol>\n"
+        "</li>\n"
+        "</ol>\n"
+        # Hidden page-list, in a content document. `hidden` means markup, not
+        # reading content, whatever element carries it (#60).
+        '<nav epub:type="page-list" hidden="hidden"><h2>Page List</h2><ol>\n'
+        '<li><a href="part1.xhtml#pg2">2</a></li>\n'
+        '<li><a href="part1.xhtml#pg3">3</a></li></ol></nav>\n'
         '<p id="c1" class="num">1</p>\n'
         "<p>First Chapter</p>\n"
         # Both note links are written relative to THIS document, which lives in
