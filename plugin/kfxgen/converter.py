@@ -874,9 +874,10 @@ def _leading_chapter_title(head_blocks):
     a bare cover image reads as a brief, tidy heading. The chapter was then
     *titled* with a picture, and because `_rebuild_contents_page` skips
     chapters by matching literal strings, no entry in `CONTENTS_SKIP_TITLES`
-    could match it: the cover came back as a contents entry. A title is also
+    could match it: the cover came back as a contents entry. Worse, a title is
     emitted as a heading chunk without token resolution, so both copies reached
-    the reader as raw control characters. (#133)
+    the reader as raw control characters — 116 of them across the corpus, and a
+    device crashed paging over them. (#133)
 
     Strip rather than reject the whole block. An image sits beside real words
     often enough that rejecting on sight would answer #133 by discarding good
