@@ -31,6 +31,8 @@ from pathlib import Path
 import pytest
 from lxml import etree
 
+from kfxgen._img_tokens import IMG_TOKEN_RE
+
 from kfxgen import converter as conv
 from kfxgen.kfxlib_minimal.ion import IS
 from tests._kfx_introspect import by_type, load_fragments, val
@@ -284,6 +286,31 @@ def _inline_image_refs(epub_path) -> int:
     return len(refs)
 
 
+def _raw_img_tokens_in_file(kfx_path):
+    """Unresolved image tokens anywhere in the serialized container.
+
+    Deliberately scans the whole file rather than the `$145` text chunks. A
+    token is an internal placeholder the generator is meant to turn into an
+    image; one that survives is raw control bytes (`\\x00`, `\\x01`) shipped to
+    the device. On a Paperwhite, a book carrying them in its first content
+    fragment crashed the reader while paging through the opening pages —
+    device-verified against the pre-fix build of one corpus book. So this is a
+    crash gate, not a cosmetic one.
+
+    Checking emitted *text* alone is not enough: a chapter title reaches the
+    body as a heading chunk only when `_omit_title_heading` is unset, but it
+    reaches the `$389` navigation fragment either way. The book that crashed
+    carried four of its six tokens in `$389` and only two in `$145`. Scanning
+    bytes covers nav labels, section names and metadata without needing a
+    fragment-by-fragment walk that would have to be kept in step with the
+    generator. (#133)
+    """
+    raw = Path(kfx_path).read_bytes()
+    # The token is ASCII-safe by construction, so matching on bytes is exact.
+    pattern = IMG_TOKEN_RE.pattern.encode("latin-1")
+    return len(re.findall(pattern, raw))
+
+
 def _metrics(kfx_path):
     frags = load_fragments(kfx_path)
     texts = [
@@ -335,6 +362,7 @@ def _metrics(kfx_path):
         "links": len(targets),
         "dangling": len(set(targets) - anchors),
         "nav_junk": sum(1 for t in texts if t.strip() in NAV_MARKERS),
+        "raw_img_tokens_anywhere": _raw_img_tokens_in_file(kfx_path),
         "image_resources": len(by_type(frags, "$164")),
         "images_shown": shown,
     }
@@ -394,6 +422,14 @@ def test_corpus_book_invariants(epub, tmp_path):
             f"{m['anchors']} anchors emitted but zero link spans — every link "
             "was dropped, which 'dangling == 0' cannot see"
         )
+    # #133: an unresolved image token is raw control bytes in the container.
+    # A device crashed paging through the opening pages of a book carrying them
+    # in its first content fragment, so this gates a crash, not a cosmetic
+    # defect. Whole-file, because the nav fragment carried most of them.
+    assert m["raw_img_tokens_anywhere"] == 0, (
+        f"{m['raw_img_tokens_anywhere']} unresolved image token(s) reached the "
+        "container as raw control bytes"
+    )
     # #60: hidden page-list/landmarks navs are markup, never reading content.
     assert m["nav_junk"] == 0, f"{m['nav_junk']} navigation blocks leaked into the body"
     # Every image the source displays inline must survive into the container.
