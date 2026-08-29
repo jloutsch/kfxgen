@@ -51,11 +51,26 @@ def _make_img_token(href, alt):
 class _ParagraphExtractor(HTMLParser):
     """Extract text preserving paragraph boundaries via block-level elements."""
 
-    BLOCK_TAGS = frozenset([
-        'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-        'blockquote', 'li', 'section', 'article', 'tr', 'dt', 'dd',
-    ])
-    SKIP_TAGS = frozenset(['script', 'style', 'head'])
+    BLOCK_TAGS = frozenset(
+        [
+            "p",
+            "div",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "blockquote",
+            "li",
+            "section",
+            "article",
+            "tr",
+            "dt",
+            "dd",
+        ]
+    )
+    SKIP_TAGS = frozenset(["script", "style", "head"])
 
     def __init__(self):
         super().__init__()
@@ -67,7 +82,7 @@ class _ParagraphExtractor(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
-        if tag == 'body':
+        if tag == "body":
             self._in_body = True
             self._body_depth = 1
             return
@@ -76,26 +91,26 @@ class _ParagraphExtractor(HTMLParser):
         if tag in self.SKIP_TAGS:
             self._skip_depth += 1
             return
-        if tag == 'br':
-            self._current.append('\n')
+        if tag == "br":
+            self._current.append("\n")
             return
-        if tag == 'img':
+        if tag == "img":
             if self._skip_depth == 0 and self._in_body:
                 attr_map = dict(attrs)
-                src = attr_map.get('src') or ''
-                alt = attr_map.get('alt') or ''
+                src = attr_map.get("src") or ""
+                alt = attr_map.get("alt") or ""
                 if src:
                     self._current.append(_make_img_token(src, alt))
             return
         if tag in self.BLOCK_TAGS and self._current:
-            text = ' '.join(''.join(self._current).split()).strip()
+            text = " ".join("".join(self._current).split()).strip()
             if text:
                 self.paragraphs.append(text)
             self._current = []
 
     def handle_endtag(self, tag):
         tag = tag.lower()
-        if tag == 'body':
+        if tag == "body":
             self._in_body = False
         if self._in_body:
             self._body_depth -= 1
@@ -103,7 +118,7 @@ class _ParagraphExtractor(HTMLParser):
             self._skip_depth = max(0, self._skip_depth - 1)
             return
         if tag in self.BLOCK_TAGS and self._current:
-            text = ' '.join(''.join(self._current).split()).strip()
+            text = " ".join("".join(self._current).split()).strip()
             if text:
                 self.paragraphs.append(text)
             self._current = []
@@ -117,45 +132,46 @@ class _ParagraphExtractor(HTMLParser):
     def get_text(self):
         # Flush remaining
         if self._current:
-            text = ' '.join(''.join(self._current).split()).strip()
+            text = " ".join("".join(self._current).split()).strip()
             if text:
                 self.paragraphs.append(text)
             self._current = []
-        return '\n\n'.join(self.paragraphs)
+        return "\n\n".join(self.paragraphs)
 
 
 def extract_text_from_html(html_bytes):
     """Extract text from HTML bytes, preserving paragraph breaks as \\n\\n."""
     try:
         try:
-            html_str = html_bytes.decode('utf-8')
+            html_str = html_bytes.decode("utf-8")
         except UnicodeDecodeError:
-            html_str = html_bytes.decode('latin-1')
+            html_str = html_bytes.decode("latin-1")
 
         parser = _ParagraphExtractor()
         parser.feed(html_str)
         return parser.get_text()
     except Exception:
-        return ''
+        return ""
 
 
 # ---------------------------------------------------------------------------
 # EPUB parsing
 # ---------------------------------------------------------------------------
 
+
 def _find_opf(zf):
     """Find the OPF file path in an EPUB zip."""
     try:
-        container = zf.read('META-INF/container.xml')
+        container = zf.read("META-INF/container.xml")
         root = ET.fromstring(container)
-        ns = {'c': 'urn:oasis:names:tc:opendocument:xmlns:container'}
-        rf = root.find('.//c:rootfile', ns)
+        ns = {"c": "urn:oasis:names:tc:opendocument:xmlns:container"}
+        rf = root.find(".//c:rootfile", ns)
         if rf is not None:
-            return rf.get('full-path')
+            return rf.get("full-path")
     except Exception:
         pass
     for name in zf.namelist():
-        if name.endswith('.opf'):
+        if name.endswith(".opf"):
             return name
     return None
 
@@ -163,57 +179,62 @@ def _find_opf(zf):
 def _resolve_path(opf_dir, href):
     """Resolve an href relative to the OPF directory."""
     if opf_dir:
-        full = os.path.join(opf_dir, href).replace('\\', '/')
+        full = os.path.join(opf_dir, href).replace("\\", "/")
     else:
         full = href
     parts = []
-    for p in full.split('/'):
-        if p == '..':
+    for p in full.split("/"):
+        if p == "..":
             if parts:
                 parts.pop()
-        elif p and p != '.':
+        elif p and p != ".":
             parts.append(p)
-    return '/'.join(parts)
+    return "/".join(parts)
 
 
 def _normalize_href(href):
     """Normalize href: strip anchor fragment and path prefix."""
-    href = href.split('#')[0]
-    if '/' in href:
-        href = href.rsplit('/', 1)[-1]
+    href = href.split("#")[0]
+    if "/" in href:
+        href = href.rsplit("/", 1)[-1]
     return href
 
 
 def extract_epub_metadata(epub_path):
     """Extract title, author, language, publisher, date from EPUB."""
     meta = {
-        'title': 'Untitled', 'author': 'Unknown', 'language': 'en',
-        'publisher': 'kfxgen', 'issue_date': None,
+        "title": "Untitled",
+        "author": "Unknown",
+        "language": "en",
+        "publisher": "kfxgen",
+        "issue_date": None,
     }
     try:
-        with zipfile.ZipFile(epub_path, 'r') as zf:
+        with zipfile.ZipFile(epub_path, "r") as zf:
             opf_path = _find_opf(zf)
             if not opf_path:
                 return meta
             opf_root = ET.fromstring(zf.read(opf_path))
-            ns = {'opf': 'http://www.idpf.org/2007/opf',
-                  'dc': 'http://purl.org/dc/elements/1.1/'}
+            ns = {
+                "opf": "http://www.idpf.org/2007/opf",
+                "dc": "http://purl.org/dc/elements/1.1/",
+            }
 
-            el = opf_root.find('.//dc:title', ns)
+            el = opf_root.find(".//dc:title", ns)
             if el is not None and el.text:
-                meta['title'] = el.text.strip()
-            el = opf_root.find('.//dc:creator', ns)
+                meta["title"] = el.text.strip()
+            el = opf_root.find(".//dc:creator", ns)
             if el is not None and el.text:
-                meta['author'] = el.text.strip()
-            el = opf_root.find('.//dc:language', ns)
+                meta["author"] = el.text.strip()
+            el = opf_root.find(".//dc:language", ns)
             if el is not None and el.text:
-                meta['language'] = el.text.strip()[:2].lower()
-            el = opf_root.find('.//dc:publisher', ns)
+                meta["language"] = el.text.strip()[:2].lower()
+            el = opf_root.find(".//dc:publisher", ns)
             if el is not None and el.text:
-                meta['publisher'] = el.text.strip()
-            el = opf_root.find('.//dc:date', ns)
+                meta["publisher"] = el.text.strip()
+            el = opf_root.find(".//dc:date", ns)
             if el is not None and el.text:
-                meta['issue_date'] = el.text.strip()[:10]
+                meta["issue_date"] = el.text.strip()[:10]
     except Exception as e:
         print(f"Warning: metadata extraction error: {e}")
     return meta
@@ -227,39 +248,40 @@ def extract_epub_spine(epub_path):
     """
     items = []
     try:
-        with zipfile.ZipFile(epub_path, 'r') as zf:
+        with zipfile.ZipFile(epub_path, "r") as zf:
             opf_path = _find_opf(zf)
             if not opf_path:
                 return items
             opf_dir = os.path.dirname(opf_path)
             opf_root = ET.fromstring(zf.read(opf_path))
-            ns = {'opf': 'http://www.idpf.org/2007/opf'}
+            ns = {"opf": "http://www.idpf.org/2007/opf"}
 
             # Build manifest: id -> (href, media_type)
             manifest = {}
-            mel = opf_root.find('.//opf:manifest', ns)
+            mel = opf_root.find(".//opf:manifest", ns)
             if mel is not None:
-                for item in mel.findall('opf:item', ns):
-                    iid = item.get('id')
-                    href = item.get('href')
-                    mt = item.get('media-type', '')
+                for item in mel.findall("opf:item", ns):
+                    iid = item.get("id")
+                    href = item.get("href")
+                    mt = item.get("media-type", "")
                     if iid and href:
                         manifest[iid] = (href, mt)
 
             # Get spine order
             spine_hrefs = []
-            sel = opf_root.find('.//opf:spine', ns)
+            sel = opf_root.find(".//opf:spine", ns)
             if sel is not None:
-                for iref in sel.findall('opf:itemref', ns):
-                    idref = iref.get('idref')
+                for iref in sel.findall("opf:itemref", ns):
+                    idref = iref.get("idref")
                     if idref and idref in manifest:
                         href, mt = manifest[idref]
-                        if 'html' in mt or 'xhtml' in mt:
+                        if "html" in mt or "xhtml" in mt:
                             spine_hrefs.append(href)
 
             if not spine_hrefs:
-                spine_hrefs = [n for n in zf.namelist()
-                               if n.endswith(('.html', '.xhtml', '.htm'))]
+                spine_hrefs = [
+                    n for n in zf.namelist() if n.endswith((".html", ".xhtml", ".htm"))
+                ]
 
             for href in spine_hrefs:
                 full_path = _resolve_path(opf_dir, href)
@@ -272,7 +294,7 @@ def extract_epub_spine(epub_path):
                         continue
                 text = extract_text_from_html(html_bytes)
                 if text and text.strip():
-                    items.append({'href': href, 'text': text})
+                    items.append({"href": href, "text": text})
 
     except Exception as e:
         print(f"Warning: spine extraction error: {e}")
@@ -287,37 +309,41 @@ def extract_epub_toc(epub_path):
     """
     entries = []
     try:
-        with zipfile.ZipFile(epub_path, 'r') as zf:
+        with zipfile.ZipFile(epub_path, "r") as zf:
             # Prefer NCX (more reliable for EPUB2 books)
             ncx_name = None
             nav_name = None
             for name in zf.namelist():
-                if name.endswith('.ncx'):
+                if name.endswith(".ncx"):
                     ncx_name = name
-                if 'nav' in name.lower() and name.endswith(('.xhtml', '.html')):
+                if "nav" in name.lower() and name.endswith((".xhtml", ".html")):
                     nav_name = name
 
             if ncx_name:
                 ncx_root = ET.fromstring(zf.read(ncx_name))
-                ns = {'ncx': 'http://www.daisy.org/z3986/2005/ncx/'}
-                for np in ncx_root.findall('.//ncx:navPoint', ns):
-                    text_el = np.find('ncx:navLabel/ncx:text', ns)
-                    content_el = np.find('ncx:content', ns)
+                ns = {"ncx": "http://www.daisy.org/z3986/2005/ncx/"}
+                for np in ncx_root.findall(".//ncx:navPoint", ns):
+                    text_el = np.find("ncx:navLabel/ncx:text", ns)
+                    content_el = np.find("ncx:content", ns)
                     if text_el is not None and text_el.text:
-                        href = content_el.get('src', '') if content_el is not None else ''
-                        entries.append({
-                            'title': text_el.text.strip(),
-                            'href': href,
-                        })
+                        href = (
+                            content_el.get("src", "") if content_el is not None else ""
+                        )
+                        entries.append(
+                            {
+                                "title": text_el.text.strip(),
+                                "href": href,
+                            }
+                        )
             elif nav_name:
-                nav_text = zf.read(nav_name).decode('utf-8', errors='ignore')
+                nav_text = zf.read(nav_name).decode("utf-8", errors="ignore")
                 matches = re.findall(
-                    r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>([^<]+)</a>',
-                    nav_text)
+                    r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>([^<]+)</a>', nav_text
+                )
                 for href, title in matches:
                     title = title.strip()
                     if title and len(title) > 1:
-                        entries.append({'title': title, 'href': href})
+                        entries.append({"title": title, "href": href})
 
     except Exception as e:
         print(f"Warning: TOC extraction error: {e}")
@@ -327,52 +353,56 @@ def extract_epub_toc(epub_path):
 def extract_cover_image(epub_path):
     """Extract cover image bytes from EPUB."""
     try:
-        with zipfile.ZipFile(epub_path, 'r') as zf:
+        with zipfile.ZipFile(epub_path, "r") as zf:
             opf_path = _find_opf(zf)
             if not opf_path:
                 return None
             opf_dir = os.path.dirname(opf_path)
             opf_root = ET.fromstring(zf.read(opf_path))
-            ns = {'opf': 'http://www.idpf.org/2007/opf'}
+            ns = {"opf": "http://www.idpf.org/2007/opf"}
 
             # Build manifest
             manifest = {}
-            mel = opf_root.find('.//opf:manifest', ns)
+            mel = opf_root.find(".//opf:manifest", ns)
             if mel is not None:
-                for item in mel.findall('opf:item', ns):
-                    iid = item.get('id', '')
-                    href = item.get('href', '')
-                    mt = item.get('media-type', '')
+                for item in mel.findall("opf:item", ns):
+                    iid = item.get("id", "")
+                    href = item.get("href", "")
+                    mt = item.get("media-type", "")
                     manifest[iid] = (href, mt)
 
             # Method 1: <meta name="cover" content="item_id">
-            for meta in opf_root.findall('.//opf:metadata/opf:meta', ns):
-                if meta.get('name') == 'cover':
-                    cover_id = meta.get('content', '')
+            for meta in opf_root.findall(".//opf:metadata/opf:meta", ns):
+                if meta.get("name") == "cover":
+                    cover_id = meta.get("content", "")
                     if cover_id in manifest:
                         href, mt = manifest[cover_id]
-                        if 'image' in mt:
+                        if "image" in mt:
                             full = _resolve_path(opf_dir, href)
                             data = zf.read(full)
                             if len(data) > 100:
-                                print(f"  Cover image: {len(data):,} bytes (meta cover)")
+                                print(
+                                    f"  Cover image: {len(data):,} bytes (meta cover)"
+                                )
                                 return data
 
             # Method 2: manifest item with 'cover' in id + image type
             for iid, (href, mt) in manifest.items():
-                if 'image' in mt and 'cover' in iid.lower():
+                if "image" in mt and "cover" in iid.lower():
                     full = _resolve_path(opf_dir, href)
                     try:
                         data = zf.read(full)
                         if len(data) > 100:
-                            print(f"  Cover image: {len(data):,} bytes (manifest id={iid})")
+                            print(
+                                f"  Cover image: {len(data):,} bytes (manifest id={iid})"
+                            )
                             return data
                     except KeyError:
                         pass
 
             # Method 3: manifest item with 'cover' in href + image type
             for iid, (href, mt) in manifest.items():
-                if 'image' in mt and 'cover' in href.lower():
+                if "image" in mt and "cover" in href.lower():
                     full = _resolve_path(opf_dir, href)
                     try:
                         data = zf.read(full)
@@ -400,20 +430,20 @@ def extract_epub_body_images(epub_path, exclude_data=None):
     """
     images = {}
     try:
-        with zipfile.ZipFile(epub_path, 'r') as zf:
+        with zipfile.ZipFile(epub_path, "r") as zf:
             opf_path = _find_opf(zf)
             if not opf_path:
                 return images
             opf_dir = os.path.dirname(opf_path)
             opf_root = ET.fromstring(zf.read(opf_path))
-            ns = {'opf': 'http://www.idpf.org/2007/opf'}
-            mel = opf_root.find('.//opf:manifest', ns)
+            ns = {"opf": "http://www.idpf.org/2007/opf"}
+            mel = opf_root.find(".//opf:manifest", ns)
             if mel is None:
                 return images
-            for item in mel.findall('opf:item', ns):
-                href = item.get('href') or ''
-                mt = (item.get('media-type') or '').lower()
-                if 'image' not in mt or not href:
+            for item in mel.findall("opf:item", ns):
+                href = item.get("href") or ""
+                mt = (item.get("media-type") or "").lower()
+                if "image" not in mt or not href:
                     continue
                 full_path = _resolve_path(opf_dir, href)
                 try:
@@ -425,7 +455,7 @@ def extract_epub_body_images(epub_path, exclude_data=None):
                         continue
                 if len(data) <= 100:
                     continue
-                if data[:3] != b'\xff\xd8\xff' and data[:4] != b'\x89PNG':
+                if data[:3] != b"\xff\xd8\xff" and data[:4] != b"\x89PNG":
                     continue
                 if exclude_data is not None and data == exclude_data:
                     continue
@@ -440,16 +470,30 @@ def extract_epub_body_images(epub_path, exclude_data=None):
 # ---------------------------------------------------------------------------
 
 SMALL_TEXT_CHAPTERS = {
-    'copyright', 'copyright page', 'also by', 'also by the author',
-    'about the author', 'about the authors', 'dedication', 'epigraph',
-    'acknowledgments', 'acknowledgements', 'colophon', 'credits',
-    'a note about the author',
+    "copyright",
+    "copyright page",
+    "also by",
+    "also by the author",
+    "about the author",
+    "about the authors",
+    "dedication",
+    "epigraph",
+    "acknowledgments",
+    "acknowledgements",
+    "colophon",
+    "credits",
+    "a note about the author",
 }
 SMALL_FONT_SIZE = 0.75
 
 CONTENTS_SKIP_TITLES = {
-    'title page', 'title', 'cover', 'contents', 'table of contents',
-    'copyright', 'copyright page',
+    "title page",
+    "title",
+    "cover",
+    "contents",
+    "table of contents",
+    "copyright",
+    "copyright page",
 }
 
 
@@ -463,24 +507,24 @@ def build_chapters(spine_items, toc_entries, metadata):
     Returns list of chapter dicts suitable for NativeKFXGenerator.generate_full_book().
     """
     if not spine_items:
-        return [{'title': 'Content', 'text': 'No content extracted.'}]
+        return [{"title": "Content", "text": "No content extracted."}]
 
     # First TOC title per normalized href wins (subsequent anchored entries inside
     # the same spine file are ignored — they would need in-page anchor splitting
     # to surface, which this function does not do).
     title_by_href = {}
     for entry in toc_entries or []:
-        norm = _normalize_href(entry['href'])
-        title_by_href.setdefault(norm, entry['title'])
+        norm = _normalize_href(entry["href"])
+        title_by_href.setdefault(norm, entry["title"])
 
     chapters = []
     for i, item in enumerate(spine_items):
-        norm = _normalize_href(item['href'])
+        norm = _normalize_href(item["href"])
         title = title_by_href.get(norm)
         if not title:
-            stem = norm.rsplit('.', 1)[0] if '.' in norm else norm
-            title = stem or f'Section {i + 1}'
-        chapters.append({'title': title, 'text': item['text']})
+            stem = norm.rsplit(".", 1)[0] if "." in norm else norm
+            title = stem or f"Section {i + 1}"
+        chapters.append({"title": title, "text": item["text"]})
 
     _replace_title_page(chapters, metadata)
     return chapters
@@ -490,36 +534,39 @@ def _replace_title_page(chapters, metadata):
     """Replace title page, rebuild contents, set font sizes."""
     if not metadata:
         return
-    title = metadata.get('title', '')
-    author = metadata.get('author', '')
+    title = metadata.get("title", "")
+    author = metadata.get("author", "")
     if not title:
         return
 
     for ch in chapters:
-        ch_title = ch['title'].lower().strip()
-        if ch_title in ('title page', 'title'):
-            ch['text'] = f"{title}\n\nby\n\n{author}"
+        ch_title = ch["title"].lower().strip()
+        if ch_title in ("title page", "title"):
+            ch["text"] = f"{title}\n\nby\n\n{author}"
             print(f"  Replaced title page: {title} by {author}")
-        elif ch_title in ('contents', 'table of contents'):
+        elif ch_title in ("contents", "table of contents"):
             _rebuild_contents_page(ch, chapters)
-            ch['font_size'] = SMALL_FONT_SIZE
-        if ch_title in SMALL_TEXT_CHAPTERS or ch_title in ('copyright', 'copyright page'):
-            ch['font_size'] = SMALL_FONT_SIZE
+            ch["font_size"] = SMALL_FONT_SIZE
+        if ch_title in SMALL_TEXT_CHAPTERS or ch_title in (
+            "copyright",
+            "copyright page",
+        ):
+            ch["font_size"] = SMALL_FONT_SIZE
 
 
 def _rebuild_contents_page(contents_ch, all_chapters):
     """Rebuild contents with linked entries."""
     toc_links = []
     for i, ch in enumerate(all_chapters):
-        if ch['title'].lower().strip() in CONTENTS_SKIP_TITLES:
+        if ch["title"].lower().strip() in CONTENTS_SKIP_TITLES:
             continue
-        toc_links.append({'text': ch['title'], 'target_chapter_idx': i})
+        toc_links.append({"text": ch["title"], "target_chapter_idx": i})
 
     lines = ["Contents"]
     for link in toc_links:
-        lines.append(link['text'])
-    contents_ch['text'] = '\n\n'.join(lines)
-    contents_ch['toc_links'] = toc_links
+        lines.append(link["text"])
+    contents_ch["text"] = "\n\n".join(lines)
+    contents_ch["toc_links"] = toc_links
     print(f"  Rebuilt contents page with {len(toc_links)} linked entries")
 
 
@@ -527,10 +574,11 @@ def _rebuild_contents_page(contents_ch, all_chapters):
 # Main conversion
 # ---------------------------------------------------------------------------
 
+
 def sanitize_filename(title):
     for ch in '<>:"/\\|?*':
-        title = title.replace(ch, '_')
-    title = title.strip(' .')
+        title = title.replace(ch, "_")
+    title = title.strip(" .")
     return title[:100]
 
 
@@ -559,7 +607,9 @@ def convert_epub_to_kfx(epub_path, output_dir=None):
     spine_items = extract_epub_spine(epub_path)
     print(f"  {len(spine_items)} spine items with text")
     for i, item in enumerate(spine_items[:3]):
-        print(f"    {i+1}. {_normalize_href(item['href'])}: {len(item['text']):,} chars")
+        print(
+            f"    {i + 1}. {_normalize_href(item['href'])}: {len(item['text']):,} chars"
+        )
     if len(spine_items) > 3:
         print(f"    ... and {len(spine_items) - 3} more")
 
@@ -586,12 +636,12 @@ def convert_epub_to_kfx(epub_path, output_dir=None):
     # 5. Build chapters
     print("\nBuilding chapters...")
     chapters = build_chapters(spine_items, toc_entries, metadata)
-    total_chars = sum(len(ch['text']) for ch in chapters)
+    total_chars = sum(len(ch["text"]) for ch in chapters)
     print(f"  {len(chapters)} chapters, {total_chars:,} total characters")
     for i, ch in enumerate(chapters):
-        fs_info = f" (font_size={ch['font_size']})" if 'font_size' in ch else ""
-        links = f" [{len(ch['toc_links'])} links]" if 'toc_links' in ch else ""
-        print(f"    {i+1}. {ch['title']}: {len(ch['text']):,} chars{fs_info}{links}")
+        fs_info = f" (font_size={ch['font_size']})" if "font_size" in ch else ""
+        links = f" [{len(ch['toc_links'])} links]" if "toc_links" in ch else ""
+        print(f"    {i + 1}. {ch['title']}: {len(ch['text']):,} chars{fs_info}{links}")
 
     # 6. Generate KFX
     if output_dir:
@@ -604,13 +654,13 @@ def convert_epub_to_kfx(epub_path, output_dir=None):
     gen = NativeKFXGenerator()
     data = gen.generate_full_book(
         title=modified_title,
-        author=metadata['author'],
+        author=metadata["author"],
         chapters=chapters,
         output_path=str(output_path),
         cover_image=cover_image,
-        language=metadata['language'],
-        publisher=metadata.get('publisher', 'kfxgen'),
-        issue_date=metadata.get('issue_date'),
+        language=metadata["language"],
+        publisher=metadata.get("publisher", "kfxgen"),
+        issue_date=metadata.get("issue_date"),
         images=body_images or None,
     )
 
@@ -635,6 +685,7 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"ERROR converting {epub.name}: {e}")
                 import traceback
+
                 traceback.print_exc()
                 print()
     else:
@@ -646,5 +697,6 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"\nERROR: {e}")
             import traceback
+
             traceback.print_exc()
             sys.exit(1)

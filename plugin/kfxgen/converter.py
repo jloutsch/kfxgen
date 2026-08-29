@@ -8,6 +8,7 @@ import logging
 import os
 import posixpath
 import re
+import string
 from urllib.parse import unquote
 
 from ._img_tokens import (
@@ -353,6 +354,36 @@ def _is_non_rendered(elem):
     return any(part in _NON_RENDERED_EPUB_TYPES for part in raw.lower().split())
 
 
+#: Marks a contents listing the book printed itself: a `class` token, an
+#: `epub:type`, or the ARIA role. Gutenberg overwhelmingly uses `class="toc"`,
+#: on the listing container in some books and on each entry paragraph in
+#: others; EPUB 3 producers use `epub:type="toc"` / `role="doc-toc"`.
+_TOC_CLASS_TOKEN = "toc"
+_TOC_DOC_ROLE = "doc-toc"
+
+
+def _is_nav_listing(elem):
+    """True when `elem` heads a contents listing printed in the source.
+
+    KFX carries navigation of its own, and kfxgen rebuilds a contents page
+    from the actual chapter titles, so a listing in the source is a duplicate
+    wherever it sits. The discard used to key on the enclosing *chapter's*
+    title, which only recognises a listing that is its own chapter; seven
+    corpus books put one inside the front-matter page instead, or titled the
+    chapter after the front matter, and printed the whole listing to the
+    reader. Recognise the markup rather than the title. (#132)
+
+    Class matching is by whitespace-separated token, never substring: "tocsin"
+    is a word, and `class="toc-entry"` is a different name.
+    """
+    if _TOC_CLASS_TOKEN in (elem.get("class") or "").split():
+        return True
+    raw = elem.get(_EPUB_TYPE_ATTR) or elem.get("epub:type") or ""
+    if _TOC_CLASS_TOKEN in raw.lower().split():
+        return True
+    return (elem.get("role") or "").strip().lower() == _TOC_DOC_ROLE
+
+
 def _attach_anchor_keys(blocks, base_href):
     """Qualify each block's anchor ids with the file they live in, so a link
     target normalized to "<file>#<id>" can be matched across spine files.
@@ -388,13 +419,21 @@ def _attach_anchor_keys(blocks, base_href):
     return blocks
 
 
-def extract_blocks_from_html(element, style_resolver=None, base_href=None):
+def extract_blocks_from_html(
+    element, style_resolver=None, base_href=None, nav_listing_at=None
+):
     """Like extract_text_from_html but returns structured blocks:
     [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None,
     "anchor_ids": list[str], "anchor_keys": list[str]}],
     preserving inline emphasis as spans and inline <img> as IMG tokens in `text`.
     When style_resolver is given, it is called per block element (elem -> css_dict|None)
     and the result is passed to compute_block_style to populate block_style.
+
+    `nav_listing_at`, when given, collects the block index at which each
+    contents listing was discarded, so the caller can tell which chapter held
+    one. A listing that *was* the chapter's content has to be handed to the
+    contents rebuild rather than simply deleted, or the book loses its
+    contents page (#132).
 
     `base_href` is the spine file this markup came from. It qualifies both
     sides of an in-book link: `anchor_keys` are the block's ids as
@@ -435,8 +474,54 @@ def extract_blocks_from_html(element, style_resolver=None, base_href=None):
     blocks = []
     pending_ids = []  # anchors awaiting the next leaf block (containers, standalone <a>)
 
+    def _emit_image_block(elem):
+        ids = pending_ids[:]
+        pending_ids.clear()
+        ids.extend(_own_anchor_ids(elem))
+        block_ids = _dedupe_keep_order(ids)
+        blocks.append(
+            {
+                "text": _make_img_token(
+                    elem.get("src", "") or "", elem.get("alt", "") or ""
+                ),
+                "spans": [],
+                "block_style": None,
+                "anchor_ids": block_ids,
+                "anchor_offsets": dict.fromkeys(block_ids, 0),
+            }
+        )
+
+    def _discard_listing(elem):
+        """Drop a contents listing's text, keeping the two things in it that
+        are not navigation.
+
+        Images: a plate printed inside the section is content. The reason to
+        discard a listing is that its *text* duplicates navigation KFX already
+        carries, which says nothing about pictures — that distinction is #117,
+        and dropping the subtree wholesale would reintroduce it.
+
+        Anchors: a TOC entry often points at the listing container itself. An
+        anchor that vanishes takes every link aimed at it with it (#51/#53), so
+        ids carry forward to the next real block, exactly as an empty anchor
+        block already does. Anchors are paragraph-granular, so the link lands
+        just past where it used to.
+        """
+        if _is_non_rendered(elem):
+            return
+        if _local_tag(elem.tag) == "img":
+            _emit_image_block(elem)
+            return
+        pending_ids.extend(_own_anchor_ids(elem))
+        for child in elem:
+            _discard_listing(child)
+
     def _walk(elem):
         if _is_non_rendered(elem):
+            return
+        if _is_nav_listing(elem):
+            if nav_listing_at is not None:
+                nav_listing_at.append(len(blocks))
+            _discard_listing(elem)
             return
         is_block = elem.tag in block_tags
         has_block_child = any(child.tag in block_tags for child in elem)
@@ -483,21 +568,7 @@ def extract_blocks_from_html(element, style_resolver=None, base_href=None):
         # which is exactly what #113 was. Removed rather than left dead so a
         # future call site cannot resurrect the silent drop.
         if _local_tag(elem.tag) == "img":
-            ids = pending_ids[:]
-            pending_ids.clear()
-            ids.extend(_own_anchor_ids(elem))
-            href = elem.get("src", "") or ""
-            alt = elem.get("alt", "") or ""
-            block_ids = _dedupe_keep_order(ids)
-            blocks.append(
-                {
-                    "text": _make_img_token(href, alt),
-                    "spans": [],
-                    "block_style": None,
-                    "anchor_ids": block_ids,
-                    "anchor_offsets": dict.fromkeys(block_ids, 0),
-                }
-            )
+            _emit_image_block(elem)
             return
 
         pending_ids.extend(_own_anchor_ids(elem))
@@ -785,6 +856,12 @@ def _extract_text_from_manifest_item(oeb_book, href, log):
 # rather than dumping a paragraph into the nav entry.
 _LEADING_TITLE_MAX_LEN = 60
 
+#: Label used when front matter has no usable heading of its own. kfxgen
+#: invents this string; no book contains it. Anything that would put it in
+#: front of a reader — a rendered heading, a contents entry — is a leak of
+#: the same kind as #107's "Half Title Page". (#133)
+LEADING_TITLE_FALLBACK = "Front Matter"
+
 
 def _leading_chapter_title(head_blocks):
     """Title for front matter that precedes the first TOC anchor.
@@ -799,7 +876,8 @@ def _leading_chapter_title(head_blocks):
     chapters by matching literal strings, no entry in `CONTENTS_SKIP_TITLES`
     could match it: the cover came back as a contents entry. Worse, a title is
     emitted as a heading chunk without token resolution, so both copies reached
-    the reader as raw control characters — 116 of them across the corpus. (#133)
+    the reader as raw control characters — 116 of them across the corpus, and a
+    device crashed paging over them. (#133)
 
     Strip rather than reject the whole block. An image sits beside real words
     often enough that rejecting on sight would answer #133 by discarding good
@@ -811,7 +889,7 @@ def _leading_chapter_title(head_blocks):
         t = _IMG_TOKEN_RE.sub("", head_blocks[0].get("text") or "").strip()
         if 0 < len(t) <= _LEADING_TITLE_MAX_LEN and "\n" not in t:
             return t
-    return "Front Matter"
+    return LEADING_TITLE_FALLBACK
 
 
 def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
@@ -875,6 +953,32 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
     if not coords:
         return None
 
+    # Flat indices at which a contents listing was discarded, so the chapter
+    # covering one can be handed to the contents rebuild (#132).
+    # A discarded listing occupies no block, so it records the index its first
+    # block *would* have had — that is, the index of the block now following
+    # it. A listing at the end of its file records one past the last block,
+    # which is also the next chapter's first index; left as-is, the boundary
+    # is ambiguous and the chapter *after* the listing gets flagged too. Since
+    # the rebuild takes the first heading-sized flagged chapter, that replaces
+    # a real short chapter's content with a contents page. Clamp such an index
+    # back onto the file's last block so every listing lands strictly inside
+    # the chapter that held it.
+    nav_flat = set()
+    for si, s_item in enumerate(spine_items_ordered):
+        last = len(spine_blocks[si]) - 1
+        for local in s_item.get("nav_listing_at") or ():
+            if last < 0:
+                continue
+            nav_flat.add(file_offset[si] + min(local, last))
+
+    def _flag_nav(ch, start, end):
+        """Mark a chapter that held a discarded listing. Half-open, matching
+        the slice the chapter was built from."""
+        if ch and any(start <= i < end for i in nav_flat):
+            ch["_had_nav_listing"] = True
+        return ch
+
     def _mk(title, block_slice):
         text = "\n\n".join(b["text"] for b in block_slice if b.get("text"))
         if not text.strip():
@@ -898,8 +1002,15 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
         if not _has_real_text(head_text):
             log.info("  Skipping image-only head before first TOC anchor")
         else:
-            ch = _mk(_leading_chapter_title(head), head)
+            ch = _flag_nav(_mk(_leading_chapter_title(head), head), 0, first_fi)
             if ch:
+                if ch["title"] == LEADING_TITLE_FALLBACK:
+                    # Invented label, not the book's own words — suppress it
+                    # as a heading so it cannot print onto the page. Set only
+                    # on this synthetic path: a book whose own TOC names a
+                    # chapter "Front Matter" comes through `coords` and keeps
+                    # its heading. (#133)
+                    ch["_omit_title_heading"] = True
                 chapters.append(ch)
 
     for k, (fi, si, title) in enumerate(coords):
@@ -908,7 +1019,7 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
         else:
             end = file_offset[si] + len(spine_blocks[si])
         start = 0 if (k == 0 and head_has_toc_anchor) else fi
-        ch = _mk(title, flat[start:end])
+        ch = _flag_nav(_mk(title, flat[start:end]), start, end)
         if ch:
             chapters.append(ch)
 
@@ -922,7 +1033,11 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
             continue
         norm = _normalize_href(item["href"])
         stem = norm.rsplit(".", 1)[0] if "." in norm else norm
-        ch = _mk(stem or f"Section {si + 1}", spine_blocks[si])
+        ch = _flag_nav(
+            _mk(stem or f"Section {si + 1}", spine_blocks[si]),
+            file_offset[si],
+            file_offset[si] + len(spine_blocks[si]),
+        )
         if ch:
             chapters.append(ch)
 
@@ -964,10 +1079,12 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
             if not hasattr(item, "data") or item.data is None:
                 continue
             resolver = _build_style_resolver(oeb_book, item, log)
+            nav_listing_at = []
             blocks = extract_blocks_from_html(
                 item.data,
                 style_resolver=resolver,
                 base_href=getattr(item, "href", "") or "",
+                nav_listing_at=nav_listing_at,
             )
             text = "\n\n".join(b["text"] for b in blocks)
         except Exception as e:
@@ -984,7 +1101,14 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
 
         spine_map[norm_href] = text
         spine_map[href] = text
-        spine_items_ordered.append({"href": href, "text": text, "blocks": blocks})
+        spine_items_ordered.append(
+            {
+                "href": href,
+                "text": text,
+                "blocks": blocks,
+                "nav_listing_at": nav_listing_at,
+            }
+        )
         log.info(f"  Spine item {i + 1}: {len(text)} chars ({norm_href})")
 
     if not spine_items_ordered:
@@ -1016,11 +1140,35 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
         chapter = {"title": f"Section {i + 1}", "text": item["text"]}
         if item.get("blocks"):
             chapter["blocks"] = item["blocks"]
+        if item.get("nav_listing_at"):
+            chapter["_had_nav_listing"] = True
         chapters.append(chapter)
 
     log.info(f"Using {len(chapters)} spine items as chapters (no TOC mapping)")
     _replace_title_page(chapters, metadata, log)
     return chapters
+
+
+# Chapter titles come from a book's TOC, where a label is routinely typeset
+# with trailing punctuation ("CONTENTS.") or wrapped in brackets. Every lookup
+# below is exact membership against a set of literal strings, so a single such
+# character defeats it: one corpus book printed its entire 65-block contents
+# listing into the body because "contents." is not "contents". #107 patched the
+# same failure mode one string at a time. Normalise once, here, and route every
+# set lookup through it.
+#
+# Edge-of-string only, deliberately. Interior punctuation is part of the label,
+# and stripping it could turn a distinct chapter title into a matching one —
+# a title that merely *contains* a label must not start behaving like it. (#135)
+_TITLE_EDGE_CHARS = string.punctuation + string.whitespace
+
+
+def _normalize_title(title):
+    """Canonical form of a chapter title, for label-set lookups.
+
+    Lowercases, collapses internal whitespace, and strips punctuation and
+    whitespace from both ends. (#135)"""
+    return " ".join((title or "").split()).strip(_TITLE_EDGE_CHARS).lower()
 
 
 SMALL_TEXT_CHAPTERS = {
@@ -1039,6 +1187,13 @@ SMALL_TEXT_CHAPTERS = {
 }
 
 SMALL_FONT_SIZE = 0.75
+
+#: TOC labels that denote a contents listing of the book's own.
+_CONTENTS_TITLES = frozenset({"contents", "table of contents"})
+
+#: Title given to a contents page rebuilt from markup rather than from a
+#: recognised chapter title, replacing whatever the source called the listing.
+CONTENTS_PAGE_TITLE = "Contents"
 
 # TOC labels that denote the full title page (book title + author).
 TITLE_PAGE_TITLES = frozenset({"title page", "title"})
@@ -1063,6 +1218,31 @@ HALF_TITLE_TITLES = frozenset(
 )
 
 
+#: A chapter that held a discarded listing is treated as the book's contents
+#: page only when what remains of it is heading-sized. Anything longer is a
+#: page that merely *carried* a listing, and its text is content that must
+#: never be overwritten by a generated one. Reuses the leading-title bound,
+#: which draws the same heading-versus-prose line. (#132)
+_NAV_REMNANT_MAX_LEN = _LEADING_TITLE_MAX_LEN
+
+
+def _nav_listing_contents_chapter(chapters):
+    """The chapter whose discarded listing should become the contents page.
+
+    None when the book already builds one from a titled chapter — a book must
+    not end up with two — or when no flagged chapter is heading-sized.
+    """
+    if any(_normalize_title(c["title"]) in _CONTENTS_TITLES for c in chapters):
+        return None
+    for ch in chapters:
+        if not ch.get("_had_nav_listing"):
+            continue
+        remnant = _IMG_TOKEN_RE.sub("", ch.get("text") or "").strip()
+        if len(remnant) <= _NAV_REMNANT_MAX_LEN:
+            return ch
+    return None
+
+
 def _replace_title_page(chapters, metadata, log):
     """Replace title page, reformat copyright/contents, and set font sizes for front/back matter."""
     if not metadata:
@@ -1071,8 +1251,26 @@ def _replace_title_page(chapters, metadata, log):
     author = metadata.get("author", "")
     if not title:
         return
+    # A listing recognised by markup rather than by title still has to become
+    # kfxgen's contents page; discarding it alone leaves the book with none
+    # (#132). Resolved before the loop so the "already has one" test sees
+    # every chapter, not just those visited so far.
+    nav_contents_ch = _nav_listing_contents_chapter(chapters)
     for ch in chapters:
-        ch_title = ch["title"].lower().strip()
+        if ch is nav_contents_ch:
+            _rebuild_contents_page(ch, chapters, log)
+            ch.pop("blocks", None)
+            ch["font_size"] = SMALL_FONT_SIZE
+            # Rename rather than suppress. The source label named the listing
+            # that was replaced — "Navigation" is structural metadata and must
+            # not print (#60/#107) — but omitting the heading instead leaves a
+            # bare list of links under no header, where the title-keyed path
+            # shows one. The page is now kfxgen's contents page, in the body
+            # heading and in the reader's navigation alike, so name it that.
+            log.info(f"  Rebuilt contents from listing markup: {ch['title']}")
+            ch["title"] = CONTENTS_PAGE_TITLE
+            continue
+        ch_title = _normalize_title(ch["title"])
         if ch_title in TITLE_PAGE_TITLES:
             ch["text"] = f"{title}\n\nby\n\n{author}"
             ch.pop("blocks", None)
@@ -1093,7 +1291,7 @@ def _replace_title_page(chapters, metadata, log):
         elif ch_title in ("copyright", "copyright page"):
             ch["font_size"] = SMALL_FONT_SIZE
             log.info(f"  Copyright page (font_size={SMALL_FONT_SIZE})")
-        elif ch_title in ("contents", "table of contents"):
+        elif ch_title in _CONTENTS_TITLES:
             # Rebuild contents page from actual chapter titles
             _rebuild_contents_page(ch, chapters, log)
             ch.pop("blocks", None)
@@ -1112,6 +1310,8 @@ CONTENTS_SKIP_TITLES = (
     | {
         "cover",
         "contents",
+        # Invented by _leading_chapter_title, never the book's own text (#133).
+        LEADING_TITLE_FALLBACK.lower(),
         "table of contents",
         "copyright",
         "copyright page",
@@ -1123,7 +1323,13 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     """Rebuild a Contents chapter with underlined, linked entries."""
     toc_links = []
     for i, ch in enumerate(all_chapters):
-        ch_lower = ch["title"].lower().strip()
+        if ch is contents_ch:
+            # A contents page never lists itself. The title-keyed path got
+            # this for free — "contents" is in the skip set — but a listing
+            # recognised by markup sits under whatever title the book gave
+            # it ("Navigation"), which matches nothing. (#132)
+            continue
+        ch_lower = _normalize_title(ch["title"])
         if ch_lower in CONTENTS_SKIP_TITLES:
             continue
         toc_links.append({"text": ch["title"], "target_chapter_idx": i})

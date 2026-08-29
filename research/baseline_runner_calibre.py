@@ -159,9 +159,7 @@ def run_one(epub_path: Path, out_dir: Path, timeout_s: int = 600) -> dict:
 
     cmd = [EBOOK_CONVERT, str(epub_path), str(kfx_path)]
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout_s
-        )
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
         result["exit_code"] = proc.returncode
         log_path.write_text(
             f"$ {' '.join(cmd)}\n\n--- STDOUT ---\n{proc.stdout}\n\n--- STDERR ---\n{proc.stderr}\n"
@@ -205,7 +203,9 @@ def build_report(results: list, out_path: Path) -> None:
     lines.append(
         "| # | File | Status | KFX KB | s | Src words | KFX paras | KFX retention | Spine | TOC | EPUB body imgs | KFX imgs | Notes |"
     )
-    lines.append("|---|------|--------|--------|---|-----------|-----------|----------------|-------|-----|----------------|----------|-------|")
+    lines.append(
+        "|---|------|--------|--------|---|-----------|-----------|----------------|-------|-----|----------------|----------|-------|"
+    )
     for i, r in enumerate(results, 1):
         src = r.get("source") or {}
         rb = r.get("kfx_readback") or {}
@@ -230,9 +230,9 @@ def build_report(results: list, out_path: Path) -> None:
         notes_s = "; ".join(notes)
         lines.append(
             f"| {i} | {r['file']} | {status} | {kfx_kb} | {r['elapsed_s']} | "
-            f"{src.get('source_words','—')} | {kfx_paras} | {kfx_ret_s} | "
-            f"{src.get('spine_items','—')} | {src.get('toc_entries','—')} | "
-            f"{src.get('body_image_count_in_manifest','—')} | {kfx_imgs} | {notes_s} |"
+            f"{src.get('source_words', '—')} | {kfx_paras} | {kfx_ret_s} | "
+            f"{src.get('spine_items', '—')} | {src.get('toc_entries', '—')} | "
+            f"{src.get('body_image_count_in_manifest', '—')} | {kfx_imgs} | {notes_s} |"
         )
     lines.append("")
     lines.append("## Failures\n")
@@ -284,7 +284,7 @@ def main():
         print(f"  [{i}/{len(targets)}] {ep.name} ...", flush=True)
         r = run_one(ep, OUT_DIR)
         flag = "OK " if r["ok"] else "FAIL"
-        kb = f"{r['kfx_bytes']//1024}KB" if r.get("kfx_bytes") else "—"
+        kb = f"{r['kfx_bytes'] // 1024}KB" if r.get("kfx_bytes") else "—"
         print(f"      {flag} {kb} in {r['elapsed_s']}s")
         results.append(r)
 

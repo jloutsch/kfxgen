@@ -16,6 +16,7 @@ from lxml import etree
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin"))
 
 from kfxgen import converter as _conv
+from kfxgen._img_tokens import IMG_TOKEN_RE
 from kfxgen.converter import (
     CONTENTS_SKIP_TITLES,
     HALF_TITLE_TITLES,
@@ -24,6 +25,7 @@ from kfxgen.converter import (
     _assemble_chapters_by_coordinate,
     _href_fragment,
     _leading_chapter_title,
+    _normalize_title,
     _replace_title_page,
     extract_blocks_from_html,
     extract_chapters_from_oeb,
@@ -2010,6 +2012,495 @@ def test_contents_without_illustrations_sets_no_key():
     ]
     _replace_title_page(chapters, {"title": "B", "author": "A"}, _silent_log())
     assert "preserved_images" not in chapters[0]
+
+
+class TestTitleNormalisation:
+    """#135: every title lookup in converter.py is `in <frozenset>` against
+    `title.lower().strip()`, so a trailing period defeats it. One corpus book
+    titles its contents chapter "CONTENTS." and printed all 65 listing blocks
+    into the body because `"contents."` is not `"contents"`.
+
+    Normalise once, edge-of-string only — interior punctuation is part of the
+    label and must survive."""
+
+    META = {"title": "The Real Title", "author": "Jane Author"}
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("CONTENTS.", "contents"),
+            ("Contents:", "contents"),
+            ("  Table of Contents  ", "table of contents"),
+            ("[Contents]", "contents"),
+            ("*Contents*", "contents"),
+            ("Table   of\tContents", "table of contents"),
+            ("Half-Title Page.", "half-title page"),
+            ("Chapter I. The Beginning", "chapter i. the beginning"),
+            ("", ""),
+            ("...", ""),
+        ],
+    )
+    def test_normalises_edges_only(self, raw, expected):
+        assert _normalize_title(raw) == expected
+
+    def test_contents_with_trailing_period_is_rebuilt(self):
+        """The pg1998 case: `_replace_title_page` must recognise "CONTENTS."
+        and hand it to the rebuild, replacing the source listing."""
+        chapters = [
+            {"title": "CONTENTS.", "text": "old listing", "blocks": [{"text": "x"}]},
+            {"title": "Chapter 1", "text": "body one"},
+        ]
+        _replace_title_page(chapters, self.META, _silent_log())
+        contents = chapters[0]
+        assert "toc_links" in contents, "contents chapter was never rebuilt"
+        assert [link["text"] for link in contents["toc_links"]] == ["Chapter 1"]
+        assert "blocks" not in contents
+
+    def test_punctuated_title_page_is_replaced(self):
+        chapters = [{"title": "Title Page:", "text": "old"}]
+        _replace_title_page(chapters, self.META, _silent_log())
+        assert chapters[0]["text"] == "The Real Title\n\nby\n\nJane Author"
+
+    def test_punctuated_half_title_is_replaced(self):
+        chapters = [{"title": "Half Title Page.", "text": "old"}]
+        _replace_title_page(chapters, self.META, _silent_log())
+        assert chapters[0]["text"] == "The Real Title"
+        assert chapters[0]["_omit_title_heading"] is True
+
+    def test_punctuated_small_text_chapter_gets_small_font(self):
+        chapters = [{"title": "DEDICATION.", "text": "for someone"}]
+        _replace_title_page(chapters, self.META, _silent_log())
+        assert chapters[0]["font_size"] == _conv.SMALL_FONT_SIZE
+
+    def test_punctuated_skip_title_excluded_from_listing(self):
+        chapters = [
+            {"title": "Contents", "text": "old"},
+            {"title": "COVER.", "text": "c"},
+            {"title": "Chapter 1", "text": "body"},
+        ]
+        _replace_title_page(chapters, self.META, _silent_log())
+        listed = [link["text"] for link in chapters[0]["toc_links"]]
+        assert "COVER." not in listed
+        assert listed == ["Chapter 1"]
+
+
+class TestLeadingChapterTitleRejectsImageToken:
+    """#133: `_leading_chapter_title` titles front matter from its first
+    block, guarding only on length and absence of a newline. An IMG token is
+    short and has no newline, so a leading cover image became the chapter's
+    title — and every one of the 39 corpus books that builds a contents page
+    then listed that token as its first entry. Tokens are stripped from the
+    candidate before the guards run, so an image beside real words keeps the
+    words (matching PR #138)."""
+
+    META = {"title": "The Real Title", "author": "Jane Author"}
+
+    def test_bare_image_token_head_falls_back_to_front_matter(self):
+        token = _conv._make_img_token("cover.jpg", "")
+        assert _leading_chapter_title([{"text": token}]) == "Front Matter"
+
+    def test_image_token_with_alt_text_falls_back(self):
+        token = _conv._make_img_token("cover.jpg", "Cover")
+        assert _leading_chapter_title([{"text": token}]) == "Front Matter"
+
+    def test_token_beside_words_keeps_the_words(self):
+        """Strip the token, don't reject the block. An image sits beside real
+        words often enough that rejecting on sight would discard good titles:
+        `<h2><img/>Preface</h2>` is one block, and the chapter is Preface."""
+        token = _conv._make_img_token("cover.jpg", "")
+        assert (
+            _leading_chapter_title([{"text": f"{token} Frontispiece"}])
+            == "Frontispiece"
+        )
+
+    def test_plain_short_text_is_still_used_as_title(self):
+        assert _leading_chapter_title([{"text": "Copyright 2026"}]) == "Copyright 2026"
+
+    def test_cover_plus_title_line_head_is_titled_front_matter(self):
+        """The corpus shape: a front-matter page that opens with the cover
+        image and continues with the title/author line. The head survives as a
+        chapter (it is not image-only), so its title must not be the token."""
+        token = _conv._make_img_token("cover.jpg", "")
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [
+                    (token, []),
+                    ("The Real Title, by Jane Author", []),
+                    ("Chapter I", ["c1"]),
+                    ("Body text", []),
+                ],
+            )
+        ]
+        toc = [{"title": "I", "href": "book.xhtml#c1"}]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert chapters[0]["title"] == "Front Matter"
+        assert IMG_TOKEN_RE.search(chapters[0]["title"]) is None
+
+    def test_no_contents_entry_carries_an_image_token(self):
+        """End to end: the token must not reach `toc_links`, because the
+        generator emits `link["text"]` as a chunk and the token is processed
+        back into an image reference downstream."""
+        token = _conv._make_img_token("cover.jpg", "")
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [
+                    (token, []),
+                    ("The Real Title, by Jane Author", []),
+                    ("Contents", ["toc"]),
+                    ("Chapter I", ["c1"]),
+                    ("Body text", []),
+                ],
+            )
+        ]
+        toc = [
+            {"title": "Contents", "href": "book.xhtml#toc"},
+            {"title": "I", "href": "book.xhtml#c1"},
+        ]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        _replace_title_page(chapters, self.META, _silent_log())
+        contents = next(c for c in chapters if c.get("toc_links"))
+        for link in contents["toc_links"]:
+            assert IMG_TOKEN_RE.search(link["text"]) is None, (
+                f"contents entry carries an image token: {link['text']!r}"
+            )
+
+
+class TestSyntheticFrontMatterLabel:
+    """#133 follow-on. "Front Matter" is a label kfxgen invents when a
+    front-matter page has no usable heading of its own — it is never text the
+    book contains. Rejecting image-token titles makes it the label for every
+    book that opens with a cover image, so it must not reach the page.
+
+    Same failure mode as #107, where the structural label "Half Title Page"
+    was printed as visible text."""
+
+    META = {"title": "The Real Title", "author": "Jane Author"}
+
+    def _front_matter_book(self):
+        token = _conv._make_img_token("cover.jpg", "")
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [
+                    (token, []),
+                    ("The Real Title, by Jane Author", []),
+                    ("Contents", ["toc"]),
+                    ("Chapter I", ["c1"]),
+                    ("Body text", []),
+                ],
+            )
+        ]
+        toc = [
+            {"title": "Contents", "href": "book.xhtml#toc"},
+            {"title": "I", "href": "book.xhtml#c1"},
+        ]
+        return _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+
+    def test_heading_is_suppressed(self):
+        chapters = self._front_matter_book()
+        head = chapters[0]
+        assert head["title"] == _conv.LEADING_TITLE_FALLBACK
+        assert head.get("_omit_title_heading") is True, (
+            "the invented label would render as visible text on the page"
+        )
+
+    def test_real_leading_title_still_renders_as_heading(self):
+        """Control: a genuine heading taken from the book keeps its heading."""
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [("Copyright 2026", []), ("Chapter I", ["c1"]), ("Body", [])],
+            )
+        ]
+        toc = [{"title": "I", "href": "book.xhtml#c1"}]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert chapters[0]["title"] == "Copyright 2026"
+        assert not chapters[0].get("_omit_title_heading")
+
+    def test_not_listed_as_a_contents_entry(self):
+        chapters = self._front_matter_book()
+        _replace_title_page(chapters, self.META, _silent_log())
+        contents = next(c for c in chapters if c.get("toc_links"))
+        listed = [link["text"] for link in contents["toc_links"]]
+        assert _conv.LEADING_TITLE_FALLBACK not in listed
+        assert listed == ["I"]
+
+
+def _body_markup(markup):
+    """Build an XHTML element from raw body markup."""
+    src = (
+        '<html xmlns="http://www.w3.org/1999/xhtml" '
+        'xmlns:epub="http://www.idpf.org/2007/ops"><body>'
+        f"{markup}"
+        "</body></html>"
+    )
+    return etree.fromstring(src)
+
+
+class TestNavigationListingDiscardedByMarkup:
+    """#132: the contents discard was keyed on a chapter's *title*, so a
+    listing that is not its own chapter — a `<div class="toc">` inside the
+    front-matter page — was never recognised and printed in full. Seven corpus
+    books ship a visible duplicate listing for this reason.
+
+    Recognise the listing from its markup instead. KFX carries navigation
+    itself and kfxgen builds its own contents page from chapter titles, so the
+    source listing is redundant wherever it appears."""
+
+    def _texts(self, markup):
+        return [b["text"] for b in extract_blocks_from_html(_body_markup(markup))]
+
+    def test_div_toc_listing_is_discarded(self):
+        """The pg64317 shape: a toc div inside a larger front-matter page."""
+        texts = self._texts(
+            "<h1>The Real Title</h1>"
+            '<div class="toc"><h2>Table of Contents</h2>'
+            '<ol><li><a href="#c1">Chapter I</a></li>'
+            '<li><a href="#c2">Chapter II</a></li></ol></div>'
+            "<p>Real front matter prose.</p>"
+        )
+        assert "Real front matter prose." in texts
+        assert "The Real Title" in texts
+        assert not any("Chapter I" in t for t in texts)
+        assert not any("Table of Contents" in t for t in texts)
+
+    def test_sibling_p_toc_entries_are_discarded(self):
+        """The dominant Gutenberg shape: one `<p class="toc">` per entry."""
+        texts = self._texts(
+            '<p class="toc">CONTENTS</p>'
+            '<p class="toc"><a href="#c1">Chapter I. The Start</a></p>'
+            '<p class="toc"><a href="#c2">Chapter II. The Middle</a></p>'
+            "<p>Real prose follows.</p>"
+        )
+        assert texts == ["Real prose follows."]
+
+    def test_table_toc_listing_is_discarded(self):
+        """A table listing fuses into one block, so it never shows as a run —
+        it has to be caught structurally or not at all."""
+        texts = self._texts(
+            '<table class="toc"><tr><td><a href="#c1">Chapter I</a></td>'
+            "<td>1</td></tr>"
+            '<tr><td><a href="#c2">Chapter II</a></td><td>17</td></tr></table>'
+            "<p>Real prose follows.</p>"
+        )
+        assert texts == ["Real prose follows."]
+
+    def test_epub_type_toc_is_discarded(self):
+        texts = self._texts(
+            '<nav epub:type="toc"><ol><li><a href="#c1">Chapter I</a></li></ol></nav>'
+            "<p>Real prose follows.</p>"
+        )
+        assert texts == ["Real prose follows."]
+
+    def test_role_doc_toc_is_discarded(self):
+        texts = self._texts(
+            '<div role="doc-toc"><p><a href="#c1">Chapter I</a></p></div>'
+            "<p>Real prose follows.</p>"
+        )
+        assert texts == ["Real prose follows."]
+
+    def test_class_is_matched_as_a_token_not_a_substring(self):
+        """A class name like "tocsin" is a word, and a book using it must keep
+        its text. Match whitespace-separated class tokens only."""
+        texts = self._texts(
+            '<p class="tocsin">Ring the alarm.</p>'
+            '<p class="nottoc">Still real text.</p>'
+            '<p class="toc-entry">Also real.</p>'
+        )
+        assert texts == ["Ring the alarm.", "Still real text.", "Also real."]
+
+    def test_multi_class_token_still_matches(self):
+        texts = self._texts(
+            '<p class="indent toc small"><a href="#c1">Chapter I</a></p>'
+            "<p>Real prose.</p>"
+        )
+        assert texts == ["Real prose."]
+
+    def test_image_inside_a_toc_container_is_preserved(self):
+        """#117's rule: the reason to discard a listing is that its *text*
+        duplicates navigation KFX already carries. That says nothing about a
+        plate printed there."""
+        texts = self._texts(
+            '<div class="toc"><p><a href="#c1">Chapter I</a></p>'
+            '<img src="plate.jpg" alt="A plate"/>'
+            '<p><a href="#c2">Chapter II</a></p></div>'
+            "<p>Real prose.</p>"
+        )
+        assert any(IMG_TOKEN_RE.search(t) for t in texts), "the plate was discarded"
+        assert not any("Chapter I" in t for t in texts)
+        assert "Real prose." in texts
+
+    def test_anchor_on_a_discarded_block_carries_forward(self):
+        """A TOC entry may point at the listing container itself. Dropping the
+        block must not drop the anchor, or that link dies (#51/#53)."""
+        blocks = extract_blocks_from_html(
+            _body_markup(
+                '<div class="toc" id="tocanchor">'
+                '<p><a href="#c1">Chapter I</a></p></div>'
+                "<p>Real prose.</p>"
+            )
+        )
+        assert [b["text"] for b in blocks] == ["Real prose."]
+        assert "tocanchor" in blocks[0]["anchor_ids"]
+
+
+class _RawSpineItem:
+    """Spine item whose body is raw markup, not wrapped in a <p>."""
+
+    def __init__(self, href, markup):
+        self.href = href
+        self.data = _body_markup(markup)
+        self.media_type = "application/xhtml+xml"
+
+
+_NAV_LISTING = (
+    "<h1>Navigation</h1>"
+    '<nav epub:type="toc"><ol>'
+    '<li><a href="c1.xhtml">Chapter I</a></li>'
+    '<li><a href="c2.xhtml">Chapter II</a></li>'
+    "</ol></nav>"
+)
+
+
+class TestDiscardedListingBecomesGeneratedContents:
+    """#132, second half. Recognising a listing structurally is only half the
+    fix: for seven corpus books the listing *was* the contents page, so
+    discarding it alone left a near-empty stub and the book lost its contents
+    entirely. A source listing is redundant because kfxgen builds its own from
+    the real chapter titles — so the discard has to hand off to that rebuild,
+    not just delete.
+
+    The same shape reaches kfxgen as a publisher's EPUB 3 navigation document
+    sitting in the spine under a title like "Navigation"."""
+
+    META = {"title": "The Real Title", "author": "Jane Author"}
+
+    def _chapters(self, spine, toc_nodes):
+        oeb = _OEBBook(spine, [_TOCNode(t, h) for t, h in toc_nodes])
+        chapters = extract_chapters_from_oeb(oeb, _silent_log())
+        _replace_title_page(chapters, self.META, _silent_log())
+        return chapters
+
+    def _body_chapters(self):
+        return [
+            _RawSpineItem("c1.xhtml", "<p>First chapter prose.</p>"),
+            _RawSpineItem("c2.xhtml", "<p>Second chapter prose.</p>"),
+        ]
+
+    def test_standalone_nav_document_is_rebuilt_as_contents(self):
+        chapters = self._chapters(
+            [_RawSpineItem("nav.xhtml", _NAV_LISTING)] + self._body_chapters(),
+            [
+                ("Navigation", "nav.xhtml"),
+                ("Chapter I", "c1.xhtml"),
+                ("Chapter II", "c2.xhtml"),
+            ],
+        )
+        nav = chapters[0]
+        assert nav.get("toc_links"), (
+            "the nav document was discarded and nothing replaced it — "
+            "the book has no contents page at all"
+        )
+        assert [link["text"] for link in nav["toc_links"]] == [
+            "Chapter I",
+            "Chapter II",
+        ]
+        # The source listing's own entry text must not survive alongside it.
+        assert "Navigation" not in nav.get("text", "")
+        # The page needs a heading of its own. "Navigation" named the listing
+        # that was replaced and is a structural label, so it must not print
+        # (#60/#107) — but suppressing it and adding nothing leaves a bare list
+        # of links under no header, while the title-keyed path shows one. Name
+        # the rebuilt page for what it now is.
+        assert nav["title"] == "Contents"
+        assert not nav.get("_omit_title_heading"), (
+            "the rebuilt contents page would render with no heading at all"
+        )
+
+    def test_book_does_not_get_two_contents_pages(self):
+        """pg64317's shape: an inline listing in the front matter *and* a real
+        Contents chapter. The rebuild belongs to the Contents chapter; the
+        front matter keeps its own prose and gains nothing."""
+        front = (
+            "<h1>The Real Title</h1>"
+            '<div class="toc"><p><a href="c1.xhtml">Chapter I</a></p></div>'
+            "<p>Front matter prose that is real content.</p>"
+        )
+        chapters = self._chapters(
+            [
+                _RawSpineItem("front.xhtml", front),
+                _RawSpineItem("contents.xhtml", "<h1>Contents</h1>"),
+            ]
+            + self._body_chapters(),
+            [
+                ("Front Matter", "front.xhtml"),
+                ("Contents", "contents.xhtml"),
+                ("Chapter I", "c1.xhtml"),
+                ("Chapter II", "c2.xhtml"),
+            ],
+        )
+        with_links = [c for c in chapters if c.get("toc_links")]
+        assert len(with_links) == 1, (
+            f"expected exactly one contents page, got {len(with_links)}"
+        )
+        assert _normalize_title(with_links[0]["title"]) == "contents"
+        front_ch = chapters[0]
+        assert "Front matter prose that is real content." in front_ch["text"]
+        assert "Chapter I" not in front_ch["text"]
+
+    def test_listing_at_a_file_end_does_not_flag_the_next_chapter(self):
+        """A listing records the block index it would have occupied. When it
+        sits at the end of a file that index equals the *next* chapter's first
+        block, so a naive range test flags both — and since the guard picks the
+        first heading-sized flagged chapter, the short chapter after the
+        listing gets its content replaced by a contents page."""
+        front = (
+            "<p>A long stretch of genuine front matter prose that the reader "
+            "is meant to see, well beyond a heading in length.</p>"
+            '<div class="toc"><p><a href="c1.xhtml">Chapter I</a></p>'
+            '<p><a href="c2.xhtml">Chapter II</a></p></div>'
+        )
+        chapters = self._chapters(
+            [
+                _RawSpineItem("front.xhtml", front),
+                _RawSpineItem("short.xhtml", "<h1>Short</h1>"),
+            ]
+            + self._body_chapters(),
+            [
+                ("Preface", "front.xhtml"),
+                ("Short", "short.xhtml"),
+                ("Chapter I", "c1.xhtml"),
+                ("Chapter II", "c2.xhtml"),
+            ],
+        )
+        short = next(c for c in chapters if c["title"] == "Short")
+        assert not short.get("toc_links"), (
+            "a chapter after the listing was rebuilt as the contents page"
+        )
+        assert "Short" in short["text"]
+
+    def test_listing_beside_real_prose_does_not_replace_that_prose(self):
+        """A page that carries a listing *and* substantial content is not a
+        contents page. Drop the listing; never overwrite the content."""
+        front = (
+            '<div class="toc"><p><a href="c1.xhtml">Chapter I</a></p></div>'
+            "<p>A long stretch of genuine front matter prose that the reader "
+            "is meant to see, well beyond a heading in length.</p>"
+        )
+        chapters = self._chapters(
+            [_RawSpineItem("front.xhtml", front)] + self._body_chapters(),
+            [
+                ("Preface", "front.xhtml"),
+                ("Chapter I", "c1.xhtml"),
+                ("Chapter II", "c2.xhtml"),
+            ],
+        )
+        front_ch = chapters[0]
+        assert not front_ch.get("toc_links")
+        assert "genuine front matter prose" in front_ch["text"]
+        assert "Chapter I" not in front_ch["text"]
 
 
 @pytest.mark.unit

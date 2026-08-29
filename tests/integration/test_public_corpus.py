@@ -29,6 +29,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from lxml import etree
 
 from kfxgen import converter as conv
 from kfxgen._img_tokens import IMG_TOKEN_RE
@@ -41,9 +42,40 @@ BASELINE_ENV = "KFXGEN_CORPUS_BASELINE"
 WRITE_ENV = "KFXGEN_CORPUS_WRITE_BASELINE"
 
 #: Text that means a non-rendered navigation document leaked into the body (#60).
-NAV_MARKERS = frozenset(
-    {"Page List", "Navigation", "Begin Reading", "Table of Contents"}
-)
+#:
+#: "Table of Contents" is deliberately absent. kfxgen emits `chapter["title"]`
+#: as the heading of the contents page it generates, and one corpus book's TOC
+#: labels that page exactly so — the assertion fired on kfxgen's own output
+#: while the book's real inline listing had been discarded correctly. Every
+#: other book labels it "Contents"/"CONTENTS", which is why only one tripped.
+#: A legitimate heading in output cannot also be a leak marker (#136).
+#:
+#: This set was written for #60, where the leak was a `page-list`/`landmarks`
+#: nav document with a fixed label. It was never a duplicate-listing detector,
+#: and read as one it reported one failing book where there were nine, the one
+#: it reported being a false positive. Duplicate listings are measured against
+#: the source instead, by `_listing_leak` below.
+NAV_MARKERS = frozenset({"Page List", "Navigation", "Begin Reading"})
+
+#: Consecutive body blocks that must all be source toc labels before a listing
+#: counts as having survived. One corpus book has a three-entry dramatis
+#: personae page whose entries coincide with its toc labels — real content, and
+#: the closest thing to a false positive here — so the threshold sits above it.
+#: A book leaking a listing of three entries would be missed; none is.
+MIN_LISTING_RUN = 4
+
+#: Share of a listing that must appear inside a single block to count as fused.
+#: Prose mentions the odd section name — one book scatters 4-6 hits across
+#: eleven unrelated chapters — while the two real fused listings score 27/27
+#: and 40/79. Noise sits at or below 10%, signal at or above 51%.
+FUSED_FRACTION = 0.33
+
+#: A label this short, or made only of digits and roman numerals, matches body
+#: text by coincidence. "3", "I.", "PAGE" are entry decoration, not entries.
+MIN_LABEL_LEN = 4
+NUMERIC_LABEL = re.compile(r"^[\dIVXLCDMivxlcdm.,;:\s()\[\]-]+$")
+
+HTML_SUFFIXES = (".xhtml", ".html", ".htm")
 
 #: An image token is an internal placeholder: the generator is supposed to turn
 #: it into an image chunk, and any that reaches emitted text is a
@@ -58,6 +90,136 @@ NAV_MARKERS = frozenset(
 #: A book may legitimately shrink slightly (deduplicated headings, #64) or grow
 #: (recovered container text, #58). Only flag movement beyond this.
 TEXT_DRIFT_TOLERANCE = 0.02
+
+
+def _norm(text):
+    """Collapse whitespace so source markup and output blocks compare equal."""
+    return " ".join((text or "").split())
+
+
+def _entry_texts(elem):
+    """Candidate entry labels inside one toc-marked element.
+
+    Reading `<a>` labels is wrong for a table listing: the link sits on the
+    page-number cell, so a 13-entry table yields `1, 48, 91, …` and the
+    comparison runs a set of numerals against body text — missing every real
+    entry while inviting false positives from any run of numeric blocks. Take
+    the granularity the markup uses: cells for a table, items for a list,
+    links otherwise.
+    """
+    if any(True for _ in elem.iter("tr")):
+        raw = [c for row in elem.iter("tr") for c in row.iter("td", "th")]
+    elif any(True for _ in elem.iter("li")):
+        raw = list(elem.iter("li"))
+    else:
+        raw = list(elem.iter("a"))
+    out = []
+    for node in raw:
+        text = _norm("".join(node.itertext()))
+        if len(text) >= MIN_LABEL_LEN and not NUMERIC_LABEL.match(text):
+            out.append(text)
+    return out
+
+
+def _toc_labels(epub):
+    """Entry labels inside any toc-marked element in the source EPUB.
+
+    The marker sits at wildly different granularity across the corpus: a
+    `<div>` wrapping the whole listing in one book, one `<p>` per entry in
+    seven others, a `<table>` in three. Collecting labels rather than
+    containers is what makes the measurement indifferent to which.
+    """
+    labels = []
+    with zipfile.ZipFile(str(epub)) as zf:
+        for name in sorted(zf.namelist()):
+            if not name.lower().endswith(HTML_SUFFIXES):
+                continue
+            try:
+                tree = etree.fromstring(zf.read(name), etree.HTMLParser())
+            except etree.XMLSyntaxError:
+                continue
+            if tree is None:
+                continue
+            for elem in tree.iter():
+                if not isinstance(elem.tag, str):
+                    continue
+                if "toc" not in (elem.get("class") or "").lower().split():
+                    continue
+                labels += _entry_texts(elem)
+    return labels
+
+
+def _longest_run(blocks, labels):
+    """Longest stretch of consecutive blocks that are each a toc label.
+
+    Contiguity is what makes this a measurement rather than a guess. Asking
+    "does this label appear anywhere in the body" counts a real chapter
+    heading as a leak, because a heading is exactly what a toc label copies —
+    that inflated a first pass from 8 books to 10, two with no leak at all.
+    """
+    longest = run = 0
+    for text in blocks:
+        run = run + 1 if text in labels else 0
+        longest = max(longest, run)
+    return longest
+
+
+def _most_fused(blocks, labels):
+    """Most distinct labels found inside any single block.
+
+    A table listing never produces a run: `td`/`th` are not block tags, so a
+    whole `<table>` is walked as one container and every cell lands in one
+    paragraph — one book's entire contents table arrives as a single
+    1551-character block. Run-based detection alone called all three table
+    books clean.
+    """
+    most = 0
+    for text in blocks:
+        if len(text) < MIN_LABEL_LEN:
+            continue
+        most = max(most, sum(1 for label in labels if label in text))
+    return most
+
+
+def _body_blocks(chapter):
+    """A chapter's block texts in reading order.
+
+    Falls back to splitting `text` for chapters the converter left unblocked;
+    `_replace_title_page` drops `blocks` on the pages it rewrites.
+    """
+    blocks = chapter.get("blocks")
+    if blocks:
+        texts = [_norm(b.get("text")) for b in blocks]
+    else:
+        texts = [_norm(line) for line in (chapter.get("text") or "").split("\n")]
+    return [t for t in texts if t]
+
+
+def _listing_leak(epub):
+    """(run, fused, entries) for the worst-leaking chapter in one book.
+
+    Measures the source against the output instead of pattern-matching output
+    text, which is what `NAV_MARKERS` was doing and could not do (#136).
+
+    Chapters carrying `toc_links` are skipped: that is the contents page
+    kfxgen generated itself, and its entries are chapter titles, which are
+    exactly what a source toc label copies. Counting it would make every book
+    with a contents page look like a leak.
+    """
+    labels = set(_toc_labels(epub))
+    if not labels:
+        return 0, 0, 0
+    log = _silent_log()
+    oeb = EpubAsOeb(str(epub))
+    chapters = conv.extract_chapters_from_oeb(oeb, log, conv.extract_metadata(oeb, log))
+    best_run = best_fused = 0
+    for chapter in chapters:
+        if chapter.get("toc_links"):
+            continue
+        body = _body_blocks(chapter)
+        best_run = max(best_run, _longest_run(body, labels))
+        best_fused = max(best_fused, _most_fused(body, labels))
+    return best_run, best_fused, len(labels)
 
 
 def _corpus_files():
@@ -133,6 +295,31 @@ def _inline_image_refs(epub_path) -> int:
     return len(refs)
 
 
+def _raw_img_tokens_in_file(kfx_path):
+    """Unresolved image tokens anywhere in the serialized container.
+
+    Deliberately scans the whole file rather than the `$145` text chunks. A
+    token is an internal placeholder the generator is meant to turn into an
+    image; one that survives is raw control bytes (`\\x00`, `\\x01`) shipped to
+    the device. On a Paperwhite, a book carrying them in its first content
+    fragment crashed the reader while paging through the opening pages —
+    device-verified against the pre-fix build of one corpus book. So this is a
+    crash gate, not a cosmetic one.
+
+    Checking emitted *text* alone is not enough: a chapter title reaches the
+    body as a heading chunk only when `_omit_title_heading` is unset, but it
+    reaches the `$389` navigation fragment either way. The book that crashed
+    carried four of its six tokens in `$389` and only two in `$145`. Scanning
+    bytes covers nav labels, section names and metadata without needing a
+    fragment-by-fragment walk that would have to be kept in step with the
+    generator. (#133)
+    """
+    raw = Path(kfx_path).read_bytes()
+    # The token is ASCII-safe by construction, so matching on bytes is exact.
+    pattern = IMG_TOKEN_RE.pattern.encode("latin-1")
+    return len(re.findall(pattern, raw))
+
+
 def _metrics(kfx_path):
     frags = load_fragments(kfx_path)
     texts = [
@@ -185,9 +372,39 @@ def _metrics(kfx_path):
         "dangling": len(set(targets) - anchors),
         "nav_junk": sum(1 for t in texts if t.strip() in NAV_MARKERS),
         "raw_img_tokens": sum(1 for t in texts if IMG_TOKEN_RE.search(t)),
+        "raw_img_tokens_anywhere": _raw_img_tokens_in_file(kfx_path),
         "image_resources": len(by_type(frags, "$164")),
         "images_shown": shown,
     }
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+@pytest.mark.skipif(not _corpus_files(), reason=f"{CORPUS_ENV} not set or empty")
+@pytest.mark.parametrize("epub", _corpus_files(), ids=lambda p: p.stem[:40])
+def test_corpus_no_duplicate_contents_listing(epub):
+    """A book's own contents listing must not print in the body (#132/#135).
+
+    kfxgen builds a contents page from the real chapter titles, so a listing
+    carried over from the source is a second one printed in front of the
+    reader. Nine of the 77 books shipped one; `nav_junk` saw one of them, and
+    that one was its own false positive (#136).
+
+    The two signals are the two shapes a surviving listing takes. `run` is a
+    stretch of consecutive blocks that are each a source toc label — a listing
+    of paragraphs. `fused` is many labels inside one block, which is what a
+    table listing collapses to and what no run-based check can see.
+    """
+    run, fused, entries = _listing_leak(epub)
+    assert run < MIN_LISTING_RUN, (
+        f"{run} consecutive body blocks are source contents entries — "
+        "the book's own listing survived into the text"
+    )
+    if entries:
+        assert fused < max(MIN_LISTING_RUN, FUSED_FRACTION * entries), (
+            f"{fused} of {entries} contents entries are fused into one body "
+            "block — a table listing survived into the text"
+        )
 
 
 @pytest.mark.integration
@@ -215,6 +432,14 @@ def test_corpus_book_invariants(epub, tmp_path):
             f"{m['anchors']} anchors emitted but zero link spans — every link "
             "was dropped, which 'dangling == 0' cannot see"
         )
+    # #133: an unresolved image token is raw control bytes in the container.
+    # A device crashed paging through the opening pages of a book carrying them
+    # in its first content fragment, so this gates a crash, not a cosmetic
+    # defect. Whole-file, because the nav fragment carried most of them.
+    assert m["raw_img_tokens_anywhere"] == 0, (
+        f"{m['raw_img_tokens_anywhere']} unresolved image token(s) reached the "
+        "container as raw control bytes"
+    )
     # #60: hidden page-list/landmarks navs are markup, never reading content.
     assert m["nav_junk"] == 0, f"{m['nav_junk']} navigation blocks leaked into the body"
     # #133: an image token in emitted text is a placeholder the generator
