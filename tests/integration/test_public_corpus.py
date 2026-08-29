@@ -31,6 +31,7 @@ from pathlib import Path
 import pytest
 
 from kfxgen import converter as conv
+from kfxgen._img_tokens import IMG_TOKEN_RE
 from kfxgen.kfxlib_minimal.ion import IS
 from tests._kfx_introspect import by_type, load_fragments, val
 from tests.fixtures.oeb_shim import EpubAsOeb
@@ -43,6 +44,16 @@ WRITE_ENV = "KFXGEN_CORPUS_WRITE_BASELINE"
 NAV_MARKERS = frozenset(
     {"Page List", "Navigation", "Begin Reading", "Table of Contents"}
 )
+
+#: An image token is an internal placeholder: the generator is supposed to turn
+#: it into an image chunk, and any that reaches emitted text is a
+#: control-character string printed to the reader. 116 of them survived across
+#: all 77 books before #133.
+#:
+#: Imported rather than spelled out. A local copy would still read zero after a
+#: change to the token's shape, so the check would go green on the very bug it
+#: exists to catch — `_img_tokens` is the canonical definition for exactly this
+#: reason.
 
 #: A book may legitimately shrink slightly (deduplicated headings, #64) or grow
 #: (recovered container text, #58). Only flag movement beyond this.
@@ -173,6 +184,7 @@ def _metrics(kfx_path):
         "links": len(targets),
         "dangling": len(set(targets) - anchors),
         "nav_junk": sum(1 for t in texts if t.strip() in NAV_MARKERS),
+        "raw_img_tokens": sum(1 for t in texts if IMG_TOKEN_RE.search(t)),
         "image_resources": len(by_type(frags, "$164")),
         "images_shown": shown,
     }
@@ -205,6 +217,15 @@ def test_corpus_book_invariants(epub, tmp_path):
         )
     # #60: hidden page-list/landmarks navs are markup, never reading content.
     assert m["nav_junk"] == 0, f"{m['nav_junk']} navigation blocks leaked into the body"
+    # #133: an image token in emitted text is a placeholder the generator
+    # failed to resolve — the reader gets control characters. Its usual source
+    # was a chapter *titled* with an image, which `_leading_chapter_title`
+    # admitted because a token is short and has no whitespace. That title was
+    # then emitted as a heading chunk and, via `_rebuild_contents_page`, as a
+    # contents entry.
+    assert m["raw_img_tokens"] == 0, (
+        f"{m['raw_img_tokens']} unresolved image token(s) reached emitted text"
+    )
     # Every image the source displays inline must survive into the container.
     #
     # This has to be measured against the EPUB, not within the KFX, and the
