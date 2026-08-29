@@ -94,7 +94,7 @@ Tag every test with the tier of oracle it relies on, so reviewers can tell
 | 1 | `tier1` | In-process Python invariants (entity-id uniqueness, position-map subset relations, fragment-graph consistency — encoded in `tests/unit/test_kfx_invariants.py` and `tests/unit/test_position_map.py`) | < 1 s | Pre-push hook + every PR |
 | 2 | `tier2` | Calibre `kfxlib` differential decode (round-trips our output through an independent decoder) | seconds | Every PR |
 | 3 | `tier3` | Golden-file diff against synthetic regression corpus under `tests/fixtures/golden/expected/` (see [Golden corpus](#golden-corpus) below) | seconds | Every PR |
-| 4 | `device` | Manual verification on a physical Kindle (Paperwhite/Oasis/Voyage) | minutes, manual | Release tags only |
+| 4 | `device` | Manual verification on the physical Kindles listed under [Tier 4](#tier-4-device-verification) | minutes, manual | Release tags only |
 
 A tier-1 pass means "kfxgen is internally consistent." A tier-2 pass means
 "another implementation can decode it." A tier-3 pass means "it matches a
@@ -112,6 +112,65 @@ device today." Don't conflate them.
 
 Skipping `device` in CI is intentional — the runner has no Kindle attached.
 Test failures under `device` block release tags but never block PR merges.
+
+### Tier 4: device verification
+
+The hardware, pinned. "A physical Kindle" is not a record — `Paperwhite` alone
+spans several revisions whose behaviour differs (the CHANGELOG thumbnail table
+has a Voyage failing where a Paperwhite succeeds), so generation and firmware
+both get written down (#109).
+
+| Device | Firmware | Status |
+|---|---|---|
+| Oasis, 10th generation (2019) | 5.18.2 | Terminal — no further updates |
+| Paperwhite, 11th generation (2021) | 5.19.2 | Current for that model |
+
+Test both, and understand what each buys. The Oasis can never leave 5.18.2, so
+it stands for every reader who will never update — a permanent population, and
+for a change that removes a fallback it is the *stricter* test (#126 dropped
+`$31` with no fallback, which would have degraded silently there). The
+Paperwhite is on current firmware and is the only one of the two that can
+observe render-side drift as Amazon moves. A pass on one is real evidence; it
+is not the same claim as a pass on both.
+
+Run the checklist:
+
+```bash
+pytest -m device                       # prints the procedures, fails unrun
+python scripts/device_signoff.py --template > signoff.json
+# ... perform the checks, fill in outcomes and the Paperwhite's firmware ...
+KFXGEN_DEVICE_SIGNOFF=signoff.json pytest -m device
+python scripts/device_signoff.py --summary signoff.json   # release-notes table
+```
+
+These tests **fail** rather than skip when nothing has been signed off. A skip
+is how a gate goes quiet: #99 is tier 2 skipping on every PR since it was
+added, and #92, #98 and #106 are the same shape. Before #109 the `device`
+marker was carried by no test at all, so `pytest -m device` collected nothing
+— exit 5, "no tests collected". That is a failure code rather than a false
+pass, but it reports the absence of tests, never the absence of testing, and
+it tells a reader nothing about what should have been checked.
+
+### Recording a device pass
+
+Put a trailer on the commit, one line per device, so `git log` can answer "was
+this change checked on hardware?":
+
+```
+Device-verified: Oasis 10th gen (2019), firmware 5.18.2 — TOC taps, return links
+Device-verified: Paperwhite 11th gen (2021), firmware 5.19.2 — TOC taps, return links
+```
+
+Firmware is a constant for the Oasis and a per-run value for the Paperwhite.
+List them over a range with:
+
+```bash
+python scripts/device_signoff.py --trailers v5.7.2..HEAD
+```
+
+The trailer is the per-change record; the CHANGELOG entry is the per-release
+one. Both are wanted — the CHANGELOG says the release was verified, the trailer
+says which change was.
 
 `tier3_strict` needs its own invocation for a mechanical reason worth knowing:
 `pytest.ini` puts `-m "not slow and not device and not tier3_strict"` in
@@ -143,8 +202,10 @@ def test_kfxlib_round_trip():
 def test_matches_corpus_baseline():
     ...
 
+# Tier 4 is a checklist a human performs; add entries to
+# tests/device/checklist.py rather than writing a new test function.
 @pytest.mark.device
-def test_nav_pane_renders_on_paperwhite():
+def test_device_check_signed_off(check, signoff):
     ...
 ```
 
@@ -284,6 +345,11 @@ If you change anything that touches `$259`, `$260`, `$264`, `$265`, `$550`, or
 `$164`/`$417`, real-device validation (tier 4) is mandatory before merging.
 Tier-1 invariant tests (issue 43) encode many of these rules, but not all of
 them — when in doubt, test on device.
+
+Mandatory means the PR carries the evidence: run the checklist, and put a
+`Device-verified:` trailer on the commit naming model, firmware and what was
+checked. See [Tier 4](#tier-4-device-verification). Without it the claim is
+unanswerable a month later, which is what #109 was opened about.
 
 ## Public-domain corpus sweep
 
