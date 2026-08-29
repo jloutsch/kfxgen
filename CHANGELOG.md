@@ -1,5 +1,65 @@
 # Changelog
 
+## 5.7.3 — The book's own contents listing stops printing twice
+
+Four defects around the contents page, and the corpus check that was supposed
+to catch them.
+
+**Fixed (#133):** a chapter whose front matter opened with an image was
+*titled* with that image. `_leading_chapter_title` guarded only on length and
+absence of a newline, and an image token is short and newline-free, so it went
+straight through. The token then reached the reader twice — as the chapter's
+heading and, via the rebuilt contents page, as a listing entry — in both cases
+as raw `\x00`/`\x01` control bytes, because a title is emitted without token
+resolution. 116 of them across the 77-book corpus.
+
+This one is worse than it reads. **A Paperwhite crashed** paging through the
+opening pages of a book carrying those bytes in its first content fragment;
+the same book built with the fix pages from the opening to the end without
+incident. Tokens also land in the `$389` navigation fragment, which a check on
+emitted text cannot see, so the gate scans the whole container.
+
+**Fixed (#135):** a book titling its contents chapter `CONTENTS.` printed all
+65 listing blocks into the body. Every title lookup was exact membership
+against a set of literal strings applied to `title.lower().strip()`, so one
+trailing period defeated it — the same failure mode #107 patched one string at
+a time. Titles now normalise once: lowercased, internal whitespace collapsed,
+punctuation stripped from both ends only. Interior punctuation is part of a
+label and stripping it could turn a distinct title into a matching one.
+
+**Fixed (#132):** the discard was keyed on the chapter's title, so a listing
+that was not its own chapter survived whole — seven books printed a duplicate
+table of contents. Listings are now recognised from markup (a `toc` class
+token, `epub:type="toc"`, `role="doc-toc"`), matched as whitespace-separated
+tokens so `tocsin` and `toc-entry` are untouched. Images inside a listing are
+kept (#117) and anchors carry forward, so links into the container still
+resolve (#51/#53).
+
+Recognising it was only half. For several books the listing *was* the contents
+page, so discarding it alone left a stub and the book lost its contents
+entirely. The discard now hands off to the rebuild, guarded so a book never
+gets two contents pages and a page carrying a listing beside real prose is
+never overwritten. A contents page also no longer lists itself, and one
+rebuilt from markup is named "Contents" rather than whatever the source called
+the navigation.
+
+**Fixed (#136):** the corpus check fired on kfxgen's *own* generated contents
+heading — the one book it reported was its own false positive — while seven
+real leaks passed silently. `Table of Contents` leaves the marker set, and a
+real check replaces it: source listing labels measured against the longest
+contiguous run of body blocks, plus a fused-block signal for table listings,
+which collapse into one block and so never produce a run.
+
+Across the 77-book corpus: duplicate listings **9 → 0**, contents pages
+listing an image **39/39 → 0**, generated contents pages **39 → 49**.
+
+**Testing:** the fixes are mutation-checked rather than assumed — disabling
+the markup rule fails exactly the seven books #132 names, and reverting the
+normalisation fails 12 of 15 unit assertions. The `publisher_structure`
+fixture pinned four earlier bugs on a navigation document that #132 now
+correctly replaces; those pins moved into body content rather than being left
+to pass vacuously (#76).
+
 ## 5.7.2 — Output is byte-reproducible again
 
 **Fixed (#96):** converting the same book twice produced two different files.
