@@ -2585,3 +2585,100 @@ def test_generated_contents_never_labels_an_entry_with_an_image():
     assert not [e for e in entries if _conv._IMG_TOKEN_RE.search(e)], (
         f"an image token reached the contents listing: {entries}"
     )
+
+
+class TestTableCellAnchors:
+    """#130: an `id` on a table cell was discarded while the same id on any
+    other element was kept.
+
+    `table`/`tr`/`td` are not in `block_tags`, so a whole table is walked by
+    the container branch, and that branch flushed its inline run through
+    `normalize_runs` — which drops anchor marks — where the leaf-block branch
+    uses `normalize_runs_with_anchors`. A link into a cell therefore resolved
+    to nothing, which per the anchor model (#50) is a dead link rather than a
+    mislanded one.
+
+    No corpus book has ids on cells, so this shipped without symptom. The
+    inconsistency is the defect.
+    """
+
+    BASE = "text/ch1.xhtml"
+
+    def _blocks(self, markup):
+        return extract_blocks_from_html(_body_markup(markup), base_href=self.BASE)
+
+    def test_id_on_a_table_cell_is_kept(self):
+        blocks = self._blocks('<table><tr><td id="c1">1801</td></tr></table>')
+        assert blocks[0]["anchor_ids"] == ["c1"]
+
+    def test_id_on_a_header_cell_is_kept(self):
+        blocks = self._blocks('<table><tr><th id="h1">Year</th></tr></table>')
+        assert blocks[0]["anchor_ids"] == ["h1"]
+
+    def test_every_cell_id_in_a_fused_row_survives(self):
+        """Cells fuse into one block (#128), so all their ids land on it."""
+        blocks = self._blocks(
+            '<table><tr><td id="c1">1801</td><td id="c2">8,893</td></tr></table>'
+        )
+        assert blocks[0]["anchor_ids"] == ["c1", "c2"]
+
+    def test_a_fused_cell_id_records_where_its_text_starts(self):
+        """Because the row is one block, an offset is what makes a link land
+        on the right cell rather than at the start of the row (#79)."""
+        blocks = self._blocks(
+            '<table><tr><td id="c1">1801</td><td id="c2">8,893</td></tr></table>'
+        )
+        # `anchor_offsets` is re-keyed to "<file>#<id>" once `base_href` is
+        # known, so links can be matched across files (#53).
+        offsets = blocks[0]["anchor_offsets"]
+        text = blocks[0]["text"]
+        assert offsets[f"{self.BASE}#c1"] == 0
+        assert offsets[f"{self.BASE}#c2"] == text.index("8,893"), (
+            f"expected the second cell's offset to point at its own text in "
+            f"{text!r}, got {offsets[f'{self.BASE}#c2']}"
+        )
+
+    def test_a_link_into_a_cell_has_a_key_to_resolve_against(self):
+        blocks = self._blocks('<table><tr><td id="c1">1801</td></tr></table>')
+        assert f"{self.BASE}#c1" in blocks[0]["anchor_keys"]
+
+    def test_an_id_on_the_row_is_kept_too(self):
+        blocks = self._blocks('<table><tr id="r1"><td>1801</td></tr></table>')
+        assert "r1" in blocks[0]["anchor_ids"]
+
+    def test_inline_anchor_in_a_container_lead_in_survives(self):
+        """The same branch handles a container's own inline text alongside
+        block children (#58) — an anchor there was dropped for the same
+        reason."""
+        blocks = self._blocks(
+            '<div><span id="s1">Lead-in text.</span><p>A paragraph.</p></div>'
+        )
+        assert blocks[0]["text"] == "Lead-in text."
+        assert blocks[0]["anchor_ids"] == ["s1"]
+
+    def test_ids_carried_in_from_an_earlier_empty_anchor_still_arrive(self):
+        """Guard: ids waiting in `pending_ids` must not be lost when the
+        flushed run now contributes ids of its own."""
+        blocks = self._blocks(
+            '<a id="before"></a><table><tr><td id="c1">1801</td></tr></table>'
+        )
+        assert blocks[0]["anchor_ids"] == ["before", "c1"]
+        assert blocks[0]["anchor_offsets"][f"{self.BASE}#before"] == 0
+
+    def test_an_anchor_inside_a_cell_is_kept(self):
+        """The shape that actually occurs. #130 measured ids *on* `<td>`/`<th>`
+        and found none in the corpus, concluding the defect had no instances.
+        Real books put the id on an inline element *inside* the cell — one
+        corpus book has 443 of them — and those take the same dropped path."""
+        blocks = self._blocks('<table><tr><td><a id="p1"></a>1801</td></tr></table>')
+        assert "p1" in blocks[0]["anchor_ids"]
+
+    def test_a_span_id_inside_a_cell_is_kept(self):
+        blocks = self._blocks(
+            '<table><tr><td><span id="s1">1801</span></td></tr></table>'
+        )
+        assert "s1" in blocks[0]["anchor_ids"]
+
+    def test_a_cell_without_an_id_adds_nothing(self):
+        blocks = self._blocks("<table><tr><td>1801</td></tr></table>")
+        assert blocks[0]["anchor_ids"] == []

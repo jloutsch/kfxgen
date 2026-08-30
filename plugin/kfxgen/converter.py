@@ -26,7 +26,6 @@ from .inline_style import (
     compute_block_style,
     make_anchor_mark,
     make_link_flag,
-    normalize_runs,
     normalize_runs_with_anchors,
     parse_vertical_align,
 )
@@ -583,12 +582,23 @@ def extract_blocks_from_html(
         def _flush_inline():
             if not inline_parts:
                 return
-            text, spans = normalize_runs(inline_parts)
+            # `normalize_runs_with_anchors`, matching the leaf-block branch.
+            # The plain version silently discards the anchor marks
+            # `_walk_inline` emits, which is why an `id` on a table cell used
+            # to vanish while the same id on a `<p>` or `<li>` survived:
+            # `table`/`tr`/`td` are not in `block_tags`, so a whole table is
+            # walked here rather than there, and a link into a cell resolved
+            # to nothing at all (#130).
+            text, spans, mark_offsets = normalize_runs_with_anchors(inline_parts)
             inline_parts.clear()
             if not text:
+                # An anchor contributing no visible text carries forward to the
+                # next block, exactly as an empty leaf block already does.
+                pending_ids.extend(mark_offsets)
                 return
             ids = pending_ids[:]
             pending_ids.clear()
+            ids.extend(mark_offsets)
             block_ids = _dedupe_keep_order(ids)
             blocks.append(
                 {
@@ -596,7 +606,13 @@ def extract_blocks_from_html(
                     "spans": spans,
                     "block_style": None,
                     "anchor_ids": block_ids,
-                    "anchor_offsets": dict.fromkeys(block_ids, 0),
+                    # Cells fuse into one block (#128), so an offset is what
+                    # makes a link land on the right cell rather than at the
+                    # start of the row. Ids inherited from an enclosing
+                    # container point at the block's start (#79).
+                    "anchor_offsets": {
+                        aid: mark_offsets.get(aid, 0) for aid in block_ids
+                    },
                 }
             )
 
