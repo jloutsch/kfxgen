@@ -1021,6 +1021,17 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
             ch = _flag_nav(_mk(_leading_chapter_title(head), head), 0, first_fi)
             if ch:
                 if ch["title"] == LEADING_TITLE_FALLBACK:
+                    # No title of its own, and not in the source TOC either —
+                    # this chapter exists precisely because these blocks
+                    # precede the first TOC anchor. Listing an invented label
+                    # adds navigation the publisher chose not to provide. Only
+                    # the nav entry goes; the content still ships (#143).
+                    #
+                    # Narrow on purpose: a head whose first block *does* read
+                    # as a heading keeps its entry. That label is the book's
+                    # own words rather than ours, and dropping it would remove
+                    # a usable destination to fix a naming problem.
+                    ch["_omit_from_toc"] = True
                     # Invented label, not the book's own words — suppress it
                     # as a heading so it cannot print onto the page. Set only
                     # on this synthetic path: a book whose own TOC names a
@@ -1055,6 +1066,14 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
             file_offset[si] + len(spine_blocks[si]),
         )
         if ch:
+            # Same rule as the head above, and the reason the filename title
+            # is tolerable: these spine items sit past the last TOC coordinate,
+            # so the source never listed them. Reviewing real books, what lands
+            # here is back matter the publisher deliberately left out of its
+            # own TOC — a note to the reader, a "stay in touch" page, an image
+            # wrapper. One corpus book was 835 of 994 nav entries this way,
+            # each an 85-character filename (#143).
+            ch["_omit_from_toc"] = True
             chapters.append(ch)
 
     return chapters
