@@ -6,6 +6,8 @@ content chunking, and position ID management.
 """
 
 import os
+from pathlib import Path
+import pprint
 import sys
 import tempfile
 from unittest.mock import MagicMock
@@ -20,6 +22,7 @@ from kfxgen.native_generator import NativeKFXGenerator  # noqa: E402
 from kfxgen.kfxlib_minimal.ion import IS, IonBLOB  # noqa: E402
 
 from tests._helpers import MINIMAL_JPEG  # noqa: E402
+from tests._kfx_introspect import by_type, load_fragments, val  # noqa: E402
 
 
 class TestNativeGeneratorInit:
@@ -2539,3 +2542,53 @@ def test_sub_and_super_defaults_are_both_device_verified_values():
 
     assert ng.superscript_metrics() == (0.75, ng.BASELINE_STYLE_SUPER)
     assert ng.subscript_metrics() == (0.75, ng.BASELINE_STYLE_SUB)
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
+class TestLandmarkFollowsTheFirstListedChapter:
+    """The start-of-content landmark is derived from the first *listed* nav
+    entry, so omitting a chapter from the TOC also moves where the book opens.
+
+    Found while omitting invented front-matter entries (#143): the landmark
+    went from the front-matter chapter to the one after it. That is arguably
+    the better target — Gutenberg boilerplate is not where reading starts —
+    but it was a side effect rather than a decision, and nothing pinned it.
+    This does, so a future change to `_omit_from_toc` cannot move the opening
+    position without a test saying so.
+    """
+
+    def _landmark_title(self, chapters):
+        import re
+
+        gen = NativeKFXGenerator()
+        path = tempfile.mktemp(suffix=".kfx")
+        try:
+            gen.generate_full_book("T", "A", chapters, output_path=path)
+            frags = load_fragments(Path(path))
+            for f in by_type(frags, "$389"):
+                s = pprint.pformat(val(f), width=10**6)
+                m = re.search(r"\$391:: \{\$235: \$236.*?\}\]\}", s)
+                assert m, "no landmarks container"
+                t = re.search(r"\$244: '((?:[^'\\]|\\.)*)'", m.group(0))
+                return t.group(1) if t else None
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_landmark_names_the_first_listed_chapter(self):
+        chapters = [
+            {"title": "Front Matter", "text": "Boilerplate."},
+            {"title": "Chapter 1", "text": "Body."},
+        ]
+        assert self._landmark_title(chapters) == "Front Matter"
+
+    def test_omitting_the_first_chapter_moves_the_landmark(self):
+        chapters = [
+            {"title": "Front Matter", "text": "Boilerplate.", "_omit_from_toc": True},
+            {"title": "Chapter 1", "text": "Body."},
+        ]
+        assert self._landmark_title(chapters) == "Chapter 1", (
+            "omitting a chapter from the nav also moves the start-of-content "
+            "landmark, which is where the book opens"
+        )
