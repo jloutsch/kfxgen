@@ -2682,3 +2682,104 @@ class TestTableCellAnchors:
     def test_a_cell_without_an_id_adds_nothing(self):
         blocks = self._blocks("<table><tr><td>1801</td></tr></table>")
         assert blocks[0]["anchor_ids"] == []
+
+
+class TestUntocedChaptersAreNotListed:
+    """#143: kfxgen invented navigation the source never had.
+
+    Both paths that create a chapter without a TOC entry gave it a made-up
+    label — "Front Matter" for content before the first TOC anchor, and the
+    spine filename for orphans after the last one. Reviewing source EPUBs, the
+    publisher's own TOC ends at the last real section ("End Notes", "Index");
+    the back matter after it — a note to the reader, a "stay in touch" page —
+    is deliberately unlisted. Inventing entries for those adds navigation the
+    publisher chose not to provide.
+
+    Verified across the corpus: the chapters carrying invented labels are
+    exactly the chapters whose title is not a source TOC label (pg22210
+    836 = 1 + 835, pg12082 238 = 1 + 237, pg120 44 = 1 + 43).
+
+    Omitting from the TOC is not dropping content: `_omit_from_toc` is read
+    only where the nav pane is built, so the pages still ship in the reading
+    flow and still page through.
+    """
+
+    def _spine(self, href, text):
+        return _spine_item(href, [(text, [])])
+
+    def _head_book(self, *head_blocks):
+        """`head_blocks` are separate blocks, which matters: the title comes
+        from the *first* one alone, so a token sharing a block with prose
+        would leave the prose as a perfectly good title."""
+        blocks = [(t, []) for t in head_blocks]
+        spine = [
+            _spine_item("book.xhtml", blocks + [("Chapter I", ["c1"]), ("Body", [])])
+        ]
+        toc = [{"title": "I", "href": "book.xhtml#c1"}]
+        return _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+
+    def test_invented_front_matter_label_is_not_listed(self):
+        """A head with no usable heading of its own gets the invented label,
+        and an invented label is not navigation."""
+        token = _conv._make_img_token("cover.jpg", "")
+        chapters = self._head_book(token, "more front matter")
+        assert chapters[0]["title"] == _conv.LEADING_TITLE_FALLBACK
+        assert chapters[0].get("_omit_from_toc") is True
+
+    def test_a_head_with_its_own_heading_keeps_its_entry(self):
+        """Narrow on purpose. This label is the book's own words, so it stays
+        a usable destination even though the source TOC never named it —
+        #143 is about invented labels, not about untoced content."""
+        chapters = self._head_book("Copyright 2026")
+        assert chapters[0]["title"] == "Copyright 2026"
+        assert not chapters[0].get("_omit_from_toc")
+
+    def test_the_front_matter_content_still_ships(self):
+        """Omitted from the nav, still in the book."""
+        token = _conv._make_img_token("cover.jpg", "")
+        chapters = self._head_book(token, "A cover line")
+        assert "A cover line" in chapters[0]["text"]
+
+    def test_tail_orphans_are_not_listed(self):
+        spine = [
+            _spine_item("book.xhtml", [("Chapter I", ["c1"]), ("Body", [])]),
+            self._spine("bm_001.xhtml", "A note from the author. back"),
+        ]
+        toc = [{"title": "I", "href": "book.xhtml#c1"}]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        orphan = chapters[-1]
+        assert orphan["title"] == "bm_001"
+        assert orphan.get("_omit_from_toc") is True
+        assert "A note from the author" in orphan["text"]
+
+    def test_chapters_the_toc_names_are_still_listed(self):
+        """The control. Omitting must not reach real entries — the nav pane is
+        the project's headline feature."""
+        spine = [
+            _spine_item(
+                "book.xhtml",
+                [("Chapter I", ["c1"]), ("Body", []), ("Chapter II", ["c2"])],
+            )
+        ]
+        toc = [
+            {"title": "I", "href": "book.xhtml#c1"},
+            {"title": "II", "href": "book.xhtml#c2"},
+        ]
+        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+        assert [c["title"] for c in chapters] == ["I", "II"]
+        assert not any(c.get("_omit_from_toc") for c in chapters)
+
+    def test_a_book_with_no_toc_mapping_keeps_every_entry(self):
+        """Guard against emptying the pane entirely. When nothing resolves,
+        every chapter is 'untoced' — omitting them all would leave a book with
+        no navigation at all, which is worse than a machine label."""
+        oeb = _OEBBook(
+            [
+                _SpineItem("a.xhtml", "First section body."),
+                _SpineItem("b.xhtml", "Second section body."),
+            ],
+            [_TOCNode("Nowhere", "missing.xhtml")],
+        )
+        chapters = extract_chapters_from_oeb(oeb, _silent_log())
+        assert chapters
+        assert not any(c.get("_omit_from_toc") for c in chapters)
