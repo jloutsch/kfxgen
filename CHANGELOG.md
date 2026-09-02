@@ -1,5 +1,72 @@
 # Changelog
 
+## 5.7.4 — Pictures you can see, links that resolve, a navigation pane without machinery in it
+
+Three reader-visible fixes, two of them confirmed on hardware, plus the first
+mechanical shape the device tier has ever had.
+
+**Fixed (#145):** images rendered as slivers. Every image not classified as a
+full page or a small ornament was given `$56: 9.626%` — and `$56` is *width*,
+confirmed against upstream kfxlib's property table, where this project's own
+comment describing it as a height cap was wrong. Those images drew at under a
+tenth of the text column: **2,462 of 4,436 corpus images (55%) in 29 of 77
+books, including 10 covers**.
+
+The number was copied from a reference file for a 1090x92 horizontal rule,
+where a small fraction is right, and became the default for every illustration
+between 300 and 600 pixels wide.
+
+Width now comes from the image's own pixel width against a 496px text column,
+capped at full width — `min(100, px / 496 * 100)`. That rule was recovered by
+dividing each width Kindle Previewer emits by its image's pixel width, and it
+reproduces **1,411 of 1,422** of Amazon's percent widths across seven books.
+Small square ornaments keep their `3em` sizing; a dingbat is not an
+illustration. Device-verified: images that were slivers are now easily
+viewable, and a cover fills the column.
+
+**Fixed (#130):** links into a table landed nowhere. The container branch of
+`extract_blocks_from_html` flushed its inline run through a normaliser that
+discards anchor marks, so any id inside a container-walked subtree vanished —
+and kfxgen drops a link whose target will not resolve rather than emitting a
+dangling one, so they died silently.
+
+The issue had measured the impact as *none*, by looking for ids **on**
+`<td>`/`<th>`. Books put them on inline elements **inside** the cell; one
+corpus book has 443. Re-measured across all 77 books: **475 working links
+restored** (21,516 to 21,991), 8 books affected, dangling still zero.
+pg12082 was losing 97% of its links.
+
+**Fixed (#143):** the navigation pane carried labels no reader wants —
+"Front Matter" in all 77 corpus books, and raw spine filenames like
+`..._0028.jpg.id-...wrap-0.html` in 14 more, one book at 835 of its 994
+entries. Both come from chapters kfxgen invents for spine items the source TOC
+never referenced, which is exactly why they should not be listed: the
+publisher's own contents ends where it ends, and the back matter after it is
+deliberately unlisted. **1,290 entries removed, and nothing else moved.**
+Content is untouched — only the nav entry goes. Device-verified, including
+that the entries which remain still land correctly.
+
+**Added (#109):** tier 4 has a mechanism. The `device` marker was declared,
+documented as the example to copy, and carried by no test, so the tier had no
+content: nothing said what to perform on hardware, nothing recorded what was
+performed, and "was this change checked on a device?" had no answer.
+
+There is now a checklist of six procedures, each standing for a defect that
+shipped; it fails rather than skips when nothing is signed off, and the
+failure message is the procedure. The hardware is pinned by model, generation
+and firmware. `scripts/device_signoff.py` writes the record and
+`--trailers` reads it back out of `git log`. A tier-1 guard fails if the
+marker ever collects nothing again.
+
+**Not done, deliberately.** #120 proposed emitting `$601` render mode to match
+Amazon on 626 images. The rule was worked out and verified to 1,719 of 1,720
+images — and then a device pair showed the two builds render identically. It
+was closed as measured rather than merged, because the change costs a token
+format edit in the path whose failure mode is control bytes reaching the
+reader. A related tidy-up, dropping `$790` from image entries, was closed the
+same way once measurement showed it would break TOC navigation for chapters
+that open with an image.
+
 ## 5.7.3 — The book's own contents listing stops printing twice
 
 Four defects around the contents page, and the corpus check that was supposed
