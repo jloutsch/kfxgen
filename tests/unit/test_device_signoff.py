@@ -57,8 +57,11 @@ def _complete_signoff() -> dict:
     data["book"] = "pg64317 (corpus)"
     for result in data["results"]:
         result["outcome"] = "pass"
-        if result["device"] == "paperwhite-11":
-            result["firmware"] = "5.19.2"
+        # Both, explicitly: the template no longer pre-fills any firmware.
+        result["firmware"] = {
+            "oasis-10": "5.18.2.1.1",
+            "paperwhite-11": "5.19.2",
+        }[result["device"]]
     return data
 
 
@@ -141,14 +144,12 @@ class TestTemplate:
             "a template that omits a pair is a check that silently never gets performed"
         )
 
-    def test_prefills_terminal_firmware_and_leaves_the_movable_one_blank(self):
+    def test_leaves_every_firmware_blank_to_be_read_per_run(self):
+        """Nothing is pre-filled. The Oasis's used to be, on the grounds that
+        a terminal model's firmware is a constant — it then updated, so the
+        assumption is gone rather than merely corrected."""
         data = signoff_script.template()
-        by_device = {r["device"]: r for r in data["results"]}
-        assert by_device["oasis-10"]["firmware"] == DEVICES["oasis-10"].firmware
-        assert by_device["paperwhite-11"]["firmware"] == "", (
-            "the Paperwhite's firmware can move, so it must be read off the "
-            "device each run rather than pre-filled"
-        )
+        assert {r["firmware"] for r in data["results"]} == {""}
 
     def test_leaves_outcomes_empty(self):
         data = signoff_script.template()
@@ -235,10 +236,11 @@ class TestSummaryRows:
     def test_one_row_per_recorded_result_naming_model_and_status(self):
         rows = signoff_script.summary_rows(_complete_signoff())
         assert len(rows) == len(CHECKS) * len(DEVICES)
-        oasis = [r for r in rows if r["device"].startswith("Oasis")]
-        assert oasis and all(r["status"] == "terminal" for r in oasis)
-        pw = [r for r in rows if r["device"].startswith("Paperwhite")]
-        assert pw and all(r["status"] == "current" for r in pw)
+        assert [r for r in rows if r["device"].startswith("Oasis")]
+        assert [r for r in rows if r["device"].startswith("Paperwhite")]
+        assert all(r["firmware"] for r in rows), (
+            "a row with no firmware is not a record"
+        )
 
     def test_skips_results_naming_an_unknown_device(self):
         data = _complete_signoff()
@@ -278,11 +280,11 @@ class TestChecklistHelpers:
         for issue in CHECKS[0].issues:
             assert issue in text
 
-    def test_label_shows_pinned_firmware_for_a_terminal_device(self):
-        assert "5.18.2" in DEVICES["oasis-10"].label
+    def test_label_shows_the_last_firmware_seen(self):
+        assert "5.18.2.1.1" in DEVICES["oasis-10"].label
 
-    def test_label_flags_firmware_that_must_be_read_per_run(self):
-        assert "per run" in DEVICES["paperwhite-11"].label
+    def test_label_reports_the_last_firmware_seen(self):
+        assert "last seen" in DEVICES["paperwhite-11"].label
 
     def test_signoff_path_reads_the_environment(self, monkeypatch):
         monkeypatch.delenv(SIGNOFF_ENV, raising=False)
@@ -296,8 +298,8 @@ class TestChecklistHelpers:
         assert len(problems) >= 3
 
     def test_a_device_with_no_pinned_firmware_accepts_any_recorded_value(self):
-        d = Device(id="x", model="M", generation="1st", firmware=None, terminal=False)
-        assert d.firmware is None
+        d = Device(id="x", model="M", generation="1st", last_firmware=None)
+        assert d.last_firmware is None
         assert (
             validate_result(
                 {
@@ -320,8 +322,8 @@ def test_contributing_documents_the_same_hardware_the_code_pins():
     for device in DEVICES.values():
         assert device.model in text, f"{device.model} missing from CONTRIBUTING"
         assert device.generation.split()[0] in text
-        if device.firmware:
-            assert device.firmware in text, (
-                f"{device.id}'s pinned firmware {device.firmware} is not in "
-                "CONTRIBUTING, so a reader cannot date the evidence"
+        if device.last_firmware:
+            assert device.last_firmware in text, (
+                f"{device.id}'s last-seen firmware {device.last_firmware} is "
+                "not in CONTRIBUTING, so a reader cannot date the evidence"
             )
