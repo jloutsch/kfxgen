@@ -1367,7 +1367,7 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
-    def build_fragment_157_image(self, entity_name, kind="inline"):
+    def build_fragment_157_image(self, entity_name, kind="inline", width_pct=None):
         """Builds a $157 style for inline image entries.
 
         Three variants observed in Calibre KFX Output (jhowell) reference
@@ -1390,6 +1390,28 @@ class NativeKFXGenerator:
                 IonStruct(IS("$131"), 2, IS("$132"), 2),
                 IS("$546"),
                 IS("$377"),
+                IS("$580"),
+                IS("$320"),
+                IS("$173"),
+                IS(entity_name),
+            )
+        elif kind == "sized":
+            # Width from the image's own pixel width against the text column,
+            # capped at full width — what Amazon does. Everything else matches
+            # the old "inline" style so only the width changes. (#145)
+            value = IonStruct(
+                IS("$56"),
+                IonStruct(
+                    IS("$307"), IonDecimal(str(width_pct)), IS("$306"), IS("$314")
+                ),
+                IS("$65"),
+                IonStruct(IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")),
+                IS("$785"),
+                IonStruct(IS("$131"), 2, IS("$132"), 2),
+                IS("$546"),
+                IS("$377"),
+                IS("$42"),
+                IonStruct(IS("$307"), IonDecimal("1"), IS("$306"), IS("$310")),
                 IS("$580"),
                 IS("$320"),
                 IS("$173"),
@@ -3184,21 +3206,43 @@ class NativeKFXGenerator:
         #   both dims >= 600px           -> page
         #   both dims <= 300px, ~square  -> small
         #   else                         -> inline
+        # Text column width Amazon sizes against, in CSS pixels. Recovered by
+        # dividing each sub-100% width it emits by the image's pixel width:
+        # every one resolves to this, across seven books. (#145)
+        IMAGE_COLUMN_PX = 496.0
+
+        def _image_width_pct(w):
+            """CSS width for an image `w` pixels wide, as Amazon computes it.
+
+            `min(100, px / 496 * 100)`, which reproduces 1,411 of the 1,422
+            percent widths in decoded Previewer output. An image at least as
+            wide as the column fills it; a narrower one keeps its natural
+            proportion instead of being stretched.
+            """
+            return round(min(100.0, w / IMAGE_COLUMN_PX * 100.0), 3)
+
         def _classify(w, h):
+            """`small` for ornaments, `sized` for everything else.
+
+            The old third bucket gave every image between 300 and 600 pixels a
+            fixed 9.626% width — a value correct for the 1090x92 rule it was
+            copied from and wrong for the illustrations it was applied to. It
+            is gone: an image's width now comes from its own dimensions, which
+            subsumes the old `page` bucket as the capped case. (#145)
+            """
             if not (w and h):
-                return "inline"
-            if w >= 600 and h >= 600:
-                return "page"
+                return "sized"
             if w <= 300 and h <= 300:
                 ratio = max(w, h) / float(min(w, h))
                 if ratio <= 1.4:
                     return "small"
-            return "inline"
+            return "sized"
 
         any_image_chunk = any(
             isinstance(c, dict) and c.get("type") == "image" for c in all_chunks
         )
-        image_style_names = {"small": None, "inline": None, "page": None}
+        image_style_names = {"small": None}
+        width_style_names = {}
         resource_to_dims = {}
         if any_image_chunk:
             for base, dims in (self._image_dims or {}).items():
@@ -3207,10 +3251,14 @@ class NativeKFXGenerator:
                     resource_to_dims[resname] = dims
 
             kinds_used = set()
+            widths_used = set()
             for c in all_chunks:
                 if isinstance(c, dict) and c.get("type") == "image":
                     w, h = resource_to_dims.get(c.get("resource"), (None, None))
-                    kinds_used.add(_classify(w, h))
+                    kind = _classify(w, h)
+                    kinds_used.add(kind)
+                    if kind == "sized":
+                        widths_used.add(_image_width_pct(w) if w else 100.0)
 
             # Fixed order, not the set's. Iterating `kinds_used` directly made
             # the output non-reproducible: CPython randomizes string hashing
@@ -3219,22 +3267,32 @@ class NativeKFXGenerator:
             # every local symbol numbered after them shifted with it — $270's
             # symbol ids and $419's name list changed while the content was
             # byte-identical. (#96)
-            for kind in ("small", "inline", "page"):
-                if kind not in kinds_used:
-                    continue
-                name = {"small": "s_img_sm", "inline": "s_img", "page": "s_img_page"}[
-                    kind
-                ]
+            if "small" in kinds_used:
                 self.fragments.append(
-                    self.build_fragment_157_image(entity_name=name, kind=kind)
+                    self.build_fragment_157_image(entity_name="s_img_sm", kind="small")
+                )
+                extra_style_names.append("s_img_sm")
+                image_style_names["small"] = "s_img_sm"
+
+            # Sorted, so the allocation order is a property of the widths
+            # rather than of set iteration — the #96 reproducibility rule
+            # applies here too, and there are now many of these rather than
+            # three.
+            for idx, pct in enumerate(sorted(widths_used)):
+                name = f"s_img_w{idx}"
+                self.fragments.append(
+                    self.build_fragment_157_image(
+                        entity_name=name, kind="sized", width_pct=pct
+                    )
                 )
                 extra_style_names.append(name)
-                image_style_names[kind] = name
+                width_style_names[pct] = name
 
         def _image_style_for(resource_name):
             w, h = resource_to_dims.get(resource_name, (None, None))
-            kind = _classify(w, h)
-            return image_style_names.get(kind) or image_style_names.get("inline")
+            if _classify(w, h) == "small":
+                return image_style_names.get("small")
+            return width_style_names.get(_image_width_pct(w) if w else 100.0)
 
         from .inline_style import FLAG_BOLD, FLAG_ITALIC, FLAG_SUB, FLAG_SUPER
 

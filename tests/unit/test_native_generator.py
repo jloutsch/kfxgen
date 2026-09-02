@@ -22,6 +22,27 @@ from kfxgen.native_generator import NativeKFXGenerator  # noqa: E402
 from kfxgen.kfxlib_minimal.ion import IS, IonBLOB  # noqa: E402
 
 from tests._helpers import MINIMAL_JPEG  # noqa: E402
+
+
+def _png_bytes(w, h):
+    """A real PNG of the given size, so the generator reads true dimensions."""
+    import struct
+    import zlib
+
+    raw = b"".join(b"\x00" + b"\xff\xff\xff" * w for _ in range(h))
+
+    def chunk(tag, data):
+        c = tag + data
+        return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c))
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
 from tests._kfx_introspect import by_type, load_fragments, val  # noqa: E402
 
 
@@ -2592,3 +2613,103 @@ class TestLandmarkFollowsTheFirstListedChapter:
             "omitting a chapter from the nav also moves the start-of-content "
             "landmark, which is where the book opens"
         )
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
+class TestImageWidthFollowsIntrinsicSize:
+    """#145: every image that was not classified `page` or `small` was given
+    `$56: 9.626%` — a width under a tenth of the text column. 55% of corpus
+    images landed there, including 10 covers, and on a device they render as
+    slivers.
+
+    The number was not invented: it was copied from a jhowell reference file
+    for a 1090x92 horizontal rule, where a small fraction is right. It became
+    the default for every illustration between 300 and 600 pixels.
+
+    Amazon sizes each image from its own pixel width against a 496px text
+    column, capped at full width. Decoding Kindle Previewer output for seven
+    books, `min(100, px / 496 * 100)` reproduces **1,411 of 1,422** percent
+    widths (99.2%); the rest are 7 entries against a 480px reference, one
+    against 729, and 3 small images given 100% anyway.
+    """
+
+    REF = 496.0
+
+    def _widths(self, dims):
+        """{resource pixel width: emitted CSS width} for a book of images."""
+        gen = NativeKFXGenerator()
+        path = tempfile.mktemp(suffix=".kfx")
+        images, text = {}, []
+        for i, (w, h) in enumerate(dims):
+            name = f"i{i}.png"
+            images[name] = _png_bytes(w, h)
+            text.append(f"\x00IMG\x01{name}\x01\x00")
+        chapters = [{"title": "One", "text": "\n\n".join(text)}]
+        try:
+            gen.generate_full_book("T", "A", chapters, output_path=path, images=images)
+            frags = load_fragments(Path(path))
+            styles = {}
+            for f in by_type(frags, "$157"):
+                v = val(f)
+                wv = v.get(IS("$56")) if hasattr(v, "get") else None
+                if wv is not None and hasattr(wv, "get"):
+                    unit = "%" if str(wv.get(IS("$306"))) == "$314" else "em"
+                    styles[str(getattr(f, "fid", ""))] = (
+                        float(wv.get(IS("$307"))),
+                        unit,
+                    )
+            got = []
+
+            def walk(x):
+                if hasattr(x, "get") and hasattr(x, "keys"):
+                    if x.get(IS("$175")) is not None:
+                        got.append(styles.get(str(x.get(IS("$157")) or "")))
+                    if x.get(IS("$146")) is not None:
+                        walk(x.get(IS("$146")))
+                elif isinstance(x, list):
+                    for y in x:
+                        walk(y)
+
+            for f in by_type(frags, "$259"):
+                walk(val(f))
+            return got
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_a_half_column_image_gets_half_the_width(self):
+        # Height above 300 so this is unambiguously an illustration: at
+        # 248x300 it is square enough to be an ornament, and ornaments keep
+        # em sizing.
+        (got,) = self._widths([(248, 400)])
+        assert got == (50.0, "%")
+
+    def test_an_image_wider_than_the_column_is_capped(self):
+        (got,) = self._widths([(992, 400)])
+        assert got == (100.0, "%")
+
+    def test_a_mid_size_image_is_no_longer_a_sliver(self):
+        """The reported case: 512x206 rendered at 9.626%."""
+        (got,) = self._widths([(512, 206)])
+        assert got[1] == "%"
+        assert got[0] > 90.0, f"still tiny: {got}"
+
+    def test_a_cover_sized_image_nearly_fills_the_column(self):
+        """462x700 is under 600 wide, so it used to fall through to 9.626%."""
+        (got,) = self._widths([(462, 700)])
+        assert 90.0 < got[0] <= 100.0
+
+    def test_ornaments_keep_their_em_sizing(self):
+        """A small square dingbat is not an illustration; 3em is right and
+        scaling it to 45% of the column would be wrong."""
+        (got,) = self._widths([(222, 222)])
+        assert got == (3.0, "em")
+
+    def test_no_image_is_given_the_old_fixed_fraction(self):
+        got = self._widths([(512, 206), (462, 700), (1200, 900), (150, 150)])
+        assert not any(g[0] == 9.626 for g in got if g), got
+
+    def test_distinct_sizes_get_distinct_widths(self):
+        got = self._widths([(248, 400), (124, 400), (496, 400)])
+        assert [g[0] for g in got] == [50.0, 25.0, 100.0]
