@@ -2592,3 +2592,75 @@ class TestLandmarkFollowsTheFirstListedChapter:
             "omitting a chapter from the nav also moves the start-of-content "
             "landmark, which is where the book opens"
         )
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
+class TestImagesAreNotHeadings:
+    """`$790` (-kfx-heading-level) marks a navigable section start. kfxgen set
+    it on the first entry of a storyline whatever that entry was, so a chapter
+    opening with an image had its picture flagged as a heading (#120).
+
+    Amazon never does this: across 1,698 image entries decoded from Kindle
+    Previewer output, zero carry `$790` — including 1,084 storylines that
+    *begin* with an image. So the flag is not what makes such a section
+    navigable, and an image is not a heading.
+    """
+
+    def _entries(self, chapters, images=None):
+        gen = NativeKFXGenerator()
+        path = tempfile.mktemp(suffix=".kfx")
+        try:
+            gen.generate_full_book("T", "A", chapters, output_path=path, images=images)
+            frags = load_fragments(Path(path))
+            found = []
+
+            def walk(x):
+                if hasattr(x, "get") and hasattr(x, "keys"):
+                    if x.get(IS("$159")) is not None:
+                        found.append(
+                            {
+                                "kind": str(x.get(IS("$159"))),
+                                "image": x.get(IS("$175")) is not None,
+                                "heading": x.get(IS("$790")) is not None,
+                            }
+                        )
+                    if x.get(IS("$146")) is not None:
+                        walk(x.get(IS("$146")))
+                elif isinstance(x, list):
+                    for y in x:
+                        walk(y)
+
+            for f in by_type(frags, "$259"):
+                walk(val(f))
+            return found
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_no_image_entry_is_flagged_as_a_heading(self):
+        """A chapter whose first entry is an image — the case that produced
+        the flag, since it was applied to entry 0 whatever its type."""
+        # `_omit_title_heading` is what makes the image entry 0: without it
+        # the chapter title is emitted first and takes the flag, which is why
+        # the naive shape does not reproduce this.
+        chapters = [
+            {
+                "title": "One",
+                "text": "\x00IMG\x01p.jpg\x01\x00\n\nAfter the plate.",
+                "_omit_title_heading": True,
+            }
+        ]
+        entries = self._entries(chapters, images={"p.jpg": MINIMAL_JPEG})
+        assert any(e["image"] for e in entries), "no image entry was emitted"
+        flagged = [e for e in entries if e["image"] and e["heading"]]
+        assert not flagged, f"image entries flagged as headings: {flagged}"
+
+    def test_a_text_first_entry_still_marks_the_section(self):
+        """The control. Removing the flag from images must not remove it from
+        the heading entries that actually need it — a section with no `$790`
+        anywhere is a TOC entry that does nothing on tap."""
+        entries = self._entries([{"title": "One", "text": "Body text here."}])
+        assert any(e["heading"] for e in entries), (
+            "no entry marks the section start; TOC taps would be no-ops"
+        )

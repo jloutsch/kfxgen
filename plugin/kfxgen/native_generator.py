@@ -1581,8 +1581,15 @@ class NativeKFXGenerator:
                     entry[IS("$175")] = IS(resource_name)
                 # Image entries hold no text, so they carry no content
                 # reference — their slot in content_refs is None.
-                if i == 0:
-                    entry[IS("$790")] = 1
+                #
+                # No `$790` here, unlike the text branch below. It marks a
+                # navigable section start, and applying it to entry 0 whatever
+                # its type flagged a picture as a heading whenever a chapter
+                # opened with one. Amazon never does: across 1,698 image
+                # entries decoded from Kindle Previewer output, zero carry it —
+                # including 1,084 storylines that *begin* with an image, which
+                # is the counterexample that matters. The flag is not what
+                # makes such a section navigable. (#120)
                 children.append(entry)
                 continue
 
