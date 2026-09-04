@@ -29,10 +29,22 @@ No device's firmware is assumed. The Oasis was once recorded as terminal at
 5.18.2 and then updated to 5.18.2.1.1, so every one is read per run.
 
 The Voyage is also the counterexample to reading a device pass too broadly: it
-renders navigation correctly but has never produced a home-screen thumbnail
-from a kfxgen file, before or after the #39 fix that made one appear on the
-Paperwhite. Whether that is a device limitation or a third condition kfxgen
-does not emit has never been tested.
+renders navigation correctly and never produces a home-screen thumbnail from a
+sideloaded file, before or after the #39 fix that made one appear on the
+Paperwhite.
+
+That was asserted as a firmware limitation for five years on the strength of
+two negatives, both on our own output — which could not distinguish "the
+device cannot" from "kfxgen omits something it needs". Now controlled:
+
+    store-bought book        thumbnail          <- artwork Amazon delivers
+    sideloaded AZW3          no thumbnail
+    sideloaded MOBI          no thumbnail
+    sideloaded kfxgen KFX    no thumbnail
+
+No sideloaded file gets a thumbnail whatever its format or producer, so the
+store book's cover arrives from Amazon rather than from local extraction. The
+limitation is the device's, and `cover_thumbnail` cannot be checked there.
 """
 
 from __future__ import annotations
