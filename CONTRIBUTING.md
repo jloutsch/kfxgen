@@ -120,18 +120,27 @@ spans several revisions whose behaviour differs (the CHANGELOG thumbnail table
 has a Voyage failing where a Paperwhite succeeds), so generation and firmware
 both get written down (#109).
 
-| Device | Firmware | Status |
-|---|---|---|
-| Oasis, 10th generation (2019) | 5.18.2 | Terminal — no further updates |
-| Paperwhite, 11th generation (2021) | 5.19.2 | Current for that model |
+| Device | Firmware last seen |
+|---|---|
+| Paperwhite, 11th generation (2021) | 5.19.2 |
+| Oasis, 10th generation (2019) | 5.18.2.1.1 |
+| Voyage, 7th generation (2014) | 5.13.56 (3731990038) |
 
-Test both, and understand what each buys. The Oasis can never leave 5.18.2, so
-it stands for every reader who will never update — a permanent population, and
+**Read the firmware off the device every run** — Settings → Device Options →
+Device Info. The table records what was last seen, not what is guaranteed.
+This file used to list the Oasis as "terminal — no further updates" at 5.18.2,
+and the sign-off validator rejected any other value for it as a transcription
+error. The Oasis then shipped 5.18.2.1.1, at which point the tooling built to
+keep the record honest would have thrown out the honest record. Nothing about
+firmware is assumed now.
+
+Test both, and understand what each buys. The Oasis is an older model kept
+some way behind current firmware, so it stands in for readers who lag — and
 for a change that removes a fallback it is the *stricter* test (#126 dropped
 `$31` with no fallback, which would have degraded silently there). The
-Paperwhite is on current firmware and is the only one of the two that can
-observe render-side drift as Amazon moves. A pass on one is real evidence; it
-is not the same claim as a pass on both.
+Paperwhite tracks current firmware and is the one that can observe render-side
+drift as Amazon moves. A pass on one is real evidence; it is not the same
+claim as a pass on both.
 
 Run the checklist:
 
@@ -157,12 +166,12 @@ Put a trailer on the commit, one line per device, so `git log` can answer "was
 this change checked on hardware?":
 
 ```
-Device-verified: Oasis 10th gen (2019), firmware 5.18.2 — TOC taps, return links
+Device-verified: Oasis 10th gen (2019), firmware 5.18.2.1.1 — TOC taps, return links
 Device-verified: Paperwhite 11th gen (2021), firmware 5.19.2 — TOC taps, return links
 ```
 
-Firmware is a constant for the Oasis and a per-run value for the Paperwhite.
-List them over a range with:
+Firmware is read per run for both devices. List the trailers over a range
+with:
 
 ```bash
 python scripts/device_signoff.py --trailers v5.7.2..HEAD

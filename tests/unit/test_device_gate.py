@@ -91,18 +91,19 @@ def test_every_check_names_a_procedure_and_its_provenance():
 
 @pytest.mark.tier1
 @pytest.mark.unit
-def test_device_inventory_records_model_and_firmware():
+def test_device_inventory_records_model_and_generation():
     """#109's own argument: "a physical Kindle" is not a record. "Paperwhite"
     spans several revisions with known behavioural differences, so the model
-    generation and the firmware both have to be pinned."""
+    generation has to be recorded.
+
+    Firmware is deliberately *not* asserted here. It is a last-known value used
+    to pre-fill a template, not a fact the inventory can guarantee — the Oasis
+    was recorded as terminal and then updated anyway.
+    """
     assert DEVICES, "no devices recorded"
     for device in DEVICES.values():
+        assert device.model, f"{device.id} has no model recorded"
         assert device.generation, f"{device.id} has no generation recorded"
-        if device.terminal:
-            assert device.firmware, (
-                f"{device.id} is terminal, so its firmware is a constant and "
-                "must be pinned here"
-            )
 
 
 @pytest.mark.tier1
@@ -133,12 +134,22 @@ class TestSignoffValidation:
     def test_rejects_missing_firmware(self):
         assert validate_result(self._result(firmware=""))
 
-    def test_rejects_wrong_firmware_for_a_terminal_device(self):
-        """The Oasis cannot leave 5.18.2. A sign-off claiming otherwise is a
-        transcription error, and silently trusting it would date the evidence
-        wrongly — which is the whole point of recording firmware."""
-        assert validate_result(self._result(device="oasis-10", firmware="5.19.2"))
-        assert validate_result(self._result(device="oasis-10", firmware="5.18.2")) == []
+    def test_accepts_a_firmware_the_inventory_has_not_seen(self):
+        """The validator must never reject a true reading.
+
+        It used to. The Oasis was recorded as terminal at 5.18.2 and anything
+        else was rejected as a transcription error — then the Oasis updated to
+        5.18.2.1.1, and the tooling built to keep the record honest would have
+        thrown out the honest record. "No further updates" was a claim about
+        Amazon's plans, not a property of the device, and the validator had no
+        business enforcing it.
+
+        Firmware must be *present*. What it says is the device's business.
+        """
+        for fw in ("5.18.2", "5.18.2.1.1", "5.20.0"):
+            assert (
+                validate_result(self._result(device="oasis-10", firmware=fw)) == []
+            ), f"rejected a real firmware reading: {fw}"
 
     def test_rejects_unknown_outcome(self):
         assert validate_result(self._result(outcome="probably fine"))

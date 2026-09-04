@@ -17,13 +17,34 @@ Two things are recorded, because either alone is unreadable a year on:
   revisions whose behaviour differs (the CHANGELOG thumbnail table has a Voyage
   failing where a Paperwhite succeeds), so the generation decides the outcome.
 
-The pair of devices matters as much as either one. The Oasis is on terminal
-firmware and can never move, so it stands for every reader that will never
-update — a permanent population, and for some changes the *stricter* test
-(#126 removed `$31` with no fallback, which would have degraded silently
-there). The Paperwhite is on current firmware and is the only one of the two
-that can observe render-side drift as Amazon changes things. A pass on one is
-worth recording; it just is not the same claim as a pass on both.
+The spread of devices matters as much as any one of them. The Paperwhite
+tracks current firmware and is the one that can observe render-side drift as
+Amazon changes things. The Oasis sits some way behind it, and the Voyage a
+long way behind — on 5.13.x, a decade old — which makes them the stricter
+tests for anything that removes a fallback (#126 dropped `$31` with no
+fallback, which would have degraded silently on an older reader). A pass on
+one is worth recording; it is not the same claim as a pass on all three.
+
+No device's firmware is assumed. The Oasis was once recorded as terminal at
+5.18.2 and then updated to 5.18.2.1.1, so every one is read per run.
+
+The Voyage is also the counterexample to reading a device pass too broadly: it
+renders navigation correctly and never produces a home-screen thumbnail from a
+sideloaded file, before or after the #39 fix that made one appear on the
+Paperwhite.
+
+That was asserted as a firmware limitation for five years on the strength of
+two negatives, both on our own output — which could not distinguish "the
+device cannot" from "kfxgen omits something it needs". Now controlled:
+
+    store-bought book        thumbnail          <- artwork Amazon delivers
+    sideloaded AZW3          no thumbnail
+    sideloaded MOBI          no thumbnail
+    sideloaded kfxgen KFX    no thumbnail
+
+No sideloaded file gets a thumbnail whatever its format or producer, so the
+store book's cover arrives from Amazon rather than from local extraction. The
+limitation is the device's, and `cover_thumbnail` cannot be checked there.
 """
 
 from __future__ import annotations
@@ -42,22 +63,27 @@ VALID_OUTCOMES = ("pass", "fail")
 class Device:
     """One piece of tier-4 hardware.
 
-    `terminal` means the model no longer receives firmware updates, so its
-    firmware is a property of the device rather than of the run and is pinned
-    here. A non-terminal device's firmware can move under us, so it has to be
-    recorded per run.
+    `last_firmware` is the most recent build seen on this device. It exists to
+    pre-fill a template and to date old evidence — it is **not** a constraint.
+    Firmware is recorded per run for every device.
+
+    An earlier version had a `terminal` flag meaning "this model no longer
+    receives updates", and pinned such a device's firmware as a constant the
+    validator enforced. The Oasis was marked that way at 5.18.2 and then
+    shipped 5.18.2.1.1, at which point the tooling would have rejected the
+    true reading as a transcription error. "No further updates" was a claim
+    about Amazon's plans, not a property we can hold. (#109)
     """
 
     id: str
     model: str
     generation: str
-    firmware: str | None
-    terminal: bool
+    last_firmware: str | None
 
     @property
     def label(self) -> str:
-        fw = self.firmware or "<firmware recorded per run>"
-        return f"{self.model} {self.generation}, firmware {fw}"
+        fw = self.last_firmware or "<unknown>"
+        return f"{self.model} {self.generation}, firmware last seen {fw}"
 
 
 #: The repo's tier-4 hardware, pinned in #109 after the model generations were
@@ -67,15 +93,23 @@ DEVICES: dict[str, Device] = {
         id="oasis-10",
         model="Oasis",
         generation="10th gen (2019)",
-        firmware="5.18.2",
-        terminal=True,
+        last_firmware="5.18.2.1.1",
     ),
     "paperwhite-11": Device(
         id="paperwhite-11",
         model="Paperwhite",
         generation="11th gen (2021)",
-        firmware=None,
-        terminal=False,
+        last_firmware="5.19.2",
+    ),
+    # The generation here is derived from the product, not read off the
+    # device: the Voyage shipped in exactly one generation, so it does not
+    # carry the ambiguity that makes "Paperwhite" alone useless as a record.
+    # The firmware is a reading.
+    "voyage-7": Device(
+        id="voyage-7",
+        model="Voyage",
+        generation="7th gen (2014)",
+        last_firmware="5.13.56 (3731990038)",
     ),
 }
 
@@ -219,14 +253,12 @@ def validate_result(result: dict) -> list[str]:
     if device is None:
         problems.append(f"unknown device {device_id!r}")
 
+    # Present, not equal to anything. A validator that rejects a reading it
+    # did not expect turns the device into the thing that must agree with the
+    # record, which is backwards. (#109)
     firmware = (result.get("firmware") or "").strip()
     if not firmware:
         problems.append("firmware not recorded")
-    elif device is not None and device.terminal and firmware != device.firmware:
-        problems.append(
-            f"{device.id} is on terminal firmware {device.firmware}; "
-            f"sign-off claims {firmware!r}"
-        )
 
     outcome = result.get("outcome")
     if outcome not in VALID_OUTCOMES:

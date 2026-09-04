@@ -85,10 +85,10 @@ def _current_build() -> str:
 def template() -> dict:
     """A sign-off with every check and device present and nothing invented.
 
-    Pre-filled with the firmware of the terminal device, because that cannot
-    move and re-typing a constant is how transcription errors get in. The
-    Paperwhite's is left blank on purpose — it can change, so it has to be read
-    off the device each run.
+    Firmware is left blank for every device on purpose. An earlier version
+    pre-filled the Oasis's on the grounds that a terminal model's firmware is
+    a constant; it then updated, so nothing is assumed now. Read it off
+    Settings -> Device Options -> Device Info each run.
     """
     results = []
     for check in CHECKS:
@@ -97,7 +97,7 @@ def template() -> dict:
                 {
                     "check": check.id,
                     "device": device_id,
-                    "firmware": device.firmware or "",
+                    "firmware": "",
                     "outcome": "",
                     "note": "",
                 }
@@ -130,7 +130,7 @@ def summary_rows(signoff: dict) -> list[dict]:
                 {
                     "device": f"{device.model} {device.generation}",
                     "firmware": result.get("firmware", ""),
-                    "status": "terminal" if device.terminal else "current",
+                    "last_seen": device.last_firmware or "unknown",
                     "check": check.title,
                     "result": (result.get("outcome") or "—")
                     + (f" — {note}" if note else ""),
@@ -149,11 +149,11 @@ def summarise(path: Path) -> int:
     if signoff.get("book"):
         print(f"Book: {signoff['book']}")
     print()
-    print("| Device | Firmware | Status | Check | Result |")
-    print("|---|---|---|---|---|")
+    print("| Device | Firmware | Check | Result |")
+    print("|---|---|---|---|")
     for row in summary_rows(signoff):
         print(
-            f"| {row['device']} | {row['firmware']} | {row['status']} "
+            f"| {row['device']} | {row['firmware']} "
             f"| {row['check']} | {row['result']} |"
         )
 
@@ -227,7 +227,7 @@ def main() -> int:
         return trailers(args.trailers)
     if args.checklist:
         for device in DEVICES.values():
-            print(f"  device: {device.label}{' (terminal)' if device.terminal else ''}")
+            print(f"  device: {device.label}")
         print()
         from tests.device.checklist import procedure_text
 

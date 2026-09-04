@@ -1010,8 +1010,11 @@ class TestThumbnailFix:
     - Cover $164 must include $162 MIME type ('image/jpg' for JPEG covers)
     - ASIN must be 32-char alphanumeric (not the prior `ASIN_<10>` format)
 
-    The Voyage doesn't extract local thumbnails regardless (firmware
-    limitation), but Paperwhite/Oasis+ do honor these fields.
+    The Voyage extracts no thumbnail from any sideloaded file — AZW3,
+    MOBI or KFX alike — while a store-bought book shows its cover from
+    artwork Amazon delivers. So the limitation is the device's, not a
+    missing field in our output. Controlled on hardware; it had been an
+    untested inference from two negatives on our own files.
     """
 
     def _generate_with_cover(self):
