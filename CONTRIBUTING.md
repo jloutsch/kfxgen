@@ -122,8 +122,9 @@ both get written down (#109).
 
 | Device | Firmware last seen |
 |---|---|
-| Oasis, 10th generation (2019) | 5.18.2.1.1 |
 | Paperwhite, 11th generation (2021) | 5.19.2 |
+| Oasis, 10th generation (2019) | 5.18.2.1.1 |
+| Voyage, 7th generation (2014) | 5.13.56 (3731990038) |
 
 **Read the firmware off the device every run** — Settings → Device Options →
 Device Info. The table records what was last seen, not what is guaranteed.

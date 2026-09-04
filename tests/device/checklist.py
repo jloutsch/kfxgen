@@ -17,16 +17,22 @@ Two things are recorded, because either alone is unreadable a year on:
   revisions whose behaviour differs (the CHANGELOG thumbnail table has a Voyage
   failing where a Paperwhite succeeds), so the generation decides the outcome.
 
-The pair of devices matters as much as either one. The Oasis is an older
-model kept some way behind current firmware, so it stands in for readers who
-lag — and for some changes it is the *stricter* test (#126 removed `$31` with
-no fallback, which would have degraded silently there). The Paperwhite tracks
-current firmware and is the one that can observe render-side drift as Amazon
-changes things. A pass on one is worth recording; it is not the same claim as
-a pass on both.
+The spread of devices matters as much as any one of them. The Paperwhite
+tracks current firmware and is the one that can observe render-side drift as
+Amazon changes things. The Oasis sits some way behind it, and the Voyage a
+long way behind — on 5.13.x, a decade old — which makes them the stricter
+tests for anything that removes a fallback (#126 dropped `$31` with no
+fallback, which would have degraded silently on an older reader). A pass on
+one is worth recording; it is not the same claim as a pass on all three.
 
-Neither device's firmware is assumed. The Oasis was once recorded as terminal
-at 5.18.2 and then updated to 5.18.2.1.1, so both are read per run.
+No device's firmware is assumed. The Oasis was once recorded as terminal at
+5.18.2 and then updated to 5.18.2.1.1, so every one is read per run.
+
+The Voyage is also the counterexample to reading a device pass too broadly: it
+renders navigation correctly but has never produced a home-screen thumbnail
+from a kfxgen file, before or after the #39 fix that made one appear on the
+Paperwhite. Whether that is a device limitation or a third condition kfxgen
+does not emit has never been tested.
 """
 
 from __future__ import annotations
@@ -82,6 +88,16 @@ DEVICES: dict[str, Device] = {
         model="Paperwhite",
         generation="11th gen (2021)",
         last_firmware="5.19.2",
+    ),
+    # The generation here is derived from the product, not read off the
+    # device: the Voyage shipped in exactly one generation, so it does not
+    # carry the ambiguity that makes "Paperwhite" alone useless as a record.
+    # The firmware is a reading.
+    "voyage-7": Device(
+        id="voyage-7",
+        model="Voyage",
+        generation="7th gen (2014)",
+        last_firmware="5.13.56 (3731990038)",
     ),
 }
 

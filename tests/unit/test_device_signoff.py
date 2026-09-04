@@ -57,11 +57,10 @@ def _complete_signoff() -> dict:
     data["book"] = "pg64317 (corpus)"
     for result in data["results"]:
         result["outcome"] = "pass"
-        # Both, explicitly: the template no longer pre-fills any firmware.
-        result["firmware"] = {
-            "oasis-10": "5.18.2.1.1",
-            "paperwhite-11": "5.19.2",
-        }[result["device"]]
+        # Derived from the inventory rather than hardcoded per device, so
+        # adding hardware does not break this helper. The template no longer
+        # pre-fills any firmware, so the value has to come from somewhere.
+        result["firmware"] = DEVICES[result["device"]].last_firmware or "0.0"
     return data
 
 
