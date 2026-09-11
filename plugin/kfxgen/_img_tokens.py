@@ -10,7 +10,12 @@ can't live in converter.py because converter imports native_generator — the
 reverse import would be circular — so the canonical definition lives here and
 both import it.
 
-Format: ``\\x00IMG\\x01<href>\\x01<alt-with-x02-spaces>\\x00``
+Format: ``\\x00IMG\\x01<href>\\x01<alt-with-x02-spaces>[\\x01<size>]\\x00``
+
+The optional third field is the size the markup asked for — ``w=98%``,
+``w=200px``, ``h=50%`` — so the generator can honour it the way Amazon's
+converter does instead of sizing every image from its pixel width. A
+two-field token still matches; the group is simply None.
 """
 
 import re
@@ -21,7 +26,9 @@ IMG_TOKEN_DELIM = "\x00"
 IMG_TOKEN_FIELD = "\x01"
 IMG_TOKEN_SPACE = "\x02"
 
-#: Matches one whole IMG token, capturing ``(href, alt)``. converter uses it
+#: Matches one whole IMG token, capturing ``(href, alt, size)``. converter uses it
 #: to strip tokens (the capture groups are ignored by ``.sub``);
 #: native_generator uses the groups to rebuild image chunks.
-IMG_TOKEN_RE = re.compile(r"\x00IMG\x01([^\x01]*)\x01([^\x00]*)\x00")
+IMG_TOKEN_RE = re.compile(
+    r"\x00IMG\x01([^\x01]*)\x01([^\x00\x01]*)(?:\x01([^\x00]*))?\x00"
+)

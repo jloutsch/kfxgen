@@ -107,6 +107,11 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # has no rule of its own. Read for inline runs (#52); the
                     # block path ignores it.
                     "vertical-align": st.get("vertical-align"),
+                    # An <img>'s own size. Stylizer folds the width/height
+                    # attributes into the element's CSS (and strips them),
+                    # so this is the one place both spellings meet.
+                    "width": st.get("width"),
+                    "height": st.get("height"),
                 }
             except Exception:
                 return None
@@ -156,19 +161,47 @@ def _local_tag(tag):
     return tag.rsplit("}", 1)[-1]
 
 
-def _make_img_token(href, alt):
+def _make_img_token(href, alt, size=None):
     """Encode an <img> reference as a placeholder token string.
 
     Spaces in alt text are escaped to a control char so str.split() doesn't
-    fragment the token during whitespace normalization.
+    fragment the token during whitespace normalization. `size` is the hint
+    from `_img_size_hint`, carried as an optional third field.
     """
     escaped_alt = (
         (alt or "").replace(_IMG_TOKEN_SPACE, "").replace(" ", _IMG_TOKEN_SPACE)
     )
+    size_field = f"{_IMG_TOKEN_FIELD}{size}" if size else ""
     return (
         f"{_IMG_TOKEN_DELIM}IMG{_IMG_TOKEN_FIELD}{href}"
-        f"{_IMG_TOKEN_FIELD}{escaped_alt}{_IMG_TOKEN_DELIM}"
+        f"{_IMG_TOKEN_FIELD}{escaped_alt}{size_field}{_IMG_TOKEN_DELIM}"
     )
+
+
+#: A CSS length or percentage, as the size hint accepts it. A bare number is
+#: an HTML attribute value in pixels.
+_IMG_SIZE_RE = re.compile(r"^\d+(?:\.\d+)?(?:%|px|em|pt)?$")
+
+
+def _img_size_hint(elem, style_resolver=None):
+    """The size the markup asks for, as ``w=98%`` / ``w=200px`` / ``h=50%``,
+    or None when the image is left at its natural size.
+
+    Checked against Kindle Previewer 3.106 on five test books: an explicit
+    width becomes the image's width, a height only counts when no width is
+    given, and `max-width` / `max-height` are ignored altogether. Read from
+    the computed CSS when a resolver is available (inside Calibre the
+    Stylizer has already folded the attributes in), else from the attributes.
+    """
+    css = (style_resolver(elem) if style_resolver is not None else None) or {}
+    for axis in ("width", "height"):
+        raw = css.get(axis)
+        if raw is None or raw == "":
+            raw = elem.get(axis)
+        raw = str(raw or "").strip()
+        if raw and raw != "auto" and _IMG_SIZE_RE.match(raw):
+            return f"{axis[0]}={raw}"
+    return None
 
 
 _URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:")
@@ -291,7 +324,8 @@ def _walk_inline(
                 parts.append(make_anchor_mark(aid))
             href = child.get("src", "") or ""
             alt = child.get("alt", "") or ""
-            parts.append((_make_img_token(href, alt), frozenset()))
+            size = _img_size_hint(child, style_resolver)
+            parts.append((_make_img_token(href, alt, size), frozenset()))
         else:
             parts.extend(
                 _walk_inline(
@@ -504,7 +538,9 @@ def extract_blocks_from_html(
         blocks.append(
             {
                 "text": _make_img_token(
-                    elem.get("src", "") or "", elem.get("alt", "") or ""
+                    elem.get("src", "") or "",
+                    elem.get("alt", "") or "",
+                    _img_size_hint(elem, style_resolver),
                 ),
                 "spans": [],
                 "block_style": None,
