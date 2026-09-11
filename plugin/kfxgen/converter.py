@@ -224,6 +224,29 @@ def _img_size_hint(elem, style_resolver=None):
     return None
 
 
+#: Size hint for an image wrapped in <svg>. Amazon lays those out as a block
+#: filling the page; a height of 100% is the same look in the reading flow.
+SVG_IMAGE_SIZE = "h=100%"
+
+_XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
+
+
+def _svg_image_refs(svg):
+    """(href, alt) for every <image> an <svg> element draws.
+
+    Publishers wrap full-page art in SVG — calibre's own cover page does —
+    and Amazon renders it; here the page used to come through empty.
+    """
+    refs = []
+    for node in svg.iter():
+        if _local_tag(node.tag) != "image":
+            continue
+        href = node.get(_XLINK_HREF) or node.get("href") or ""
+        if href:
+            refs.append((href, ""))
+    return refs
+
+
 _URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:")
 
 
@@ -346,6 +369,12 @@ def _walk_inline(
             alt = child.get("alt", "") or ""
             size = _img_size_hint(child, style_resolver)
             parts.append((_make_img_token(href, alt, size), frozenset()))
+        elif clocal == "svg":
+            for aid in _own_anchor_ids(child):
+                parts.append(make_anchor_mark(aid))
+            for href, alt in _svg_image_refs(child):
+                token = _make_img_token(href, alt, SVG_IMAGE_SIZE)
+                parts.append((token, frozenset()))
         else:
             parts.extend(
                 _walk_inline(
@@ -550,24 +579,29 @@ def extract_blocks_from_html(
     blocks = []
     pending_ids = []  # anchors awaiting the next leaf block (containers, standalone <a>)
 
-    def _emit_image_block(elem):
+    def _emit_image_block(elem, href=None, alt=None, size=None):
         ids = pending_ids[:]
         pending_ids.clear()
         ids.extend(_own_anchor_ids(elem))
         block_ids = _dedupe_keep_order(ids)
+        if href is None:
+            href = elem.get("src", "") or ""
+            alt = elem.get("alt", "") or ""
+            size = _img_size_hint(elem, style_resolver)
         blocks.append(
             {
-                "text": _make_img_token(
-                    elem.get("src", "") or "",
-                    elem.get("alt", "") or "",
-                    _img_size_hint(elem, style_resolver),
-                ),
+                "text": _make_img_token(href, alt, size),
                 "spans": [],
                 "block_style": None,
                 "anchor_ids": block_ids,
                 "anchor_offsets": dict.fromkeys(block_ids, 0),
             }
         )
+
+    def _emit_svg_blocks(elem):
+        """Each <image> an <svg> draws becomes an image block of its own."""
+        for href, alt in _svg_image_refs(elem):
+            _emit_image_block(elem, href, alt, SVG_IMAGE_SIZE)
 
     def _discard_listing(elem):
         """Drop a contents listing's text, keeping the two things in it that
@@ -588,6 +622,9 @@ def extract_blocks_from_html(
             return
         if _local_tag(elem.tag) == "img":
             _emit_image_block(elem)
+            return
+        if _local_tag(elem.tag) == "svg":
+            _emit_svg_blocks(elem)
             return
         pending_ids.extend(_own_anchor_ids(elem))
         for child in elem:
@@ -648,6 +685,9 @@ def extract_blocks_from_html(
         if _local_tag(elem.tag) == "img":
             _emit_image_block(elem)
             return
+        if _local_tag(elem.tag) == "svg":
+            _emit_svg_blocks(elem)
+            return
 
         pending_ids.extend(_own_anchor_ids(elem))
 
@@ -698,7 +738,7 @@ def extract_blocks_from_html(
         if elem.text:
             inline_parts.append((elem.text, frozenset()))
         for child in elem:
-            if child.tag in block_tags or _local_tag(child.tag) == "img":
+            if child.tag in block_tags or _local_tag(child.tag) in ("img", "svg"):
                 _flush_inline()
                 _walk(child)
             elif not _is_non_rendered(child):
