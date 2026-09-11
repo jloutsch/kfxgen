@@ -1733,6 +1733,7 @@ class NativeKFXGenerator:
         section_name=None,
         field_155_value=None,
         is_first_section=False,
+        cover_dims=None,
     ):
         """
         Builds Fragment $260 (Section)
@@ -1749,6 +1750,9 @@ class NativeKFXGenerator:
                          Auto-generated if None.
             field_155_value: Optional integer for Field $155 (defaults to 1800)
             is_first_section: Unused (kept for API compatibility)
+            cover_dims: (width, height) of the cover image when this section
+                        is the synthetic cover chapter — it is then laid out
+                        as a block of that size, the way Amazon does
 
         Returns:
             (YJFragment, section_name): Fragment and its fid/name for use in $538
@@ -1767,14 +1771,38 @@ class NativeKFXGenerator:
         # The $790: 1 flag on heading $259 entries handles chapter breaks.
         # Explicit $156: $326 page-break causes TOC navigation to land one
         # page late (preview shows correct page but tap goes to next page).
-        entry = IonStruct(
-            IS("$155"),
-            field_155_value,
-            IS("$176"),
-            IS(storyline_name),
-            IS("$159"),
-            IS("$269"),
-        )
+        if cover_dims and all(cover_dims):
+            # The cover is the one section Amazon lays out as a block with the
+            # image's own dimensions — $66/$67 the pixel size, $156: $326
+            # page-break, $140: $320 — and the device scales that block to the
+            # screen, so the cover fills the page instead of sitting inside
+            # the text margins. Seen on every Kindle Previewer 3.106 build
+            # whose first spine page is the cover image.
+            entry = IonStruct(
+                IS("$155"),
+                field_155_value,
+                IS("$176"),
+                IS(storyline_name),
+                IS("$66"),
+                int(cover_dims[0]),
+                IS("$67"),
+                int(cover_dims[1]),
+                IS("$156"),
+                IS("$326"),
+                IS("$140"),
+                IS("$320"),
+                IS("$159"),
+                IS("$270"),
+            )
+        else:
+            entry = IonStruct(
+                IS("$155"),
+                field_155_value,
+                IS("$176"),
+                IS(storyline_name),
+                IS("$159"),
+                IS("$269"),
+            )
 
         value = IonStruct(IS("$174"), IS(section_name), IS("$141"), [entry])
 
@@ -2363,6 +2391,7 @@ class NativeKFXGenerator:
                 section_name=sec_name,
                 field_155_value=section_positions[i],
                 is_first_section=(i == 0),
+                cover_dims=cover_dims if chapters[i].get("_is_cover") else None,
             )
             section_names.append(sec_name)
             self.fragments.append(frag_260)
