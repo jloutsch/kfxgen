@@ -126,6 +126,29 @@ def _has_real_text(text):
     return bool(_IMG_TOKEN_RE.sub("", text or "").strip())
 
 
+def _img_basename(href):
+    """Basename of an image href — the key the generator matches resources by."""
+    return (href or "").split("#", 1)[0].rsplit("/", 1)[-1]
+
+
+def _page_shows_something(text, cover_href=None):
+    """True when a page puts something in front of the reader: real text, or
+    an image other than the cover.
+
+    Image-only pages the TOC did not claim used to be discarded wholesale, on
+    the strength of the one case that is right to drop — the EPUB's own
+    cover.xhtml, whose picture the cover chapter already shows (#32). That
+    rule took every page of a comic or picture book past the last TOC entry
+    with it. The cover is the exception; a page is content.
+    """
+    if _has_real_text(text):
+        return True
+    cover = _img_basename(cover_href) if cover_href else None
+    return any(
+        _img_basename(m.group(1)) != cover for m in _IMG_TOKEN_RE.finditer(text or "")
+    )
+
+
 def _local_tag(tag):
     """Strip the lxml namespace prefix from a tag, returning the local name."""
     if not isinstance(tag, str):
@@ -908,10 +931,15 @@ def _leading_chapter_title(head_blocks):
     return LEADING_TITLE_FALLBACK
 
 
-def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
+def _assemble_chapters_by_coordinate(
+    spine_items_ordered, toc_entries, log, cover_href=None
+):
     """Resolve each TOC entry to a (spine_index, block_index) coordinate and
     slice content between consecutive coordinates into chapters. Returns None
-    when no TOC entry resolves to a spine item (caller falls back)."""
+    when no TOC entry resolves to a spine item (caller falls back).
+
+    `cover_href` names the cover image, so that a page showing nothing but
+    the cover — which the cover chapter already shows — is not repeated."""
     spine_blocks = [s.get("blocks") or [] for s in spine_items_ordered]
     spine_anchor = [_anchor_block_index(b) for b in spine_blocks]
     spine_order = [_normalize_href(s["href"]) for s in spine_items_ordered]
@@ -997,7 +1025,11 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
 
     def _mk(title, block_slice):
         text = "\n\n".join(b["text"] for b in block_slice if b.get("text"))
-        if not text.strip():
+        # A slice showing nothing but the cover — the EPUB's own cover page,
+        # listed in the TOC or not — is already shown by the cover chapter
+        # (#32). As a chapter of its own it would be a blank page: the
+        # generator resolves the cover image only through that chapter.
+        if not _page_shows_something(text, cover_href):
             return None
         return {"title": title, "text": text, "blocks": list(block_slice)}
 
@@ -1015,8 +1047,8 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
     if first_fi > 0 and not head_has_toc_anchor:
         head = flat[0:first_fi]
         head_text = "\n\n".join(b["text"] for b in head if b.get("text"))
-        if not _has_real_text(head_text):
-            log.info("  Skipping image-only head before first TOC anchor")
+        if not _page_shows_something(head_text, cover_href):
+            log.info("  Skipping cover-only head before first TOC anchor")
         else:
             ch = _flag_nav(_mk(_leading_chapter_title(head), head), 0, first_fi)
             if ch:
@@ -1055,8 +1087,8 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
     # above so they are not available to reassign here (intentional).
     for si in range(last_si + 1, len(spine_items_ordered)):
         item = spine_items_ordered[si]
-        if not _has_real_text(item["text"]):
-            log.info(f"  Skipping image-only orphan {_normalize_href(item['href'])}")
+        if not _page_shows_something(item["text"], cover_href):
+            log.info(f"  Skipping cover-only orphan {_normalize_href(item['href'])}")
             continue
         norm = _normalize_href(item["href"])
         stem = norm.rsplit(".", 1)[0] if "." in norm else norm
@@ -1079,7 +1111,7 @@ def _assemble_chapters_by_coordinate(spine_items_ordered, toc_entries, log):
     return chapters
 
 
-def extract_chapters_from_oeb(oeb_book, log, metadata=None):
+def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
     """
     Extract structured chapters from OEB book by mapping TOC to spine items.
 
@@ -1090,6 +1122,7 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
         oeb_book: Calibre OEB book object
         log: Calibre logger
         metadata: Optional dict with 'title' and 'author' for title page replacement
+        cover_href: Manifest href of the cover image, when one was found
 
     Returns:
         list: List of chapter dicts with 'title' and 'text' keys
@@ -1161,7 +1194,7 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None):
 
     if toc_entries:
         chapters = _assemble_chapters_by_coordinate(
-            spine_items_ordered, toc_entries, log
+            spine_items_ordered, toc_entries, log, cover_href=cover_href
         )
         if chapters:
             log.info(f"Assembled {len(chapters)} chapters from TOC coordinates")
@@ -1717,7 +1750,9 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
 
     # Extract structured chapters
     log.info("Extracting chapters...")
-    chapters = extract_chapters_from_oeb(oeb_book, log, metadata=metadata)
+    chapters = extract_chapters_from_oeb(
+        oeb_book, log, metadata=metadata, cover_href=cover_href
+    )
     total_chars = sum(len(ch["text"]) for ch in chapters)
     log.info(f"  Chapters: {len(chapters)}")
     log.info(f"  Total content: {total_chars:,} characters")

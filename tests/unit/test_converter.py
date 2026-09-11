@@ -317,7 +317,9 @@ class TestImageOnlyOrphanSkipped:
         ]
         oeb = _OEBBook(spine=spine, toc=toc)
 
-        chapters = extract_chapters_from_oeb(oeb, _silent_log())
+        chapters = extract_chapters_from_oeb(
+            oeb, _silent_log(), cover_href="images/cover.jpg"
+        )
         titles = [c["title"] for c in chapters]
         assert titles == ["Chapter 1", "Chapter 2"]
 
@@ -882,8 +884,11 @@ class TestCoordinateAssemblyEdges:
             )
         ]
         toc = [{"title": "I", "href": "book.xhtml#c1"}]
-        chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
-        # Only chapter I; no image-only "Front Matter" leading chapter.
+        chapters = _assemble_chapters_by_coordinate(
+            spine, toc, _silent_log(), cover_href="images/cover.jpg"
+        )
+        # Only chapter I: the head showed nothing but the cover, which the
+        # cover chapter already shows. Any other image would make it a page.
         assert [c["title"] for c in chapters] == ["I"]
 
     def test_head_leading_with_an_image_is_not_titled_with_the_image(self):
