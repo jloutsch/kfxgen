@@ -835,6 +835,21 @@ def _anchor_block_index(blocks):
     return out
 
 
+#: calibre stamps the contents page it generates for MOBI/AZW3 output with
+#: this body id. It is navigation, not the publisher's contents — KFX carries
+#: its own nav pane — and left in, it was rebuilt as the contents page: for a
+#: comic that is every page, "Page 1" to "Page 93", printed at the end.
+CALIBRE_INLINE_TOC_ID = "calibre_generated_inline_toc"
+
+
+def _is_calibre_inline_toc(element):
+    """True for a spine document that is calibre's generated inline TOC."""
+    body = element.find(".//{http://www.w3.org/1999/xhtml}body")
+    if body is None:
+        body = element.find(".//body")
+    return body is not None and body.get("id") == CALIBRE_INLINE_TOC_ID
+
+
 def _find_manifest_item(oeb_book, href):
     """Return a manifest item whose href matches (exactly or by basename)."""
     if not hasattr(oeb_book, "manifest") or oeb_book.manifest is None:
@@ -1145,6 +1160,10 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
         # call extract_text_from_html.
         try:
             if not hasattr(item, "data") or item.data is None:
+                continue
+            if _is_calibre_inline_toc(item.data):
+                href_for_log = getattr(item, "href", "") or "<unknown>"
+                log.info(f"  Skipping calibre's generated inline TOC ({href_for_log})")
                 continue
             resolver = _build_style_resolver(oeb_book, item, log)
             nav_listing_at = []
