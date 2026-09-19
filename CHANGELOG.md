@@ -1,5 +1,56 @@
 # Changelog
 
+## 5.8.1 — Two more ways a page lost its picture
+
+Both fixes here are 5.8.0's defect turning up in places that release did not
+reach. A patch rather than a minor: nothing new is emitted, and the feature
+list is unchanged — these are books that were losing content and now are not.
+
+**Fixed (#178):** the pictures printed on a title page went with the text that
+replaced it. `_replace_title_page` rewrites a title page's body to the book's
+title and author, and a half-title's to the title alone, because a TOC label
+like "Title Page" is structural metadata and the book's own title states it
+better. That is a statement about the text and none at all about what the
+publisher printed alongside it — the whole scanned page in a page-scan book,
+the vignette or series device above the title in an ordinary illustrated one.
+
+**181 of 226 books, 314 images.** #117 had already made this call for the
+contents page, and the generator reads `preserved_images` outside its
+`toc_links` branch precisely so a page with no links can use it, so nothing in
+the generator needed to change. The title-page path had simply never asked.
+
+20 of those 314 are on chapters labelled `Cover`, which matches neither title
+set and is not explained by this defect. Tracked as #182 rather than folded in.
+
+**Fixed (#177):** a page stored as GIF was dropped before the generator saw it.
+`extract_images_from_oeb` accepted JPEG and PNG and skipped the rest with a
+warning — right for a stray ornament, and catastrophic for a book whose every
+page is one. Four books in the same library convert with their text intact and
+**no pictures at all**, 225 images skipped each.
+
+A GIF is now re-encoded as PNG. Not passed through: GIF has a symbol (`$286`,
+named in the generator's own format comment and listed among upstream kfxlib's
+fixed-layout formats), but nothing emits it and no device has been asked
+whether it would render one, so emitting it would be shipping a guess. PNG is
+lossless exactly as GIF is, so the re-encode discards nothing the original
+still had, and PNG is a format this project has watched render on hardware. A
+scanned page is larger as PNG; larger is not the expensive direction when the
+alternative is blank. Whether `$286` also works stays open as a size
+optimisation rather than a prerequisite.
+
+The conversion is Calibre's `scale_image` at the image's own dimensions, so
+only the encoding changes and downscaling remains `optimize_image`'s decision.
+Outside Calibre — tests, CI — it declines and the old skip stands.
+
+### Documentation
+
+`CONTRIBUTING.md` says how to describe a book without naming it (#180). Most
+defects here are shape defects, so the shape is the reproducer and the title
+adds nothing; what it does add is an author and a work sitting beside a
+description of someone's private library, in a repository that is public and
+permanently indexed. `research/describe_epub.py` already prints exactly the
+former and deliberately none of the latter.
+
 ## 5.8.0 — Books made of pictures
 
 Every defect in this release is the same defect wearing a different hat: a page whose
