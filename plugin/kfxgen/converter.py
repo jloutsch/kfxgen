@@ -17,7 +17,7 @@ from ._img_tokens import (
     IMG_TOKEN_RE as _IMG_TOKEN_RE,
     IMG_TOKEN_SPACE as _IMG_TOKEN_SPACE,
 )
-from .image_optimize import optimize_images
+from .image_optimize import GIF_SIGNATURES, gif_to_png, optimize_images
 from .inline_style import (
     FLAG_BOLD,
     FLAG_ITALIC,
@@ -1761,6 +1761,7 @@ def extract_images_from_oeb(oeb_book, log, exclude_hrefs=None):
     """
     images = {}
     skipped_unsupported = 0
+    converted_gifs = 0
     excluded = {_normalize_href(h) for h in (exclude_hrefs or [])}
     try:
         for item in oeb_book.manifest:
@@ -1777,17 +1778,40 @@ def extract_images_from_oeb(oeb_book, log, exclude_hrefs=None):
             # generator silently drops unrecognized magic bytes; doing the
             # check here lets us log the skip with the offending href.
             if data[:3] != b"\xff\xd8\xff" and data[:4] != b"\x89PNG":
-                skipped_unsupported += 1
-                log.warn(
-                    f"  Skipping image {href!r}: unsupported format "
-                    f"(magic bytes {bytes(data[:4]).hex()}); only JPEG and PNG "
-                    f"are emitted as KFX resources"
+                # A GIF is re-encoded rather than dropped. Four books in a
+                # 226-EPUB library store every page as one and reach the reader
+                # with no pictures at all (#177) — the text arrives, the scans
+                # do not. GIF has a symbol (`$286`, in the generator's own
+                # format comment) but nothing emits it and no device has been
+                # asked whether it would render; PNG is lossless like GIF, so
+                # nothing is lost in the change, and it is a format this
+                # project has watched render on hardware.
+                converted = (
+                    gif_to_png(bytes(data), log)
+                    if bytes(data[:6]) in GIF_SIGNATURES
+                    else None
                 )
+                if converted is None:
+                    skipped_unsupported += 1
+                    log.warn(
+                        f"  Skipping image {href!r}: unsupported format "
+                        f"(magic bytes {bytes(data[:4]).hex()}); only JPEG and PNG "
+                        f"are emitted as KFX resources"
+                    )
+                    continue
+                log.info(
+                    f"  Converted GIF to PNG: {href!r} "
+                    f"({len(data):,} -> {len(converted):,} bytes)"
+                )
+                converted_gifs += 1
+                images[href] = converted
                 continue
             images[href] = bytes(data)
     except Exception as e:
         log.warn(f"Error walking manifest for images: {e}")
     summary = f"  Extracted {len(images)} body image(s) from manifest"
+    if converted_gifs:
+        summary += f" ({converted_gifs} GIF converted to PNG)"
     if skipped_unsupported:
         summary += f" ({skipped_unsupported} skipped — unsupported format)"
     log.info(summary)
