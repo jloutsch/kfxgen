@@ -1,0 +1,6 @@
+{
+  "upstream_pin": "20260827",
+  "ran_on": "2026-09-19",
+  "tests_passed": 67,
+  "suite": "tests/integration/test_kfxlib_diff.py"
+}
