@@ -165,3 +165,45 @@ class TestSizedImageStyles:
         assert _parse_size_hint("w=0", 496) is None
         assert _parse_size_hint(None, 496) is None
         assert _parse_size_hint("w=12pt", 496) == ("w", round(16 / 496 * 100, 3))
+
+
+# ── the token's own delimiters, in values the book supplies ─────────────────
+
+_NUL, _FIELD, _SPACE = "\x00", "\x01", "\x02"
+
+
+class TestTokenFieldInjection:
+    """href and alt are written between the token's delimiters, and every
+    field of an EPUB is attacker-controlled (SECURITY.md). Adding the size
+    field made a 0x01 in either value open a field that is not there: the
+    book chose the image's width and lost part of its own alt text."""
+
+    def test_field_separator_in_alt_cannot_open_a_size(self):
+        token = _conv._make_img_token("p.jpg", f"photo{_FIELD}w=100%")
+        href, alt, size = IMG_TOKEN_RE.fullmatch(token).groups()
+        assert (href, alt) == ("p.jpg", "photow=100%")
+        assert size is None
+
+    def test_field_separator_in_href_cannot_shift_the_fields(self):
+        token = _conv._make_img_token(f"p.jpg{_FIELD}w=100%", "alt")
+        href, alt, size = IMG_TOKEN_RE.fullmatch(token).groups()
+        assert (href, alt, size) == ("p.jpgw=100%", "alt", None)
+
+    def test_a_nul_cannot_end_the_token_early(self):
+        # The #133 shape: the tail escapes the token and reaches the reader
+        # as raw control bytes.
+        token = _conv._make_img_token("p.jpg", f"photo{_NUL}tail")
+        assert IMG_TOKEN_RE.sub("", token) == ""
+        assert IMG_TOKEN_RE.fullmatch(token).group(2) == "phototail"
+
+    def test_the_space_escape_is_still_stripped_from_input(self):
+        token = _conv._make_img_token("p.jpg", f"a{_SPACE}b c")
+        assert IMG_TOKEN_RE.fullmatch(token).group(2) == f"ab{_SPACE}c"
+
+    def test_ordinary_alt_and_a_real_size_are_untouched(self):
+        token = _conv._make_img_token("images/p.jpg", "a photo", "h=98%")
+        assert IMG_TOKEN_RE.fullmatch(token).groups() == (
+            "images/p.jpg",
+            f"a{_SPACE}photo",
+            "h=98%",
+        )

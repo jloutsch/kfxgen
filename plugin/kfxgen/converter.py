@@ -161,6 +161,27 @@ def _local_tag(tag):
     return tag.rsplit("}", 1)[-1]
 
 
+#: The token's own delimiters, stripped from any value taken out of the book
+#: before it is placed between them.
+_IMG_TOKEN_CONTROLS = (_IMG_TOKEN_DELIM, _IMG_TOKEN_FIELD, _IMG_TOKEN_SPACE)
+
+
+def _strip_token_controls(value):
+    """Remove the token's delimiters from a value the book supplies.
+
+    Every field of an EPUB is attacker-controlled (SECURITY.md), and href and
+    alt are both written between delimiters. A `0x01` in either one opens a
+    field that is not there: with the size field added, alt text of
+    `photo<0x01>w=100%` parses as alt `photo` plus a size of 100% — an
+    image width chosen by the book, and alt text silently truncated. A
+    NUL ends the token early instead, leaving the remainder of the value
+    in the text stream as raw control bytes, which is the #133 failure.
+    """
+    for ch in _IMG_TOKEN_CONTROLS:
+        value = value.replace(ch, "")
+    return value
+
+
 def _make_img_token(href, alt, size=None):
     """Encode an <img> reference as a placeholder token string.
 
@@ -168,12 +189,11 @@ def _make_img_token(href, alt, size=None):
     fragment the token during whitespace normalization. `size` is the hint
     from `_img_size_hint`, carried as an optional third field.
     """
-    escaped_alt = (
-        (alt or "").replace(_IMG_TOKEN_SPACE, "").replace(" ", _IMG_TOKEN_SPACE)
-    )
+    safe_href = _strip_token_controls(href or "")
+    escaped_alt = _strip_token_controls(alt or "").replace(" ", _IMG_TOKEN_SPACE)
     size_field = f"{_IMG_TOKEN_FIELD}{size}" if size else ""
     return (
-        f"{_IMG_TOKEN_DELIM}IMG{_IMG_TOKEN_FIELD}{href}"
+        f"{_IMG_TOKEN_DELIM}IMG{_IMG_TOKEN_FIELD}{safe_href}"
         f"{_IMG_TOKEN_FIELD}{escaped_alt}{size_field}{_IMG_TOKEN_DELIM}"
     )
 
