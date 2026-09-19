@@ -28,6 +28,35 @@ MINIMAL_JPEG: bytes = bytes.fromhex(
 )
 
 
+def jpeg_of(width: int, height: int) -> bytes:
+    """A JPEG that *declares* `width` x `height`, for fixtures about sizing.
+
+    Not `MINIMAL_JPEG` with the numbers swapped, deliberately. That constant
+    was built for the magic-byte sniff and its DQT segment declares 67 bytes
+    while carrying 113, so a strict marker walk — which is what
+    `native_generator._detect_image_dimensions` does — stops before it ever
+    reaches the SOF0 and reports no dimensions at all. Fine for what it is
+    used for; useless for the image-sizing rules, which read an image's own
+    pixel width.
+
+    This one's marker chain is honest end to end: APP0, a DQT whose length
+    matches its table, a comment segment padding past the 100-byte floor
+    below which the converter declines to treat bytes as an image, then the
+    SOF0 carrying the dimensions. Both readers in the codebase agree on it.
+    """
+    sof0 = f"ffc0000b08{height:04x}{width:04x}0101"
+    return bytes.fromhex(
+        "ffd8"  # SOI
+        "ffe000104a46494600010101004800480000"  # APP0, JFIF, 16 bytes
+        "ffdb0043 00".replace(" ", "")
+        + "0a" * 64  # DQT, 67 bytes as declared
+        + "fffe0066"
+        + "20" * 100  # COM, padding past the 100-byte floor
+        + sof0
+        + "ffd9"  # SOF0 with the dimensions, EOI
+    )
+
+
 class NullLog:
     """No-op logger satisfying the kfxgen `log` parameter protocol.
 
