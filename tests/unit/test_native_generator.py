@@ -854,16 +854,7 @@ class TestImageOnlyChapterHeadings:
         }
         if cover is not None:
             kwargs["cover_image"] = cover
-        kwargs["images"] = {
-            "images/x.jpg": bytes.fromhex(
-                "ffd8ffe000104a46494600010100000100010000ffdb004300080606"
-                "07060805070707090908"
-                + "0a" * 100
-                + "ffc0000b08000100010101"
-                + "00" * 30
-                + "ffd9"
-            )
-        }
+        kwargs["images"] = {"images/x.jpg": MINIMAL_JPEG}
         gen.generate_full_book(**kwargs)
         return path
 
