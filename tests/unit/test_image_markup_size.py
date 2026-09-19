@@ -13,6 +13,7 @@ from kfxgen._img_tokens import IMG_TOKEN_RE  # noqa: E402
 from kfxgen.converter import extract_blocks_from_html  # noqa: E402
 from kfxgen.kfxlib_minimal.ion import IS  # noqa: E402
 from kfxgen.native_generator import NativeKFXGenerator, _parse_size_hint  # noqa: E402
+from tests._helpers import jpeg_of  # noqa: E402
 from tests._kfx_introspect import by_type, load_fragments, val  # noqa: E402
 
 pytestmark = pytest.mark.unit
@@ -77,16 +78,6 @@ class TestImageSizeHint:
 # ── generator: the $157 the size becomes ────────────────────────────────────
 
 
-def _jpeg(w, h):
-    """A JPEG whose SOF0 the generator's dimension scan can read, padded past
-    the 100-byte floor below which the generator treats bytes as not an image."""
-    app0 = b"\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
-    dims = h.to_bytes(2, "big") + w.to_bytes(2, "big")
-    sof0 = b"\xff\xc0\x00\x0b\x08" + dims + b"\x01\x01\x11\x00"
-    comment = b"\xff\xfe\x00\x66" + b"\x00" * 100
-    return b"\xff\xd8" + app0 + sof0 + comment + b"\xff\xd9"
-
-
 def _build(text, images, cover=None):
     gen = NativeKFXGenerator()
     with tempfile.NamedTemporaryFile(suffix=".kfx", delete=False) as f:
@@ -122,7 +113,7 @@ def _magnitude(style, key):
 
 
 class TestSizedImageStyles:
-    IMAGES = {"images/p.jpg": _jpeg(390, 625)}
+    IMAGES = {"images/p.jpg": jpeg_of(390, 625)}
 
     def test_height_percent_becomes_57(self):
         frags = _build(_token("p.jpg", "h=98%"), self.IMAGES)
