@@ -42,6 +42,36 @@ jobs:
         run: |
           pytest tests/unit tests/integration -v
 
+      # Tier 2 decodes our output with jhowell's full kfxlib, which is not in
+      # this repository, so every one of its tests skips here and has since the
+      # suite was added. A skip is not a failure: the run goes green and reads
+      # as "everything checkable was checked", which is how #91 came to cite
+      # tier-2 coverage that had not happened. Say it in the job summary
+      # instead of leaving it 67 lines deep in a log nobody opens.
+      #
+      # Deliberately not a failure. Tier 4 fails when unsigned because a human
+      # with a Kindle is supposed to act; nobody can act on this one, so a red
+      # run would just be a licensing constraint charged to contributors.
+      # `tests/unit/test_tier2_record.py` is the part that gates.
+      - name: Report that tier 2 did not run
+        if: always()
+        run: |
+          {
+            echo "### Tier 2 did not run"
+            echo
+            echo "Differential decode against upstream \`kfxlib\` is **unverified** in CI."
+            echo "The KFX Input zip is not in this repository, so all of"
+            echo "\`tests/integration/test_kfxlib_diff.py\` skipped."
+            echo
+            echo "Last real run, per \`tests/fixtures/vendor/kfx_input_plugin.lastrun.json\`:"
+            echo
+            echo '```'
+            cat tests/fixtures/vendor/kfx_input_plugin.lastrun.json 2>/dev/null || echo "no record"
+            echo '```'
+            echo
+            echo "See #99."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # tier3_strict is excluded by pytest.ini's addopts, so the line above
       # never runs it and never has. It needs its own invocation with an
       # explicit -m, which overrides that exclusion.

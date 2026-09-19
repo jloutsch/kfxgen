@@ -1,0 +1,8 @@
+{
+  "upstream_pin": "20260827",
+  "kfxlib_version": "20260827",
+  "zip_sha256_prefix": "338809c18e5f9bb7",
+  "ran_on": "2026-09-19",
+  "tests_passed": 67,
+  "suite": "tests/integration/test_kfxlib_diff.py"
+}
