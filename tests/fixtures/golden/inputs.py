@@ -28,6 +28,7 @@ from pathlib import Path
 
 from tests._helpers import MINIMAL_JPEG as _MINIMAL_JPEG
 from tests._helpers import MINIMAL_PNG as _MINIMAL_PNG
+from tests._helpers import SIZED_JPEG as _SIZED_JPEG
 from tests.fixtures.epub_builder import EpubBuilder
 
 
@@ -173,11 +174,20 @@ def make_sub_super_marks(out_dir: Path) -> Path:
 
 def make_with_cover(out_dir: Path) -> Path:
     """Book with a cover image. Locks cover-image emission ($164/$417 with
-    distinct fids, $490 cover_image metadata). #32 cover-in-flow context."""
+    distinct fids, $490 cover_image metadata). #32 cover-in-flow context.
+
+    The cover is `_SIZED_JPEG` rather than `_MINIMAL_JPEG` because the
+    generator branches on whether the cover's dimensions are readable, and
+    `_MINIMAL_JPEG`'s are not — it has a malformed DQT length, so the
+    dimension scan never reaches its SOF0. With that cover this fixture could
+    not see a change to how the cover section is laid out: it pinned the
+    unknown-size branch, which is the branch a real book almost never takes.
+    (#163)
+    """
     return (
         EpubBuilder()
         .set_metadata(title="Cover Golden", author="Golden Author")
-        .set_cover(_MINIMAL_JPEG, media_type="image/jpeg", href="cover.jpg")
+        .set_cover(_SIZED_JPEG, media_type="image/jpeg", href="cover.jpg")
         .add_chapter("Chapter One", "First chapter body.\n\nSecond paragraph.")
         .add_chapter("Chapter Two", "Second chapter body.")
         .build(out_dir, "with_cover")

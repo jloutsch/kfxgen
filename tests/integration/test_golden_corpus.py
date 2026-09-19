@@ -441,6 +441,28 @@ def test_fixture_with_cover_shape():
 
 @pytest.mark.tier3
 @pytest.mark.integration
+def test_with_cover_fixture_has_a_measurable_cover():
+    """The cover golden must use a cover whose dimensions the generator can read.
+
+    #163.
+
+    The generator takes a different branch for a cover of unknown size, and for
+    as long as this fixture carried `MINIMAL_JPEG` it pinned that branch — so a
+    change to the cover's layout altered every real book while
+    `test_golden_byte_identical[with_cover]` stayed green. The fixture was not
+    wrong about what it asserted; it was asserting it about the wrong cover.
+    """
+    from kfxgen.native_generator import NativeKFXGenerator
+    from tests._helpers import SIZED_JPEG, SIZED_JPEG_DIMS
+
+    assert NativeKFXGenerator._detect_image_dimensions(SIZED_JPEG) == SIZED_JPEG_DIMS, (
+        "the cover fixture's image no longer reports its own size — the "
+        "with_cover golden is back to pinning the unknown-size branch"
+    )
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
 def test_fixture_multi_chapter_shape():
     """multi_chapter: 8 sections (exercises larger-corpus path)."""
     frags = load_fragments(EXPECTED_DIR / "multi_chapter.kfx")
