@@ -45,8 +45,20 @@ _SOF_MARKERS = {
 }
 
 
+#: GIF's magic bytes, either version. Matched on the file rather than on the
+#: manifest's media type, which is as trustworthy here as it is anywhere else.
+GIF_SIGNATURES = (b"GIF87a", b"GIF89a")
+
+
 def _read_image_size(data):
-    """Return (width, height) for PNG or JPEG bytes, else None."""
+    """Return (width, height) for PNG, JPEG or GIF bytes, else None."""
+    # GIF states its size in the header: little-endian, at offset 6. Here so
+    # that a GIF can be measured before `gif_to_png` re-encodes it, and so
+    # `optimize_image` sizes a converted page the same way it sizes any other.
+    if len(data) >= 10 and data[:6] in GIF_SIGNATURES:
+        w = int.from_bytes(data[6:8], "little")
+        h = int.from_bytes(data[8:10], "little")
+        return (w, h) if w and h else None
     if len(data) >= 24 and data[:8] == _PNG_SIG:
         w, h = struct.unpack(">II", data[16:24])
         return (int(w), int(h))
@@ -152,6 +164,53 @@ def optimize_image(
         return data
     if not out or len(out) >= len(data):
         return data
+    return out
+
+
+def gif_to_png(data, log=None):
+    """Re-encode a GIF as PNG, or None when that cannot be done here.
+
+    kfxgen emits two image formats: `$285` JPEG and `$284` PNG. GIF has a
+    symbol — `$286`, named in the generator's own format comment and listed
+    among upstream kfxlib's fixed-layout formats — but nothing emits it, and
+    whether a Kindle would render one from a sideloaded container is untested.
+
+    So this converts instead of passing through. PNG is what a page scan needs
+    anyway: both are lossless, so nothing is thrown away that the GIF still
+    had, and PNG is a format this project has watched render on hardware.
+    The cost is bytes — a scanned page as PNG is larger than as GIF — and
+    `optimize_image` runs afterwards and will bring an oversized one down.
+
+    Four books in a 226-EPUB library store every page this way and reach the
+    reader with no pictures at all (#177). Against that, larger is not the
+    expensive direction.
+
+    Returns None when Calibre is not importable (tests, CI) or the re-encode
+    fails, so the caller can fall back to skipping the image as it did before.
+    """
+    try:
+        from calibre.utils.img import scale_image
+    except Exception:
+        if log:
+            log.debug("  calibre.utils.img unavailable; cannot convert GIF")
+        return None
+    size = _read_image_size(data)
+    if not size:
+        if log:
+            log.warn("  GIF has unreadable dimensions; leaving it unconverted")
+        return None
+    try:
+        # Its own dimensions, so this step only changes the encoding. Any
+        # downscaling is `optimize_image`'s decision and stays there.
+        _w, _h, out = scale_image(data, width=size[0], height=size[1], as_png=True)
+    except Exception as e:  # noqa: BLE001 - never fail a conversion over an image
+        if log:
+            log.warn(f"  GIF to PNG failed ({e}); skipping the image")
+        return None
+    if not out or out[:8] != _PNG_SIG:
+        if log:
+            log.warn("  GIF to PNG produced something that is not a PNG; skipping")
+        return None
     return out
 
 
