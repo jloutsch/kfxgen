@@ -1,5 +1,136 @@
 # Changelog
 
+## 5.8.0 — Books made of pictures
+
+Every defect in this release is the same defect wearing a different hat: a page whose
+content is a picture rather than a paragraph reached the reader empty. kfxgen knew one
+way of drawing an image — an `<img>` the navigation had listed — and a book built any
+other way lost its art silently, converted cleanly, and read as blank pages.
+
+None of it was visible from here. The 90-book Gutenberg corpus is prose: not one of its
+books is fixed-layout, wraps art in `<svg>`, states a size on an image, or paints a page
+from a stylesheet. All seven fixes below came from an outside contributor
+([@kmnkv1](https://github.com/kmnkv1)) measuring against a 226-EPUB library of
+illustrated children's books, and the numbers in this entry are theirs, reproduced here
+before being written down.
+
+**Fixed (#152):** pages the navigation never listed were dropped. A publisher lists
+chapters; the art between them is just pages. Those pages were discarded as "image-only
+orphans" on the strength of the one case that is right to drop — the EPUB's own cover
+page, whose picture the cover chapter already shows. **200 pages across 64 of 226 books**,
+one of them shipping 3 of its 7 pages. The cover remains the exception, and a page showing
+only the cover is still dropped, so a book does not gain a blank first page.
+
+Across that library: **+277 image tokens, +166 chapters.** 58 books lose exactly one
+token — in every case a nav-listed cover page that used to become a chapter the generator
+could not resolve, rendering blank. A blank page disappearing is the fix, not a cost.
+
+**Fixed (#153):** the size the markup asks for was ignored. `height="98%"` on a full-page
+plate, `width: 100%` in a stylesheet — both discarded in favour of sizing the image from
+its own pixel width. Width now goes to `$56` and height to `$57`. Measured honestly:
+6,606 images carry a stated size, and 6,098 of them state what the pixel rule already
+computed, so **the behaviour changes for 490 images across 102 books** — full-page plates
+rendering at 76% of the column instead of 98% of the page height, and images an author
+deliberately sized down.
+
+**Fixed (#153, security):** an image's alt text or href could reach the token's own
+delimiters. The token gained an optional size field, and alt text is not sanitised, so a
+`\x01` in either value shifted the parse — at worst letting a book choose its own image
+width, at best truncating its alt text. A `\x00` was older and worse: it ended the token
+early and the remainder escaped into the text stream as raw control bytes, the shape that
+crashed a device in 5.7.3. Both delimiters are now stripped from href and alt before
+either is written between them.
+
+**Fixed (#154):** art wrapped in `<svg>` came through empty. Publishers wrap full-page
+scans this way and calibre's comic input generates a `titlepage.xhtml` that does exactly
+it, so this affected every comic converted through calibre as well as **104 of the 226
+books** measured. An `<image>` inside `<defs>`, `<symbol>`, `<mask>`, `<clipPath>`,
+`<pattern>` or `<marker>` is a definition rather than a drawing and is correctly not
+painted.
+
+**Fixed (#165):** a spine document that *is* an SVG — media type `image/svg+xml`, no
+`<body>` — was never read at all. The walk starts at `<body>`, so the page yielded
+nothing. Where that was the whole book the conversion failed outright; where the page
+carried anything else, what reached the reader was worse than nothing: the document's
+own stylesheet and RDF metadata, as body text. One freely licensed sample put 1,894
+characters of CSS into the reading flow.
+
+**Fixed (#168):** a page painted by the stylesheet lost its picture. A print-to-EPUB chain
+positions each scanned page as a `background-image` on an empty `<div>` with the text
+laid over it; there is no `<img>` anywhere. **Six books converted with no pictures at
+all** — text intact, every page blank where the art was. One went from 222 invented
+filename chapters to the publisher's own four labels, because pages that yield nothing
+cannot anchor a nav coordinate.
+
+The rule is deliberately narrow: the element must carry a `url(...)`, render nothing else
+of its own, and set `background-repeat: no-repeat`, since a tiled background is decoration
+by definition. Measured across the library, **6 books gain images and none gain anything
+that is not a page.** Four of the six still need #177 — their scans are GIF, which kfxgen
+does not yet emit.
+
+**Fixed (#156):** calibre's generated inline contents page was rebuilt as the book's
+contents. `ebook-convert --epub-inline-toc` stamps that page with a body id, which calibre
+itself uses to find and replace a previous one; kfxgen now skips it on the same marker.
+KFX carries its own navigation pane, so the page is machine navigation for a format this
+is not. On a real calibre-produced file: 17 blocks and 14 links of generated navigation
+removed, chapter structure and the book's own contents untouched.
+
+### Tests that were not testing
+
+Four checks in this repository reported success while checking nothing. They are not
+user-visible, and they are why the defects above survived as long as they did.
+
+**Fixed (#162):** the corpus baseline comparison had never run. An autouse fixture clears
+`KFXGEN_*` so an exported conversion setting cannot leak into assertions, and it also
+cleared the two variables that test reads — inside its body, after the fixture. It took
+its skip branch in every configuration from the day the sweep landed. Its own docstring
+calls it "the check that catches *silent* damage". It now runs, over 90 books.
+
+**Fixed (#163):** the cover golden could not see a cover change. `MINIMAL_JPEG` declares a
+67-byte quantization table and carries 114 bytes of payload, so a parser following segment
+lengths — which the dimension scan must — stops 49 bytes short of the SOF0 the file does
+have and reports no dimensions. The generator branches on whether a cover's size is known,
+so that fixture pinned the branch a real book almost never takes. Measured against #160,
+which relays out the cover section: the byte gate passed while **90 of 90 corpus books
+changed**.
+
+**Changed (#99):** tier 2 skips in CI and now says so. The differential decode needs an
+upstream plugin that cannot be committed, so all 67 of its tests skip on every pull
+request and always have — silently, which is how a green run came to be cited as evidence
+of decode coverage. CI now reports it in the job summary, `CONTRIBUTING.md` no longer
+claims the check runs on every PR, and a committed record of the last real run is checked
+on every PR: it fails when the vendored pin moves without a tier-2 run behind it, and
+names the archive it was run against rather than the sidecar describing it.
+
+**Changed (#109):** the device tier no longer asserts firmware the device is free to
+change.
+
+### Testing and tooling
+
+`EpubBuilder` can now construct the shapes these defects live in — unlisted spine pages,
+art wrapped either way, stated sizes, a generated inline contents page — so a fixture no
+longer depends on anyone's private library (#166). One builder makes a test JPEG, with a
+guard to keep it that way (#174, #175); the previous three had each been written from
+scratch and none agreed. Development dependencies are pinned exactly and the lint job
+reads its ruff pin from that file rather than a second copy of the version (#170).
+`research/describe_epub.py` reports an EPUB's shape and deliberately nothing else — no
+title, author, filenames or text — so a book can be described in a public thread without
+being shared (#172).
+
+The vendored `kfxlib` pin moves to 20260827, KFX Input 2.34.2 (#150).
+
+### Known gaps
+
+- Page scans stored as GIF are dropped before reaching the generator (#177). GIF is named
+  in the format table as `$286` and never emitted.
+- The background-image rule does not reach pages whose overlay text sits *inside* the
+  background element rather than beside it. Widening it would fire on ordinary decorated
+  wrappers, so it stays narrow.
+- No golden exercises a computed image width, so the #145 sizing arithmetic and the #96
+  allocation order are untested by the golden corpus (#164).
+- Two `test_safe_write` assertions encode POSIX semantics and fail on Windows; the
+  defense they cover does hold there (#173).
+
 ## 5.7.4 — Pictures you can see, links that resolve, a navigation pane without machinery in it
 
 Three reader-visible fixes, two of them confirmed on hardware, plus the first
