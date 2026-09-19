@@ -486,6 +486,33 @@ def test_corpus_book_invariants(epub, tmp_path):
         )
 
 
+@pytest.mark.tier1
+@pytest.mark.integration
+def test_harness_env_is_exempt_from_the_isolation_sweep():
+    """Every variable this module selects its work with must be exempt from
+    `conftest._isolate_kfxgen_env` (#162).
+
+    That fixture clears `KFXGEN_*` so a maintainer's exported conversion
+    settings cannot leak into assertions. It matched on the prefix, which also
+    caught the three variables below — and `test_corpus_metrics_match_baseline`
+    reads two of them *inside its body*, after the fixture has run. It
+    therefore skipped in every configuration, from the day the sweep landed,
+    while claiming to be the check that catches silent text loss.
+
+    A skip is not a failure, which is why this went unnoticed. The assertion
+    is on the exemption list rather than on a conversion, so it costs nothing
+    and fails loudly if the list and this module drift apart.
+    """
+    from tests.conftest import HARNESS_ENV_VARS
+
+    for name in (CORPUS_ENV, BASELINE_ENV, WRITE_ENV):
+        assert name in HARNESS_ENV_VARS, (
+            f"{name} selects what the corpus suite runs, but the autouse env "
+            "sweep in tests/conftest.py clears it — the test that reads it "
+            "will skip instead of run. Add it to HARNESS_ENV_VARS."
+        )
+
+
 @pytest.mark.integration
 @pytest.mark.slow
 @pytest.mark.skipif(not _corpus_files(), reason=f"{CORPUS_ENV} not set or empty")
