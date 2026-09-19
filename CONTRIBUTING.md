@@ -366,6 +366,48 @@ Mandatory means the PR carries the evidence: run the checklist, and put a
 checked. See [Tier 4](#tier-4-device-verification). Without it the claim is
 unanswerable a month later, which is what #109 was opened about.
 
+## Describing a book without naming it
+
+Most defects in kfxgen are shape defects. Whether a page survives depends on how
+many spine documents the navigation lists, whether art is an `<img>` or an
+`<svg>`, whether the markup states a size — not on what the book says. Two books
+with the same shape hit the same code path, so **the shape is the reproducer and
+the title is not.**
+
+That is convenient, because the books these defects surface in are usually ones
+nobody can attach to an issue. So:
+
+**Do not name a real title or author in an issue, a pull request, a commit
+message, a comment or a test fixture.** Describe the book by the shape that
+matters instead:
+
+| instead of | write |
+|---|---|
+| a title | "a 227-page scan book" |
+| an author | "a print-to-EPUB chain that positions each page as a background" |
+| a filename from inside the book | "one book with 443 ids inside table cells" |
+
+This repository is public and permanently indexed. A title and author sitting
+next to a description of someone's library invites inferences about how that
+library was assembled, and those inferences land on the person who posted, not
+on the project. The rule protects contributors more than it protects kfxgen.
+
+`research/describe_epub.py` exists for this. It reports spine and nav counts,
+media types, SVG form, image sizing and fixed-layout properties, and prints no
+title, author, identifier, internal filename or text at all — text is counted,
+never read out. Its output is safe to paste into a public thread as it stands:
+
+```bash
+python3 research/describe_epub.py BOOK.epub
+```
+
+Gutenberg identifiers (`pg11`, `pg3011`) are fine: the corpus is public domain,
+its contents are listed in the README, and the id is what the tests key on.
+
+**If a name does get posted, delete the comment and repost it.** GitHub keeps
+the previous revision in a comment's edit history, so editing leaves the
+original one click away.
+
 ## Public-domain corpus sweep
 
 `tests/integration/test_public_corpus.py` runs real books through the whole
