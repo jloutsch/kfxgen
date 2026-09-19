@@ -19,9 +19,17 @@ covers everything else worth deduplicating.
 from __future__ import annotations
 
 
-# Minimal valid 1×1 JPEG accepted by the converter's magic-byte sniff
+# A 1×1 JPEG accepted by the converter's magic-byte sniff
 # (`\xff\xd8\xff` + JFIF APP0 + length>100). Hex-encoded inline so tests
 # don't need to bundle binary fixtures for trivial image-pipeline cases.
+#
+# NOT well-formed, and do not reason from it: the padding sits inside the
+# DQT without widening that segment's declared length — 67 declared, 116
+# carried — so a parser that follows lengths walks off the quantization
+# table and never reaches the SOF0 at offset 138. `_detect_image_dimensions`
+# reports (None, None) for it, which is how a cover golden came to pin the
+# unknown-size branch (#163). Use `jpeg_of()` below wherever an image's own
+# size is read.
 MINIMAL_JPEG: bytes = bytes.fromhex(
     "ffd8ffe000104a46494600010100000100010000ffdb004300080606"
     "07060805070707090908" + "0a" * 100 + "ffc0000b08000100010101" + "00" * 30 + "ffd9"
@@ -33,9 +41,10 @@ def jpeg_of(width: int, height: int) -> bytes:
 
     Not `MINIMAL_JPEG` with the numbers swapped, deliberately. That constant
     was built for the magic-byte sniff and its DQT segment declares 67 bytes
-    while carrying 113, so a strict marker walk — which is what
-    `native_generator._detect_image_dimensions` does — stops before it ever
-    reaches the SOF0 and reports no dimensions at all. Fine for what it is
+    while carrying 116, so a parser that follows lengths — which is what
+    `native_generator._detect_image_dimensions` does, as a JPEG parser must —
+    walks off the quantization table and never reaches the SOF0 at offset 138,
+    and reports no dimensions at all. (#163) Fine for what it is
     used for; useless for the image-sizing rules, which read an image's own
     pixel width.
 
