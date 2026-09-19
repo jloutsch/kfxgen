@@ -20,8 +20,8 @@ this directory-level summary.
 | Field | Value |
 |-------|-------|
 | Fork baseline (approx.) | jhowell `kfxlib` ≈ late-2025; the fork carries no `version.py` |
-| Latest upstream compared | `kfxlib` **20260520** (KFX Input 2.33.0) — re-measured 2026-08-21 (#91) |
-| Drift at that comparison | `YJ_symbols` table version **10** (unchanged); `ROOT_FRAGMENT_TYPES` identical. Our catalog holds **842** symbols (`$10`–`$851`), upstream **843** (`$10`–`$852`). The one extra entry is itself an unnamed placeholder. **Benign for generation.** |
+| Latest upstream compared | `kfxlib` **20260827** (KFX Input 2.34.2) — re-measured 2026-09-04, prompted by the #46 drift watch |
+| Drift at that comparison | `YJ_symbols` table version **10** (unchanged); `ROOT_FRAGMENT_TYPES` identical (17 entries). Our catalog holds **842** symbols (`$10`–`$851`), upstream **850** (`$10`–`$859`). Upstream's first 843 entries are byte-identical to 20260520's, so nothing inside our range moved; all eight extra entries are unnamed placeholders. **Benign for generation.** |
 
 ### `YJ_symbols` catalog: what the numbers mean (#91)
 
@@ -36,14 +36,16 @@ Length is safe to lag, and deliberately not bumped. `StandardSymbolTable`
 imports the shared table with `max_id = len(YJ_SYMBOLS.symbols)` — currently
 **842** — and every reader truncates its own copy to that length, so the ids
 kfxgen emits resolve identically on a device whose table is longer. Raising it
-to 843 would shift every local symbol id by one and rewrite every generated
-file, in exchange for a placeholder kfxgen never emits. Against a format whose
+to 850 would shift every local symbol id by eight and rewrite every generated
+file, in exchange for eight placeholders kfxgen never emits. Against a format whose
 only real verification is a device sideload, that is a bad trade.
 
 For scale: Kindle Previewer 3.106 declares `max_id` **844** (`+9=853`), which is
 why upstream `kfxlib` 20260520 warns when decoding Amazon's own output. That
 warning is about upstream's table, not ours, and appears on Amazon-produced
-files only.
+files only. 20260827 declares **850** (`+9=859`), so that id is now inside the
+range upstream can name — on the numbers alone; whether the warning actually
+stops requires decoding an Amazon-produced file, which has not been done.
 
 ### What is actually checked, and what still needs a human
 
