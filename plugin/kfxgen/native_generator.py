@@ -2200,8 +2200,21 @@ class NativeKFXGenerator:
             # names stay contiguous (img_0, img_1, ...) regardless of skips.
             # Unsupported formats are dropped silently here; the converter
             # is responsible for pre-filtering or logging.
+            #
+            # Sorted by href, so the numbering is a property of the book rather
+            # than of however the caller's mapping happened to be ordered.
+            # Calibre's `Manifest` is backed by a `set`, so `oeb_book.manifest`
+            # yields a different order between processes; converting one book
+            # twice through `ebook-convert` gave `img_1` to a different picture
+            # each time and produced a different file. Nothing rendered wrongly
+            # — every entry referenced whichever name held its image — but the
+            # output was not reproducible on the path users actually use (#189).
+            #
+            # This is #96 one allocation over. That fixed the same drift in
+            # `$157` style symbols, for the same reason, with the same remedy:
+            # let the content decide the order, never the iteration.
             valid = []
-            for href, data in images.items():
+            for href, data in sorted(images.items()):
                 if not data or len(data) <= 100:
                     continue
                 if data[:3] == b"\xff\xd8\xff":
