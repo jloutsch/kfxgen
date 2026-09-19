@@ -779,8 +779,17 @@ def extract_blocks_from_html(
                 inline_parts.append((child.tail, frozenset()))
         _flush_inline()
 
-    for child in body:
-        _walk(child)
+    # The spine document is itself an SVG when the <body> lookup above fell
+    # through to the root element. EPUB 3 fixed-layout producers emit these —
+    # the page is an .svg file rather than an XHTML page containing one — and
+    # walking their children finds <image>, which no branch of `_walk` claims,
+    # so the page came through empty. (#165)
+    is_svg_document = _local_tag(body.tag) == "svg"
+    if is_svg_document:
+        _emit_svg_blocks(body)
+    else:
+        for child in body:
+            _walk(child)
 
     # Trailing anchors (e.g. <a id="eof"/> after the last leaf block) never
     # reach a subsequent block to flush to; snap them onto the last emitted
@@ -793,6 +802,20 @@ def extract_blocks_from_html(
 
     if blocks:
         return _attach_anchor_keys(blocks, base_href)
+
+    if is_svg_document:
+        # An SVG document's text nodes are not reading content: they are the
+        # stylesheet, the RDF metadata the drawing program left behind, the
+        # ids inside <defs>. The flat-text fallback below scoops all of it
+        # into the body — 1,894 characters of CSS from the cover of the
+        # IDPF/epub3-samples book, 220 of RDF from two of its pages. A vector
+        # page that draws no bitmap contributes nothing instead.
+        #
+        # SVG <text> is the one thing this gives up, and knowingly: nothing
+        # downstream renders it today, and the alternative on the same path is
+        # the stylesheet reaching the reader. Worth revisiting with a
+        # reference file that has some.
+        return []
 
     # Fallback: no block elements — flat extraction, no spans (unchanged rule).
     text = body.xpath("string()")

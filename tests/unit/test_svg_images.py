@@ -100,3 +100,94 @@ class TestNonRenderedSvgContainers:
     def test_a_page_whose_only_image_is_a_definition_draws_nothing(self):
         doc = self._page('<defs><image xlink:href="hidden.jpg"/></defs>')
         assert extract_blocks_from_html(doc) == []
+
+
+_SVG_DOC = (
+    '<?xml version="1.0" encoding="utf-8"?>'
+    '<svg xmlns="http://www.w3.org/2000/svg" '
+    'xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1200 1600">'
+    '<image width="1200" height="1600" xlink:href="page01.jpg"/></svg>'
+)
+
+
+def _svg_doc(markup=_SVG_DOC):
+    """A spine document that IS an SVG — no <body> anywhere in it."""
+    return etree.fromstring(markup.encode())
+
+
+class TestRootedSvgDocument:
+    """#165: a spine document whose media type is image/svg+xml. The page is
+    an SVG file, `extract_blocks_from_html` walks from <body>, and an SVG
+    document has none — so every image it drew was lost."""
+
+    def test_a_rooted_svg_page_yields_its_image(self):
+        blocks = extract_blocks_from_html(_svg_doc())
+        assert _tokens(blocks) == [("page01.jpg", "", "h=100%")]
+
+    def test_several_images_in_one_rooted_document(self):
+        markup = _SVG_DOC.replace(
+            "</svg>",
+            '<image width="10" height="10" xlink:href="stamp.png"/></svg>',
+        )
+        assert [
+            h for h, _a, _s in _tokens(extract_blocks_from_html(_svg_doc(markup)))
+        ] == [
+            "page01.jpg",
+            "stamp.png",
+        ]
+
+    def test_a_rooted_svg_drawing_nothing_yields_nothing(self):
+        markup = (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+            '<rect width="10" height="10"/></svg>'
+        )
+        assert extract_blocks_from_html(_svg_doc(markup)) == []
+
+    def test_an_xhtml_page_is_still_walked_as_before(self):
+        # The control: the nested form must not change behaviour.
+        blocks = extract_blocks_from_html(_doc(f"<p>Caption</p><div>{_SVG}</div>"))
+        assert [IMG_TOKEN_RE.sub("", b["text"]) for b in blocks] == ["Caption", ""]
+
+
+class TestRootedSvgEmitsOnlyPictures:
+    """An SVG document's text nodes are the stylesheet, the RDF the drawing
+    program left behind, the ids inside <defs> — never reading content. The
+    flat-text fallback scooped all of it into the body: 1,894 characters of
+    CSS from the cover of the IDPF/epub3-samples book, 220 of RDF from two of
+    its pages."""
+
+    def _rooted(self, inner):
+        return etree.fromstring(
+            '<svg xmlns="http://www.w3.org/2000/svg" '
+            'xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 10 10">'
+            f"{inner}</svg>".encode()
+        )
+
+    def test_a_stylesheet_does_not_reach_the_reader(self):
+        doc = self._rooted("<style>.st0{fill:#AAB2AB;}</style><path d='M0 0'/>")
+        assert extract_blocks_from_html(doc) == []
+
+    def test_metadata_does_not_reach_the_reader(self):
+        doc = self._rooted("<metadata>Created with a drawing program</metadata>")
+        assert extract_blocks_from_html(doc) == []
+
+    def test_a_page_that_draws_a_bitmap_emits_only_the_bitmap(self):
+        doc = self._rooted(
+            "<style>.st0{fill:#000;}</style>"
+            '<image width="10" height="10" xlink:href="p.jpg"/>'
+            "<desc>a crane</desc>"
+        )
+        blocks = extract_blocks_from_html(doc)
+        assert _tokens(blocks) == [("p.jpg", "", "h=100%")]
+        assert IMG_TOKEN_RE.sub("", blocks[0]["text"]).strip() == ""
+
+    def test_an_xhtml_page_still_falls_back_to_flat_text(self):
+        # The control: the fallback is only suppressed for SVG documents.
+        doc = etree.fromstring(
+            '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+            "Loose text with no block element around it."
+            "</body></html>".encode()
+        )
+        blocks = extract_blocks_from_html(doc)
+        assert len(blocks) == 1
+        assert "Loose text" in blocks[0]["text"]
