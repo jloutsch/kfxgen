@@ -21,10 +21,12 @@ Usage:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
 import sys
+import zipfile
 from datetime import date
 from pathlib import Path
 
@@ -43,6 +45,35 @@ def read_pin() -> str:
     if not PIN_FILE.is_file():
         sys.exit(f"no pin file at {PIN_FILE.relative_to(REPO)}")
     return PIN_FILE.read_text().strip()
+
+
+_VERSION_RE = re.compile(r"__version__\s*=\s*['\"]([^'\"]+)")
+
+
+def describe_zip() -> tuple[str, str]:
+    """(kfxlib version read out of the zip, short digest of the zip itself).
+
+    Taken from the file rather than from the sidecar on purpose. The sidecar
+    is what CI compares against; it is not evidence of what was run. Reading
+    the version out of `kfxlib/version.py` is the same thing
+    `test_vendored_pin_matches_the_zip_it_describes` does, so a mismatch
+    already fails the suite and blocks a record — but a version alone cannot
+    tell two plugins apart.
+
+    That distinction was raised by a contributor running tier 2 against the
+    `kfxlib` inside **KFX Output** rather than KFX Input. Both ship the
+    library, so at equal versions the sidecar check passes and a record would
+    be written naming an upstream that was never the one tested. The digest
+    makes the difference visible: same version, different bytes, different
+    record.
+    """
+    with zipfile.ZipFile(ZIP_FILE) as z:
+        src = z.read("kfxlib/version.py").decode("utf-8", "replace")
+    m = _VERSION_RE.search(src)
+    if not m:
+        sys.exit("could not read __version__ from kfxlib/version.py inside the zip")
+    digest = hashlib.sha256(ZIP_FILE.read_bytes()).hexdigest()[:16]
+    return m.group(1), digest
 
 
 def run_tier2() -> tuple[dict[str, int], bool]:
@@ -87,10 +118,13 @@ def main(argv: list[str]) -> int:
             "run. Record refused."
         )
 
+    zip_version, zip_digest = describe_zip()
     RECORD_FILE.write_text(
         json.dumps(
             {
                 "upstream_pin": pin,
+                "kfxlib_version": zip_version,
+                "zip_sha256_prefix": zip_digest,
                 "ran_on": date.today().isoformat(),
                 "tests_passed": passed,
                 "suite": SUITE,

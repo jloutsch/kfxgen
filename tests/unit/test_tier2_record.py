@@ -80,6 +80,34 @@ def test_record_describes_a_run_that_did_something():
     )
 
 
+def test_record_says_which_upstream_was_actually_read():
+    """The record must name the version it read out of the zip, and the zip.
+
+    `upstream_pin` is copied from the sidecar, so on its own it is a claim
+    about a file rather than about a run. `kfxlib_version` comes from
+    `kfxlib/version.py` inside the archive that was tested, and
+    `zip_sha256_prefix` identifies the archive itself.
+
+    The digest is what distinguishes two plugins carrying the same library.
+    A contributor ran this suite against the `kfxlib` inside KFX *Output*
+    instead of KFX Input; both ship it, so at equal versions the sidecar check
+    passes and a record could be written naming an upstream that was never the
+    one under test. Same version, different bytes, different record.
+    """
+    rec = _record()
+    for field in ("kfxlib_version", "zip_sha256_prefix"):
+        assert rec.get(field), (
+            f"the record has no {field!r}, so it describes the sidecar rather "
+            f"than the archive that was read. {WRITE_IT}"
+        )
+    assert rec["kfxlib_version"] == rec["upstream_pin"], (
+        f"the record was written against kfxlib {rec['kfxlib_version']} while "
+        f"the sidecar pin says {rec['upstream_pin']}. Those must agree — "
+        "`test_vendored_pin_matches_the_zip_it_describes` should have caught "
+        "this before a record was written at all."
+    )
+
+
 def test_record_is_not_dated_in_the_future():
     """A date ahead of today means a wrong clock or a hand-edited record.
 
