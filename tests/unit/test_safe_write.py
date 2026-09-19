@@ -33,6 +33,28 @@ class TestSafeWriteHappyPath:
         _safe_write_bytes(str(target), b"new")
         assert target.read_bytes() == b"new"
 
+    def test_owner_can_read_and_write_what_was_written(self, tmp_path):
+        """The part of `0o644` that means anything on every platform.
+
+        Kept separate from the exact mode below so Windows has an assertion
+        here rather than a skip. `os.chmod` there toggles the read-only
+        attribute and nothing else, so the file comes back `0o666` — nothing
+        is wrong with the write, and a bare skip would leave that platform
+        with nothing checking this at all (#173).
+        """
+        target = tmp_path / "book.kfx"
+        _safe_write_bytes(str(target), b"x")
+        assert os.access(target, os.R_OK | os.W_OK)
+
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason=(
+            "Windows has no POSIX permission bits and no umask: os.chmod "
+            "toggles the read-only attribute, so st_mode comes back 0o100666 "
+            "and the 0o644 the production code requests is not expressible. "
+            "The owner-access assertion above covers that platform (#173)."
+        ),
+    )
     def test_mode_is_0644(self, tmp_path):
         target = tmp_path / "book.kfx"
         _safe_write_bytes(str(target), b"x")
@@ -115,7 +137,44 @@ class TestSafeWriteSymlinkRejection:
         assert sensitive.read_bytes() == b"DO NOT OVERWRITE"
         # And the symlink itself still points where it did.
         assert symlink.is_symlink()
-        assert os.readlink(str(symlink)) == str(sensitive)
+        # `realpath` on both sides rather than the raw strings: Windows returns
+        # the extended-length `\\?\C:\...` form from `readlink`, the same path
+        # spelled differently. Comparing spellings failed there while every
+        # assertion above — refusal, target untouched, still a symlink — passed
+        # (#173).
+        assert os.path.realpath(os.readlink(str(symlink))) == os.path.realpath(
+            str(sensitive)
+        )
+
+    def test_the_target_comparison_survives_two_spellings_of_one_path(self, tmp_path):
+        """`realpath` on both sides is what makes the assertion above portable.
+
+        Windows' `readlink` returns the extended-length form, so comparing it
+        to the path the test wrote failed there while the defense worked
+        perfectly (#173). That is not really a Windows quirk: a path has more
+        than one spelling wherever a directory symlink is involved, and macOS
+        ships `/tmp` -> `/private/tmp` doing exactly this. Built here rather
+        than relying on that, so it holds anywhere symlinks do.
+        """
+        real_dir = tmp_path / "real"
+        real_dir.mkdir()
+        alias_dir = tmp_path / "alias"
+        alias_dir.symlink_to(real_dir, target_is_directory=True)
+
+        sensitive = real_dir / "sensitive.txt"
+        sensitive.write_bytes(b"DO NOT OVERWRITE")
+        link = tmp_path / "book.kfx"
+        link.symlink_to(alias_dir / "sensitive.txt")
+
+        with pytest.raises(OSError):
+            _safe_write_bytes(str(link), b"attacker-payload")
+        assert sensitive.read_bytes() == b"DO NOT OVERWRITE"
+
+        via_alias = os.readlink(str(link))
+        assert via_alias != str(sensitive), (
+            "this test is pointless unless the two spellings really differ"
+        )
+        assert os.path.realpath(via_alias) == os.path.realpath(str(sensitive))
 
     @pytest.mark.skipif(
         not hasattr(os, "O_NOFOLLOW"),
