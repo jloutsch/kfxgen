@@ -779,8 +779,16 @@ def extract_blocks_from_html(
                 inline_parts.append((child.tail, frozenset()))
         _flush_inline()
 
-    for child in body:
-        _walk(child)
+    if _local_tag(body.tag) == "svg":
+        # The spine document is itself an SVG, so the <body> lookup above fell
+        # through to the root element. EPUB 3 fixed-layout producers emit these
+        # — the page is an .svg file rather than an XHTML page containing one —
+        # and walking their children finds <image>, which no branch of `_walk`
+        # claims. The page came through empty. (#165)
+        _emit_svg_blocks(body)
+    else:
+        for child in body:
+            _walk(child)
 
     # Trailing anchors (e.g. <a id="eof"/> after the last leaf block) never
     # reach a subsequent block to flush to; snap them onto the last emitted

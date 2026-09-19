@@ -100,3 +100,50 @@ class TestNonRenderedSvgContainers:
     def test_a_page_whose_only_image_is_a_definition_draws_nothing(self):
         doc = self._page('<defs><image xlink:href="hidden.jpg"/></defs>')
         assert extract_blocks_from_html(doc) == []
+
+
+_SVG_DOC = (
+    '<?xml version="1.0" encoding="utf-8"?>'
+    '<svg xmlns="http://www.w3.org/2000/svg" '
+    'xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1200 1600">'
+    '<image width="1200" height="1600" xlink:href="page01.jpg"/></svg>'
+)
+
+
+def _svg_doc(markup=_SVG_DOC):
+    """A spine document that IS an SVG — no <body> anywhere in it."""
+    return etree.fromstring(markup.encode())
+
+
+class TestRootedSvgDocument:
+    """#165: a spine document whose media type is image/svg+xml. The page is
+    an SVG file, `extract_blocks_from_html` walks from <body>, and an SVG
+    document has none — so every image it drew was lost."""
+
+    def test_a_rooted_svg_page_yields_its_image(self):
+        blocks = extract_blocks_from_html(_svg_doc())
+        assert _tokens(blocks) == [("page01.jpg", "", "h=100%")]
+
+    def test_several_images_in_one_rooted_document(self):
+        markup = _SVG_DOC.replace(
+            "</svg>",
+            '<image width="10" height="10" xlink:href="stamp.png"/></svg>',
+        )
+        assert [
+            h for h, _a, _s in _tokens(extract_blocks_from_html(_svg_doc(markup)))
+        ] == [
+            "page01.jpg",
+            "stamp.png",
+        ]
+
+    def test_a_rooted_svg_drawing_nothing_yields_nothing(self):
+        markup = (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+            '<rect width="10" height="10"/></svg>'
+        )
+        assert extract_blocks_from_html(_svg_doc(markup)) == []
+
+    def test_an_xhtml_page_is_still_walked_as_before(self):
+        # The control: the nested form must not change behaviour.
+        blocks = extract_blocks_from_html(_doc(f"<p>Caption</p><div>{_SVG}</div>"))
+        assert [IMG_TOKEN_RE.sub("", b["text"]) for b in blocks] == ["Caption", ""]
