@@ -53,3 +53,50 @@ class TestSvgWrappedImage:
         svg = _SVG.replace("xlink:href", "href")
         blocks = extract_blocks_from_html(_doc(f"<div>{svg}</div>"))
         assert _tokens(blocks) == [("../images/p49.jpg", "", "h=100%")]
+
+
+class TestNonRenderedSvgContainers:
+    """SVG paints nothing inside <defs>, <symbol>, <mask>, <clipPath>,
+    <pattern> or <marker> — an <image> there is a definition, drawn only where
+    a <use> references it. Walking into them painted a picture the publisher
+    hid, and embedded the resource, which #102 then could not prune because an
+    entry did display it."""
+
+    def _page(self, inner):
+        """An XHTML page wrapping an <svg> — the form this PR reads."""
+        return _doc(
+            '<div><svg xmlns="http://www.w3.org/2000/svg" '
+            f'xmlns:xlink="http://www.w3.org/1999/xlink">{inner}</svg></div>'
+        )
+
+    @pytest.mark.parametrize(
+        "container", ["defs", "symbol", "mask", "clipPath", "pattern", "marker"]
+    )
+    def test_an_image_inside_a_definition_is_not_painted(self, container):
+        doc = self._page(
+            f'<{container}><image xlink:href="hidden.jpg"/></{container}>'
+            '<image xlink:href="drawn.jpg"/>'
+        )
+        assert [h for h, _a, _s in _tokens(extract_blocks_from_html(doc))] == [
+            "drawn.jpg"
+        ]
+
+    def test_a_definition_nested_deeper_is_still_skipped(self):
+        doc = self._page(
+            '<g><defs><g><image xlink:href="hidden.jpg"/></g></defs></g>'
+            '<image xlink:href="drawn.jpg"/>'
+        )
+        assert [h for h, _a, _s in _tokens(extract_blocks_from_html(doc))] == [
+            "drawn.jpg"
+        ]
+
+    def test_a_painted_container_is_still_walked(self):
+        # <g> and <a> paint their children; only the list above does not.
+        doc = self._page('<g><a><image xlink:href="drawn.jpg"/></a></g>')
+        assert [h for h, _a, _s in _tokens(extract_blocks_from_html(doc))] == [
+            "drawn.jpg"
+        ]
+
+    def test_a_page_whose_only_image_is_a_definition_draws_nothing(self):
+        doc = self._page('<defs><image xlink:href="hidden.jpg"/></defs>')
+        assert extract_blocks_from_html(doc) == []

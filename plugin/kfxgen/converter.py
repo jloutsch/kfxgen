@@ -231,19 +231,43 @@ SVG_IMAGE_SIZE = "h=100%"
 _XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
 
 
+#: SVG containers whose contents are definitions rather than drawing. An
+#: <image> inside one is painted only where a <use> references it, so walking
+#: into them paints pictures the publisher hid — and embeds the resource,
+#: which #102 then cannot prune because an entry does display it.
+#:
+#: <use> is not resolved, so an image defined here and used elsewhere is
+#: dropped rather than drawn in the wrong place. Dropping a referenced image
+#: is the lesser error, and a reference file with one would be the thing to
+#: change it on.
+_SVG_NON_RENDERED_CONTAINERS = frozenset(
+    {"defs", "symbol", "mask", "clippath", "pattern", "marker"}
+)
+
+
 def _svg_image_refs(svg):
-    """(href, alt) for every <image> an <svg> element draws.
+    """(href, alt) for every <image> an <svg> element actually draws.
 
     Publishers wrap full-page art in SVG — calibre's own cover page does —
     and Amazon renders it; here the page used to come through empty.
+
+    Walks rather than using `iter()`, so a subtree that SVG does not paint can
+    be skipped whole.
     """
     refs = []
-    for node in svg.iter():
-        if _local_tag(node.tag) != "image":
-            continue
-        href = node.get(_XLINK_HREF) or node.get("href") or ""
-        if href:
-            refs.append((href, ""))
+
+    def walk(node):
+        for child in node:
+            local = _local_tag(child.tag)
+            if not local or local.lower() in _SVG_NON_RENDERED_CONTAINERS:
+                continue
+            if local == "image":
+                href = child.get(_XLINK_HREF) or child.get("href") or ""
+                if href:
+                    refs.append((href, ""))
+            walk(child)
+
+    walk(svg)
     return refs
 
 
