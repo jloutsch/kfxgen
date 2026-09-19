@@ -154,6 +154,13 @@ def make_ion_symtab():
 #:
 #: Repairing `MINIMAL_JPEG` itself, and giving the body-image fixtures real
 #: dimensions so a computed width reaches a golden at all, is #164.
+#:
+#: Fixed bytes rather than `jpeg_of(600, 800)`, and the difference matters:
+#: this feeds the `with_cover` golden. Deriving a golden's *input* from a
+#: helper couples the committed output to that helper, so editing `jpeg_of` —
+#: for a fixture with nothing to do with covers — would move `with_cover.kfx`
+#: and fail the byte gate somewhere unrelated to the change. Golden inputs
+#: hold still on purpose. `jpeg_of` is for fixtures built at run time.
 SIZED_JPEG: bytes = bytes.fromhex(
     "ffd8ffe000104a46494600010100000100010000ffdb0043001b12141714111b1716171e"
     "1c1b2028422b28252528513a3d3042605565645f555d5b6a7899816a7190735b5d85b586"
