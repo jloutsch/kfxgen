@@ -1529,6 +1529,32 @@ def _nav_listing_contents_chapter(chapters):
     return None
 
 
+def _keep_illustrations(ch):
+    """Move the pictures off a chapter whose text is about to be replaced.
+
+    Three front-matter pages have their body rewritten: the contents listing
+    becomes kfxgen's own (#132), and the title and half-title pages become the
+    book's title and author. In every case the reason is that the *text*
+    duplicates something KFX carries itself or states worse than the metadata
+    does. None of that is a reason to drop what the publisher printed there.
+
+    #117 made this call for the contents page. The title pages had no
+    equivalent, so a scanned title page — the whole page, in a page-scan book —
+    went with the text that replaced it, and so did the vignette or series
+    device an ordinary illustrated book prints above its title. Measured across
+    a 226-book library: 181 books, 314 images (#178).
+
+    Tokens only, never the blocks they came from: the surrounding text is
+    exactly what the caller is replacing. `preserved_images` is read outside
+    the generator's `toc_links` branch, so it works for a page with no links.
+    """
+    return [
+        m.group(0)
+        for b in (ch.get("blocks") or [])
+        for m in _IMG_TOKEN_RE.finditer(b.get("text") or "")
+    ]
+
+
 def _replace_title_page(chapters, metadata, log):
     """Replace title page, reformat copyright/contents, and set font sizes for front/back matter."""
     if not metadata:
@@ -1558,8 +1584,14 @@ def _replace_title_page(chapters, metadata, log):
             continue
         ch_title = _normalize_title(ch["title"])
         if ch_title in TITLE_PAGE_TITLES:
+            kept = _keep_illustrations(ch)
             ch["text"] = f"{title}\n\nby\n\n{author}"
             ch.pop("blocks", None)
+            if kept:
+                ch["preserved_images"] = kept
+                log.info(
+                    f"  Kept {len(kept)} illustration(s) from the replaced title page"
+                )
             # The replaced body already contains the book title — don't
             # also render the chapter's TOC name ("Title Page") as a
             # heading on top of it (#33).
@@ -1570,9 +1602,15 @@ def _replace_title_page(chapters, metadata, log):
             # label ("Half Title Page") is structural metadata, never
             # printed content — replace with the title and suppress the
             # label as a heading so it can't leak onto the page. (#107)
+            kept = _keep_illustrations(ch)
             ch["text"] = title
             ch.pop("blocks", None)
             ch["_omit_title_heading"] = True
+            if kept:
+                ch["preserved_images"] = kept
+                log.info(
+                    f"  Kept {len(kept)} illustration(s) from the replaced half-title"
+                )
             log.info(f"  Replaced half-title page with: {title}")
         elif ch_title in ("copyright", "copyright page"):
             ch["font_size"] = SMALL_FONT_SIZE
@@ -1629,11 +1667,7 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     #
     # Tokens only, not the blocks they came from: the surrounding text is
     # exactly what this function exists to replace.
-    preserved_images = [
-        m.group(0)
-        for b in (contents_ch.get("blocks") or [])
-        for m in _IMG_TOKEN_RE.finditer(b.get("text") or "")
-    ]
+    preserved_images = _keep_illustrations(contents_ch)
 
     # Build display text (header + entries)
     lines = ["Contents"]
