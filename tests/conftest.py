@@ -41,9 +41,30 @@ def load_kfx_fragments():
 # Markers are registered in pytest.ini's [pytest] section.
 
 
+#: `KFXGEN_*` variables that select what the suite runs, rather than telling
+#: the generator how to convert. The sweep below must not touch these: they are
+#: how a maintainer points the corpus tests at a directory of books and at a
+#: recorded baseline, and clearing them turns the test that reads them into a
+#: silent skip (#162).
+#:
+#: `KFXGEN_CORPUS_DIR` survived the original sweep by accident — it is read at
+#: collection time, before any fixture runs, so the parametrized invariant
+#: tests kept working. The two baseline variables are read inside the test
+#: body, after the fixture, so `test_corpus_metrics_match_baseline` skipped in
+#: every configuration from the day the sweep was added. The check the module
+#: docstring calls "the check that catches *silent* damage" had never once run.
+HARNESS_ENV_VARS = frozenset(
+    {
+        "KFXGEN_CORPUS_DIR",
+        "KFXGEN_CORPUS_BASELINE",
+        "KFXGEN_CORPUS_WRITE_BASELINE",
+    }
+)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_kfxgen_env(monkeypatch):
-    """Clear `KFXGEN_*` overrides so tests see documented defaults.
+    """Clear `KFXGEN_*` conversion overrides so tests see documented defaults.
 
     These variables are meant to be exported for a conversion — that is the
     documented way to correct a device that renders superscripts or images
@@ -56,6 +77,12 @@ def _isolate_kfxgen_env(monkeypatch):
     happens to carry. `KFXGEN_MAX_DECODE_SIZE` is read at import time rather
     than per call, so clearing it here has no effect on that one — it is left
     in the sweep anyway so the rule stays "no KFXGEN_* reaches a test".
+
+    `HARNESS_ENV_VARS` is the exception, and the distinction is what the
+    original sweep missed: those variables do not change how a book converts,
+    they choose which books the suite converts at all.
     """
     for name in [k for k in os.environ if k.startswith("KFXGEN_")]:
+        if name in HARNESS_ENV_VARS:
+            continue
         monkeypatch.delenv(name, raising=False)
