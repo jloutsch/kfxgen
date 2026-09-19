@@ -1,27 +1,46 @@
 # Development Dependencies
+#
+# Exact pins, matching the convention `requirements.txt` already sets for
+# runtime. This file had none: every entry was a lower bound, so two people
+# following CONTRIBUTING could run different tools and get different results
+# from the same tree.
+#
+# The concrete case was ruff. CI installed `ruff==0.15.1` from a literal in
+# test.yml while this file said `ruff>=0.1.0`, so a contributor who installed
+# from here got whatever was current and could pass locally while the gate
+# failed — or worse, reformat the tree to a different style. The workflow now
+# reads the pin from this file, so the two cannot drift apart again.
+#
+# Pins also make the tier-2 record honest. It states a test count against an
+# upstream pin (`tests/fixtures/vendor/kfx_input_plugin.lastrun.json`), and a
+# count is only evidence if the next person can reproduce it.
+#
+# Bump deliberately, one line at a time, and re-run the suite.
 
 # Include core requirements
 -r requirements.txt
 
 # Testing
-pytest>=7.4.0
-pytest-cov>=4.1.0
-pytest-benchmark>=4.0.0
-pytest-mock>=3.12.0
-hypothesis>=6.100.0
+pytest==9.1.1
+pytest-cov==7.1.0
+pytest-benchmark==5.2.3
+pytest-mock==3.15.1
+hypothesis==6.155.7
 
 # Code quality
-black>=24.1.0
-ruff>=0.1.0
-mypy>=1.8.0
-pre-commit>=3.6.0
+# ruff gates every PR (`ruff check` + `ruff format --check`). The workflow
+# installs this exact line — see .github/workflows/test.yml.
+black==26.5.1
+ruff==0.15.1
+mypy==2.1.0
+pre-commit==4.6.0
 
 # Documentation
-sphinx>=7.2.0
-sphinx-rtd-theme>=2.0.0
+sphinx==9.1.0
+sphinx-rtd-theme==3.1.0
 
 # HarfBuzz (text shaping - will be critical for Phase 2)
-uharfbuzz>=0.38.0
+uharfbuzz==0.55.0
 
 # Needed to IMPORT jhowell's kfxlib in the tier-2 differential decode
 # (tests/integration/test_kfxlib_diff.py). kfxgen itself uses neither.
@@ -40,8 +59,8 @@ uharfbuzz>=0.38.0
 # runs outside Calibre's interpreter; without it, the chain exhausts and the
 # error surfaces as "No module named 'calibre'", which reads as "this can only
 # run inside Calibre" and is misleading.
-Pillow>=10.0.0
-beautifulsoup4>=4.12.0
+Pillow==12.3.0
+beautifulsoup4==4.15.0
 
 # Development tools (optional, Python 3.10+ only)
 # ipython>=8.20.0
