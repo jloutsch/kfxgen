@@ -71,13 +71,21 @@ def _parse(z: zipfile.ZipFile, name: str):
         return None
 
 
-def _nav_targets(z: zipfile.ZipFile, names: list[str]) -> set[str]:
-    """Spine hrefs the navigation points at, from NCX or an EPUB 3 nav document.
+def _nav_targets(z: zipfile.ZipFile, names: list[str]) -> tuple[set[str], int]:
+    """(spine hrefs the navigation points at, how many entries point at them).
 
-    Fragments are dropped: a nav entry into the middle of a page still means that
-    page is listed, which is the distinction the spine walk cares about.
+    Both numbers, because they answer different questions and conflating them
+    is misleading. Fragments are dropped from the hrefs, since a nav entry into
+    the middle of a page still means that page is listed — which is what the
+    spine walk cares about. But five entries pointing at five anchors in one
+    document then collapse to one target, and reporting that as "nav entries"
+    reads as a book with almost no table of contents when it has a full one.
+
+    Gutenberg's illustrated books are exactly this shape, and the single number
+    made a 5-entry TOC look like a 1-entry one.
     """
     targets: set[str] = set()
+    entries = 0
     for name in names:
         low = name.lower()
         if low.endswith(".ncx"):
@@ -86,6 +94,7 @@ def _nav_targets(z: zipfile.ZipFile, names: list[str]) -> set[str]:
                 continue
             for el in root.iter(f"{NCX_NS}content"):
                 if el.get("src"):
+                    entries += 1
                     targets.add(el.get("src").split("#")[0].rsplit("/", 1)[-1])
         elif low.endswith((".xhtml", ".html")):
             root = _parse(z, name)
@@ -102,8 +111,9 @@ def _nav_targets(z: zipfile.ZipFile, names: list[str]) -> set[str]:
                     continue
                 for a in nav.iter():
                     if _local(a.tag) == "a" and a.get("href"):
+                        entries += 1
                         targets.add(a.get("href").split("#")[0].rsplit("/", 1)[-1])
-    return targets
+    return targets, entries
 
 
 def _describe_doc(root) -> dict:
@@ -166,7 +176,7 @@ def describe(path: Path) -> dict:
                     fxl = fxl or (meta.text or "").strip() == "pre-paginated"
             fxl = fxl or any("rendition:layout" in p for p in props_by_id.values())
 
-        nav = _nav_targets(z, names)
+        nav, nav_entry_count = _nav_targets(z, names)
 
         totals = {
             "svg_rooted": 0,
@@ -211,7 +221,8 @@ def describe(path: Path) -> dict:
 
         return {
             "spine_documents": len(spine_ids),
-            "nav_entries": len(nav),
+            "nav_entries": nav_entry_count,
+            "nav_target_documents": len(nav),
             "spine_listed_in_nav": listed,
             "spine_not_listed_in_nav": unlisted,
             "fixed_layout": fxl,
@@ -234,6 +245,7 @@ def render(shape: dict, index: int | None = None) -> str:
     order = [
         ("spine_documents", "spine documents"),
         ("nav_entries", "nav entries"),
+        ("nav_target_documents", "...pointing at N documents"),
         ("spine_listed_in_nav", "spine docs listed in nav"),
         ("spine_not_listed_in_nav", "spine docs NOT listed in nav"),
         ("fixed_layout", "fixed layout (pre-paginated)"),
