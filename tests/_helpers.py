@@ -3,9 +3,12 @@ Shared assets and helpers used across the test suite (#90).
 
 Centralizes test fixtures that were previously duplicated in 4-5 files:
 
-- `MINIMAL_JPEG`: a minimal-but-valid 1×1 JPEG that passes the converter's
-  magic-byte sniff. Used wherever a test needs to exercise the
-  cover/body-image pipeline without bundling a real photo.
+- `MINIMAL_JPEG`: a 1×1 JPEG that passes the converter's magic-byte sniff.
+  Used wherever a test needs to exercise the cover/body-image pipeline
+  without bundling a real photo. Not well-formed — it cannot report its own
+  size; see the note at its definition, and #164.
+- `SIZED_JPEG` / `jpeg_of(width, height)`: images whose dimensions the
+  generator can actually read. Anything asserting on a size wants these.
 - `MINIMAL_PNG`: the same idea in the other format, for fixtures that need
   two images the pipeline cannot confuse for one another.
 - `NullLog`: a no-op logger that satisfies the converter's `log` parameter
@@ -54,6 +57,9 @@ def jpeg_of(width: int, height: int) -> bytes:
     matches its table, a comment segment padding past the 100-byte floor
     below which the converter declines to treat bytes as an image, then the
     SOF0 carrying the dimensions. Both readers in the codebase agree on it.
+
+    `SIZED_JPEG` is the same idea as a constant, for the 600x800 case; reach
+    for this when a test needs particular dimensions.
     """
     sof0 = f"ffc0000b08{height:04x}{width:04x}0101"
     return bytes.fromhex(
@@ -136,10 +142,10 @@ def make_ion_symtab():
 #: A well-formed 600x800 JPEG, mid-grey, quality 30.
 #:
 #: `MINIMAL_JPEG` cannot be used where a test depends on an image's *size*:
-#: its DQT segment declares 67 bytes and carries 116, so a parser that follows
-#: segment lengths — which `_detect_image_dimensions` does — walks off the
-#: table and never reaches the SOF0 at offset 138. It reports `(None, None)`
-#: for what is nominally a 1x1 image.
+#: its DQT segment declares a length its payload overruns, so a parser that
+#: follows segment lengths — which `_detect_image_dimensions` does — never
+#: reaches the SOF0. It reports `(None, None)` for what is nominally a 1x1
+#: image. The arithmetic is at that constant's definition, in one place.
 #:
 #: That is why the `with_cover` golden could not see a change to how the cover
 #: is laid out: the generator branches on whether the cover's dimensions are
