@@ -14,28 +14,20 @@ from pathlib import Path
 
 import pytest
 
+from tests._helpers import jpeg_of
+
 _ROOT = Path(__file__).resolve().parents[2]
 
 
-def _jpeg(width: int, height: int) -> bytes:
-    """A JPEG carrying a SOF0 with the given dimensions, which is all the size
-    classifier reads.
-
-    `MINIMAL_JPEG` has no SOF at all and so classifies as `inline`; pairing it
-    with this one puts two size classes in one book, which is what makes the
-    allocation order observable. Padded past 100 bytes with a comment segment
-    because `converter.py` drops anything smaller as not-really-an-image.
-    """
-    pad = b"kfxgen reproducibility fixture padding. " * 4
-    comment = b"\xff\xfe" + bytes([(len(pad) + 2) >> 8, (len(pad) + 2) & 0xFF]) + pad
-    return (
-        b"\xff\xd8"
-        + comment
-        + b"\xff\xc0\x00\x11\x08"
-        + bytes([height >> 8, height & 0xFF, width >> 8, width & 0xFF])
-        + b"\x03\x01\x11\x00\x02\x11\x01\x03\x11\x01"
-        + b"\xff\xd9"
-    )
+#: One builder for test JPEGs. See `tests/_helpers.jpeg_of`.
+#:
+#: Pairing it with `MINIMAL_JPEG` puts two size classes in one book, which is
+#: what makes the `$157` allocation order observable. `MINIMAL_JPEG` reports no
+#: size — not because it lacks a SOF0, as this comment claimed for a long time,
+#: but because its padding sits inside the DQT without widening that segment's
+#: declared length, so a length-following parser never reaches the SOF0 it does
+#: have (#163).
+_jpeg = jpeg_of
 
 
 _SCRIPT = textwrap.dedent(

@@ -4,6 +4,8 @@ import types
 import pytest
 from kfxgen import image_optimize as io
 
+from tests._helpers import jpeg_of
+
 
 def _png(w, h):
     return (
@@ -15,23 +17,8 @@ def _png(w, h):
     )
 
 
-def _jpeg(w, h):
-    # SOI, APP0 stub, SOF0 (len=17, precision=8, height, width), EOI
-    app0 = (
-        b"\xff\xe0"
-        + struct.pack(">H", 16)
-        + b"JFIF\x00"
-        + b"\x01\x01\x00"
-        + b"\x00\x01\x00\x01\x00\x00"
-    )
-    sof0 = (
-        b"\xff\xc0"
-        + struct.pack(">H", 17)
-        + b"\x08"
-        + struct.pack(">HH", h, w)
-        + b"\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01"
-    )
-    return b"\xff\xd8" + app0 + sof0 + b"\xff\xd9"
+#: One builder for test JPEGs. See `tests/_helpers.jpeg_of`.
+_jpeg = jpeg_of
 
 
 class _Log:
