@@ -28,6 +28,7 @@ from pathlib import Path
 
 from tests._helpers import MINIMAL_JPEG as _MINIMAL_JPEG
 from tests._helpers import MINIMAL_PNG as _MINIMAL_PNG
+from tests._helpers import jpeg_of as _jpeg_of
 from tests._helpers import SIZED_JPEG as _SIZED_JPEG
 from tests.fixtures.epub_builder import EpubBuilder
 
@@ -48,7 +49,24 @@ def make_minimal(out_dir: Path) -> Path:
 def make_body_images(out_dir: Path) -> Path:
     """Two chapters, the first with two body `<img>` tags. Locks the v5.3.5
     body-image rendering path that #4 fixed (image $259 entries with
-    dedicated $157 styles, image positions in $265, etc.)."""
+    dedicated $157 styles, image positions in $265, etc.).
+
+    The two images are deliberately different sizes, and one of them is
+    narrower than the 496px text column, because until #164 no golden in this
+    corpus exercised the width rule at all. Every one of them carried
+    `$56 = 100.0` — which is not a computed result but the fall-through taken
+    when an image's dimensions are unreadable, as `MINIMAL_JPEG`'s are.
+
+    Two things were therefore untested. `_image_width_pct` is
+    `min(100, px / 496 * 100)`, and the interesting half of that is an image
+    narrower than the column; a regression in the arithmetic could not fail a
+    golden. And `s_img_w0`, `s_img_w1`, … are allocated in sorted width order
+    because iterating the set directly randomised symbol ids between runs
+    (#96) — with one bucket there was no order to get wrong.
+
+    300px wide computes to 60.484% of the column; 800px saturates at 100%.
+    Change these and `test_fixture_body_images_shape` will tell you what moved.
+    """
     body_with_imgs = (
         "<p>Opening paragraph of chapter one.</p>\n"
         '<p><img src="img1.jpg" alt="first image"/></p>\n'
@@ -74,13 +92,13 @@ def make_body_images(out_dir: Path) -> Path:
             item_id="img1",
             href="img1.jpg",
             media_type="image/jpeg",
-            data=_MINIMAL_JPEG,
+            data=_jpeg_of(300, 400),
         )
         .add_manifest_item(
             item_id="img2",
             href="img2.jpg",
             media_type="image/jpeg",
-            data=_MINIMAL_JPEG,
+            data=_jpeg_of(800, 1000),
         )
     )
     return builder.build(out_dir, "body_images")

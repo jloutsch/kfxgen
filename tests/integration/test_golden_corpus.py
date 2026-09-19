@@ -236,11 +236,102 @@ def test_fixture_minimal_shape():
 
 @pytest.mark.tier3
 @pytest.mark.integration
+def _image_style_percents(frags, axis="$56") -> dict[str, float]:
+    """`$56` percentages from the styles the *width rule* produces.
+
+    `s_img_w*` only, and the exclusion is load-bearing. `s_img_sm` — the small
+    ornament — also carries a `$56`, of 3.0, and it is a fixed `3em` rather
+    than anything `_image_width_pct` computed. Counting it made both coverage
+    assertions below pass against a corpus where every real width was the
+    fall-through 100.0: a value between 0 and 100 was present, and two distinct
+    values were present, and neither had anything to do with the rule.
+
+    That is #164's own defect wearing the fix's clothes, and a mutation test is
+    what caught it. Keep the filter narrow.
+    """
+    out = {}
+    for f in by_type(frags, "$157"):
+        name = str(f.fid)
+        if not name.startswith("s_img_w"):
+            continue
+        v = val(f)
+        box = v.get(IS(axis))
+        if box is not None:
+            out[name] = float(str(box[IS("$307")]))
+    return out
+
+
 def test_fixture_body_images_shape():
-    """body_images: at least 2 $259 image entries (with $175 resource ref)."""
+    """body_images: 2 image entries, at two different computed widths."""
     frags = load_fragments(EXPECTED_DIR / "body_images.kfx")
     assert _count_image_resource_entries(frags) >= 2, (
         "body_images must emit at least two $259 image entries — fixture rotted"
+    )
+    widths = _image_style_percents(frags)
+    assert widths == {"s_img_w0": 60.484, "s_img_w1": 100.0}, (
+        f"body_images must carry one computed width and one saturated one, got "
+        f"{widths}. 300px against a 496px column is 60.484%; 800px caps at 100%. "
+        "If this moved deliberately, regenerate — but see #164 for why a golden "
+        "showing only 100.0 tests nothing."
+    )
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
+def test_some_golden_exercises_a_computed_width():
+    """At least one golden must carry a width the arithmetic actually produced.
+
+    `_image_width_pct` is `min(100, px / 496 * 100)`, and 100.0 is also what
+    the caller falls back to when an image's dimensions are unreadable. So a
+    corpus where every width is 100.0 cannot tell a working rule from a broken
+    one — which is exactly what this corpus was until #164, because every
+    fixture image was `MINIMAL_JPEG` and that constant reports no size.
+
+    The defect #145 fixed gave 2,462 of 4,436 corpus images a fixed 9.626%
+    width and shipped. The golden corpus was green throughout.
+
+    Read from the committed goldens rather than built fresh on purpose: the
+    claim is about what this corpus covers, not about what the generator does
+    on one input.
+    """
+    seen = {}
+    for name, _builder in GOLDEN_INPUTS:
+        path = EXPECTED_DIR / f"{name}.kfx"
+        if not path.is_file():
+            continue
+        for style, pct in _image_style_percents(load_fragments(path)).items():
+            if 0 < pct < 100:
+                seen[f"{name}:{style}"] = pct
+    assert seen, (
+        "no golden carries an image width strictly between 0 and 100, so the "
+        "width rule is untested by this corpus — every value is the saturated "
+        "or fall-through 100.0. Give a fixture image a width below the 496px "
+        "text column (#164)."
+    )
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
+def test_some_golden_allocates_more_than_one_width_style():
+    """Sorted allocation needs an order to get wrong.
+
+    `s_img_w0`, `s_img_w1`, … are allocated in sorted width order because
+    iterating the set directly randomised symbol ids between runs, shifting
+    every local symbol numbered after them (#96). A corpus where no book has
+    two distinct widths cannot distinguish sorted allocation from unsorted.
+    """
+    counts = {}
+    for name, _builder in GOLDEN_INPUTS:
+        path = EXPECTED_DIR / f"{name}.kfx"
+        if not path.is_file():
+            continue
+        widths = set(_image_style_percents(load_fragments(path)).values())
+        if len(widths) > 1:
+            counts[name] = sorted(widths)
+    assert counts, (
+        "no golden emits two distinct image widths, so the sorted `$157` "
+        "allocation that #96 installed is not exercised — with one bucket "
+        "there is no order to get wrong (#164)."
     )
 
 
