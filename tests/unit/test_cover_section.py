@@ -9,19 +9,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin")
 
 from kfxgen.kfxlib_minimal.ion import IS  # noqa: E402
 from kfxgen.native_generator import NativeKFXGenerator  # noqa: E402
+from tests._helpers import jpeg_of  # noqa: E402
 from tests._kfx_introspect import by_type, load_fragments, val  # noqa: E402
 
 pytestmark = pytest.mark.unit
-
-
-def _jpeg(w, h):
-    """A JPEG whose SOF0 the generator's dimension scan can read, padded past
-    the 100-byte floor below which the generator treats bytes as not an image."""
-    app0 = b"\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
-    dims = h.to_bytes(2, "big") + w.to_bytes(2, "big")
-    sof0 = b"\xff\xc0\x00\x0b\x08" + dims + b"\x01\x01\x11\x00"
-    comment = b"\xff\xfe\x00\x66" + b"\x00" * 100
-    return b"\xff\xd8" + app0 + sof0 + comment + b"\xff\xd9"
 
 
 def _build(text, images, cover=None):
@@ -46,7 +37,7 @@ def _build(text, images, cover=None):
 
 class TestCoverSection:
     def test_cover_section_is_a_block_of_the_cover_size(self):
-        frags = _build("Some prose.", {}, cover=_jpeg(1495, 2200))
+        frags = _build("Some prose.", {}, cover=jpeg_of(1495, 2200))
         sections = {str(f.fid): val(f) for f in by_type(frags, "$260")}
         cover = sections["c0"][IS("$141")][0]
         assert (cover[IS("$66")], cover[IS("$67")]) == (1495, 2200)
