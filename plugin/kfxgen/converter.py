@@ -112,6 +112,12 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # so this is the one place both spellings meet.
                     "width": st.get("width"),
                     "height": st.get("height"),
+                    # A page drawn as a background layer carries its picture
+                    # here and nowhere in the markup (#168). `background`
+                    # shorthand is not consulted: Stylizer does not expand it,
+                    # and no producer seen writes a page that way.
+                    "background-image": st.get("background-image"),
+                    "background-repeat": st.get("background-repeat"),
                 }
             except Exception:
                 return None
@@ -243,6 +249,43 @@ _XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
 _SVG_NON_RENDERED_CONTAINERS = frozenset(
     {"defs", "symbol", "mask", "clippath", "pattern", "marker"}
 )
+
+
+#: `url(...)` in a CSS value, quoted or not.
+_CSS_URL_RE = re.compile(r"""url\(\s*['"]?([^'")]+)""")
+
+
+def _css_background_image(elem, css):
+    """The href of a picture this element draws as its background, or None.
+
+    Some print-to-EPUB chains put the scanned page in a `background-image` on
+    an empty div and position the text over it. No `<img>`, no `<svg>`, so the
+    page reached the reader with no picture at all — and a page-scan book with
+    no text overlay reached it as a failed conversion, every spine item being
+    empty (#168).
+
+    Deliberately the narrowest rule that covers that shape, because the risk
+    runs the other way: emitting for every `background-image` would *add*
+    pictures to books that convert correctly today.
+
+    * a `background-image` with a `url(...)`;
+    * the element draws nothing else — no element children, no text of its
+      own, so it is a picture rather than a decorated box;
+    * `background-repeat: no-repeat`, which is the cheapest thing separating
+      a page scan from a texture. A tiled background is decoration by
+      definition, and the producers that lay pages out this way all set it.
+    """
+    if not css:
+        return None
+    if len(elem) or (elem.text or "").strip():
+        return None
+    if (css.get("background-repeat") or "").strip().lower() != "no-repeat":
+        return None
+    match = _CSS_URL_RE.search(css.get("background-image") or "")
+    if not match:
+        return None
+    href = match.group(1).strip()
+    return href or None
 
 
 def _svg_image_refs(svg):
@@ -662,6 +705,20 @@ def extract_blocks_from_html(
                 nav_listing_at.append(len(blocks))
             _discard_listing(elem)
             return
+        background = _css_background_image(
+            elem, style_resolver(elem) if style_resolver is not None else None
+        )
+        if background:
+            # The element *is* the picture — no children, no text — so it is
+            # handled here rather than in either branch below, both of which
+            # would see an empty block and drop it. Its box is sized to the
+            # scan in every book seen with this shape, so the size hint comes
+            # from the same place it would for an <img>. (#168)
+            _emit_image_block(
+                elem, background, "", _img_size_hint(elem, style_resolver)
+            )
+            return
+
         is_block = elem.tag in block_tags
         has_block_child = any(child.tag in block_tags for child in elem)
 
@@ -712,7 +769,6 @@ def extract_blocks_from_html(
         if _local_tag(elem.tag) == "svg":
             _emit_svg_blocks(elem)
             return
-
         pending_ids.extend(_own_anchor_ids(elem))
 
         # A container can hold its own inline content alongside block children —
