@@ -3,9 +3,12 @@ Shared assets and helpers used across the test suite (#90).
 
 Centralizes test fixtures that were previously duplicated in 4-5 files:
 
-- `MINIMAL_JPEG`: a minimal-but-valid 1×1 JPEG that passes the converter's
-  magic-byte sniff. Used wherever a test needs to exercise the
-  cover/body-image pipeline without bundling a real photo.
+- `MINIMAL_JPEG`: a 1×1 JPEG that passes the converter's magic-byte sniff.
+  Used wherever a test needs to exercise the cover/body-image pipeline
+  without bundling a real photo. Not well-formed — it cannot report its own
+  size; see the note at its definition, and #164.
+- `SIZED_JPEG` / `jpeg_of(width, height)`: images whose dimensions the
+  generator can actually read. Anything asserting on a size wants these.
 - `MINIMAL_PNG`: the same idea in the other format, for fixtures that need
   two images the pipeline cannot confuse for one another.
 - `NullLog`: a no-op logger that satisfies the converter's `log` parameter
@@ -19,13 +22,56 @@ covers everything else worth deduplicating.
 from __future__ import annotations
 
 
-# Minimal valid 1×1 JPEG accepted by the converter's magic-byte sniff
+# A 1×1 JPEG accepted by the converter's magic-byte sniff
 # (`\xff\xd8\xff` + JFIF APP0 + length>100). Hex-encoded inline so tests
 # don't need to bundle binary fixtures for trivial image-pipeline cases.
+#
+# NOT well-formed, and do not reason from it: the padding sits inside the
+# DQT without widening that segment's declared length. The marker at offset
+# 20 declares 67, so a parser looks for the next one at 89; the payload is
+# 114 bytes against the 65 declared, and the SOF0 it does have sits at 138,
+# 49 bytes past where a length-following parser gives up.
+# `_detect_image_dimensions` therefore reports (None, None), which is how a
+# cover golden came to pin the unknown-size branch (#163). Use `jpeg_of()`
+# below wherever an image's own size is read.
 MINIMAL_JPEG: bytes = bytes.fromhex(
     "ffd8ffe000104a46494600010100000100010000ffdb004300080606"
     "07060805070707090908" + "0a" * 100 + "ffc0000b08000100010101" + "00" * 30 + "ffd9"
 )
+
+
+def jpeg_of(width: int, height: int) -> bytes:
+    """A JPEG that *declares* `width` x `height`, for fixtures about sizing.
+
+    Not `MINIMAL_JPEG` with the numbers swapped, deliberately. That constant
+    was built for the magic-byte sniff and its DQT segment declares 67 bytes
+    while carrying 114 of payload against the 65 declared, so a parser that
+    follows lengths — which is what
+    `native_generator._detect_image_dimensions` does, as a JPEG parser must —
+    walks off the quantization table and never reaches the SOF0 at offset 138,
+    and reports no dimensions at all. (#163) Fine for what it is
+    used for; useless for the image-sizing rules, which read an image's own
+    pixel width.
+
+    This one's marker chain is honest end to end: APP0, a DQT whose length
+    matches its table, a comment segment padding past the 100-byte floor
+    below which the converter declines to treat bytes as an image, then the
+    SOF0 carrying the dimensions. Both readers in the codebase agree on it.
+
+    `SIZED_JPEG` is the same idea as a constant, for the 600x800 case; reach
+    for this when a test needs particular dimensions.
+    """
+    sof0 = f"ffc0000b08{height:04x}{width:04x}0101"
+    return bytes.fromhex(
+        "ffd8"  # SOI
+        "ffe000104a46494600010101004800480000"  # APP0, JFIF, 16 bytes
+        "ffdb0043 00".replace(" ", "")
+        + "0a" * 64  # DQT, 67 bytes as declared
+        + "fffe0066"
+        + "20" * 100  # COM, padding past the 100-byte floor
+        + sof0
+        + "ffd9"  # SOF0 with the dimensions, EOI
+    )
 
 
 class NullLog:
@@ -96,10 +142,10 @@ def make_ion_symtab():
 #: A well-formed 600x800 JPEG, mid-grey, quality 30.
 #:
 #: `MINIMAL_JPEG` cannot be used where a test depends on an image's *size*:
-#: its DQT segment declares 67 bytes and carries 116, so a parser that follows
-#: segment lengths — which `_detect_image_dimensions` does — walks off the
-#: table and never reaches the SOF0 at offset 138. It reports `(None, None)`
-#: for what is nominally a 1x1 image.
+#: its DQT segment declares a length its payload overruns, so a parser that
+#: follows segment lengths — which `_detect_image_dimensions` does — never
+#: reaches the SOF0. It reports `(None, None)` for what is nominally a 1x1
+#: image. The arithmetic is at that constant's definition, in one place.
 #:
 #: That is why the `with_cover` golden could not see a change to how the cover
 #: is laid out: the generator branches on whether the cover's dimensions are
