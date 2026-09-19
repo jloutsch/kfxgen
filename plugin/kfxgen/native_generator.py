@@ -24,6 +24,35 @@ _DRIVE_RELATIVE_TRAVERSAL_RE = re.compile(r"^[A-Za-z]:\.\.")
 _security_log = logging.getLogger(__name__ + ".security")
 _log = logging.getLogger(__name__)
 
+#: A token size hint: axis, number, unit (bare = px).
+_SIZE_HINT_RE = re.compile(r"^([wh])=(\d+(?:\.\d+)?)(%|px|em|pt)?$")
+_CSS_PX_PER_UNIT = {"px": 1.0, "em": 16.0, "pt": 4.0 / 3.0}
+
+
+def _parse_size_hint(hint, column_px):
+    """('w' | 'h', percent) for a token size hint, or None to size by pixels.
+
+    Amazon's arithmetic, recovered from Kindle Previewer 3.106 output: a
+    width length is divided by the text column (em at 16px, pt at 4/3px), a
+    percentage is passed through, and either is capped at the column. A
+    height counts only as a percentage — a height in a length has no
+    reference output to copy, so it falls back to the pixel rule.
+    """
+    m = _SIZE_HINT_RE.match(hint or "")
+    if not m:
+        return None
+    axis, number, unit = m.group(1), float(m.group(2)), m.group(3) or "px"
+    if unit == "%":
+        pct = number
+    elif axis == "h":
+        return None
+    else:
+        pct = number * _CSS_PX_PER_UNIT[unit] / column_px * 100.0
+    if pct <= 0:
+        return None
+    return axis, round(min(100.0, pct), 3)
+
+
 # O_NOFOLLOW is POSIX-only; on Windows it isn't defined. Degrade to 0 (no-op
 # flag bit) so the plugin still imports under Calibre on Windows. Symlink
 # defense on Windows then relies on the islink() check above the open, which
@@ -1367,7 +1396,9 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
-    def build_fragment_157_image(self, entity_name, kind="inline", width_pct=None):
+    def build_fragment_157_image(
+        self, entity_name, kind="inline", width_pct=None, height_pct=None
+    ):
         """Builds a $157 style for inline image entries.
 
         Three variants observed in Calibre KFX Output (jhowell) reference
@@ -1380,6 +1411,8 @@ class NativeKFXGenerator:
           $56=100% lets the image take the full available height.
 
         Decision is driven by the caller, who knows the image dimensions.
+        `height_pct` sizes a "sized" image by height ($57) instead of width —
+        Amazon's shape for `height="98%"` and `height: 100%`.
         """
         self.symtab.create_local_symbol(entity_name)
         if kind == "page":
@@ -1399,11 +1432,16 @@ class NativeKFXGenerator:
             # Width from the image's own pixel width against the text column,
             # capped at full width — what Amazon does. Everything else matches
             # the old "inline" style so only the width changes. (#145)
+            # A height-sized image swaps $56 for $57 and keeps the max-width
+            # guard, so a tall page image still cannot overflow the column.
+            axis, pct = (
+                (IS("$57"), height_pct)
+                if height_pct is not None
+                else (IS("$56"), width_pct)
+            )
             value = IonStruct(
-                IS("$56"),
-                IonStruct(
-                    IS("$307"), IonDecimal(str(width_pct)), IS("$306"), IS("$314")
-                ),
+                axis,
+                IonStruct(IS("$307"), IonDecimal(str(pct)), IS("$306"), IS("$314")),
                 IS("$65"),
                 IonStruct(IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")),
                 IS("$785"),
@@ -2696,9 +2734,10 @@ class NativeKFXGenerator:
                 basename = href.split("#", 1)[0].rsplit("/", 1)[-1] if href else ""
                 resource = image_resources.get(basename)
                 if resource is not None:
-                    chunks.append(
-                        {"type": "image", "resource": resource[0], "alt": alt}
-                    )
+                    chunk = {"type": "image", "resource": resource[0], "alt": alt}
+                    if m.group(3):
+                        chunk["size"] = m.group(3)  # the markup's own size
+                    chunks.append(chunk)
                 # Unknown href: drop the token silently
                 last = m.end()
             if last < len(para_text):
@@ -3243,22 +3282,38 @@ class NativeKFXGenerator:
         )
         image_style_names = {"small": None}
         width_style_names = {}
+        height_style_names = {}
         resource_to_dims = {}
+
+        def _image_size_key(c):
+            """('small', None), ('w', pct) or ('h', pct) for an image chunk.
+
+            A size the markup asked for wins over the pixel-width rule: it is
+            what Amazon honours, and it is how a page-image book says "fill
+            the page" (`height="98%"`, `width: 100%`).
+            """
+            hint = _parse_size_hint(c.get("size"), IMAGE_COLUMN_PX)
+            if hint:
+                return hint
+            w, h = resource_to_dims.get(c.get("resource"), (None, None))
+            if _classify(w, h) == "small":
+                return ("small", None)
+            return ("w", _image_width_pct(w) if w else 100.0)
+
         if any_image_chunk:
             for base, dims in (self._image_dims or {}).items():
                 resname, _ = (self.image_resources or {}).get(base, (None, None))
                 if resname:
                     resource_to_dims[resname] = dims
 
-            kinds_used = set()
-            widths_used = set()
-            for c in all_chunks:
-                if isinstance(c, dict) and c.get("type") == "image":
-                    w, h = resource_to_dims.get(c.get("resource"), (None, None))
-                    kind = _classify(w, h)
-                    kinds_used.add(kind)
-                    if kind == "sized":
-                        widths_used.add(_image_width_pct(w) if w else 100.0)
+            keys_used = {
+                _image_size_key(c)
+                for c in all_chunks
+                if isinstance(c, dict) and c.get("type") == "image"
+            }
+            kinds_used = {axis for axis, _ in keys_used}
+            widths_used = {pct for axis, pct in keys_used if axis == "w"}
+            heights_used = {pct for axis, pct in keys_used if axis == "h"}
 
             # Fixed order, not the set's. Iterating `kinds_used` directly made
             # the output non-reproducible: CPython randomizes string hashing
@@ -3288,11 +3343,23 @@ class NativeKFXGenerator:
                 extra_style_names.append(name)
                 width_style_names[pct] = name
 
-        def _image_style_for(resource_name):
-            w, h = resource_to_dims.get(resource_name, (None, None))
-            if _classify(w, h) == "small":
+            for idx, pct in enumerate(sorted(heights_used)):
+                name = f"s_img_h{idx}"
+                self.fragments.append(
+                    self.build_fragment_157_image(
+                        entity_name=name, kind="sized", height_pct=pct
+                    )
+                )
+                extra_style_names.append(name)
+                height_style_names[pct] = name
+
+        def _image_style_for(chunk):
+            axis, pct = _image_size_key(chunk)
+            if axis == "small":
                 return image_style_names.get("small")
-            return width_style_names.get(_image_width_pct(w) if w else 100.0)
+            if axis == "h":
+                return height_style_names.get(pct)
+            return width_style_names.get(pct)
 
         from .inline_style import FLAG_BOLD, FLAG_ITALIC, FLAG_SUB, FLAG_SUPER
 
@@ -3340,9 +3407,7 @@ class NativeKFXGenerator:
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
                 if chunk.get("type") == "image":
-                    entry_styles.append(
-                        _image_style_for(chunk["resource"]) or story_names[ch_idx]
-                    )
+                    entry_styles.append(_image_style_for(chunk) or story_names[ch_idx])
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)
