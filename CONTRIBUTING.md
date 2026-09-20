@@ -404,9 +404,24 @@ python3 research/describe_epub.py BOOK.epub
 Gutenberg identifiers (`pg11`, `pg3011`) are fine: the corpus is public domain,
 its contents are listed in the README, and the id is what the tests key on.
 
+The sharper version of that line is **a book anyone can fetch**, rather than
+a book that happens to be out of copyright. Naming one is what makes a
+measurement checkable by someone else — "pg12082 was losing 97% of its links"
+is a claim a reader can verify, and the same sentence about an unnamed book is
+one they have to take on faith. A book only you can open buys none of that and
+costs the person who named it.
+
 **If a name does get posted, delete the comment and repost it.** GitHub keeps
 the previous revision in a comment's edit history, so editing leaves the
 original one click away.
+
+That works for a comment. An issue or pull-request **body** has no
+delete-and-repost: editing it removes the text from view but leaves it in the
+body's edit history, refiling leaves the original issue in place, and a
+contributor cannot delete an issue in someone else's repository. If a body
+needs redacting, edit it and say so — a maintainer can then delete the issue
+and let you refile from the redacted text if the history matters. Found by a
+contributor complying with this section and hitting the gap in it.
 
 ## Public-domain corpus sweep
 
