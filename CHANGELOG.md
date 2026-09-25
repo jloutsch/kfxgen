@@ -53,6 +53,12 @@ former and deliberately none of the latter.
 
 ## 5.8.0 — Books made of pictures
 
+> Corrected after release. Three figures in this entry were wrong and the reporter
+> checked them against their own measurements: the seven-page book was a synthetic
+> oracle EPUB rather than one of the 226, the six books losing every picture were four,
+> and #178 was missing from the known gaps. The tag and the published plugin are
+> unaffected — only this text was wrong.
+
 Every defect in this release is the same defect wearing a different hat: a page whose
 content is a picture rather than a paragraph reached the reader empty. kfxgen knew one
 way of drawing an image — an `<img>` the navigation had listed — and a book built any
@@ -69,8 +75,9 @@ before being written down.
 chapters; the art between them is just pages. Those pages were discarded as "image-only
 orphans" on the strength of the one case that is right to drop — the EPUB's own cover
 page, whose picture the cover chapter already shows. **200 pages across 64 of 226 books**,
-one of them shipping 3 of its 7 pages. The cover remains the exception, and a page showing
-only the cover is still dropped, so a book does not gain a blank first page.
+the worst of them 104 spine documents against 22 nav entries, losing seven pages.
+The cover remains the exception, and a page showing only the cover is still
+dropped, so a book does not gain a blank first page.
 
 Across that library: **+277 image tokens, +166 chapters.** 58 books lose exactly one
 token — in every case a nav-listed cover page that used to become a chapter the generator
@@ -108,8 +115,9 @@ characters of CSS into the reading flow.
 
 **Fixed (#168):** a page painted by the stylesheet lost its picture. A print-to-EPUB chain
 positions each scanned page as a `background-image` on an empty `<div>` with the text
-laid over it; there is no `<img>` anywhere. **Six books converted with no pictures at
-all** — text intact, every page blank where the art was. One went from 222 invented
+laid over it; there is no `<img>` anywhere. **Six books converted with no pages at all,
+four of them with no picture of any kind** — the other two kept their cover and nothing
+else. Text intact, every page blank where the art was. One went from 222 invented
 filename chapters to the publisher's own four labels, because pages that yield nothing
 cannot anchor a nav coordinate.
 
@@ -181,6 +189,9 @@ The vendored `kfxlib` pin moves to 20260827, KFX Input 2.34.2 (#150).
   allocation order are untested by the golden corpus (#164).
 - Two `test_safe_write` assertions encode POSIX semantics and fail on Windows; the
   defense they cover does hold there (#173).
+- The title-page replacement discards whatever the publisher printed on that page —
+  181 of 226 books, 314 images (#178). Reported after this entry was written; fixed in
+  5.8.1. Recorded here because it is the release these books were converted with.
 
 ## 5.7.4 — Pictures you can see, links that resolve, a navigation pane without machinery in it
 
