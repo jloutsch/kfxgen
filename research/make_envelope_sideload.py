@@ -17,14 +17,18 @@ respect — how far their positions run — and prints what to look for.
 Output is `.kfx`, which is gitignored. Do not commit these.
 
 Result so far (2026-09-07, Kindle Oasis 10th generation, firmware 5.18.2):
-**void, because the control failed.** At chapter 105, A (max position 12,998,
-under the ceiling) reported 28% where 10.5% was expected, and B reported 26%
-where 7.5% was expected. C locked the device up, but a 5,000-chapter book also
-has a 5,000-entry contents list, so that may be the contents renderer rather
-than positions. What the run did establish is that progress reporting is wrong
-for kfxgen KFX in general, by roughly 3x, on a file with no envelope problem.
-The envelope question cannot be answered until that is fixed. Re-run this
-then.
+**no answer to the envelope question.** At chapter 105, A (max position
+12,998, under the ceiling) reported 28% where 10.5% was expected, and B
+reported 26% where 7.5% was expected. C locked the device up, but a
+5,000-chapter book also has a 5,000-entry contents list, so that may be the
+contents renderer rather than positions.
+
+These books are pathological, though. Every chapter is a near-empty section
+of its own, and the expected figures assume progress is proportional to
+position, which was never checked against a book with known-correct progress.
+The mismatch has not been seen in ordinary reading. Before re-running, check a
+real book's reported progress against its position share; if that agrees,
+these books need realistic chapters.
 """
 
 import sys
