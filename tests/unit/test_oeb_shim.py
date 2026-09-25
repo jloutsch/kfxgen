@@ -248,3 +248,228 @@ class TestEpubAsOebMissingMetadata:
             raise AssertionError("date should be falsy when absent")
         if oeb.metadata.publisher:
             raise AssertionError("publisher should be falsy when absent")
+
+
+def _epub_with_ncx_at(tmp_path, opf_path, ncx_path, points, name="ncxdir"):
+    """An EPUB with its OPF and NCX at chosen paths.
+
+    `points` is [(label, src, children)] with children in the same shape; src is
+    written into the NCX exactly as given, relative to the NCX, as the EPUB spec
+    says NCX links are. Content files live at `<opf dir>/Text/ch1.xhtml` and
+    `ch2.xhtml`.
+    """
+    opf_dir = opf_path.rpartition("/")[0]
+    text_dir = f"{opf_dir}/Text" if opf_dir else "Text"
+
+    def nav(pts, start=[0]):
+        out = ""
+        for label, src, kids in pts:
+            start[0] += 1
+            out += (
+                f'<navPoint id="n{start[0]}" playOrder="{start[0]}"><navLabel>'
+                f'<text>{label}</text></navLabel><content src="{src}"/>'
+                f"{nav(kids, start)}</navPoint>"
+            )
+        return out
+
+    chapter = (
+        '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><head>'
+        '<title>C</title></head><body><h1 id="s1">Chapter {n}</h1><p>Body {n}.</p>'
+        "</body></html>"
+    )
+    path = tmp_path / f"{name}.epub"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("mimetype", "application/epub+zip")
+        zf.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0" '
+            'xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles>'
+            f'<rootfile full-path="{opf_path}" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>',
+        )
+        ncx_rel = ncx_path[len(opf_dir) + 1 :] if opf_dir else ncx_path
+        zf.writestr(
+            opf_path,
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" '
+            'version="2.0" unique-identifier="i"><metadata '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="i">x'
+            "</dc:identifier><dc:title>T</dc:title><dc:language>en</dc:language>"
+            f'</metadata><manifest><item id="ncx" href="{ncx_rel}" '
+            'media-type="application/x-dtbncx+xml"/>'
+            '<item id="c1" href="Text/ch1.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="c2" href="Text/ch2.xhtml" media-type="application/xhtml+xml"/>'
+            '</manifest><spine toc="ncx"><itemref idref="c1"/><itemref idref="c2"/>'
+            "</spine></package>",
+        )
+        zf.writestr(
+            ncx_path,
+            '<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" '
+            'version="2005-1"><head/><docTitle><text>T</text></docTitle>'
+            f"<navMap>{nav(points)}</navMap></ncx>",
+        )
+        zf.writestr(f"{text_dir}/ch1.xhtml", chapter.format(n=1))
+        zf.writestr(f"{text_dir}/ch2.xhtml", chapter.format(n=2))
+    return path
+
+
+def _toc_hrefs(epub):
+    out = []
+
+    def walk(nodes):
+        for n in nodes:
+            out.append(n.href)
+            walk(n)
+
+    walk(EpubAsOeb(epub).toc)
+    return out
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
+class TestEpubAsOebTocHrefsAreOpfRelative:
+    """NCX links are relative to the NCX; the converter wants them relative to
+    the OPF, like manifest hrefs, which is what calibre hands the plugin.
+
+    Before this, the shim passed `src` through raw, so a book whose NCX sits one
+    folder below the OPF (`../Text/ch1.xhtml`) had every TOC link rejected as
+    unsafe and fell back to one chapter per spine file. Real calibre converts
+    the same book correctly.
+    """
+
+    def test_ncx_in_a_subfolder_resolves_its_parent_relative_links(self, tmp_path):
+        epub = _epub_with_ncx_at(
+            tmp_path,
+            "OEBPS/content.opf",
+            "OEBPS/Toc/toc.ncx",
+            [("One", "../Text/ch1.xhtml#s1", []), ("Two", "../Text/ch2.xhtml", [])],
+        )
+        assert _toc_hrefs(epub) == ["Text/ch1.xhtml#s1", "Text/ch2.xhtml"]
+
+    def test_ncx_beside_the_opf_is_unchanged(self, tmp_path):
+        epub = _epub_with_ncx_at(
+            tmp_path,
+            "OEBPS/content.opf",
+            "OEBPS/toc.ncx",
+            [("One", "Text/ch1.xhtml#s1", []), ("Two", "Text/ch2.xhtml", [])],
+        )
+        assert _toc_hrefs(epub) == ["Text/ch1.xhtml#s1", "Text/ch2.xhtml"]
+
+    def test_ncx_at_the_root_with_the_opf_in_a_subfolder(self, tmp_path):
+        epub = _epub_with_ncx_at(
+            tmp_path,
+            "OEBPS/content.opf",
+            "toc.ncx",
+            [("One", "OEBPS/Text/ch1.xhtml", [])],
+        )
+        assert _toc_hrefs(epub) == ["Text/ch1.xhtml"]
+
+    def test_ncx_two_folders_deep(self, tmp_path):
+        epub = _epub_with_ncx_at(
+            tmp_path,
+            "OEBPS/content.opf",
+            "OEBPS/nav/ncx/toc.ncx",
+            [("One", "../../Text/ch1.xhtml", [])],
+        )
+        assert _toc_hrefs(epub) == ["Text/ch1.xhtml"]
+
+    def test_nested_navpoints_are_resolved_too(self, tmp_path):
+        epub = _epub_with_ncx_at(
+            tmp_path,
+            "OEBPS/content.opf",
+            "OEBPS/Toc/toc.ncx",
+            [("Part", "../Text/ch1.xhtml", [("Sub", "../Text/ch2.xhtml#s1", [])])],
+        )
+        assert _toc_hrefs(epub) == ["Text/ch1.xhtml", "Text/ch2.xhtml#s1"]
+
+    def test_percent_encoding_is_preserved_not_decoded(self, tmp_path):
+        epub = _epub_with_ncx_at(
+            tmp_path,
+            "OEBPS/content.opf",
+            "OEBPS/Toc/toc.ncx",
+            [("One", "../Text/ch%201.xhtml#a%3ab", [])],
+        )
+        assert _toc_hrefs(epub) == ["Text/ch%201.xhtml#a%3ab"]
+
+    @pytest.mark.parametrize(
+        "src",
+        [
+            "../../../etc/passwd",
+            "../../../../Text/ch1.xhtml",
+            "/Text/ch1.xhtml",
+            "http://example.com/x.xhtml",
+            "#s1",
+            "",
+        ],
+        ids=[
+            "escapes-root",
+            "escapes-root-deep",
+            "absolute",
+            "url",
+            "fragment",
+            "empty",
+        ],
+    )
+    def test_links_that_cannot_be_resolved_inside_the_book_pass_through_verbatim(
+        self, tmp_path, src
+    ):
+        """Adversarial: the shim never sanitises. A link that escapes the book,
+        is absolute or is a URL reaches the converter exactly as written, so the
+        converter's own traversal defences are what gets tested."""
+        epub = _epub_with_ncx_at(
+            tmp_path, "OEBPS/content.opf", "OEBPS/Toc/toc.ncx", [("X", src, [])]
+        )
+        assert _toc_hrefs(epub) == [src]
+
+    def test_a_subfolder_ncx_now_assembles_chapters_from_the_toc(self, tmp_path):
+        """End to end: the book is split by its TOC, not by spine file."""
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "plugin"))
+        from kfxgen import converter
+
+        class _Q:
+            def __getattr__(self, _):
+                return lambda *a, **k: None
+
+        epub = _epub_with_ncx_at(
+            tmp_path,
+            "OEBPS/content.opf",
+            "OEBPS/Toc/toc.ncx",
+            [("First", "../Text/ch1.xhtml", []), ("Second", "../Text/ch2.xhtml", [])],
+        )
+        chapters = converter.extract_chapters_from_oeb(EpubAsOeb(epub), _Q())
+        assert [c["title"] for c in chapters] == ["First", "Second"]
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
+def test_the_spine_named_ncx_wins_over_another_ncx_in_the_book(tmp_path):
+    """Adversarial: a book can carry two NCX files; calibre reads the one
+    `<spine toc="...">` names, not whichever the zip lists first.
+
+    Here a stray NCX in another folder is listed first. Before this, the shim
+    read it, resolved its links outside the OPF folder, and the converter
+    rejected the whole table of contents.
+    """
+    epub = _epub_with_ncx_at(
+        tmp_path,
+        "OEBPS/content.opf",
+        "OEBPS/toc.ncx",
+        [("Right", "Text/ch1.xhtml", [])],
+        name="two_ncx",
+    )
+    stray = (
+        '<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" '
+        'version="2005-1"><head/><docTitle><text>T</text></docTitle><navMap>'
+        '<navPoint id="s" playOrder="1"><navLabel><text>Wrong</text></navLabel>'
+        '<content src="ch1.xhtml"/></navPoint></navMap></ncx>'
+    )
+    rebuilt = tmp_path / "two_ncx_reordered.epub"
+    with zipfile.ZipFile(epub) as src, zipfile.ZipFile(rebuilt, "w") as dst:
+        dst.writestr("mimetype", src.read("mimetype"))
+        dst.writestr("Stray/toc.ncx", stray)  # listed before the real one
+        for info in src.infolist():
+            if info.filename != "mimetype":
+                dst.writestr(info, src.read(info.filename))
+    toc = EpubAsOeb(rebuilt).toc
+    assert [(n.title, n.href) for n in toc] == [("Right", "Text/ch1.xhtml")]
