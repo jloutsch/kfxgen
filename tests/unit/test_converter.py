@@ -2788,3 +2788,96 @@ class TestUntocedChaptersAreNotListed:
         chapters = extract_chapters_from_oeb(oeb, _silent_log())
         assert chapters
         assert not any(c.get("_omit_from_toc") for c in chapters)
+
+
+class TestImageHrefsResolveAgainstTheirDocument:
+    """`<img src>` must be resolved the way `<a href>` already is.
+
+    A manifest href is container-relative (`images/pic.jpg`); an `<img src>`
+    is relative to the document holding it (`../images/pic.jpg`). They are
+    different namespaces, which is why the generator matched them by basename
+    — and why two images sharing a basename collapsed onto one resource.
+
+    `_resolve_doc_path` has bridged exactly this gap for link targets since
+    #51. These pin that image tokens now carry the resolved href, so the
+    generator can match the manifest key exactly and only fall back to the
+    basename when resolution finds nothing.
+    """
+
+    def _token_hrefs(self, html, base_href):
+        tree = etree.fromstring(html, etree.HTMLParser())
+        blocks = _conv.extract_blocks_from_html(tree, base_href=base_href)
+        return [
+            m.group(1)
+            for b in blocks
+            for m in IMG_TOKEN_RE.finditer(b.get("text") or "")
+        ]
+
+    def test_parent_relative_src_resolves_to_the_manifest_href(self):
+        html = (
+            b'<html><body><p><img src="../images/pic.jpg" alt="x"/></p>'
+            b"<p>Body text.</p></body></html>"
+        )
+        assert self._token_hrefs(html, "text/chapter1.xhtml") == ["images/pic.jpg"]
+
+    def test_sibling_relative_src_resolves_against_the_document_directory(self):
+        html = (
+            b'<html><body><p><img src="pic.jpg" alt="x"/></p>'
+            b"<p>Body text.</p></body></html>"
+        )
+        assert self._token_hrefs(html, "OEBPS/text/chapter1.xhtml") == [
+            "OEBPS/text/pic.jpg"
+        ]
+
+    def test_two_images_with_the_same_basename_stay_distinct(self):
+        """The collision, at the layer where it is actually created."""
+        html = (
+            b'<html><body><p><img src="../a/pic.jpg" alt="x"/></p>'
+            b'<p><img src="../b/pic.jpg" alt="y"/></p>'
+            b"<p>Body text.</p></body></html>"
+        )
+        assert self._token_hrefs(html, "text/chapter1.xhtml") == [
+            "a/pic.jpg",
+            "b/pic.jpg",
+        ]
+
+    def test_no_base_href_leaves_the_src_untouched(self):
+        """Nothing to resolve against — the raw src must survive unchanged.
+
+        `extract_blocks_from_html` is called without a base in places, and
+        mangling the href there would lose the image entirely rather than
+        merely mis-key it.
+        """
+        html = (
+            b'<html><body><p><img src="../images/pic.jpg" alt="x"/></p>'
+            b"<p>Body text.</p></body></html>"
+        )
+        assert self._token_hrefs(html, "") == ["../images/pic.jpg"]
+
+    @pytest.mark.parametrize(
+        "src",
+        [
+            "http://example.com/remote.png",
+            "/abs/pic.png",
+            "data:image/png;base64,AAAA",
+            "C:/a/pic.png",
+        ],
+    )
+    def test_an_unsafe_src_is_left_untouched_without_a_security_warning(
+        self, src, caplog
+    ):
+        """Remote, absolute and inline sources are not book-internal paths.
+
+        `_resolve_doc_path` logs every href it rejects as a security event, so
+        passing these through it turned each remote image into a false alarm,
+        and an inline `data:` image into a log line carrying its whole payload.
+        """
+        with caplog.at_level(logging.DEBUG, logger="kfxgen.converter.security"):
+            assert self._token_hrefs(
+                f'<html><body><p><img src="{src}" alt="x"/></p>'
+                "<p>Body text.</p></body></html>".encode(),
+                "text/chapter1.xhtml",
+            ) == [src]
+        assert not [
+            r for r in caplog.records if "rejected unsafe href" in r.getMessage()
+        ]
