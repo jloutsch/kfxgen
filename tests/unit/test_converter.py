@@ -1451,7 +1451,9 @@ def test_nested_list_inside_li_is_not_flattened():
     blocks = _conv.extract_blocks_from_html(
         _doc("<ol><li>Part<ol><li>Ch1</li><li>Ch2</li></ol></li></ol>")
     )
-    assert [b["text"] for b in blocks] == ["Part", "Ch1", "Ch2"]
+    # Markers since #201: "Part" is item 1 of the outer list, the chapters
+    # items 1 and 2 of the inner one.
+    assert [b["text"] for b in blocks] == ["1. Part", "1. Ch1", "2. Ch2"]
 
 
 @pytest.mark.unit
@@ -1459,7 +1461,7 @@ def test_nested_ul_inside_li_is_not_flattened():
     blocks = _conv.extract_blocks_from_html(
         _doc("<ul><li>Top<ul><li>Sub</li></ul></li></ul>")
     )
-    assert [b["text"] for b in blocks] == ["Top", "Sub"]
+    assert [b["text"] for b in blocks] == ["• Top", "• Sub"]
 
 
 @pytest.mark.unit

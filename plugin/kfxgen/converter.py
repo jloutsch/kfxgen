@@ -118,6 +118,14 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # and no producer seen writes a page that way.
                     "background-image": st.get("background-image"),
                     "background-repeat": st.get("background-repeat"),
+                    # A list item's marker (#201). list-style-type inherits
+                    # from the list, and Calibre's UA sheet already maps
+                    # `<ol type>` and nested lists onto it, so the computed
+                    # value is the whole answer. The `list-style` shorthand
+                    # is expanded by Stylizer. display does not inherit:
+                    # the declared value is what can take the marker away.
+                    "list-style-type": _computed_value(st, "list-style-type"),
+                    "display": st.get("display"),
                 }
             except Exception:
                 return None
@@ -616,6 +624,192 @@ def _attach_anchor_keys(blocks, base_href):
     return blocks
 
 
+# ── List markers (#201) ──────────────────────────────────────────────────────
+#
+# kfxgen has no list structure: each <li> is a paragraph of its own. The
+# number or bullet a reader draws in front of it is not in the text, so it
+# used to be lost — for a bulleted list a formatting loss, for a numbered one
+# a content loss ("step 2", endnote 14). The marker is written into the text
+# instead, which survives any reader.
+
+#: `<ol type>` / `<li type>` values, as the list-style-type each one means.
+#: Case matters: "a" and "A" are different styles.
+_LIST_TYPE_ATTR = {
+    "1": "decimal",
+    "a": "lower-alpha",
+    "A": "upper-alpha",
+    "i": "lower-roman",
+    "I": "upper-roman",
+    "disc": "disc",
+    "circle": "circle",
+    "square": "square",
+}
+
+#: One glyph for every bullet style. Readers ship "•" in every font; the
+#: circle and square glyphs are not guaranteed, and a missing glyph is worse
+#: than a disc where a circle was meant.
+_BULLET_TYPES = frozenset({"disc", "circle", "square"})
+_BULLET = "•"
+
+_ROMAN = (
+    (1000, "m"),
+    (900, "cm"),
+    (500, "d"),
+    (400, "cd"),
+    (100, "c"),
+    (90, "xc"),
+    (50, "l"),
+    (40, "xl"),
+    (10, "x"),
+    (9, "ix"),
+    (5, "v"),
+    (4, "iv"),
+    (1, "i"),
+)
+_GREEK = "αβγδεζηθικλμνξοπρστυφχψω"
+
+
+def _to_roman(n):
+    out = []
+    for value, numeral in _ROMAN:
+        while n >= value:
+            out.append(numeral)
+            n -= value
+    return "".join(out)
+
+
+def _to_alpha(n, letters):
+    """Bijective base-N: a, b, …, z, aa, ab — the CSS alphabetic system."""
+    out = []
+    while n > 0:
+        n, rem = divmod(n - 1, len(letters))
+        out.append(letters[rem])
+    return "".join(reversed(out))
+
+
+def _format_ordinal(n, style):
+    """`n` as the counter text of `style`. Outside a style's range (alphabetic
+    and roman have no zero or negatives; roman stops at 3999) CSS falls back
+    to decimal, and so does an unrecognised style name."""
+    if style == "decimal-leading-zero":
+        return f"{n:02d}" if n >= 0 else f"-{-n:02d}"
+    if n > 0:
+        if style in ("lower-alpha", "lower-latin"):
+            return _to_alpha(n, string.ascii_lowercase)
+        if style in ("upper-alpha", "upper-latin"):
+            return _to_alpha(n, string.ascii_uppercase)
+        if style == "lower-greek":
+            return _to_alpha(n, _GREEK)
+        if n < 4000:
+            if style == "lower-roman":
+                return _to_roman(n)
+            if style == "upper-roman":
+                return _to_roman(n).upper()
+    return str(n)
+
+
+def _parse_int(value):
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _list_ordinals(list_elem):
+    """{li: ordinal} for the items of one list, honouring `start`, `reversed`
+    and `<li value>`. Hidden items take no number, as in a browser."""
+    items = [
+        child
+        for child in list_elem
+        if _local_tag(child.tag) == "li" and not _is_non_rendered(child)
+    ]
+    is_reversed = list_elem.get("reversed") is not None
+    start = _parse_int(list_elem.get("start"))
+    if start is None:
+        start = len(items) if is_reversed else 1
+    step = -1 if is_reversed else 1
+    ordinals = {}
+    n = start
+    for li in items:
+        value = _parse_int(li.get("value"))
+        if value is not None:
+            n = value
+        ordinals[li] = n
+        n += step
+    return ordinals
+
+
+def _list_style_type(li, css):
+    """The list-style-type that governs `li`, lowercased for keywords.
+
+    Calibre's Stylizer resolves it fully — its UA sheet maps `<ol type>` and
+    nested lists, and the property inherits from the list — so the computed
+    value wins when there is one. Without a stylizer the markup decides: an
+    `<ol>` counts in decimal (or its `type`), anything else is bulleted. A
+    `type` on the item itself is a presentational hint the UA sheet does not
+    cover, and it outranks what the item inherits."""
+    own = li.get("type")
+    if own is not None and own.strip() in _LIST_TYPE_ATTR:
+        return _LIST_TYPE_ATTR[own.strip()]
+    computed = (css or {}).get("list-style-type")
+    if computed:
+        computed = str(computed).strip()
+        # A quoted string is itself the marker (CSS Lists 3).
+        return computed if computed[:1] in "\"'" else computed.lower()
+    parent = li.getparent()
+    if parent is not None and _local_tag(parent.tag) == "ol":
+        return _LIST_TYPE_ATTR.get((parent.get("type") or "").strip(), "decimal")
+    return "disc"
+
+
+def _already_numbered(text, n):
+    """True when `text` opens with item number `n` written out by hand.
+
+    Endnote lists commonly print the number in the text — often as the
+    back-link, `<a>1</a>. The note…` — and prefixing another would read
+    "1. 1. The note". Only the item's own number counts, so a sentence that
+    merely starts with a figure is not mistaken for one. Letters and numerals
+    need closing punctuation: "A man…" and "I went…" are prose."""
+    head = text.lstrip()[:16]
+    if re.match(rf"[(\[]?0*{n}(?:[.):\]]|\s|$)", head):
+        return True
+    if n <= 0:
+        return False
+    forms = {_to_alpha(n, string.ascii_lowercase)}
+    if n < 4000:
+        forms.add(_to_roman(n))
+    lowered = head.lower()
+    return any(re.match(rf"[(\[]?{re.escape(f)}[.)\]]", lowered) for f in forms)
+
+
+def _list_marker(li, css, ordinals):
+    """(marker text, ordinal or None) for `li`, or None when it shows none."""
+    display = str((css or {}).get("display") or "").strip().lower()
+    if display and "list-item" not in display:
+        return None  # `li { display: block }` suppresses the marker
+    style = _list_style_type(li, css)
+    if style == "none":
+        return None
+    if style[:1] in "\"'":
+        return style[1:-1], None
+    if style in _BULLET_TYPES:
+        return f"{_BULLET} ", None
+    n = ordinals.get(li)
+    if n is None:
+        return None
+    return f"{_format_ordinal(n, style)}. ", n
+
+
+def _prefix_marker(marker, text, spans, mark_offsets):
+    """Put `marker` in front of a block's text, moving everything after it."""
+    shift = len(marker)
+    spans = [(start + shift, length, flags) for start, length, flags in spans]
+    # An anchor at the very start keeps pointing at the start, which is now
+    # the marker — a link to the item lands on its number.
+    mark_offsets = {k: (v + shift if v else 0) for k, v in mark_offsets.items()}
+    return marker + text, spans, mark_offsets
+
+
 def extract_blocks_from_html(
     element, style_resolver=None, base_href=None, nav_listing_at=None
 ):
@@ -670,6 +864,27 @@ def extract_blocks_from_html(
 
     blocks = []
     pending_ids = []  # anchors awaiting the next leaf block (containers, standalone <a>)
+    # List markers awaiting the next text block: an item's number belongs on
+    # the first text it holds, which may sit in a nested <p> (#201). An entry
+    # is (marker, ordinal or None).
+    pending_markers = []
+    list_ordinals = {}  # list element -> {li: ordinal}
+
+    def _take_marker(text, spans, mark_offsets):
+        """Prefix the pending list marker, if any, to a text block."""
+        # A picture is not text: an image-only item stays an image block,
+        # and the marker waits for text (or is dropped with the item).
+        if not pending_markers or not _has_real_text(text):
+            return text, spans, mark_offsets
+        entries = pending_markers[:]
+        pending_markers.clear()
+        marker, n = entries[-1]
+        if n is not None and _already_numbered(text, n):
+            marker = ""
+        marker = "".join(m for m, _ in entries[:-1]) + marker
+        if not marker:
+            return text, spans, mark_offsets
+        return _prefix_marker(marker, text, spans, mark_offsets)
 
     def _emit_image_block(elem, href=None, alt=None, size=None):
         ids = pending_ids[:]
@@ -723,6 +938,28 @@ def extract_blocks_from_html(
             _discard_listing(child)
 
     def _walk(elem):
+        if _local_tag(elem.tag) != "li" or _is_non_rendered(elem):
+            _walk_element(elem)
+            return
+        parent = elem.getparent()
+        if parent not in list_ordinals:
+            list_ordinals[parent] = _list_ordinals(parent)
+        css = style_resolver(elem) if style_resolver is not None else None
+        entry = _list_marker(elem, css, list_ordinals[parent])
+        if entry is None:
+            _walk_element(elem)
+            return
+        # An outer item that has shown no text yet (`<li><ol><li>…`) keeps its
+        # marker ahead of this one rather than losing it.
+        before = pending_markers[:]
+        pending_markers.append(entry)
+        _walk_element(elem)
+        if pending_markers:
+            # The item held no text to carry its marker (an image, or
+            # nothing); it does not leak onto whatever follows the list.
+            pending_markers[:] = before
+
+    def _walk_element(elem):
         if _is_non_rendered(elem):
             return
         if _is_nav_listing(elem):
@@ -755,6 +992,7 @@ def extract_blocks_from_html(
             pending_ids.clear()
             ids.extend(_subtree_anchor_ids(elem))
             if text:
+                text, spans, mark_offsets = _take_marker(text, spans, mark_offsets)
                 bstyle = None
                 if style_resolver is not None:
                     css = style_resolver(elem)
@@ -820,6 +1058,7 @@ def extract_blocks_from_html(
                 # next block, exactly as an empty leaf block already does.
                 pending_ids.extend(mark_offsets)
                 return
+            text, spans, mark_offsets = _take_marker(text, spans, mark_offsets)
             ids = pending_ids[:]
             pending_ids.clear()
             ids.extend(mark_offsets)

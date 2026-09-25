@@ -393,6 +393,9 @@ def make_publisher_structure(out_dir: Path) -> Path:
       every chapter under it into one paragraph (#58)
     * a container holding inline text *and* block children — the inline text
       was silently dropped, costing 44% of one book's body (#58)
+    * list markers written into the text — the same nested ``<ol>`` reads
+      "1. PART II", "1. 2. Second Chapter", "2. Closing", as a browser shows
+      it; the "2." is the book's own and is not a count (#201)
     * ``hidden="hidden"`` ``page-list`` and ``landmarks`` navs — arrived as
       hundreds of blocks of bare page numbers (#60)
     * back matter whose heading equals its chapter title — that block is
