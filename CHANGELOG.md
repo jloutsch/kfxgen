@@ -1,5 +1,68 @@
 # Changelog
 
+## 5.8.3 — Every picture where the book put it
+
+Two fixes to how a picture in the text finds its image, and both are visible:
+pictures that were missing now appear, and pictures that were wrong are now
+right.
+
+**Fixed (#198): pictures lost to a spelling difference.** A book's markup and
+its manifest can spell the same filename differently: `pic%20one.jpg` against
+`pic one.jpg`, or a non-ASCII name percent-encoded on one side and literal on
+the other. Calibre itself keeps some hrefs encoded (spaces) and others literal
+(non-ASCII). kfxgen matched the two spellings as different names and dropped
+the picture. In a 200-book random sample of a real library, one book lost **19
+of its 51 pictures** this way and another lost one. The decoded name is now a
+second exact key, so both spellings meet. A `?query` on an image source is
+stripped too, as `#fragment` already was.
+
+**Fixed (#194, #198): the wrong picture.** Images were matched by bare
+filename, so two different pictures called `pic.jpg` in different folders
+both showed the first one. Image sources are now resolved against the document
+that holds them, the way link targets have been since #69, and matched by
+full path. A reference to a file that is missing or unreadable used to
+borrow another image with the same filename. It now shows nothing, which is
+what the book actually contains. The filename fallback survives only for a
+source that could not be resolved (it escapes the book root, or is absolute).
+In the library sample, the one such case found the right image.
+
+Neither fix changes a book that has neither problem: all 90 corpus books are
+byte-identical to 5.8.2, and 198 of the 200 library books are unchanged.
+
+### Tests and tooling
+
+- #182 is explained and closed with a test. The 20 pictures a contributor saw
+  lost on "Cover" chapters were the title-page defect #181 fixed, reached by
+  another route. When a book's Title Page entry comes first, or both entries
+  point at one position, the Cover entry gets no chapter of its own; its page
+  joins the Title Page chapter, and the old rewrite took the cover picture
+  with it. Six arrangements are now pinned; five fail on the pre-#181 code.
+- Adversarial testing of #194 found that it logged remote, `data:` and
+  absolute image sources as "rejected unsafe href" security events. Those
+  sources are now left untouched (#194).
+- `research/make_envelope_sideload.py` and `research/make_search_sideload.py`
+  are committed with the results of their device runs (#196). #151's closing
+  comment named the second, which had never been on `main`.
+
+### Corrections to 5.8.2
+
+Two statements in the 5.8.2 entry were wrong, and are corrected in place with a
+note:
+
+- **#188 was never a thumbnail failure.** The test comic came from a CBR with
+  no cover, so calibre generated a title card, gray text on a pale gradient,
+  and every build carried that as its cover. The home screen showed it
+  correctly; on e-ink it read as "no cover". A real cover shows as the
+  thumbnail on a Paperwhite 11th generation, firmware 5.19.2.
+- **#160's device pass compared the wrong page.** The full-screen art compared
+  on the Oasis was the comic's first page, not the cover section #160
+  changes. A rerun with a real cover, on the Paperwhite 11th generation, 5.19.2,
+  shows the two layouts identical. #160 stays open for a Colorsoft comparison.
+
+### Device verification
+
+DEVICE-VERIFICATION-PENDING
+
 ## 5.8.2 — The same book, twice, byte for byte
 
 One fix, and it is invisible to a reader: converting the same EPUB twice could
@@ -54,6 +117,8 @@ not of the production one. It is true of both now.
 ### Waiting on hardware, and not in this release
 
 Two questions are open that only a device answers, and neither is fixed here.
+
+*Corrected in 5.8.3: both device readings below were wrong. #188 was a calibre-generated title card shown correctly as the cover, and #160's comparison was of the comic's first page rather than the cover section. See the 5.8.3 entry.*
 
 - **#160**, which lays the cover section out as a fixed-size block the way
   Amazon does, is still an unmerged pull request. An Oasis 10th generation on
