@@ -61,7 +61,18 @@ note:
 
 ### Device verification
 
-DEVICE-VERIFICATION-PENDING
+**The device claim rests on one device:** Kindle Paperwhite 11th generation (2021), firmware 5.19.2. The Oasis and Voyage were not run for this release. The two fixes change which image a reference points at, not how an image is drawn, which is why one current-firmware device was judged enough; that is a judgement, not a measurement on older firmware.
+
+The three fix-specific A/B pairs behaved as predicted on the device: two same-named pictures show as two pictures (#194); a picture whose name is spelled differently in the markup appears, where 5.8.2 left it blank or repeated another (#198); and a picture whose file is missing shows nothing, where 5.8.2 borrowed a same-named one (#198).
+
+| Device | Firmware | Check | Result |
+|---|---|---|---|
+| Paperwhite 11th gen (2021) | 5.19.2 | Navigation pane entries land on their chapter | pass — E: table-of-contents entries land on their chapters |
+| Paperwhite 11th gen (2021) | 5.19.2 | A note marker and its return link both land on the marker | pass — D: the raised note marker lands on its note, and the note's return link lands back on the marker |
+| Paperwhite 11th gen (2021) | 5.19.2 | Every image the source displays is drawn | pass — E: a four-panel figure mid-book, all panels drawn. A pair (#194): 5.8.2 shows the first picture twice, the release shows two different pictures. B pair (#198): 5.8.2 repeats one picture and leaves one blank, the release shows each picture. C pair (#198): 5.8.2 fills a missing picture with a same-named one, the release leaves it blank. D: a figure under a heading and one between paragraphs, both drawn |
+| Paperwhite 11th gen (2021) | 5.19.2 | Superscript and subscript render raised and smaller | pass — D: a subscript sits lower and smaller, a superscript higher and smaller |
+| Paperwhite 11th gen (2021) | 5.19.2 | The contents page is generated, singular, and free of raw tokens | pass — E: paged through from the start; no crash, no stray characters |
+| Paperwhite 11th gen (2021) | 5.19.2 | The cover appears as the home-screen thumbnail | pass — D and E: each shows its cover art on the home-screen tile |
 
 ## 5.8.2 — The same book, twice, byte for byte
 
