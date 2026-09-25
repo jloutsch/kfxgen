@@ -2853,3 +2853,31 @@ class TestImageHrefsResolveAgainstTheirDocument:
             b"<p>Body text.</p></body></html>"
         )
         assert self._token_hrefs(html, "") == ["../images/pic.jpg"]
+
+    @pytest.mark.parametrize(
+        "src",
+        [
+            "http://example.com/remote.png",
+            "/abs/pic.png",
+            "data:image/png;base64,AAAA",
+            "C:/a/pic.png",
+        ],
+    )
+    def test_an_unsafe_src_is_left_untouched_without_a_security_warning(
+        self, src, caplog
+    ):
+        """Remote, absolute and inline sources are not book-internal paths.
+
+        `_resolve_doc_path` logs every href it rejects as a security event, so
+        passing these through it turned each remote image into a false alarm,
+        and an inline `data:` image into a log line carrying its whole payload.
+        """
+        with caplog.at_level(logging.DEBUG, logger="kfxgen.converter.security"):
+            assert self._token_hrefs(
+                f'<html><body><p><img src="{src}" alt="x"/></p>'
+                "<p>Body text.</p></body></html>".encode(),
+                "text/chapter1.xhtml",
+            ) == [src]
+        assert not [
+            r for r in caplog.records if "rejected unsafe href" in r.getMessage()
+        ]

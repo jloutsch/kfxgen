@@ -360,8 +360,13 @@ def _resolve_img_src(base_href, src):
     absolute path, an href that escapes the book root). The generator's
     basename fallback can still find the image from the raw value; an empty
     string would lose it.
+
+    A remote, absolute or `data:` source is not a book-internal path, so it is
+    returned untouched rather than passed to `_resolve_doc_path`, which would
+    log it as a rejected security event. A leading `../` is not skipped here:
+    that is ordinary cross-folder markup, and the resolver handles it quietly.
     """
-    if not src:
+    if not src or (_is_unsafe_href(src) and not src.startswith("..")):
         return src
     return _resolve_doc_path(base_href, src) or src
 
