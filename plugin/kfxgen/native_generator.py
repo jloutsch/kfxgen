@@ -4,6 +4,7 @@ import logging
 import os
 import posixpath
 import re
+from urllib.parse import unquote
 
 from ._img_tokens import IMG_TOKEN_RE
 from .inline_style import ALIGN_MAP
@@ -356,6 +357,22 @@ def _safe_write_bytes(path, data):
             pass
         raise
     os.replace(tmp, path)
+
+
+def _may_fall_back_by_basename(href, resolved_image_refs):
+    """Whether an image href that matched no key may try its bare filename.
+
+    Callers that pass raw document-relative sources rely on the basename to
+    bridge the two namespaces. When converter has resolved the href, a miss
+    means the file is not there, and a basename match is some other image
+    that shares the name: the reader would see the wrong picture (#195). Only
+    an href resolution could not handle (it escaped the book root, or is
+    absolute) still falls back; in a 200-book library sample the one such
+    case found the right image.
+    """
+    if not resolved_image_refs:
+        return True
+    return href.startswith("/") or ".." in href.replace("\\", "/").split("/")
 
 
 class NativeKFXGenerator:
@@ -2045,6 +2062,7 @@ class NativeKFXGenerator:
         issue_date=None,
         images=None,
         font_table=None,
+        resolved_image_refs=False,
     ):
         """
         Generates a complete KFX book with metadata and content.
@@ -2071,7 +2089,14 @@ class NativeKFXGenerator:
             issue_date: Optional ISO date string
             images: Optional dict of {href: raw bytes} for body images.
                 Each gets a $164 manifest + $417 blob pair; <img> tokens
-                in chapter text resolve against this dict by basename.
+                in chapter text resolve against this dict by full href,
+                then by percent-decoded href, then by basename.
+            resolved_image_refs: True when the caller resolved every
+                <img src> against its document, as converter does. A
+                resolved href that matches no image then shows nothing,
+                instead of falling back to another image that happens to
+                share its filename (#195). Hrefs that could not be resolved
+                (a `..` segment, an absolute path) still fall back.
 
         Returns:
             bytes: Serialized KFX data
@@ -2121,6 +2146,7 @@ class NativeKFXGenerator:
             asin = _id_digest[:32]
 
         # Reset state for clean generation
+        self._resolved_image_refs = resolved_image_refs
         self.fragments = []
         self.symtab = StandardSymbolTable()
         self.entity_ids = {}
@@ -2253,6 +2279,13 @@ class NativeKFXGenerator:
                 # another image's basename still finds its own resource.
                 image_resources[href] = (resource_name, location_name)
                 self._image_dims[href] = (width, height)
+                # Calibre keeps some manifest hrefs percent-encoded (spaces)
+                # and others literal (non-ASCII), while markup may spell the
+                # same name either way. The decoded form is a second exact
+                # key, so both spellings meet. (#195)
+                image_resources.setdefault(
+                    unquote(href), (resource_name, location_name)
+                )
 
         # Embedded fonts (#15): one $418 (bytes) + one $262 (@font-face) per
         # face, mirroring the image $417/$164 pair. Application (setting $11 on
@@ -2749,11 +2782,16 @@ class NativeKFXGenerator:
                         chunks.append({"type": "text", "text": seg})
                 href = m.group(1)
                 alt = m.group(2).replace("\x02", " ")
-                # Exact manifest href first; basename for hrefs converter
-                # could not resolve — see _img_basename helper above.
-                bare = href.split("#", 1)[0] if href else ""
+                # Exact manifest href, then its decoded form; basename only
+                # for hrefs that were never resolved — see _img_basename
+                # helper above. A query string names no different file.
+                bare = href.split("#", 1)[0].split("?", 1)[0] if href else ""
                 resource = image_resources.get(bare)
                 if resource is None:
+                    resource = image_resources.get(unquote(bare))
+                if resource is None and _may_fall_back_by_basename(
+                    bare, self._resolved_image_refs
+                ):
                     resource = image_resources.get(bare.rsplit("/", 1)[-1])
                 if resource is not None:
                     chunk = {"type": "image", "resource": resource[0], "alt": alt}
