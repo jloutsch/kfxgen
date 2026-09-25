@@ -168,6 +168,8 @@ class EpubAsOeb:
         self._metadata: _Metadata | None = None
         self._manifest: _Manifest | None = None
         self._spine: _Spine | None = None
+        self._opf_dir = ""
+        self._ncx_path = ""
         self._parsed = False
 
     def _ensure_parsed(self) -> None:
@@ -184,6 +186,7 @@ class EpubAsOeb:
                 )
             opf_path = rootfile.attrib["full-path"]
             opf_dir = "/".join(opf_path.split("/")[:-1])
+            self._opf_dir = opf_dir
             opf = ET.fromstring(zf.read(opf_path))
 
         meta_el = opf.find(f"{_OPF_NS}metadata")
@@ -240,6 +243,14 @@ class EpubAsOeb:
                 spine_items.append(items[idref])
         self._spine = _Spine(spine_items)
 
+        # The NCX calibre reads is the one `<spine toc="...">` names. A book can
+        # carry more than one, and the first in the zip need not be it.
+        spine_el = opf.find(f"{_OPF_NS}spine")
+        toc_id = spine_el.get("toc", "") if spine_el is not None else ""
+        if toc_id in items:
+            href = items[toc_id].href
+            self._ncx_path = f"{opf_dir}/{href}" if opf_dir else href
+
         self._parsed = True
 
     @staticmethod
@@ -274,9 +285,15 @@ class EpubAsOeb:
         import zipfile
 
         with zipfile.ZipFile(self._epub_path) as zf:
-            for name in zf.namelist():
+            names = zf.namelist()
+            ordered = ([self._ncx_path] if self._ncx_path in names else []) + names
+            for name in ordered:
                 if name.lower().endswith(".ncx"):
-                    return _parse_ncx(zf.read(name))
+                    ncx_dir = name.rpartition("/")[0]
+                    return _parse_ncx(
+                        zf.read(name),
+                        lambda src: _opf_relative(src, ncx_dir, self._opf_dir),
+                    )
         return []
 
     @property
@@ -304,8 +321,38 @@ class _TocNode:
         return iter(self._children)
 
 
-def _parse_ncx(data: bytes):
-    """Return a list of _TocNode from NCX bytes, or [] if unparseable."""
+def _opf_relative(src: str, ncx_dir: str, opf_dir: str) -> str:
+    """An NCX `src`, re-expressed relative to the OPF, as calibre hands it over.
+
+    NCX links are relative to the NCX file, and manifest hrefs to the OPF. They
+    only agree when the two files share a folder. A book whose NCX sits one
+    folder below the OPF writes `../Text/ch1.xhtml`, and passing that through
+    raw had the converter reject every entry as unsafe; real calibre resolves
+    it and the book converts correctly.
+
+    Nothing is sanitised, matching the shim's pass-through rule for hostile
+    input: a link that is empty, fragment-only, absolute, a URL, or that
+    escapes the book root after resolution comes back exactly as written, so
+    the converter's own defences are what gets exercised. Percent-encoding is
+    left as it is.
+    """
+    import posixpath
+
+    path, sep, frag = src.partition("#")
+    if not path or path.startswith("/") or "://" in path or ":" in path.split("/")[0]:
+        return src
+    joined = posixpath.normpath(posixpath.join(ncx_dir, path))
+    if joined == ".." or joined.startswith("../") or joined.startswith("/"):
+        return src
+    rel = posixpath.relpath(joined, opf_dir) if opf_dir else joined
+    return rel + sep + frag
+
+
+def _parse_ncx(data: bytes, resolve=lambda src: src):
+    """Return a list of _TocNode from NCX bytes, or [] if unparseable.
+
+    `resolve` maps each `content/@src` to the href the converter should see;
+    the default leaves it as written."""
     from lxml import etree
 
     try:
@@ -322,7 +369,7 @@ def _parse_ncx(data: bytes):
             out.append(
                 _TocNode(
                     (label.text or "").strip() if label is not None else "",
-                    content.get("src", "") if content is not None else "",
+                    resolve(content.get("src", "")) if content is not None else "",
                     walk(np),
                 )
             )
