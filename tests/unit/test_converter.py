@@ -2881,3 +2881,45 @@ class TestImageHrefsResolveAgainstTheirDocument:
         assert not [
             r for r in caplog.records if "rejected unsafe href" in r.getMessage()
         ]
+
+
+def test_a_missing_image_does_not_borrow_a_same_named_one(tmp_path):
+    """End to end through convert_oeb_to_kfx (#195).
+
+    Calibre keeps an `<img>` whose file is missing ("Referenced file not
+    found"). Converter resolves it to `a/pic.jpg`; the book also holds a
+    different `b/pic.jpg`. Resolved references must not fall back by
+    filename, or the reader sees b's picture where a's was meant.
+    """
+    from tests._helpers import MINIMAL_JPEG
+    from tests._kfx_introspect import by_type, load_fragments, val, walk_for_key
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    body = (
+        b'<?xml version="1.0" encoding="utf-8"?>'
+        b'<html xmlns="http://www.w3.org/1999/xhtml"><head><title>C</title></head>'
+        b"<body><h1>C</h1><p>Missing picture:</p>"
+        b'<div><img src="a/pic.jpg" alt="a"/></div>'
+        b'<p>Present picture:</p><div><img src="b/pic.jpg" alt="b"/></div>'
+        b"</body></html>"
+    )
+    epub = (
+        EpubBuilder()
+        .set_metadata(title="MissingImage", author="T")
+        .add_chapter("C", body)
+        .add_manifest_item(
+            item_id="pb", href="b/pic.jpg", media_type="image/jpeg", data=MINIMAL_JPEG
+        )
+        .build(tmp_path, "missing-image")
+    )
+    out = tmp_path / "out.kfx"
+    _conv.convert_oeb_to_kfx(EpubAsOeb(str(epub)), str(out), None, _silent_log())
+
+    frags = load_fragments(out)
+    refs = [
+        str(r) for s in by_type(frags, "$259") for r in walk_for_key(val(s), "$175")
+    ]
+    assert refs == ["img_0"], (
+        "the missing a/pic.jpg must show nothing, and b/pic.jpg must show once"
+    )

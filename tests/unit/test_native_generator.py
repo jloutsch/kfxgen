@@ -2767,3 +2767,91 @@ class TestImagesSharingABasename:
             {"images/pic.jpg": MINIMAL_JPEG},
         )
         assert refs == ["img_0"]
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
+class TestImageReferenceMatching:
+    """How an image token finds its resource (#195).
+
+    Measured on a 200-book sample of a real library: one book referenced 20
+    images with a literal name where the manifest spelled it percent-encoded,
+    and lost 19 of them. A cleanly resolved reference to a missing file fell
+    back to another image with the same filename and printed the wrong picture.
+    """
+
+    @staticmethod
+    def _token(href):
+        return f"\x00IMG\x01{href}\x01\x00"
+
+    def _refs(self, hrefs, images, resolved_image_refs=False):
+        text = " ".join(f"w {self._token(h)}" for h in hrefs) + " end."
+        path = tempfile.mktemp(suffix=".kfx")
+        try:
+            NativeKFXGenerator().generate_full_book(
+                "T",
+                "A",
+                [{"title": "Ch", "text": text}],
+                output_path=path,
+                images=images,
+                resolved_image_refs=resolved_image_refs,
+            )
+            data = Path(path).read_bytes()
+            frags = load_fragments(path)
+            refs = [
+                str(ref)
+                for story in by_type(frags, "$259")
+                for ref in walk_for_key(val(story), "$175")
+            ]
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+        assert b"\x00IMG\x01" not in data, "an image token leaked into the output"
+        return refs
+
+    def test_a_literal_reference_finds_a_percent_encoded_manifest_name(self):
+        # The direction the library sample hit: 19 images lost in one book.
+        assert self._refs(["a/pic one.jpg"], {"a/pic%20one.jpg": MINIMAL_JPEG}) == [
+            "img_0"
+        ]
+
+    def test_a_percent_encoded_reference_finds_a_literal_manifest_name(self):
+        assert self._refs(
+            ["a/%E3%83%94%E3%82%AF.jpg"], {"a/ピク.jpg": MINIMAL_JPEG}
+        ) == ["img_0"]
+
+    def test_a_query_string_does_not_lose_the_image(self):
+        assert self._refs(["a/pic.jpg?v=2"], {"a/pic.jpg": MINIMAL_JPEG}) == ["img_0"]
+
+    def test_a_resolved_reference_to_a_missing_file_shows_no_image(self):
+        # Before: fell back by filename and printed b/pic.jpg in its place.
+        assert (
+            self._refs(
+                ["a/pic.jpg"], {"b/pic.jpg": MINIMAL_JPEG}, resolved_image_refs=True
+            )
+            == []
+        )
+
+    def test_a_resolved_reference_to_a_rejected_image_shows_no_image(self):
+        refs = self._refs(
+            ["a/pic.jpg", "b/pic.jpg"],
+            {"a/pic.jpg": b"PK\x03\x04not an image", "b/pic.jpg": MINIMAL_JPEG},
+            resolved_image_refs=True,
+        )
+        assert refs == ["img_0"], "only b/pic.jpg should display, once"
+
+    def test_an_unresolvable_reference_still_falls_back_by_filename(self):
+        # A source that escapes the book root cannot be resolved; converter
+        # passes it through raw. The filename is then the only lead, and in
+        # the library sample it found the right image.
+        assert self._refs(
+            ["../../images/pic.jpg"],
+            {"OEBPS/images/pic.jpg": MINIMAL_JPEG},
+            resolved_image_refs=True,
+        ) == ["img_0"]
+
+    def test_callers_that_do_not_resolve_keep_the_filename_fallback(self):
+        # research/convert_epub_to_kfx.py builds tokens from raw sources.
+        assert self._refs(
+            ["images/pic.jpg"], {"OEBPS/images/pic.jpg": MINIMAL_JPEG}
+        ) == ["img_0"]

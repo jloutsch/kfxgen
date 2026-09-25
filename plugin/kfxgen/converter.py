@@ -2075,6 +2075,9 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         publisher=metadata["publisher"],
         issue_date=metadata.get("issue_date"),
         font_table=font_table,
+        # Every <img src> went through _resolve_img_src, so a miss means the
+        # file is absent, not that the href is spelled differently. (#195)
+        resolved_image_refs=True,
     )
 
     if os.path.isfile(output_path):
