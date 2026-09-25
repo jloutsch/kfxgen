@@ -241,7 +241,13 @@ def build_manifest_lookup(oeb_book):
     by_base = {}
     for item in getattr(oeb_book, "manifest", []) or []:
         href = getattr(item, "href", "") or ""
-        data = getattr(item, "data", None)
+        # `.data` can raise rather than return None when the manifest names a
+        # file the container does not hold — see the matching guard in
+        # build_font_table. A missing font must cost that font, not the book.
+        try:
+            data = item.data
+        except Exception:
+            continue
         if not href or not isinstance(data, (bytes, bytearray)):
             continue
         b = bytes(data)
@@ -295,12 +301,24 @@ def build_font_table(oeb_book, log, stylizer_factory=None):
     make = stylizer_factory or _default_stylizer_factory(oeb_book, log)
     all_rules = []
     for item in getattr(oeb_book, "spine", []) or []:
-        if getattr(item, "data", None) is None:
+        # Per-item try/except, matching the spine loop in
+        # extract_chapters_from_oeb (#73). `getattr(item, "data", None)`
+        # only absorbs AttributeError: a manifest entry whose file is
+        # missing from the container has a `.data` that *raises* — KeyError
+        # out of zipfile — and that propagated out of here and aborted the
+        # whole conversion. Collecting @font-face rules is optional work, so
+        # failing it costs the book its embedded fonts, never its text.
+        try:
+            if item.data is None:
+                continue
+            st = make(item)
+            if st is None:
+                continue
+            all_rules.extend(getattr(st, "font_face_rules", []) or [])
+        except Exception as e:
+            href = getattr(item, "href", "") or "<unknown>"
+            log.warning(f"  Font scan skipped unreadable spine item ({href}): {e}")
             continue
-        st = make(item)
-        if st is None:
-            continue
-        all_rules.extend(getattr(st, "font_face_rules", []) or [])
     lookup = build_manifest_lookup(oeb_book)
     faces = faces_from_rules(all_rules, lookup, log)
     if faces:

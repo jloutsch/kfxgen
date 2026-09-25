@@ -292,6 +292,69 @@ def test_build_font_table_empty_when_no_fonts():
     assert table.faces == []
 
 
+class _UnreadableItem:
+    """A spine item whose file is declared but missing from the container.
+
+    `zipfile.ZipFile.read` raises `KeyError` for a name that is not in the
+    archive, and Calibre's container is no more forgiving, so a manifest entry
+    left behind by a broken export reaches the font pass as a property that
+    raises on access rather than one that returns None.
+    """
+
+    href = "ghost.xhtml"
+
+    @property
+    def data(self):
+        raise KeyError("There is no item named 'ghost.xhtml' in the archive")
+
+
+def test_build_font_table_survives_a_spine_item_that_cannot_be_read():
+    """One unreadable spine item must not abort the font pass.
+
+    `extract_chapters_from_oeb` already survives this — #73 wrapped its
+    per-item body in `try/except Exception` *specifically* to cover the
+    `.data` access. `build_font_table` walks the same spine and guarded with
+    `getattr(item, "data", None) is None`, which only absorbs
+    `AttributeError`; a property raising anything else propagated out of the
+    font pass and killed the whole conversion.
+
+    Collecting `@font-face` rules is optional work. Failing it must cost the
+    book its embedded fonts at worst, never its text.
+    """
+    good = _SpineItem("c1.xhtml")
+    font = _Item("fonts/f.ttf", b"\x00\x01\x00\x00yy")
+    oeb = _Oeb([font], spine=[_UnreadableItem(), good])
+    rules = [{"font-family": "Foo", "src": "url(fonts/f.ttf)"}]
+
+    table = build_font_table(
+        oeb, _Log(), stylizer_factory=lambda item: _Stylizer(rules)
+    )
+
+    assert len(table.faces) == 1, (
+        "the readable spine item's @font-face rules must still be collected "
+        "after an unreadable sibling"
+    )
+
+
+def test_build_manifest_lookup_survives_an_unreadable_manifest_item():
+    """The same defect, one function over: the manifest walk, not the spine.
+
+    `build_manifest_lookup` guarded with the same
+    `getattr(item, "data", None)` shape, so a manifest entry whose file is
+    missing raised straight out of it. Worth its own test because the two
+    walks iterate different collections — a fix to one leaves the other.
+    """
+    font = _Item("fonts/f.ttf", b"\x00\x01\x00\x00yy")
+    oeb = _Oeb([_UnreadableItem(), font], spine=[])
+
+    lookup = build_manifest_lookup(oeb)
+
+    assert lookup("fonts/f.ttf")[:4] == b"\x00\x01\x00\x00", (
+        "a readable font must still resolve after an unreadable manifest entry"
+    )
+    assert lookup("ghost.xhtml") is None
+
+
 # --- #36: non-ASCII @font-face family names must yield distinct, stable slugs ---
 
 

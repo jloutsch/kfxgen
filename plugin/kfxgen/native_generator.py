@@ -6,15 +6,47 @@ import posixpath
 import re
 
 from ._img_tokens import IMG_TOKEN_RE
+
 from .inline_style import ALIGN_MAP
 from .kfxlib_minimal.kfx_container import KfxContainer
 from .kfxlib_minimal.standard_symbols import StandardSymbolTable
 from .kfxlib_minimal.ion import IonStruct, IonDecimal, IonAnnotation, IonBLOB, IS
+
 from .kfxlib_minimal.yj_container import (
     YJFragment,
     YJFragmentList,
     CONTAINER_FORMAT_KFX_MAIN,
 )
+
+#: Label for a chapter whose title is nothing but an image token. Defined here
+#: rather than in converter because converter imports this module, not the
+#: reverse; converter re-exports it as LEADING_TITLE_FALLBACK.
+TITLE_FALLBACK = "Front Matter"
+
+
+def _title_for_output(title):
+    """A chapter title with image tokens removed, safe to print.
+
+    Applied only where the title becomes output — the nav label and the
+    heading chunk. The raw title is still what the body-prefix comparison
+    matches against, because the body carries the token too and cleaning both
+    sides would stop the prefix lining up.
+
+    Converter strips tokens at the one place it derives a title from block
+    text (`_leading_chapter_title`, #133), so the plugin path never sends one
+    here. `generate_full_book` is public, though — `scripts/`, `research/` and
+    `tools/` build chapter dicts themselves — and a token emitted as a nav
+    label reaches the reader as raw control characters.
+
+    Nothing else is normalised: `_rebuild_contents_page` and
+    `_replace_title_page` match titles as literal strings, so trimming or
+    collapsing whitespace here would silently stop those matching.
+    """
+    if not title:
+        return title
+    cleaned = IMG_TOKEN_RE.sub("", title)
+    return cleaned if cleaned.strip() else TITLE_FALLBACK
+
 
 # Windows drive-relative '..' patterns like 'C:..\foo' or 'C:..' have no
 # separator before the '..', so the segment-split traversal check would
@@ -2184,17 +2216,23 @@ class NativeKFXGenerator:
                     )
                 )
                 self.fragments.append(self.build_fragment_417(location_name, data))
+                # Two keys per image. The full manifest href is the exact
+                # one: converter resolves <img src> against its containing
+                # document (_resolve_img_src), so a token's href and the
+                # manifest key are the same string for anything that
+                # resolved. The basename stays as a fallback for hrefs that
+                # did not — no base_href, an absolute path — because losing
+                # the image is worse than mis-keying it.
+                #
+                # Exact keys never collide, so two images sharing a filename
+                # now render as two images. Only the fallback layer can
+                # collide, and there the first entry still wins.
+                image_resources[href] = (resource_name, location_name)
+                self._image_dims[href] = (width, height)
                 base = _img_basename(href)
-                # Basename collision (e.g. images/foo.jpg + ext/foo.jpg): keep
-                # the first entry so existing <img src> resolutions stay
-                # stable. The collision is logged once below.
                 if base not in image_resources:
                     image_resources[base] = (resource_name, location_name)
                     self._image_dims[base] = (width, height)
-                else:
-                    self._image_basename_collisions = getattr(
-                        self, "_image_basename_collisions", []
-                    ) + [base]
 
         # Embedded fonts (#15): one $418 (bytes) + one $262 (@font-face) per
         # face, mirroring the image $417/$164 pair. Application (setting $11 on
@@ -2340,7 +2378,7 @@ class NativeKFXGenerator:
         # marked with `_omit_from_toc` (e.g. the cover-in-reading-flow
         # chapter) are excluded so they don't appear in the nav-pane.
         nav_entries = [
-            {"title": ch["title"], "position": pos}
+            {"title": _title_for_output(ch["title"]), "position": pos}
             for ch, pos in zip(chapters, toc_positions)
             if not ch.get("_omit_from_toc")
         ]
@@ -2691,10 +2729,14 @@ class NativeKFXGenerator:
                         chunks.append({"type": "text", "text": seg})
                 href = m.group(1)
                 alt = m.group(2).replace("\x02", " ")
-                # Match <img src> values (often relative) against manifest
-                # hrefs by basename — see _img_basename helper above.
-                basename = href.split("#", 1)[0].rsplit("/", 1)[-1] if href else ""
-                resource = image_resources.get(basename)
+                # Exact href first — converter resolved <img src> against
+                # its document, so it matches the manifest key directly.
+                # Basename second, for hrefs that could not be resolved.
+                bare = href.split("#", 1)[0] if href else ""
+                resource = image_resources.get(bare)
+                if resource is None:
+                    basename = bare.rsplit("/", 1)[-1] if bare else ""
+                    resource = image_resources.get(basename)
                 if resource is not None:
                     chunks.append(
                         {"type": "image", "resource": resource[0], "alt": alt}
@@ -2827,7 +2869,7 @@ class NativeKFXGenerator:
             if not omit_heading:
                 # First chunk: chapter title (heading)
                 heading_chunk_indices.add(len(all_chunks))
-                all_chunks.append({"type": "text", "text": title})
+                all_chunks.append({"type": "text", "text": _title_for_output(title)})
 
             if toc_links:
                 for link in toc_links:

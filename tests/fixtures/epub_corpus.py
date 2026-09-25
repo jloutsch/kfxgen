@@ -293,6 +293,63 @@ def make_zip_as_image(out_dir: Path) -> tuple[Path, Outcome]:
     return path, Outcome.succeeds()
 
 
+def _dangling_spine_item_check(kfx_path: Path) -> None:
+    """One bad spine item must cost one section, not the whole book.
+
+    The real chapter has to survive. A guard that answered the crash by
+    aborting early, or by returning the sentinel book, would satisfy
+    "conversion succeeded" while losing everything — so pin the content.
+    """
+    from tests._kfx_introspect import by_type, load_fragments
+
+    sections = by_type(load_fragments(kfx_path), "$260")
+    assert len(sections) == 1, (
+        f"{len(sections)} $260 sections, expected 1 — the readable chapter "
+        f"should survive a sibling spine item whose file is missing"
+    )
+
+
+def make_dangling_spine_item(out_dir: Path) -> tuple[Path, Outcome]:
+    """A spine item declared in the OPF whose file is not in the zip.
+
+    Real EPUBs ship this: an export drops a file but leaves the manifest
+    entry, and the spine still points at it. `data=None` reproduces it
+    exactly — `add_manifest_item` writes the OPF entry and skips the zip
+    write, so `item.data` raises `KeyError` from `zipfile` on access.
+
+    Found by adversarial review, not by a report. `extract_chapters_from_oeb`
+    already survives this — #73 wrapped its per-item body in `try/except
+    Exception` *specifically* to cover the `.data` access — and that is what
+    this fixture exercises, because the corpus runner uses the reduced
+    pipeline (`extract_metadata` + `extract_chapters_from_oeb` +
+    `extract_cover_image` + `generate_full_book`) rather than
+    `convert_oeb_to_kfx`.
+
+    The same input *did* abort the full entry point, in `build_font_table` and
+    `build_manifest_lookup`, both of which guarded with
+    `getattr(item, "data", None) is None` — a shape that only absorbs
+    `AttributeError`, so a property raising `KeyError` propagated straight
+    past it. Those two are pinned at the unit layer by
+    `test_font_table.py::test_build_font_table_survives_a_spine_item_that_cannot_be_read`
+    and its manifest counterpart, which is where the assertion belongs: no
+    fixture in this corpus can reach the font pass at all.
+    """
+    path = (
+        EpubBuilder()
+        .set_metadata(title="DanglingSpine", author="T")
+        .add_chapter("Ch1", "Real body text.\n\nA second paragraph.")
+        .add_manifest_item(
+            item_id="ghost",
+            href="ghost.xhtml",
+            media_type="application/xhtml+xml",
+            data=None,
+            in_spine=True,
+        )
+        .build(out_dir, "dangling_spine_item")
+    )
+    return path, Outcome.succeeds(check=_dangling_spine_item_check)
+
+
 def _path_traversal_check(kfx_path: Path) -> None:
     """Pin that the path-traversal href was rejected by _normalize_href
     and the chapter dropped. KFX should be sentinel-band size since the
@@ -382,6 +439,145 @@ def make_duplicate_basename(out_dir: Path) -> tuple[Path, Outcome]:
     return path, Outcome.succeeds(check=_duplicate_basename_check)
 
 
+#: Sections the source TOC lists, in spine order. Ported from a real trade
+#: EPUB whose shape no public-domain book in the corpus reproduces: front
+#: matter and back matter that the publisher's own contents *does* list,
+#: bracketing the chapters.
+_LISTED_SECTIONS: tuple[str, ...] = (
+    "Cover",
+    "About the Author",
+    "Also By This Author",
+    "Title Page",
+    "Copyright",
+    "Dedication",
+    "Contents",
+    "Introduction",
+    *(f"Chapter {n}" for n in range(1, 16)),
+    "Afterword",
+    "Endnotes",
+    "Index",
+)
+
+#: Spine items the source TOC never references. In the book this was ported
+#: from these are the last two files, and they are what #143 was about: the
+#: publisher's contents ends at the index, and everything after it is
+#: deliberately unlisted.
+_UNLISTED_STEMS: tuple[str, ...] = ("bm_001", "bm_002")
+
+
+def _nav_toc_labels(kfx_path: Path) -> list[str]:
+    """Entry labels in the `$389` navigation fragment's TOC container.
+
+    `$389` -> `$392` (nav containers) -> the one whose `$235` is `$212`
+    (table of contents, as opposed to `$798` headings or `$236` landmarks)
+    -> `$247` (entries) -> `$241.$244` (label).
+    """
+    from tests._kfx_introspect import by_type, load_fragments
+
+    def plain(o, depth=0):
+        if depth > 40:
+            return None
+        if hasattr(o, "annotations") and hasattr(o, "value"):
+            return plain(o.value, depth + 1)
+        if hasattr(o, "items"):
+            return {str(k): plain(v, depth + 1) for k, v in o.items()}
+        if isinstance(o, list):
+            return [plain(x, depth + 1) for x in o]
+        if hasattr(o, "value") and not isinstance(o, str):
+            return plain(o.value, depth + 1)
+        if isinstance(o, (int, float, bool)) or o is None:
+            return o
+        return str(o)
+
+    labels: list[str] = []
+    for frag in by_type(load_fragments(kfx_path), "$389"):
+        for top in plain(frag.value) or []:
+            for container in (top or {}).get("$392") or []:
+                if (container or {}).get("$235") != "$212":
+                    continue
+                for entry in container.get("$247") or []:
+                    label = ((entry or {}).get("$241") or {}).get("$244")
+                    if label is not None:
+                        labels.append(str(label))
+    return labels
+
+
+def _unlisted_back_matter_check(kfx_path: Path) -> None:
+    """#143: spine items the source TOC never referenced must not be listed.
+
+    Two assertions, because #143 made two promises and only one of them is
+    about the navigation pane.
+
+    The nav assertion is the defect itself. Before the fix, kfxgen invented a
+    chapter for every spine item the source TOC skipped and listed it, which
+    surfaced raw filenames — here `bm_001` and `bm_002`. Matching on the stems
+    rather than on an exact label set keeps this from breaking when an
+    unrelated change rewrites a *listed* entry's text (the title-page and
+    contents-page paths both do that by design).
+
+    The section assertion is the other half: "Content is untouched — only the
+    nav entry goes." Every spine item must still become its own `$260`
+    section, unlisted ones included, so a future change cannot satisfy the nav
+    assertion the lazy way by dropping the content.
+    """
+    from tests._kfx_introspect import by_type, load_fragments
+
+    labels = _nav_toc_labels(kfx_path)
+    leaked = [
+        label for label in labels if any(stem in label for stem in _UNLISTED_STEMS)
+    ]
+    assert not leaked, (
+        f"nav lists {leaked}, which the source TOC never referenced — #143. "
+        f"The publisher's contents ends at the last listed section; spine "
+        f"items after it are deliberately unlisted."
+    )
+    assert len(labels) == len(_LISTED_SECTIONS), (
+        f"nav has {len(labels)} entries, expected {len(_LISTED_SECTIONS)} "
+        f"(one per source TOC entry). More means entries were invented; "
+        f"fewer means a listed section stopped being reachable."
+    )
+
+    sections = by_type(load_fragments(kfx_path), "$260")
+    expected = len(_LISTED_SECTIONS) + len(_UNLISTED_STEMS)
+    assert len(sections) == expected, (
+        f"{len(sections)} $260 sections, expected {expected} (one per spine "
+        f"item). #143 removes the nav entry, never the content — an unlisted "
+        f"section must still be reachable by reading forward."
+    )
+
+
+def make_unlisted_back_matter(out_dir: Path) -> tuple[Path, Outcome]:
+    """Trailing spine items the source TOC never references (#143).
+
+    Ported from a real trade EPUB rather than invented: 28 spine items, of
+    which the NCX lists the first 26 and skips the last two. No book in the
+    public-domain corpus has this shape — Gutenberg's own NCX lists
+    essentially everything it ships, which is why #143 needed a whole-corpus
+    sweep to find and could not be pinned by a fixture until now.
+
+    `add_chapter` puts a section in both the spine and the NCX;
+    `add_manifest_item(in_spine=True)` puts one in the spine only, because
+    `_ncx()` is built from `add_chapter` calls alone. That asymmetry is the
+    entire fixture.
+    """
+    builder = EpubBuilder().set_metadata(title="UnlistedBackMatter", author="T")
+    for title in _LISTED_SECTIONS:
+        builder.add_chapter(title, f"Body text for {title}.\n\nA second paragraph.")
+    for stem in _UNLISTED_STEMS:
+        builder.add_manifest_item(
+            item_id=stem,
+            href=f"{stem}.xhtml",
+            media_type="application/xhtml+xml",
+            data=(
+                b"<html><body><p>Unlisted back matter. The source TOC does "
+                b"not reference this file.</p></body></html>"
+            ),
+            in_spine=True,
+        )
+    path = builder.build(out_dir, "unlisted_back_matter")
+    return path, Outcome.succeeds(check=_unlisted_back_matter_check)
+
+
 # Each entry is a pytest.param so we can attach per-fixture marks. All entries
 # carry an explicit `id=` so the parametrize call doesn't need an ids= kwarg
 # (mixing tuples with pytest.param breaks the simple `[n for n, _ in CORPUS]`
@@ -417,5 +613,15 @@ CORPUS: list[pytest.param] = [
     ),
     pytest.param(
         "duplicate_basename", make_duplicate_basename, id="duplicate_basename"
+    ),
+    pytest.param(
+        "unlisted_back_matter",
+        make_unlisted_back_matter,
+        id="unlisted_back_matter",
+    ),
+    pytest.param(
+        "dangling_spine_item",
+        make_dangling_spine_item,
+        id="dangling_spine_item",
     ),
 ]

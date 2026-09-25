@@ -29,7 +29,7 @@ from .inline_style import (
     normalize_runs_with_anchors,
     parse_vertical_align,
 )
-from .native_generator import NativeKFXGenerator
+from .native_generator import NativeKFXGenerator, TITLE_FALLBACK as _TITLE_FALLBACK
 
 _ITALIC_TAGS = {"em", "i"}
 _BOLD_TAGS = {"strong", "b"}
@@ -180,6 +180,29 @@ def _resolve_doc_path(base_href, href):
     return resolved
 
 
+def _resolve_img_src(base_href, src):
+    """Resolve an `<img src>` to the container-relative key the manifest uses.
+
+    A manifest href is relative to the container (`images/pic.jpg`); an
+    `<img src>` is relative to the document holding it (`../images/pic.jpg`).
+    Matching them by basename bridged that gap but collapsed two images that
+    shared a filename onto one resource — the reader saw the first picture
+    twice. Resolving puts both sides in one namespace so the generator can
+    match exactly.
+
+    Same treatment `<a href>` has had since #51, via the same helper.
+
+    Falls back to the raw `src` when resolution yields nothing — no
+    `base_href`, an absolute path, or an href that escapes the book root.
+    `_resolve_doc_path` returns "" for all of those, and substituting that
+    would drop the image entirely; the generator's basename fallback can
+    still find it from the raw value.
+    """
+    if not src:
+        return src
+    return _resolve_doc_path(base_href, src) or src
+
+
 def _resolve_link_target(href, base_href):
     """Normalize an in-book `<a href>` to a "<file>#<fragment>" anchor key.
 
@@ -266,7 +289,7 @@ def _walk_inline(
         if clocal == "img":
             for aid in _own_anchor_ids(child):
                 parts.append(make_anchor_mark(aid))
-            href = child.get("src", "") or ""
+            href = _resolve_img_src(base_href, child.get("src", "") or "")
             alt = child.get("alt", "") or ""
             parts.append((_make_img_token(href, alt), frozenset()))
         else:
@@ -481,7 +504,8 @@ def extract_blocks_from_html(
         blocks.append(
             {
                 "text": _make_img_token(
-                    elem.get("src", "") or "", elem.get("alt", "") or ""
+                    _resolve_img_src(base_href, elem.get("src", "") or ""),
+                    elem.get("alt", "") or "",
                 ),
                 "spans": [],
                 "block_style": None,
@@ -876,7 +900,9 @@ _LEADING_TITLE_MAX_LEN = 60
 #: invents this string; no book contains it. Anything that would put it in
 #: front of a reader — a rendered heading, a contents entry — is a leak of
 #: the same kind as #107's "Half Title Page". (#133)
-LEADING_TITLE_FALLBACK = "Front Matter"
+#: Re-exported from native_generator so the generator can fall back to the
+#: same label without importing converter (which would be circular).
+LEADING_TITLE_FALLBACK = _TITLE_FALLBACK
 
 
 def _leading_chapter_title(head_blocks):

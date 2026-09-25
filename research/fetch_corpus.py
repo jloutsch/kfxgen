@@ -4,9 +4,26 @@
 The books are not committed (~0.5 GB) and never should be. What is committed is
 `corpus_ids.json`, so the *set* is reproducible even though its contents are not.
 That manifest did not exist until 2026-08-21: `BASELINE.md` recorded titles only,
-which is why 13 of the original 90 could not be recovered — their filenames were
-abbreviated past the point where they match a catalog entry. The manifest holds
-the 77 that were.
+so the first recovery pass matched abbreviated filenames against the catalog and
+captured 77 of the original 90. The remaining 13 were recovered on 2026-09-06 and
+the manifest is complete.
+
+What made the second pass work was verifying rather than matching. A title alone
+is ambiguous — two of the 13 needed the author to separate them from same-named
+works, and one is a Gutenberg duplicate pair (`pg42`/`pg43`) with identical
+titles. But `BASELINE.md` also records source word count, TOC entry count and
+image count per book, and those identify an edition outright: 12 of the 13 match
+their recorded word count *exactly*, one of them at 992,194 words.
+
+Two carry known drift, because Gutenberg regenerates its EPUBs. `pg6133` matches
+words, spine and images exactly but has one navPoint fewer than recorded, and
+`pg34413` is 23 words (0.06%) and one navPoint off. Both are the right work —
+image counts match and the titles are unambiguous — but they are not byte-identical
+to what BASELINE.md measured, so a metrics diff against that file will show them.
+
+Do not use `BASELINE.md`'s `Spine` column to identify a book. It was written by an
+older `extract_epub_spine` and no longer agrees with the current one on most books.
+Word count, TOC entries and image count are the fingerprints that held up.
 
 Usage:
 

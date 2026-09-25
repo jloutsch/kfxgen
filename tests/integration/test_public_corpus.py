@@ -149,6 +149,85 @@ def _toc_labels(epub):
     return labels
 
 
+#: An emitted nav label that is really a spine filename — the second shape #143
+#: took, where one book listed 835 of them.
+_FILENAME_LABEL = re.compile(r"\.(x?html?|jpe?g|png|gif|svg)\b", re.IGNORECASE)
+
+
+def _source_nav_entries(epub):
+    """Entry count in the source EPUB's own navigation.
+
+    The NCX is preferred and the EPUB3 nav is the fallback, rather than both
+    being merged: this is a *count* comparison, so double-counting a book that
+    ships both would make the assertion below unfalsifiable. Deliberately not
+    `_toc_labels`, which reads `class~="toc"` markup in the body and would
+    scoop up an index page — one book's runs to 233 KB of links.
+    """
+    with zipfile.ZipFile(str(epub)) as zf:
+        names = zf.namelist()
+        ncx = next((n for n in names if n.lower().endswith(".ncx")), None)
+        if ncx:
+            try:
+                root = etree.fromstring(zf.read(ncx))
+                return sum(
+                    1
+                    for _ in root.iter("{http://www.daisy.org/z3986/2005/ncx/}navPoint")
+                )
+            except etree.XMLSyntaxError:
+                pass
+        for name in names:
+            low = name.lower()
+            if "nav" not in low or not low.endswith((".xhtml", ".html")):
+                continue
+            try:
+                tree = etree.fromstring(zf.read(name), etree.HTMLParser())
+            except etree.XMLSyntaxError:
+                continue
+            if tree is None:
+                continue
+            for nav in tree.iter("nav"):
+                links = [a for a in nav.iter("a") if "".join(a.itertext()).strip()]
+                if links:
+                    return len(links)
+    return 0
+
+
+def _emitted_nav_labels(kfx_path):
+    """TOC-container entry labels in the generated `$389` fragment.
+
+    `$389` -> `$392` (nav containers) -> the one whose `$235` is `$212` (table
+    of contents, not `$798` headings or `$236` landmarks) -> `$247` (entries)
+    -> `$241.$244` (label).
+    """
+
+    def plain(node, depth=0):
+        if depth > 40:
+            return None
+        if hasattr(node, "annotations") and hasattr(node, "value"):
+            return plain(node.value, depth + 1)
+        if hasattr(node, "items"):
+            return {str(k): plain(v, depth + 1) for k, v in node.items()}
+        if isinstance(node, list):
+            return [plain(x, depth + 1) for x in node]
+        if hasattr(node, "value") and not isinstance(node, str):
+            return plain(node.value, depth + 1)
+        if isinstance(node, (int, float, bool)) or node is None:
+            return node
+        return str(node)
+
+    labels = []
+    for frag in by_type(load_fragments(kfx_path), "$389"):
+        for top in plain(frag.value) or []:
+            for container in (top or {}).get("$392") or []:
+                if (container or {}).get("$235") != "$212":
+                    continue
+                for entry in container.get("$247") or []:
+                    label = ((entry or {}).get("$241") or {}).get("$244")
+                    if label is not None:
+                        labels.append(str(label))
+    return labels
+
+
 def _longest_run(blocks, labels):
     """Longest stretch of consecutive blocks that are each a toc label.
 
@@ -484,6 +563,50 @@ def test_corpus_book_invariants(epub, tmp_path):
             f"{m['image_resources']} image resources emitted but zero $175 refs "
             "— every image is in the file and none of them is on screen"
         )
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+@pytest.mark.skipif(not _corpus_files(), reason=f"{CORPUS_ENV} not set or empty")
+@pytest.mark.parametrize("epub", _corpus_files(), ids=lambda p: p.stem[:40])
+def test_corpus_nav_lists_only_what_the_source_listed(epub, tmp_path):
+    """The nav pane must not list what the source TOC never referenced (#143).
+
+    kfxgen invents a chapter for every spine item, including the ones the
+    publisher's contents deliberately skips. Listing them put "Front Matter"
+    in all 77 books and raw spine filenames in 14 more — 1,290 entries, one
+    book contributing 835 of its 994. The unit suite could not see it: no
+    fixture had the shape until `unlisted_back_matter`, because Gutenberg's
+    own NCX lists essentially everything it ships.
+
+    **Counts, not labels.** Entry-for-entry label identity is not asserted,
+    because one book legitimately fails it: its NCX makes a navPoint per
+    title-page line, and the spine item behind one of them is where the
+    book's contents listing lives, so `_rebuild_contents_page` renames it to
+    `Contents` (#132/#60/#107). The count is what #143 was actually about,
+    and it is exception-free — 4,941 emitted against 4,941 source entries
+    across the corpus, with no book over or under.
+
+    The filename assertion is narrower and catches the same defect earlier:
+    a label ending in `.html` or `.jpg` is a spine item that reached the nav
+    without ever having been named by anything.
+    """
+    labels = _emitted_nav_labels(_convert(epub, tmp_path / "out.kfx"))
+    expected = _source_nav_entries(epub)
+    if not expected:
+        pytest.skip("source ships no navigation to compare against")
+
+    filenames = [lab for lab in labels if _FILENAME_LABEL.search(lab)]
+    assert not filenames, (
+        f"{len(filenames)} nav entries are spine filenames, e.g. "
+        f"{filenames[:3]} — these are items the source TOC never named"
+    )
+    assert len(labels) == expected, (
+        f"nav has {len(labels)} entries, source TOC has {expected}. More "
+        f"means entries were invented for spine items the publisher left "
+        f"unlisted (#143); fewer means a listed section stopped being "
+        f"reachable."
+    )
 
 
 @pytest.mark.integration

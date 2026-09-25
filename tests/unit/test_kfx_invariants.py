@@ -31,11 +31,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin")
 from kfxgen.kfxlib_minimal.ion import IS, IonSymbol  # noqa: E402
 from kfxgen.native_generator import NativeKFXGenerator  # noqa: E402
 
-from tests._kfx_introspect import (
+from tests._kfx_introspect import (  # noqa: E402
     by_type as _by_type,
+    load_fragments as _load_fragments,
     val as _val,
     walk_for_key as _walk_for_key,
-)  # noqa: E402
+)
 
 
 # Valid JPEG header + size-gate padding for cover fixture (#46).
@@ -233,8 +234,8 @@ class TestPositionEnvelopeCeiling:
     # ceiling must hold for every position-bearing key.
     _POS_KEYS = ("$155", "$185", "$181", "$182")
 
-    def test_max_position_within_envelope(self, fixture_kfx):
-        path, frags = fixture_kfx
+    def _max_position(self, frags):
+        """Largest position id in the fragment set, with where it was found."""
         max_pos = 0
         location = None
         for f in frags:
@@ -255,9 +256,46 @@ class TestPositionEnvelopeCeiling:
                         if n > max_pos:
                             max_pos = n
                             location = (str(f.fid), str(f.ftype), key)
+        return max_pos, location
+
+    def test_max_position_within_envelope(self, fixture_kfx):
+        path, frags = fixture_kfx
+        max_pos, location = self._max_position(frags)
         assert max_pos <= self.MAX_POS, (
             f"Position id {max_pos} exceeds 5-digit envelope ({self.MAX_POS}) "
             f"at {location} — Kindle progress display will break"
+        )
+
+    def test_envelope_holds_for_a_book_far_larger_than_any_fixture(self, tmp_path):
+        """The ceiling above is only ever asked of inputs too small to break it.
+
+        Every `fixture_kfx` book is tiny; the largest in the corpus is 300
+        chapters, which lands at 10,598 — the assertion cannot fail there no
+        matter what position allocation does. This runs 1,500 chapters, which
+        is where the envelope still holds, so a regression that inflates the
+        per-chapter stride has something to trip over.
+
+        Measured while writing this (2026-09-06): 100 chapters -> 10,198;
+        300 -> 10,598; 1,000 -> 11,998; 1,500 -> 12,998; **2,000 -> 16,998**.
+        The generator emits that last one without complaint. Whether it
+        actually breaks progress display is unverified — the note this class
+        cites is about `SECTION_POS_BASE`, not about content overflow, and
+        only a device can settle it. Deliberately not asserted here: pinning
+        an unverified ceiling as a hard failure would be inventing a
+        requirement. What is asserted is the range known to be good.
+        """
+        chapters = [
+            {"title": f"C{i}", "text": "Body text here. Another sentence."}
+            for i in range(1500)
+        ]
+        out = tmp_path / "large.kfx"
+        NativeKFXGenerator().generate_full_book(
+            "T", "A", chapters, output_path=str(out)
+        )
+        max_pos, location = self._max_position(_load_fragments(out))
+        assert max_pos <= self.MAX_POS, (
+            f"1500 chapters reached position {max_pos} at {location}, past the "
+            f"{self.MAX_POS} envelope — the per-chapter stride grew"
         )
 
 

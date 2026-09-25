@@ -2783,3 +2783,197 @@ class TestUntocedChaptersAreNotListed:
         chapters = extract_chapters_from_oeb(oeb, _silent_log())
         assert chapters
         assert not any(c.get("_omit_from_toc") for c in chapters)
+
+
+def _epub_with_unlisted_leading_image(tmp_path):
+    """An EPUB whose first spine item is an image-only page the NCX skips.
+
+    Hand-rolled rather than built with `EpubBuilder`, following
+    `_cover_by_metadata_epub` above: `add_chapter` puts every page in the NCX
+    and `add_manifest_item` appends to the *end* of the spine, so the builder
+    cannot express a leading page that the table of contents does not list.
+
+    That shape is what makes `_leading_chapter_title` run at all — it titles
+    the content preceding the first TOC anchor — and it is the shape #133 came
+    from: a cover plate in the reading order that no contents entry names.
+
+    The plate carries an image paragraph *and* a text paragraph. Image-only
+    pages are discarded before this point by `_has_real_text`, so a page with
+    nothing but the plate never reaches the titling code at all. The image
+    must lead, because `_leading_chapter_title` reads only the first block:
+    unstripped, a lone token is a short single-line run and reads as a
+    perfectly tidy heading, which is exactly how #133 shipped.
+    """
+    import zipfile
+
+    from tests._helpers import MINIMAL_JPEG
+
+    opf = (
+        '<?xml version="1.0"?>'
+        '<package xmlns="http://www.idpf.org/2007/opf" version="2.0" '
+        'unique-identifier="i">'
+        '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        '<dc:identifier id="i">x</dc:identifier><dc:title>T</dc:title>'
+        "<dc:language>en</dc:language></metadata>"
+        "<manifest>"
+        '<item id="plate" href="plate.xhtml" media-type="application/xhtml+xml"/>'
+        '<item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>'
+        '<item id="pic" href="pic.jpg" media-type="image/jpeg"/>'
+        '<item id="ncx" href="toc.ncx" '
+        'media-type="application/x-dtbncx+xml"/>'
+        "</manifest>"
+        '<spine toc="ncx"><itemref idref="plate"/><itemref idref="c1"/></spine>'
+        "</package>"
+    )
+    # The NCX names c1 only. plate.xhtml is in the reading order and in no
+    # contents entry, so it becomes the leading front-matter chapter.
+    ncx = (
+        '<?xml version="1.0"?>'
+        '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">'
+        '<head><meta name="dtb:uid" content="x"/></head>'
+        "<docTitle><text>T</text></docTitle><navMap>"
+        '<navPoint id="n1" playOrder="1"><navLabel><text>Chapter One</text>'
+        '</navLabel><content src="c1.xhtml"/></navPoint>'
+        "</navMap></ncx>"
+    )
+    path = tmp_path / "unlisted_leading_image.epub"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("mimetype", "application/epub+zip")
+        zf.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0" '
+            'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+            '<rootfiles><rootfile full-path="content.opf" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>',
+        )
+        zf.writestr("content.opf", opf)
+        zf.writestr("toc.ncx", ncx)
+        zf.writestr(
+            "plate.xhtml",
+            '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml">'
+            '<body><p><img src="pic.jpg" alt="cover"/></p>'
+            "<p>Publisher boilerplate that keeps this page alive.</p>"
+            "</body></html>",
+        )
+        zf.writestr(
+            "c1.xhtml",
+            '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml">'
+            "<body><h1>Chapter One</h1><p>Body text long enough to keep.</p>"
+            "</body></html>",
+        )
+        zf.writestr("pic.jpg", MINIMAL_JPEG)
+    return path
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
+class TestConverterNeverMintsATokenBearingTitle:
+    """The converter must not put an image token in a chapter title (#133).
+
+    This asserts on the converter's *own* output rather than on the finished
+    container, and that is the whole point of it existing. `generate_full_book`
+    now strips tokens from the nav label and the heading chunk, so a converter
+    regression that started minting token-bearing titles again would produce
+    perfectly clean bytes — every container-level check, including the corpus
+    nav sweep, would stay green while the bug was back.
+
+    Verified by removing the `_IMG_TOKEN_RE.sub` from `_leading_chapter_title`:
+    these two go red, and every generator- and container-level test stays
+    green. That is the masking this class exists to prevent.
+    """
+
+    def _chapters(self, tmp_path):
+        from tests.fixtures.oeb_shim import EpubAsOeb
+
+        path = _epub_with_unlisted_leading_image(tmp_path)
+        return _conv.extract_chapters_from_oeb(EpubAsOeb(str(path)), MagicMock())
+
+    def test_no_chapter_title_contains_an_image_token(self, tmp_path):
+        titles = [ch["title"] for ch in self._chapters(tmp_path)]
+        offenders = [t for t in titles if IMG_TOKEN_RE.search(t)]
+        assert not offenders, (
+            f"converter produced chapter titles carrying image tokens: "
+            f"{offenders!r} — the generator strips these before they reach "
+            f"the container, so nothing downstream would notice"
+        )
+
+    def test_the_unlisted_leading_page_gets_the_neutral_label(self, tmp_path):
+        """Pins the behaviour the assertion above relies on.
+
+        Stripping the token from a bare-image page leaves nothing, so
+        `_leading_chapter_title` returns `LEADING_TITLE_FALLBACK`. Without
+        this, the test above could pass merely because the title came out
+        empty — which is a different defect, not a fix.
+        """
+        titles = [ch["title"] for ch in self._chapters(tmp_path)]
+        assert titles[0] == _conv.LEADING_TITLE_FALLBACK, (
+            f"expected the unlisted leading page to be titled "
+            f"{_conv.LEADING_TITLE_FALLBACK!r}, got {titles!r}"
+        )
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
+class TestImageHrefsResolveAgainstTheirDocument:
+    """`<img src>` must be resolved the way `<a href>` already is.
+
+    A manifest href is container-relative (`images/pic.jpg`); an `<img src>`
+    is relative to the document holding it (`../images/pic.jpg`). They are
+    different namespaces, which is why the generator matched them by basename
+    — and why two images sharing a basename collapsed onto one resource.
+
+    `_resolve_doc_path` has bridged exactly this gap for link targets since
+    #51. These pin that image tokens now carry the resolved href, so the
+    generator can match the manifest key exactly and only fall back to the
+    basename when resolution finds nothing.
+    """
+
+    def _token_hrefs(self, html, base_href):
+        tree = etree.fromstring(html, etree.HTMLParser())
+        blocks = _conv.extract_blocks_from_html(tree, base_href=base_href)
+        return [
+            m.group(1)
+            for b in blocks
+            for m in IMG_TOKEN_RE.finditer(b.get("text") or "")
+        ]
+
+    def test_parent_relative_src_resolves_to_the_manifest_href(self):
+        html = (
+            b'<html><body><p><img src="../images/pic.jpg" alt="x"/></p>'
+            b"<p>Body text.</p></body></html>"
+        )
+        assert self._token_hrefs(html, "text/chapter1.xhtml") == ["images/pic.jpg"]
+
+    def test_sibling_relative_src_resolves_against_the_document_directory(self):
+        html = (
+            b'<html><body><p><img src="pic.jpg" alt="x"/></p>'
+            b"<p>Body text.</p></body></html>"
+        )
+        assert self._token_hrefs(html, "OEBPS/text/chapter1.xhtml") == [
+            "OEBPS/text/pic.jpg"
+        ]
+
+    def test_two_images_with_the_same_basename_stay_distinct(self):
+        """The collision, at the layer where it is actually created."""
+        html = (
+            b'<html><body><p><img src="../a/pic.jpg" alt="x"/></p>'
+            b'<p><img src="../b/pic.jpg" alt="y"/></p>'
+            b"<p>Body text.</p></body></html>"
+        )
+        assert self._token_hrefs(html, "text/chapter1.xhtml") == [
+            "a/pic.jpg",
+            "b/pic.jpg",
+        ]
+
+    def test_no_base_href_leaves_the_src_untouched(self):
+        """Nothing to resolve against — the raw src must survive unchanged.
+
+        `extract_blocks_from_html` is called without a base in places, and
+        mangling the href there would lose the image entirely rather than
+        merely mis-key it.
+        """
+        html = (
+            b'<html><body><p><img src="../images/pic.jpg" alt="x"/></p>'
+            b"<p>Body text.</p></body></html>"
+        )
+        assert self._token_hrefs(html, "") == ["../images/pic.jpg"]

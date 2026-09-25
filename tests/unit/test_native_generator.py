@@ -2716,3 +2716,370 @@ class TestImageWidthFollowsIntrinsicSize:
     def test_distinct_sizes_get_distinct_widths(self):
         got = self._widths([(248, 400), (124, 400), (496, 400)])
         assert [g[0] for g in got] == [50.0, 25.0, 100.0]
+
+
+def _plain_ion(node, depth=0):
+    """Ion value -> plain dict/list/scalar, following annotations."""
+    if depth > 40:
+        return None
+    if hasattr(node, "annotations") and hasattr(node, "value"):
+        return _plain_ion(node.value, depth + 1)
+    if hasattr(node, "items"):
+        return {str(k): _plain_ion(v, depth + 1) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_plain_ion(x, depth + 1) for x in node]
+    if hasattr(node, "value") and not isinstance(node, str):
+        return _plain_ion(node.value, depth + 1)
+    if isinstance(node, (int, float, bool)) or node is None:
+        return node
+    return str(node)
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
+class TestNavOmissionIntegrity:
+    """Adversarial shapes for the `_omit_from_toc` filter added by #143.
+
+    The existing #143 coverage omits the *first* chapter and checks where the
+    landmark lands. These cover what that leaves open: omission in the middle,
+    omission of everything, and the pairing between a nav entry and the
+    position it points at.
+
+    That pairing is the one worth guarding. The generator builds nav entries
+    with `zip(chapters, toc_positions)` and filters afterwards, so each
+    surviving entry keeps the position belonging to its own chapter. Filtering
+    first and then computing positions would look equivalent, produce the same
+    entry count and the same labels, and silently point every entry after the
+    omission at the wrong chapter — a nav pane that opens the previous
+    section. Nothing else in the suite would notice.
+    """
+
+    def _nav(self, chapters):
+        """[(label, position)] from the `$389` TOC container."""
+
+        def plain(node, depth=0):
+            if depth > 40:
+                return None
+            if hasattr(node, "annotations") and hasattr(node, "value"):
+                return plain(node.value, depth + 1)
+            if hasattr(node, "items"):
+                return {str(k): plain(v, depth + 1) for k, v in node.items()}
+            if isinstance(node, list):
+                return [plain(x, depth + 1) for x in node]
+            if hasattr(node, "value") and not isinstance(node, str):
+                return plain(node.value, depth + 1)
+            if isinstance(node, (int, float, bool)) or node is None:
+                return node
+            return str(node)
+
+        gen = NativeKFXGenerator()
+        path = tempfile.mktemp(suffix=".kfx")
+        try:
+            gen.generate_full_book("T", "A", chapters, output_path=path)
+            out = []
+            for frag in by_type(load_fragments(Path(path)), "$389"):
+                for top in plain(frag.value) or []:
+                    for container in (top or {}).get("$392") or []:
+                        if (container or {}).get("$235") != "$212":
+                            continue
+                        for entry in container.get("$247") or []:
+                            label = ((entry or {}).get("$241") or {}).get("$244")
+                            pos = ((entry or {}).get("$246") or {}).get("$155")
+                            out.append((label, pos))
+            return out
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    @staticmethod
+    def _ch(title, omit=False):
+        ch = {"title": title, "text": f"Body of {title}. A second sentence."}
+        if omit:
+            ch["_omit_from_toc"] = True
+        return ch
+
+    def test_omitting_a_middle_chapter_leaves_the_others_pointing_where_they_did(self):
+        """Positions are bound to their own chapter, not to nav-entry order."""
+        titles = ["One", "Two", "Three", "Four"]
+        listed = dict(self._nav([self._ch(t) for t in titles]))
+        omitted = self._nav([self._ch(t, omit=(t == "Two")) for t in titles])
+
+        assert [label for label, _ in omitted] == ["One", "Three", "Four"]
+        for label, pos in omitted:
+            assert pos == listed[label], (
+                f"{label!r} moved from position {listed[label]} to {pos} when "
+                f"an earlier chapter was omitted — the nav entry now opens a "
+                f"different section than it names"
+            )
+
+    def test_omitting_alternating_chapters_keeps_every_surviving_position(self):
+        """More than one gap, so an off-by-one drift compounds visibly."""
+        titles = ["a", "b", "c", "d", "e"]
+        listed = dict(self._nav([self._ch(t) for t in titles]))
+        omitted = self._nav([self._ch(t, omit=(t in {"b", "d"})) for t in titles])
+
+        assert [label for label, _ in omitted] == ["a", "c", "e"]
+        assert [pos for _, pos in omitted] == [listed[t] for t in ("a", "c", "e")]
+
+    def test_omitting_every_chapter_yields_an_empty_toc(self):
+        """No entries, rather than a silent fallback to listing everything.
+
+        A future `if not nav_entries: nav_entries = all_chapters` guard would
+        look like defensive programming and would reinstate #143 wholesale for
+        any book whose spine the source TOC ignores entirely.
+        """
+        nav = self._nav([self._ch("One", omit=True), self._ch("Two", omit=True)])
+        assert nav == [], f"expected an empty TOC container, got {nav}"
+
+    def test_nav_lists_exactly_the_chapters_not_marked_omit(self):
+        """Guards the `zip(chapters, toc_positions)` pairing against truncation.
+
+        `zip` stops at the shorter argument, so a position list that fell
+        behind the chapter list would drop trailing nav entries with no error
+        anywhere — the book would simply stop being navigable partway through.
+        """
+        chapters = [self._ch(f"Ch{i}", omit=(i % 3 == 0)) for i in range(1, 13)]
+        expected = [c["title"] for c in chapters if not c.get("_omit_from_toc")]
+
+        assert [label for label, _ in self._nav(chapters)] == expected
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
+class TestImageTokenResolutionAdversarial:
+    """Inputs the img-token resolver is not handed by any existing fixture.
+
+    An image token is an internal placeholder. Every one of them must either
+    become a resource or disappear — a token that survives into emitted text
+    reaches the reader as raw control characters, which is #133, where 116 of
+    them shipped across the corpus and a device crashed paging over them.
+
+    The corpus sweep asserts zero raw tokens across real books, but real books
+    only exercise the case where every referenced image exists. These are the
+    shapes a malformed or hostile EPUB produces instead.
+    """
+
+    @staticmethod
+    def _token(href):
+        return f"\x00IMG\x01{href}\x01\x00"
+
+    def _build(self, text, images):
+        gen = NativeKFXGenerator()
+        path = tempfile.mktemp(suffix=".kfx")
+        gen.generate_full_book(
+            "T",
+            "A",
+            [{"title": "Ch", "text": text}],
+            output_path=path,
+            images=images,
+        )
+        return Path(path)
+
+    def test_token_for_an_image_never_supplied_leaves_no_raw_token(self):
+        """The commonest malformed case: `<img>` pointing at a missing file.
+
+        Dropping the resource is fine. Leaving `\\x00IMG\\x01ghost.jpg\\x01\\x00`
+        in the text is not — that is the #133 failure verbatim.
+        """
+        path = self._build(f"Before {self._token('ghost.jpg')} after.", {})
+        try:
+            assert b"\x00IMG\x01" not in path.read_bytes(), (
+                "an unresolved image token survived into the container"
+            )
+            assert by_type(load_fragments(path), "$164") == []
+        finally:
+            os.unlink(path)
+
+    def test_non_image_bytes_are_dropped_without_leaking_the_token(self):
+        """Supplied bytes that are not an image — a zip mislabelled as JPEG.
+
+        The resource must be refused (magic-byte gate) *and* the token that
+        referenced it removed. Refusing the bytes while leaving the token is
+        the failure mode that turns a bad image into printed control codes.
+        """
+        path = self._build(
+            f"X {self._token('bad.jpg')} Y.", {"bad.jpg": b"PK\x03\x04not an image"}
+        )
+        try:
+            assert by_type(load_fragments(path), "$164") == []
+            assert b"\x00IMG\x01" not in path.read_bytes()
+        finally:
+            os.unlink(path)
+
+    def _content_image_refs(self, path):
+        """`$175` resource references, in the order the content uses them."""
+        refs = []
+
+        def collect(node):
+            if isinstance(node, dict):
+                for key, sub in node.items():
+                    if key == "$175" and isinstance(sub, str):
+                        refs.append(sub)
+                    collect(sub)
+            elif isinstance(node, list):
+                for sub in node:
+                    collect(sub)
+
+        for frag in by_type(load_fragments(path), "$259"):
+            collect(_plain_ion(frag.value))
+        return refs
+
+    def test_two_images_sharing_a_basename_render_as_two_different_images(self):
+        """`a/pic.jpg` and `b/pic.jpg` are two pictures, not one.
+
+        `image_resources` used to be keyed by basename alone — the only thing
+        that bridged manifest hrefs (container-relative) and `<img src>`
+        (document-relative) before converter resolved them. On collision it
+        kept the first entry, so both references resolved to `img_0`: the
+        reader saw the first picture twice and `img_1` was emitted, paid for
+        in bytes, and never referenced.
+
+        Now that converter resolves `<img src>` against its containing
+        document, the token carries the same container-relative href the
+        manifest uses, so the two are distinct keys and each reference finds
+        its own resource.
+
+        Asserted on the content references rather than on the resource count:
+        both resources were always emitted, so counting `$164` cannot tell a
+        working lookup from a broken one.
+        """
+        path = self._build(
+            f"A {self._token('a/pic.jpg')} B {self._token('b/pic.jpg')} C.",
+            {"a/pic.jpg": MINIMAL_JPEG, "b/pic.jpg": MINIMAL_JPEG},
+        )
+        try:
+            assert len(by_type(load_fragments(path), "$164")) == 2
+            assert self._content_image_refs(path) == ["img_0", "img_1"], (
+                "both references resolved to the same resource — a basename "
+                "collision is printing one image where two were meant"
+            )
+        finally:
+            os.unlink(path)
+
+    def test_an_unresolved_href_still_falls_back_to_the_basename(self):
+        """Resolution is the primary key; basename remains the safety net.
+
+        A source whose `<img src>` cannot be resolved against the manifest —
+        an odd container layout, a producer that writes absolute paths — must
+        still find its image rather than losing it. Exact-match-only would
+        turn today's wrong-image bug into a missing-image bug, which is worse.
+        """
+        path = self._build(
+            f"X {self._token('deep/nested/pic.jpg')} Y.",
+            {"images/pic.jpg": MINIMAL_JPEG},
+        )
+        try:
+            assert self._content_image_refs(path) == ["img_0"], (
+                "an href that matches no manifest key exactly should still "
+                "resolve by basename"
+            )
+        finally:
+            os.unlink(path)
+
+    def test_href_that_looks_like_an_ion_symbol_is_still_resolved(self):
+        """An href of `$264` must not be mistaken for a system symbol.
+
+        Resource names become local Ion symbols, and the format's own symbols
+        are spelled `$NNN`. A source that names a file `$264.jpg` — or any
+        `$`-prefixed string — must not collide with the symbol table.
+        """
+        path = self._build(f"Text {self._token('$264')} more.", {"$264": MINIMAL_JPEG})
+        try:
+            assert len(by_type(load_fragments(path), "$164")) == 1
+            assert b"\x00IMG\x01" not in path.read_bytes()
+        finally:
+            os.unlink(path)
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
+class TestTitleTokensNeverReachOutput:
+    """A chapter title carrying an image token must not be printed raw.
+
+    #133 fixed this in the converter, at `_leading_chapter_title` — the only
+    place a title is derived from block text, and therefore the only place a
+    token could get into one. Chapter titles otherwise come from the source
+    NCX or a filename stem, neither of which can contain the token bytes, so
+    the plugin's own path is closed.
+
+    `generate_full_book` is also a public entry point. `scripts/`, `research/`
+    and `tools/` call it directly with chapter dicts they build themselves,
+    and it trusted `chapter["title"]` verbatim — emitting it as both the nav
+    label and the heading chunk. A token there reached the reader as raw
+    control characters, which is #133's symptom with #133's fix in place.
+
+    Stripped rather than rejected: a title is `<h2><img/>Preface</h2>` often
+    enough that refusing it would throw away good titles, which is the same
+    reasoning `_leading_chapter_title` records.
+    """
+
+    def _generate(self, title):
+        gen = NativeKFXGenerator()
+        path = tempfile.mktemp(suffix=".kfx")
+        gen.generate_full_book(
+            "T",
+            "A",
+            [{"title": title, "text": "Body text.\n\nA second paragraph."}],
+            output_path=path,
+        )
+        return Path(path)
+
+    def _nav_labels(self, path):
+        labels = []
+        for frag in by_type(load_fragments(path), "$389"):
+            for top in _plain_ion(frag.value) or []:
+                for container in (top or {}).get("$392") or []:
+                    if (container or {}).get("$235") != "$212":
+                        continue
+                    for entry in container.get("$247") or []:
+                        label = ((entry or {}).get("$241") or {}).get("$244")
+                        if label is not None:
+                            labels.append(label)
+        return labels
+
+    def test_token_in_a_title_does_not_reach_the_nav_label(self):
+        path = self._generate("\x00IMG\x01cover.jpg\x01\x00Preface")
+        try:
+            assert self._nav_labels(path) == ["Preface"]
+        finally:
+            os.unlink(path)
+
+    def test_token_in_a_title_does_not_reach_the_container_bytes(self):
+        """Covers the heading chunk as well as the nav entry.
+
+        The title is emitted twice — once as the nav label, once as the
+        chapter's first text chunk. Stripping one and not the other still
+        ships the control characters.
+        """
+        path = self._generate("\x00IMG\x01cover.jpg\x01\x00Preface")
+        try:
+            assert b"\x00IMG\x01" not in path.read_bytes()
+        finally:
+            os.unlink(path)
+
+    def test_a_title_that_is_only_a_token_does_not_become_an_empty_label(self):
+        """The #133 shape exactly: a chapter titled with a bare cover image.
+
+        Stripping leaves nothing, and an empty nav entry is its own defect —
+        an unlabelled row the reader cannot identify. Fall back to the same
+        neutral label the converter uses.
+        """
+        path = self._generate("\x00IMG\x01cover.jpg\x01\x00")
+        try:
+            assert self._nav_labels(path) == ["Front Matter"]
+            assert b"\x00IMG\x01" not in path.read_bytes()
+        finally:
+            os.unlink(path)
+
+    def test_an_ordinary_title_is_left_exactly_as_it_is(self):
+        """No normalisation beyond token removal.
+
+        `_rebuild_contents_page` and `_replace_title_page` match chapter
+        titles as literal strings, so collapsing whitespace or trimming
+        punctuation here would silently stop those matching.
+        """
+        path = self._generate("  CHAPTER  I.  The Beginning  ")
+        try:
+            assert self._nav_labels(path) == ["  CHAPTER  I.  The Beginning  "]
+        finally:
+            os.unlink(path)
