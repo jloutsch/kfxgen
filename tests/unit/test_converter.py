@@ -2923,3 +2923,131 @@ def test_a_missing_image_does_not_borrow_a_same_named_one(tmp_path):
     assert refs == ["img_0"], (
         "the missing a/pic.jpg must show nothing, and b/pic.jpg must show once"
     )
+
+
+def _epub_cover_and_title_share_a_document(tmp_path, nav):
+    """A front document holding the cover image and the title page, with TOC
+    entries `nav` [(label, src), ...] pointing into it, then two chapters.
+
+    Children's-book EPUBs often put both on one page and give the TOC a
+    "Cover" and a "Title Page" entry into it (#182).
+    """
+    import zipfile
+
+    from tests._helpers import jpeg_of
+
+    points = "".join(
+        f'<navPoint id="n{i}" playOrder="{i}"><navLabel><text>{label}</text>'
+        f'</navLabel><content src="{src}"/></navPoint>'
+        for i, (label, src) in enumerate(
+            nav + [("Chapter 1", "c1.xhtml"), ("Chapter 2", "c2.xhtml")], 1
+        )
+    )
+    chapter = (
+        '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml">'
+        "<head><title>C</title></head><body><h1>Chapter {n}</h1>"
+        "<p>Body {n}.</p></body></html>"
+    )
+    path = tmp_path / "shared_front.epub"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("mimetype", "application/epub+zip")
+        zf.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0" '
+            'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+            '<rootfiles><rootfile full-path="content.opf" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>',
+        )
+        zf.writestr(
+            "content.opf",
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" '
+            'version="2.0" unique-identifier="i"><metadata '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="i">x'
+            "</dc:identifier><dc:title>A Title</dc:title><dc:creator>An Author"
+            "</dc:creator><dc:language>en</dc:language></metadata><manifest>"
+            '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
+            '<item id="front" href="front.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="c2" href="c2.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="ci" href="cover.jpg" media-type="image/jpeg"/>'
+            '<item id="ti" href="title.jpg" media-type="image/jpeg"/>'
+            '</manifest><spine toc="ncx"><itemref idref="front"/>'
+            '<itemref idref="c1"/><itemref idref="c2"/></spine></package>',
+        )
+        zf.writestr(
+            "toc.ncx",
+            '<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" '
+            'version="2005-1"><head/><docTitle><text>A Title</text></docTitle>'
+            f"<navMap>{points}</navMap></ncx>",
+        )
+        zf.writestr(
+            "front.xhtml",
+            '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml">'
+            "<head><title>Front</title></head><body>"
+            '<div id="cover"><img src="cover.jpg" alt="cover"/></div>'
+            '<div id="title"><img src="title.jpg" alt=""/><h1>A Title</h1>'
+            "<p>An Author</p></div></body></html>",
+        )
+        zf.writestr("c1.xhtml", chapter.format(n=1))
+        zf.writestr("c2.xhtml", chapter.format(n=2))
+        zf.writestr("cover.jpg", jpeg_of(600, 800))
+        zf.writestr("title.jpg", jpeg_of(400, 300))
+    return path
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "nav",
+    [
+        [("Title Page", "front.xhtml"), ("Cover", "front.xhtml")],
+        [("Title Page", "front.xhtml"), ("Cover", "front.xhtml#cover")],
+        [("Title Page", "front.xhtml#title"), ("Cover", "front.xhtml#cover")],
+        [("Cover", "front.xhtml"), ("Title Page", "front.xhtml#title")],
+        [("Cover", "front.xhtml#cover"), ("Title Page", "front.xhtml#title")],
+        [("Cover", "front.xhtml"), ("Title Page", "front.xhtml")],
+    ],
+    ids=[
+        "title-then-cover-same-doc",
+        "title-doc-then-cover-fragment",
+        "title-fragment-then-cover-fragment",
+        "cover-doc-then-title-fragment",
+        "cover-fragment-then-title-fragment",
+        "cover-then-title-same-doc",
+    ],
+)
+def test_the_cover_page_keeps_its_picture_when_it_shares_the_title_pages_document(
+    tmp_path, nav
+):
+    """#182: the pictures printed on the page the TOC calls "Cover".
+
+    When the Title Page entry comes first, or both land on one position, the
+    Cover entry does not get a chapter of its own: its page joins the Title
+    Page chapter. Before #181, `_replace_title_page` then overwrote that
+    chapter's body and took the cover picture with it, which is how images
+    printed on a "Cover" page were lost even though no chapter titled Cover
+    was ever rewritten. Counted as the original measurement did: chapters
+    with and without metadata, `preserved_images` as kept.
+    """
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    epub = _epub_cover_and_title_share_a_document(tmp_path, nav)
+    meta = {"title": "A Title", "author": "An Author"}
+    with_md = _conv.extract_chapters_from_oeb(
+        EpubAsOeb(str(epub)), _silent_log(), metadata=meta
+    )
+    without_md = _conv.extract_chapters_from_oeb(
+        EpubAsOeb(str(epub)), _silent_log(), metadata=None
+    )
+
+    def kept(chapters):
+        return sorted(
+            m.group(1)
+            for c in chapters
+            for t in [c.get("text") or ""] + list(c.get("preserved_images") or [])
+            for m in IMG_TOKEN_RE.finditer(t)
+        )
+
+    assert kept(without_md) == ["cover.jpg", "title.jpg"]
+    assert kept(with_md) == kept(without_md), (
+        "the metadata rewrite dropped a picture printed on the cover or title page"
+    )
