@@ -521,6 +521,100 @@ def _subtree_anchor_ids(elem):
     return ids
 
 
+#: Semantics that make an element a note reference, a back-link, or one note,
+#: by epub:type, ARIA role, or the classes Python-Markdown's footnotes
+#: extension writes. A note *section* (epub:type footnotes/endnotes, a
+#: "footnotes" div) is deliberately absent: it is a real contents target.
+_NOTE_TYPES = {"noteref", "backlink", "footnote", "endnote", "rearnote"}
+_NOTE_ROLES = {"doc-noteref", "doc-backlink", "doc-footnote", "doc-endnote"}
+_NOTE_CLASSES = {"footnote-ref", "footnote-backref"}
+_HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+
+
+def _is_note_element(elem):
+    types = (elem.get(_EPUB_TYPE_ATTR) or elem.get("epub:type") or "").lower().split()
+    if _NOTE_TYPES & set(types):
+        return True
+    if (elem.get("role") or "").strip().lower() in _NOTE_ROLES:
+        return True
+    return bool(_NOTE_CLASSES & set((elem.get("class") or "").split()))
+
+
+def _note_target_ids(root):
+    """Ids that name a note marker, a back-link, or a single note (#203).
+
+    calibre generates a table of contents when the source has none, and it
+    lists a footnote's marker and back-link as entries. Neither is a chapter:
+    as chapters they split the text and print "1" and "↩" as headings.
+
+    An id counts when its element is itself note-marked, wraps a note marker
+    (`<sup id="fnref:1"><a class="footnote-ref">`), or is a list item in a
+    Python-Markdown footnote block (`<div class="footnote"><ol><li id=...>`).
+    A heading never counts, and neither does anything holding one, because a
+    "Notes" chapter heading inside the notes section is a real contents entry.
+    Detection is structural and never reads the label: chapters titled "1",
+    "2", "3" are common.
+    """
+    ids = set()
+    if root is None:
+        return ids
+    for elem in root.iter():
+        if not isinstance(elem.tag, str):
+            continue
+        own = _own_anchor_ids(elem)
+        if not own:
+            continue
+        if _local_tag(elem.tag) in _HEADING_TAGS or any(
+            isinstance(d.tag, str) and _local_tag(d.tag) in _HEADING_TAGS
+            for d in elem.iter()
+            if d is not elem
+        ):
+            continue
+        note = _is_note_element(elem) or any(
+            isinstance(c.tag, str) and _is_note_element(c) for c in elem
+        )
+        if not note and _local_tag(elem.tag) == "li":
+            lst = elem.getparent()
+            box = lst.getparent() if lst is not None else None
+            note = box is not None and "footnote" in (box.get("class") or "").split()
+        if note:
+            ids.update(own)
+
+    # Markers by what they link to. calibre strips the footnote-ref and
+    # footnote-backref classes during conversion, so a Markdown marker arrives
+    # as a bare `<sup id="fnref:1"><a href="#fn:1">`. It is an `<a>` pointing at
+    # a note, or a sup/span wrapping nothing but one. A paragraph that merely
+    # contains a marker is not one: its id can be a real chapter start.
+    def _points_at_note(a):
+        frag = _href_fragment(a.get("href") or "")
+        return bool(frag) and (frag in ids or unquote(frag) in ids)
+
+    markers = set()
+    for elem in root.iter():
+        if not isinstance(elem.tag, str):
+            continue
+        own = _own_anchor_ids(elem)
+        if not own or set(own) & ids:
+            continue
+        tag = _local_tag(elem.tag)
+        if tag == "a":
+            hit = _points_at_note(elem)
+        elif tag in ("sup", "span", "small"):
+            kids = [c for c in elem if isinstance(c.tag, str)]
+            hit = (
+                len(kids) == 1
+                and _local_tag(kids[0].tag) == "a"
+                and not (elem.text or "").strip()
+                and not (kids[0].tail or "").strip()
+                and _points_at_note(kids[0])
+            )
+        else:
+            hit = False
+        if hit:
+            markers.update(own)
+    return ids | markers
+
+
 def _dedupe_keep_order(items):
     seen = set()
     out = []
@@ -1213,6 +1307,17 @@ def _assemble_chapters_by_coordinate(
             continue
         frag = _href_fragment(entry["href"])
         amap = spine_anchor[si]
+        # calibre hands TOC fragments percent-encoded (`fn%3a1`); the anchor
+        # map holds the raw id (`fn:1`). (#203)
+        if frag and frag not in amap and unquote(frag) in amap:
+            frag = unquote(frag)
+        note_ids = spine_items_ordered[si].get("note_ids", ())
+        if frag and (frag in note_ids or unquote(frag) in note_ids):
+            log.info(
+                f"  TOC entry {entry['title']!r} points at a footnote, not a "
+                "chapter; skipped"
+            )
+            continue
         if frag and frag in amap:
             bi = amap[frag]
         elif frag:
@@ -1418,6 +1523,7 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
                 "text": text,
                 "blocks": blocks,
                 "nav_listing_at": nav_listing_at,
+                "note_ids": _note_target_ids(item.data),
             }
         )
         log.info(f"  Spine item {i + 1}: {len(text)} chars ({norm_href})")

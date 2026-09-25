@@ -3051,3 +3051,253 @@ def test_the_cover_page_keeps_its_picture_when_it_shares_the_title_pages_documen
     assert kept(with_md) == kept(without_md), (
         "the metadata rewrite dropped a picture printed on the cover or title page"
     )
+
+
+def _epub_with_toc(tmp_path, body, nav, name="toc_targets"):
+    """One spine document `body` (inner <body> markup) and an NCX of
+    `nav` [(label, src)] entries pointing into it."""
+    import zipfile
+
+    points = "".join(
+        f'<navPoint id="n{i}" playOrder="{i}"><navLabel><text>{label}</text>'
+        f'</navLabel><content src="{src}"/></navPoint>'
+        for i, (label, src) in enumerate(nav, 1)
+    )
+    path = tmp_path / f"{name}.epub"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("mimetype", "application/epub+zip")
+        zf.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0" '
+            'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+            '<rootfiles><rootfile full-path="content.opf" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>',
+        )
+        zf.writestr(
+            "content.opf",
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" '
+            'version="2.0" unique-identifier="i"><metadata '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="i">x'
+            "</dc:identifier><dc:title>T</dc:title><dc:language>en</dc:language>"
+            '</metadata><manifest><item id="ncx" href="toc.ncx" '
+            'media-type="application/x-dtbncx+xml"/><item id="d" href="index.xhtml" '
+            'media-type="application/xhtml+xml"/></manifest><spine toc="ncx">'
+            '<itemref idref="d"/></spine></package>',
+        )
+        zf.writestr(
+            "toc.ncx",
+            '<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" '
+            'version="2005-1"><head/><docTitle><text>T</text></docTitle>'
+            f"<navMap>{points}</navMap></ncx>",
+        )
+        zf.writestr(
+            "index.xhtml",
+            '<?xml version="1.0" encoding="utf-8"?><html '
+            'xmlns="http://www.w3.org/1999/xhtml" '
+            'xmlns:epub="http://www.idpf.org/2007/ops"><head><title>T</title></head>'
+            f"<body>{body}</body></html>",
+        )
+    return path
+
+
+# The shape Python-Markdown's footnotes extension writes, which is what calibre
+# hands kfxgen for a Markdown book (#192, #203).
+_MD_FOOTNOTE_BODY = (
+    '<h1 id="one">Chapter One</h1><p>Text with a note.'
+    '<sup id="fnref:1"><a class="footnote-ref" href="#fn:1">1</a></sup></p>'
+    '<h1 id="two">Chapter Two</h1><p>More text.</p>'
+    '<div class="footnote"><hr/><ol><li id="fn:1"><p>The note. '
+    '<a class="footnote-backref" href="#fnref:1">&#8617;</a></p></li></ol></div>'
+)
+
+
+def _chapter_titles(epub):
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    return [
+        c["title"]
+        for c in _conv.extract_chapters_from_oeb(EpubAsOeb(str(epub)), _silent_log())
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "encode", [False, True], ids=["literal-colon", "calibre-encoded-colon"]
+)
+def test_calibre_toc_entries_for_a_footnote_do_not_become_chapters(tmp_path, encode):
+    """#203: calibre's generated TOC lists the note marker and its back-link.
+
+    Neither is a chapter. As chapters they split the text and print `1` and `↩`
+    as headings. calibre hands the fragments percent-encoded (`fn%3a1`), so
+    both spellings must be recognised.
+    """
+    c = "%3a" if encode else ":"
+    epub = _epub_with_toc(
+        tmp_path,
+        _MD_FOOTNOTE_BODY,
+        [
+            ("Chapter One", "index.xhtml#one"),
+            ("Chapter Two", "index.xhtml#two"),
+            ("1", f"index.xhtml#fn{c}1"),
+            ("↩", f"index.xhtml#fnref{c}1"),
+        ],
+    )
+    assert _chapter_titles(epub) == ["Chapter One", "Chapter Two"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "body,target",
+    [
+        (
+            '<p>x<a epub:type="noteref" id="m1" href="#n1">1</a></p>'
+            '<aside epub:type="footnote" id="n1"><p>Note.</p></aside>',
+            "m1",
+        ),
+        (
+            '<p>x<a epub:type="noteref" id="m1" href="#n1">1</a></p>'
+            '<aside epub:type="footnote" id="n1"><p>Note.</p></aside>',
+            "n1",
+        ),
+        (
+            '<p>x<a role="doc-noteref" id="m1" href="#n1">1</a></p>'
+            '<aside role="doc-endnote" id="n1"><p>Note.'
+            '<a role="doc-backlink" id="b1" href="#m1">back</a></p></aside>',
+            "b1",
+        ),
+        (
+            '<p>x<a role="doc-noteref" id="m1" href="#n1">1</a></p>'
+            '<aside role="doc-endnote" id="n1"><p>Note.</p></aside>',
+            "n1",
+        ),
+    ],
+    ids=["epub-noteref", "epub-footnote", "aria-backlink", "aria-endnote"],
+)
+def test_toc_entries_for_semantic_notes_do_not_become_chapters(tmp_path, body, target):
+    epub = _epub_with_toc(
+        tmp_path,
+        '<h1 id="one">Chapter One</h1>'
+        + body
+        + '<h1 id="two">Chapter Two</h1><p>y</p>',
+        [
+            ("Chapter One", "index.xhtml#one"),
+            ("Note", f"index.xhtml#{target}"),
+            ("Chapter Two", "index.xhtml#two"),
+        ],
+    )
+    assert _chapter_titles(epub) == ["Chapter One", "Chapter Two"]
+
+
+@pytest.mark.unit
+def test_a_notes_section_heading_is_still_a_chapter(tmp_path):
+    """Adversarial: the container of the notes is a real TOC target.
+
+    A "Notes" chapter whose heading sits inside the footnotes section must
+    keep its entry. Only individual notes and markers are dropped.
+    """
+    epub = _epub_with_toc(
+        tmp_path,
+        '<h1 id="one">Chapter One</h1><p>x<a epub:type="noteref" href="#n1">1</a></p>'
+        '<section epub:type="endnotes" id="notes"><h1 id="notes-h">Notes</h1>'
+        '<aside epub:type="endnote" id="n1"><p>Note.</p></aside></section>',
+        [("Chapter One", "index.xhtml#one"), ("Notes", "index.xhtml#notes-h")],
+    )
+    assert _chapter_titles(epub) == ["Chapter One", "Notes"]
+
+
+@pytest.mark.unit
+def test_a_notes_section_itself_is_still_a_chapter(tmp_path):
+    epub = _epub_with_toc(
+        tmp_path,
+        '<h1 id="one">Chapter One</h1><p>x</p>'
+        '<div class="footnotes" id="notes"><h2>Footnotes</h2>'
+        '<p id="n1">1. Note.</p></div>',
+        [("Chapter One", "index.xhtml#one"), ("Footnotes", "index.xhtml#notes")],
+    )
+    assert _chapter_titles(epub) == ["Chapter One", "Footnotes"]
+
+
+@pytest.mark.unit
+def test_chapters_titled_with_bare_numbers_are_kept(tmp_path):
+    """Adversarial: "1", "2", "3" are ordinary chapter titles, not note markers.
+
+    The fix must key on what the target *is*, never on how its label reads.
+    """
+    epub = _epub_with_toc(
+        tmp_path,
+        '<h2 id="c1">1</h2><p>a</p><h2 id="c2">2</h2><p>b</p><h2 id="c3">3</h2><p>c</p>',
+        [("1", "index.xhtml#c1"), ("2", "index.xhtml#c2"), ("3", "index.xhtml#c3")],
+    )
+    assert _chapter_titles(epub) == ["1", "2", "3"]
+
+
+@pytest.mark.unit
+def test_an_encoded_toc_fragment_lands_on_its_own_heading(tmp_path):
+    """calibre percent-encodes TOC fragments; the anchor map holds raw ids.
+
+    `#part%3aii` must find `id="part:ii"`, not snap to a guessed block.
+    """
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    epub = _epub_with_toc(
+        tmp_path,
+        '<h1 id="part:i">Part I</h1><p>first</p><p>more first</p>'
+        '<h1 id="part:ii">Part II</h1><p>second</p>',
+        [("Part I", "index.xhtml#part%3ai"), ("Part II", "index.xhtml#part%3aii")],
+    )
+    chapters = _conv.extract_chapters_from_oeb(EpubAsOeb(str(epub)), _silent_log())
+    assert [c["title"] for c in chapters] == ["Part I", "Part II"]
+    assert "second" in chapters[1]["text"] and "first" not in chapters[1]["text"]
+
+
+@pytest.mark.unit
+def test_a_marker_calibre_stripped_of_its_class_is_still_recognised(tmp_path):
+    """Adversarial: the shape calibre actually hands kfxgen.
+
+    calibre rewrites classes during conversion, and the footnote-ref and
+    footnote-backref classes do not survive: the marker arrives as a bare
+    `<sup id="fnref:1"><a href="#fn:1">`. It is recognised by what it links
+    to. The back-link entry is listed *before* the note here, so the older
+    "out of document order" skip cannot hide a miss.
+    """
+    body = (
+        '<h1 id="one">Chapter One</h1><p>Text with a note.'
+        '<sup id="fnref:1" class="calibre10"><a href="#fn:1">1</a></sup></p>'
+        '<h1 id="two">Chapter Two</h1><p>More text.</p>'
+        '<div class="footnote"><hr/><ol class="calibre16">'
+        '<li id="fn:1" class="calibre13"><p>The note. '
+        '<a href="#fnref:1">&#8617;</a></p></li></ol></div>'
+    )
+    epub = _epub_with_toc(
+        tmp_path,
+        body,
+        [
+            ("Chapter One", "index.xhtml#one"),
+            ("↩", "index.xhtml#fnref%3a1"),
+            ("Chapter Two", "index.xhtml#two"),
+            ("1", "index.xhtml#fn%3a1"),
+        ],
+    )
+    assert _chapter_titles(epub) == ["Chapter One", "Chapter Two"]
+
+
+@pytest.mark.unit
+def test_a_paragraph_that_contains_a_note_marker_can_still_start_a_chapter(tmp_path):
+    """Adversarial: marker detection must not swallow the marker's paragraph.
+
+    A TOC entry may point at a paragraph with an id, and that paragraph may
+    hold a note marker. The paragraph is a chapter start; only the marker is
+    not.
+    """
+    body = (
+        '<h1 id="one">Chapter One</h1><p>a</p>'
+        '<p id="start2">Chapter two opens here, with a note.'
+        '<sup><a href="#n1">1</a></sup></p><p>more</p>'
+        '<aside epub:type="footnote" id="n1"><p>Note.</p></aside>'
+    )
+    epub = _epub_with_toc(
+        tmp_path,
+        body,
+        [("Chapter One", "index.xhtml#one"), ("Chapter Two", "index.xhtml#start2")],
+    )
+    assert _chapter_titles(epub) == ["Chapter One", "Chapter Two"]
