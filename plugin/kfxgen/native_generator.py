@@ -2246,6 +2246,13 @@ class NativeKFXGenerator:
                     self._image_basename_collisions = getattr(
                         self, "_image_basename_collisions", []
                     ) + [base]
+                # The full manifest href is the exact key: converter resolves
+                # <img src> against its document, so a token's href matches it
+                # directly, and two images sharing a filename stay two images.
+                # Set after the basename entry so a root-level href that equals
+                # another image's basename still finds its own resource.
+                image_resources[href] = (resource_name, location_name)
+                self._image_dims[href] = (width, height)
 
         # Embedded fonts (#15): one $418 (bytes) + one $262 (@font-face) per
         # face, mirroring the image $417/$164 pair. Application (setting $11 on
@@ -2742,10 +2749,12 @@ class NativeKFXGenerator:
                         chunks.append({"type": "text", "text": seg})
                 href = m.group(1)
                 alt = m.group(2).replace("\x02", " ")
-                # Match <img src> values (often relative) against manifest
-                # hrefs by basename — see _img_basename helper above.
-                basename = href.split("#", 1)[0].rsplit("/", 1)[-1] if href else ""
-                resource = image_resources.get(basename)
+                # Exact manifest href first; basename for hrefs converter
+                # could not resolve — see _img_basename helper above.
+                bare = href.split("#", 1)[0] if href else ""
+                resource = image_resources.get(bare)
+                if resource is None:
+                    resource = image_resources.get(bare.rsplit("/", 1)[-1])
                 if resource is not None:
                     chunk = {"type": "image", "resource": resource[0], "alt": alt}
                     if m.group(3):

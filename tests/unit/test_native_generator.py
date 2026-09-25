@@ -43,7 +43,7 @@ def _png_bytes(w, h):
     )
 
 
-from tests._kfx_introspect import by_type, load_fragments, val  # noqa: E402
+from tests._kfx_introspect import by_type, load_fragments, val, walk_for_key  # noqa: E402
 
 
 class TestNativeGeneratorInit:
@@ -2707,3 +2707,63 @@ class TestImageWidthFollowsIntrinsicSize:
     def test_distinct_sizes_get_distinct_widths(self):
         got = self._widths([(248, 400), (124, 400), (496, 400)])
         assert [g[0] for g in got] == [50.0, 25.0, 100.0]
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
+class TestImagesSharingABasename:
+    """`a/pic.jpg` and `b/pic.jpg` are two pictures, not one.
+
+    `image_resources` was keyed by basename alone, and on a collision it kept
+    the first entry, so both references resolved to `img_0`: the reader saw
+    the first picture twice, and `img_1` was emitted and never referenced.
+    """
+
+    @staticmethod
+    def _token(href):
+        return f"\x00IMG\x01{href}\x01\x00"
+
+    def _content_image_refs(self, text, images):
+        path = tempfile.mktemp(suffix=".kfx")
+        try:
+            NativeKFXGenerator().generate_full_book(
+                "T",
+                "A",
+                [{"title": "Ch", "text": text}],
+                output_path=path,
+                images=images,
+            )
+            frags = load_fragments(path)
+            n_resources = len(by_type(frags, "$164"))
+            refs = [
+                str(ref)
+                for story in by_type(frags, "$259")
+                for ref in walk_for_key(val(story), "$175")
+            ]
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+        return n_resources, refs
+
+    def test_two_images_sharing_a_basename_render_as_two_different_images(self):
+        # Asserted on the content references, not the resource count: both
+        # resources were always emitted, so counting $164 cannot tell a
+        # working lookup from a broken one.
+        n, refs = self._content_image_refs(
+            f"A {self._token('a/pic.jpg')} B {self._token('b/pic.jpg')} C.",
+            {"a/pic.jpg": MINIMAL_JPEG, "b/pic.jpg": MINIMAL_JPEG},
+        )
+        assert n == 2
+        assert refs == ["img_0", "img_1"], (
+            "both references resolved to the same resource: a basename "
+            "collision is printing one image where two were meant"
+        )
+
+    def test_an_href_matching_no_manifest_key_still_falls_back_to_the_basename(self):
+        # Exact-match-only would turn a wrong-image bug into a missing-image
+        # bug, which is worse.
+        n, refs = self._content_image_refs(
+            f"X {self._token('deep/nested/pic.jpg')} Y.",
+            {"images/pic.jpg": MINIMAL_JPEG},
+        )
+        assert refs == ["img_0"]

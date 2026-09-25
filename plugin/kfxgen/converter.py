@@ -346,6 +346,26 @@ def _resolve_doc_path(base_href, href):
     return resolved
 
 
+def _resolve_img_src(base_href, src):
+    """Resolve an `<img src>` to the container-relative href the manifest uses.
+
+    A manifest href is relative to the container (`images/pic.jpg`); an
+    `<img src>` is relative to the document holding it (`../images/pic.jpg`).
+    Matching them by basename bridged that gap but collapsed two images that
+    shared a filename onto one resource, so the reader saw the first picture
+    twice. Resolving puts both sides in one namespace, the way `<a href>` has
+    been since #69.
+
+    Falls back to the raw `src` when resolution yields nothing (no base, an
+    absolute path, an href that escapes the book root). The generator's
+    basename fallback can still find the image from the raw value; an empty
+    string would lose it.
+    """
+    if not src:
+        return src
+    return _resolve_doc_path(base_href, src) or src
+
+
 def _resolve_link_target(href, base_href):
     """Normalize an in-book `<a href>` to a "<file>#<fragment>" anchor key.
 
@@ -432,7 +452,7 @@ def _walk_inline(
         if clocal == "img":
             for aid in _own_anchor_ids(child):
                 parts.append(make_anchor_mark(aid))
-            href = child.get("src", "") or ""
+            href = _resolve_img_src(base_href, child.get("src", "") or "")
             alt = child.get("alt", "") or ""
             size = _img_size_hint(child, style_resolver)
             parts.append((_make_img_token(href, alt, size), frozenset()))
@@ -652,7 +672,7 @@ def extract_blocks_from_html(
         ids.extend(_own_anchor_ids(elem))
         block_ids = _dedupe_keep_order(ids)
         if href is None:
-            href = elem.get("src", "") or ""
+            href = _resolve_img_src(base_href, elem.get("src", "") or "")
             alt = elem.get("alt", "") or ""
             size = _img_size_hint(elem, style_resolver)
         blocks.append(
