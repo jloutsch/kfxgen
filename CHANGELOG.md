@@ -1,5 +1,83 @@
 # Changelog
 
+## 5.8.2 — The same book, twice, byte for byte
+
+One fix, and it is invisible to a reader: converting the same EPUB twice could
+produce two different files. Every page still showed its own picture, so this
+was never a rendering defect — it was a reproducibility one, and it mattered to
+anyone diffing output rather than reading it.
+
+**Fixed (#189):** image resources were numbered in whatever order the manifest
+happened to yield. `img_0`, `img_1`, ... come from walking `oeb_book.manifest`,
+and calibre backs `Manifest` with a `set`, so that order differs between
+processes. Three consecutive conversions of one book:
+
+```
+run 1   p1 p2 p3 p4   -> 0dcc3d6e3de7
+run 2   p1 p2 p3 p4   -> 0dcc3d6e3de7
+run 3   p3 p1 p2 p4   -> 034e4f0447d6
+```
+
+Sorting by href makes the numbering a property of the book. Five consecutive
+runs of the book that used to vary are now byte-identical.
+
+This is #96 one allocation over — that fixed the same drift in `$157` style
+symbols, for the same reason, with the same remedy. The comment at the fix says
+so, so the next person finds the pattern rather than the instance.
+
+**Worth stating plainly:** the byte-identical golden gate could not have caught
+this and still cannot. It builds through the test shim, whose manifest order is
+fixed, so the golden path is the one path that cannot vary. Putting calibre in
+CI would close it properly and costs more than it is worth; instead three
+tier-1 tests shuffle the mapping and assert the property directly — names must
+depend on hrefs and on nothing else.
+
+The 5.7.2 note that output is byte-reproducible was true of the tested path and
+not of the production one. It is true of both now.
+
+### Tests and tooling
+
+- A golden finally exercises a width the rule computed rather than the
+  saturated 100.0 every fixture carried, and the corpus now asserts that one
+  does (#164). `_image_width_pct`'s arithmetic and #96's sorted allocation had
+  no golden coverage at all.
+- Two `test_safe_write` assertions encoded POSIX as though it were universal
+  and failed on Windows, where the symlink defense itself holds (#173). The
+  exact-mode check is skipped there behind one that is not: the owner can read
+  and write what was written.
+- `research/describe_chapters.py` reports what the converter does to a book's
+  chapters — how many carry pictures, and what the metadata rewrites change —
+  without naming the book. `describe_epub.py` counted distinct navigation
+  *targets* while calling them entries, which undercounted a five-entry table
+  of contents as one (#187).
+
+### Waiting on hardware, and not in this release
+
+Two questions are open that only a device answers, and neither is fixed here.
+
+- **#160**, which lays the cover section out as a fixed-size block the way
+  Amazon does, is still an unmerged pull request. An Oasis 10th generation on
+  5.18.2 showed no difference between it and `main` — the covers look the same
+  and navigation is unaffected — against a change that alters the bytes of 90
+  of 90 corpus books. That is the position #120 was closed from. It stays open
+  pending a second device, because one firmware is not enough to end it.
+- **#188**: a sideloaded kfxgen KFX shows no cover on that Oasis's home
+  screen, though the container carries the `$162` MIME type and dimensions
+  #39 added for exactly that. Both builds of the A/B pair behave identically,
+  so it is not #160's doing. A Paperwhite would separate "this device does not
+  do it for sideloaded books" from "something in the file is wrong", and a
+  third build carrying `image/jpeg` instead of the `image/jpg` kfxgen emits is
+  staged to test the one hypothesis that is checkable.
+
+### Documentation
+
+The 5.8.0 entry carried three wrong figures, found by the contributor who
+supplied the measurements it cites. Corrected in place with a note; the tag and
+the published plugin were never affected. `CONTRIBUTING.md` also now says how
+to describe a book without naming it, and admits the gap a contributor found
+while complying: delete-and-repost works for a comment and not for an issue
+body.
+
 ## 5.8.1 — Two more ways a page lost its picture
 
 Both fixes here are 5.8.0's defect turning up in places that release did not
