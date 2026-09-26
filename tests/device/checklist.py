@@ -109,7 +109,7 @@ DEVICES: dict[str, Device] = {
         id="voyage-7",
         model="Voyage",
         generation="7th gen (2014)",
-        last_firmware="5.13.56 (3731990038)",
+        last_firmware="5.13.6 (373199 038)",
     ),
 }
 
