@@ -1,5 +1,79 @@
 # Changelog
 
+## 5.8.4 — Lists keep their numbers
+
+**Fixed (#201, #206): list items lost their numbers and bullets.** kfxgen has
+no list structure: each `<li>` becomes a paragraph, and the number or bullet a
+reader would draw in front of it was not in the text, so it was lost. For a
+bulleted list that is lost formatting. For a numbered list it is lost content:
+"step 2" and "note 14" could not be recovered. In a 1,333-EPUB library, 484
+books have at least one numbered list whose numbers exist only in the markup,
+including endnote lists.
+
+The marker is now written into the item's text ("1. ", "iv. ", "• "), which
+survives any reader. Counting follows `start`, `reversed` and `<li value>`.
+The style comes from calibre's computed CSS, so `<ol type="a">`,
+`list-style-type` and `list-style: none` all behave as a browser shows them.
+Items that already print their own number ("1.", "(1)", an endnote's
+back-link) are not numbered twice.
+
+**Fixed (#209): a typed bullet got a second one.** An item that opens with its
+own bullet glyph ("◦ ", "– ") read "• ◦ …". A bullet marker now yields to a
+typed bullet; a numbered list keeps its numbers.
+
+**Fixed (#203, #204): footnote links became chapters.** When a source has no
+table of contents (Markdown, plain text), calibre generates one and lists a
+footnote's marker and back-link as entries. kfxgen made each a chapter,
+splitting the text and printing "1" and "↩" as headings. Such entries are now
+skipped, recognised by what they point at, never by their label, because
+chapters titled "1", "2", "3" are common. TOC fragments that calibre
+percent-encodes (`fn%3a1`) now find their target instead of a guessed block.
+
+Outside list items and calibre-generated contents entries, nothing changes.
+Across the 90-book corpus, every changed paragraph is a list item gaining its
+marker: 5,455 paragraphs in 22 books. One index nests bullet lists whose outer
+item has no text of its own. Without calibre's CSS, as in the test harness,
+six of its entries read "• •". In a real conversion the book's CSS hides those
+markers and they read exactly as before.
+
+### Tests and tooling
+
+- The list markers are checked through calibre's real Stylizer, not only a
+  fake one (#205, #210): 22 cases converted with `ebook-convert`, local-only
+  like tier 2 since CI has no calibre. Ignoring the computed CSS fails 8 of
+  them, including `<ol type="a">`, because calibre moves the `type` attribute
+  into CSS during conversion.
+- The test harness's EPUB shim resolves NCX links the way calibre does (#207):
+  relative to the NCX, and from the NCX the spine names. A book with its NCX in
+  a subfolder had lost its whole table of contents in shim-based tools; the
+  plugin itself was never affected.
+- The Voyage's recorded firmware is corrected to 5.13.6 (#208).
+
+### Markdown input
+
+#192 asked for Markdown to KFX without an EPUB step. That already works:
+`ebook-convert book.md book.kfx` with kfxgen installed. Enable calibre's
+`fenced_code` Markdown extension for fenced code blocks. Code blocks still
+lose their line breaks (#202, not in this release).
+
+### Device verification
+
+**The device claim for this release rests on the Kindle Voyage 7th generation
+(2014), firmware 5.13.6**, the tier-4 device with the oldest fonts, and on
+the list change (#206):
+
+| Device | Firmware | Check | Result |
+|---|---|---|---|
+| Voyage 7th gen (2014) | 5.13.6 | every marker style: `•`, `α β`, `→`, letters, roman numerals, hidden markers | pass: every glyph drawn, none missing |
+| Voyage 7th gen (2014) | 5.13.6 | a public-domain novel's numbered list, 5.8.3 against 5.8.4 | pass: numbered in 5.8.4, bare in 5.8.3 |
+| Voyage 7th gen (2014) | 5.13.6 | a list-heavy library book (about 1,500 items), 5.8.3 against 5.8.4 | pass: numbers and bullets added, nothing else changed |
+
+The six-item release checklist was not rerun for 5.8.4. It passed for 5.8.3
+two days earlier on a Paperwhite 11th generation (5.19.2), and the changes
+since touch only list-item text and which contents entries become chapters.
+#209 only removes a duplicate glyph and was not device-checked on its own. The
+Oasis was not run.
+
 ## 5.8.3 — Every picture where the book put it
 
 Two fixes to how a picture in the text finds its image, and both are visible:
