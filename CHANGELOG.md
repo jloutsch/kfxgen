@@ -1,5 +1,26 @@
 # Changelog
 
+## 5.8.6 — A typed bullet without a space
+
+**Fixed (#214): a bullet shape typed directly against an item's text got a
+second one.** 5.8.4 stopped adding "• " to a list item that already opens
+with its own bullet, but only when a space followed the glyph, so `•item`
+still read `• •item`. A shape glyph (`• ◦ ▪ ▫ ■ □ ● ○ ‣ ⁃ ·`) now counts as
+the item's bullet with or without the space. Dashes and asterisks still need
+one, so "-5 degrees" and "*emphasis*" stay prose, and numbered lists are
+unaffected. The rule comes from the author of #206.
+
+**No book in the test sets changes.** Neither the 90-book corpus nor a
+40-book library sample converted through calibre types a shape bullet
+directly against its text, so this guards the case rather than fixing an
+observed one.
+
+### Device verification
+
+None for this release. The change can only remove a duplicate glyph, and no
+book in either test set is affected by it. The last device pass was 5.8.5's,
+on a Kindle Voyage 7th generation (2014), firmware 5.13.6.
+
 ## 5.8.5 — Verse keeps its lines
 
 **Fixed (#202, #212): line breaks and preformatted text were lost.** A KFX
