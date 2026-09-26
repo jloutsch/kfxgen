@@ -21,8 +21,11 @@ from .image_optimize import GIF_SIGNATURES, gif_to_png, optimize_images
 from .inline_style import (
     FLAG_BOLD,
     FLAG_ITALIC,
+    FLAG_PRE,
+    FLAG_PRE_LINE,
     FLAG_SUB,
     FLAG_SUPER,
+    HARD_BREAK,
     compute_block_style,
     make_anchor_mark,
     make_link_flag,
@@ -118,6 +121,10 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # and no producer seen writes a page that way.
                     "background-image": st.get("background-image"),
                     "background-repeat": st.get("background-repeat"),
+                    # Computed, because it inherits: <code> inside <pre> is
+                    # preformatted too, and calibre's UA sheet gives <pre>
+                    # `white-space: pre`. (#202)
+                    "white-space": _computed_value(st, "white-space"),
                     # A list item's marker (#201). list-style-type inherits
                     # from the list, and Calibre's UA sheet already maps
                     # `<ol type>` and nested lists onto it, so the computed
@@ -410,6 +417,33 @@ def _resolve_link_target(href, base_href):
     return f"{target_file}#{fragment}" if fragment else target_file
 
 
+_WS_FLAGS = frozenset({FLAG_PRE, FLAG_PRE_LINE})
+_PRESERVING_WHITE_SPACE = {"pre", "pre-wrap", "break-spaces"}
+
+
+def _white_space_flags(elem, style_resolver, inherited):
+    """The white-space mode flag for `elem`, given its parent's (#202).
+
+    The computed `white-space` decides when calibre supplies one; it already
+    inherits, and calibre's UA sheet maps <pre>. Without a stylizer a <pre>
+    is `pre` and anything else keeps what it inherited."""
+    css = style_resolver(elem) if style_resolver is not None else None
+    value = str((css or {}).get("white-space") or "").strip().lower()
+    if not value:
+        if _local_tag(elem.tag) == "pre":
+            return frozenset({FLAG_PRE})
+        return inherited & _WS_FLAGS
+    if value in _PRESERVING_WHITE_SPACE:
+        return frozenset({FLAG_PRE})
+    if value == "pre-line":
+        return frozenset({FLAG_PRE_LINE})
+    return frozenset()
+
+
+def _is_preformatted(elem, style_resolver):
+    return FLAG_PRE in _white_space_flags(elem, style_resolver, frozenset())
+
+
 def _walk_inline(
     elem, flags=frozenset(), style_resolver=None, is_root=True, base_href=None
 ):
@@ -423,7 +457,13 @@ def _walk_inline(
     `vertical-align` would otherwise turn its whole text into one raised
     run. (#52)"""
     local = _local_tag(elem.tag)
-    cur = set(flags)
+    if local == "br":
+        # A forced line break, which the normalizer turns into a newline. It
+        # used to vanish, fusing "line one<br/>line two" into one word. (#202)
+        return [make_anchor_mark(aid) for aid in _own_anchor_ids(elem)] + [
+            (HARD_BREAK, frozenset(flags) - _WS_FLAGS)
+        ]
+    cur = (set(flags) - _WS_FLAGS) | _white_space_flags(elem, style_resolver, flags)
     if local in _ITALIC_TAGS:
         cur.add(FLAG_ITALIC)
     if local in _BOLD_TAGS:
@@ -458,8 +498,12 @@ def _walk_inline(
     # paragraph". Zero-length, so it changes no text and no span. (#79)
     for aid in _own_anchor_ids(elem):
         parts.append(make_anchor_mark(aid))
-    if elem.text:
-        parts.append((elem.text, cur))
+    text = elem.text
+    if text and local == "pre":
+        # HTML ignores a newline straight after <pre>; the XML parser keeps it.
+        text = text[2:] if text.startswith("\r\n") else text.removeprefix("\n")
+    if text:
+        parts.append((text, cur))
     for child in elem:
         clocal = _local_tag(child.tag)
         if clocal == "img":
@@ -947,6 +991,7 @@ def extract_blocks_from_html(
         "h5",
         "h6",
         "blockquote",
+        "pre",
         "li",
         # ol/ul must count as blocks, otherwise an <li> holding a nested list
         # looks childless and the whole sub-list is flattened into the parent's
@@ -1106,6 +1151,7 @@ def extract_blocks_from_html(
                         "text": text,
                         "spans": spans,
                         "block_style": bstyle,
+                        "preformatted": _is_preformatted(elem, style_resolver),
                         "anchor_ids": block_ids,
                         # Ids inherited from an enclosing container point at
                         # this block's start; only ids declared inside it have
@@ -1181,8 +1227,9 @@ def extract_blocks_from_html(
                 }
             )
 
+        ws = _white_space_flags(elem, style_resolver, frozenset())
         if elem.text:
-            inline_parts.append((elem.text, frozenset()))
+            inline_parts.append((elem.text, ws))
         for child in elem:
             if child.tag in block_tags or _local_tag(child.tag) in ("img", "svg"):
                 _flush_inline()
@@ -1191,14 +1238,14 @@ def extract_blocks_from_html(
                 inline_parts.extend(
                     _walk_inline(
                         child,
-                        frozenset(),
+                        ws,
                         style_resolver,
                         is_root=False,
                         base_href=base_href,
                     )
                 )
             if child.tail:
-                inline_parts.append((child.tail, frozenset()))
+                inline_parts.append((child.tail, ws))
         _flush_inline()
 
     # The spine document is itself an SVG when the <body> lookup above fell

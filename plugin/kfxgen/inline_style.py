@@ -14,6 +14,26 @@ FLAG_BOLD = "bold"
 FLAG_SUPER = "super"
 FLAG_SUB = "sub"
 
+#: White-space modes, carried on a segment's flags by the converter and read
+#: by `normalize_runs_with_anchors`, which removes them again: they choose how
+#: the text is normalized and never become a style span. (#202)
+#:
+#: FLAG_PRE: `white-space: pre / pre-wrap / break-spaces`. Newlines are line
+#: breaks and spaces are kept.
+#: FLAG_PRE_LINE: `white-space: pre-line`. Newlines are line breaks; spaces
+#: collapse as usual.
+FLAG_PRE = "ws-pre"
+FLAG_PRE_LINE = "ws-pre-line"
+_WS_FLAGS = frozenset({FLAG_PRE, FLAG_PRE_LINE})
+
+#: A forced line break (`<br>`) in a segment stream. KFX keeps a paragraph's
+#: text preformatted, so a line break is a newline character in the content;
+#: KFX Input turns it back into <br>. (#202)
+HARD_BREAK = "\u2028"
+
+NBSP = "\u00a0"
+_TAB_STOP = 8
+
 #: CSS length unit -> KFX $306 unit symbol.
 _CSS_UNIT_TO_KFX = {
     "em": "$308",
@@ -75,14 +95,58 @@ def normalize_runs_with_anchors(
     chars = []
     flags_per_char = []
     anchors = {}
+    pre_spaces = []  # indexes of spaces kept in preformatted text
     prev_space = True  # strip leading whitespace
+
+    def _drop_last():
+        chars.pop()
+        flags_per_char.pop()
+        # A dropped kept space must lose its mark too. Otherwise the next
+        # character appended at that position is taken for a kept space and
+        # overwritten with a non-breaking one: a code line ending in spaces
+        # ate the first letters of the line after it.
+        while pre_spaces and pre_spaces[-1] >= len(chars):
+            pre_spaces.pop()
+
+    def _break(flags):
+        # Trailing spaces before a line break are invisible; drop them. A
+        # break before any text is dropped too: a paragraph never opens on an
+        # empty line.
+        while chars and chars[-1] == " ":
+            _drop_last()
+        if chars:
+            chars.append("\n")
+            flags_per_char.append(flags)
+
     for text, flags in segments:
         marked = anchor_mark_id(flags)
         if marked is not None:
             anchors.setdefault(marked, len(chars))
             continue
+        pre = FLAG_PRE in flags
+        pre_line = FLAG_PRE_LINE in flags
+        if pre or pre_line:
+            flags = flags - _WS_FLAGS
         for ch in text:
-            if ch.isspace():
+            if ch == HARD_BREAK or ((pre or pre_line) and ch == "\n"):
+                _break(flags)
+                prev_space = True
+            elif pre and ch in " \t":
+                if ch == "\t":
+                    line_start = len(chars) - 1
+                    while line_start >= 0 and chars[line_start] != "\n":
+                        line_start -= 1
+                    width = _TAB_STOP - (len(chars) - line_start - 1) % _TAB_STOP
+                else:
+                    width = 1
+                for _ in range(width):
+                    pre_spaces.append(len(chars))
+                    chars.append(" ")
+                    flags_per_char.append(flags)
+                prev_space = False
+            elif pre and ch == "\r":
+                continue
+            elif ch.isspace():
                 if not prev_space:
                     chars.append(" ")
                     # a collapsed space carries its own segment's flags so
@@ -93,10 +157,23 @@ def normalize_runs_with_anchors(
                 chars.append(ch)
                 flags_per_char.append(flags)
                 prev_space = False
-    # strip trailing space
-    while chars and chars[-1] == " ":
-        chars.pop()
-        flags_per_char.pop()
+    # strip trailing space and line breaks
+    while chars and chars[-1] in (" ", "\n"):
+        _drop_last()
+
+    # A kept space that starts a line or sits beside another one would be
+    # collapsed or stripped by a reader; a non-breaking space is not. A single
+    # space between words stays breakable. This is the rule KFX Input uses in
+    # reverse when it turns KFX text back into HTML. (#202)
+    kept = set(pre_spaces)
+    n_chars = len(chars)
+    for i in pre_spaces:
+        if i >= n_chars:
+            continue
+        at_line_start = i == 0 or chars[i - 1] in ("\n", NBSP)
+        beside_space = (i > 0 and (i - 1) in kept) or (i + 1) in kept
+        if at_line_start or beside_space:
+            chars[i] = NBSP
 
     text_out = "".join(chars)
     spans = []

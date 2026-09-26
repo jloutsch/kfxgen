@@ -2771,13 +2771,21 @@ class NativeKFXGenerator:
         heading_chunk_indices = set()
         toc_link_chunks = {}
 
-        def _emit_text_chunks(para_text):
-            """Yield typed chunks from a paragraph that may contain image tokens."""
+        def _emit_text_chunks(para_text, preformatted=False):
+            """Yield typed chunks from a paragraph that may contain image tokens.
+
+            A preformatted paragraph keeps its leading spaces: they are its
+            indentation, and `strip()` also removes the non-breaking spaces
+            that carry it. (#202)"""
+
+            def _trim(seg):
+                return seg.rstrip() if preformatted else seg.strip()
+
             chunks = []
             last = 0
             for m in IMG_TOKEN_RE.finditer(para_text):
                 if m.start() > last:
-                    seg = para_text[last : m.start()].strip()
+                    seg = _trim(para_text[last : m.start()])
                     if seg:
                         chunks.append({"type": "text", "text": seg})
                 href = m.group(1)
@@ -2801,7 +2809,7 @@ class NativeKFXGenerator:
                 # Unknown href: drop the token silently
                 last = m.end()
             if last < len(para_text):
-                seg = para_text[last:].strip()
+                seg = _trim(para_text[last:])
                 if seg:
                     chunks.append({"type": "text", "text": seg})
             return chunks
@@ -2999,15 +3007,20 @@ class NativeKFXGenerator:
                         ]
 
                     for block in para_iter:
-                        para = block["text"].strip()
-                        if not para:
+                        preformatted = bool(block.get("preformatted"))
+                        para = (
+                            block["text"].rstrip()
+                            if preformatted
+                            else block["text"].strip()
+                        )
+                        if not para.strip():
                             continue
                         para_spans = block.get("spans", [])
                         block_style = block.get("block_style")
                         block_anchor_keys = block.get("anchor_keys") or []
                         block_offsets = block.get("anchor_offsets") or {}
                         block_first_chunk = len(all_chunks)
-                        for chunk in _emit_text_chunks(para):
+                        for chunk in _emit_text_chunks(para, preformatted):
                             if chunk["type"] == "image":
                                 # Figure ids live on image blocks; without this
                                 # a link to a figure resolved to nothing. (#62)
