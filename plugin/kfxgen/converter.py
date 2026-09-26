@@ -744,6 +744,10 @@ _LIST_TYPE_ATTR = {
 #: than a disc where a circle was meant.
 _BULLET_TYPES = frozenset({"disc", "circle", "square"})
 _BULLET = "•"
+#: An item that opens with its own bullet glyph and a space has typed its
+#: marker, as an item that opens with "1." has typed its number. Only a
+#: space-separated glyph counts: "-5 degrees" is a number, not a bullet.
+_TYPED_BULLET_RE = re.compile(r"\s*[•◦▪■●○‣⁃–—\-*·]\s")
 
 _ROMAN = (
     (1000, "m"),
@@ -974,6 +978,10 @@ def extract_blocks_from_html(
         pending_markers.clear()
         marker, n = entries[-1]
         if n is not None and _already_numbered(text, n):
+            marker = ""
+        elif n is None and marker == f"{_BULLET} " and _TYPED_BULLET_RE.match(text):
+            # A typed bullet is the marker; a second one read "• ◦ …". Only a
+            # bullet yields: in a numbered list the number is content.
             marker = ""
         marker = "".join(m for m, _ in entries[:-1]) + marker
         if not marker:
