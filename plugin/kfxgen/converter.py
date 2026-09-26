@@ -788,10 +788,12 @@ _LIST_TYPE_ATTR = {
 #: than a disc where a circle was meant.
 _BULLET_TYPES = frozenset({"disc", "circle", "square"})
 _BULLET = "•"
-#: An item that opens with its own bullet glyph and a space has typed its
-#: marker, as an item that opens with "1." has typed its number. Only a
-#: space-separated glyph counts: "-5 degrees" is a number, not a bullet.
-_TYPED_BULLET_RE = re.compile(r"\s*[•◦▪■●○‣⁃–—\-*·]\s")
+#: An item that opens with its own bullet has typed its marker, as an item
+#: that opens with "1." has typed its number. A shape glyph counts on its own
+#: ("•item" too); a dash or asterisk only with a space after it, so
+#: "-5 degrees" and "*emphasis*" stay prose. (Shapes-without-space from the
+#: #206 author's follow-up, 294a691.)
+_TYPED_BULLET_RE = re.compile(r"\s*(?:[•◦▪▫■□●○‣⁃·]|[-–—*]\s)")
 
 _ROMAN = (
     (1000, "m"),

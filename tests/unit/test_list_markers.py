@@ -318,10 +318,26 @@ def test_a_numbered_item_that_starts_with_a_dash_still_gets_its_number():
     ]
 
 
-@pytest.mark.parametrize(
-    "text", ["-5 degrees", "*emphasis* here", "•no space after", "—em dash lead"]
-)
-def test_a_glyph_not_followed_by_a_space_is_text_not_a_bullet(text):
-    """Adversarial: a leading glyph counts as a typed bullet only when a space
-    follows it. "-5 degrees" is a negative number, not a list marker."""
+@pytest.mark.parametrize("text", ["-5 degrees", "*emphasis* here", "—em dash lead"])
+def test_a_dash_or_asterisk_without_a_space_is_text_not_a_bullet(text):
+    """Adversarial: a dash or asterisk counts as a typed bullet only when a
+    space follows it. "-5 degrees" is a negative number, not a list marker."""
     assert _texts(f"<ul><li>{text}</li></ul>") == [f"• {text}"]
+
+
+@pytest.mark.parametrize(
+    "glyph", ["•", "◦", "▪", "▫", "■", "□", "●", "○", "‣", "⁃", "·"]
+)
+def test_a_bullet_shape_counts_even_with_no_space_after_it(glyph):
+    """A shape glyph at the start of a list item is a typed bullet whether or
+    not a space follows it: "•item" read "• •item". (From the #206 author's
+    follow-up commit 294a691.)"""
+    assert _texts(f"<ul><li>{glyph}item</li><li>plain</li></ul>") == [
+        f"{glyph}item",
+        "• plain",
+    ]
+
+
+def test_a_numbered_item_that_starts_with_a_shape_still_gets_its_number():
+    """Adversarial: only a bullet marker yields; a number is content."""
+    assert _texts("<ol><li>•item</li></ol>") == ["1. •item"]
