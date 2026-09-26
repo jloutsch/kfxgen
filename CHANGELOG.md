@@ -1,5 +1,56 @@
 # Changelog
 
+## 5.8.5 — Verse keeps its lines
+
+**Fixed (#202, #212): line breaks and preformatted text were lost.** A KFX
+paragraph's text is preformatted: a newline inside it is a line break, and
+spaces are kept. kfxgen collapsed every run of whitespace, so:
+
+- **`<br>` became a space.** Verse, addresses and title pages ran together as
+  prose. Where no whitespace sat beside the `<br>`, two words fused into one:
+  across the 90-book corpus that happened 4,101 times in 39 books, including
+  every sonnet number in the complete Shakespeare ("…and thee.2 When forty
+  winters…").
+- **`<pre>` lost its lines and indentation,** so code became one long line.
+
+Now `<br>` is a line break, and text whose `white-space` is `pre`, `pre-wrap`
+or `break-spaces` keeps its newlines and spaces. Leading and repeated spaces
+become non-breaking, so the reader cannot collapse them, and tabs expand to 8
+columns. `pre-line` keeps newlines and collapses spaces. The mode comes from
+calibre's computed CSS, so `<pre>`, `<code>` inside it, and styled paragraphs
+all follow it. `<pre>` is now a block of its own, and a preformatted block keeps
+the indentation of its first line.
+
+**Nothing else changes.** Across the corpus, every book's text is identical to
+5.8.4 once whitespace is removed; 399,375 spaces became the line breaks their
+`<br>` asked for. In a 50-book library sample converted through calibre (30
+books with code blocks), 49 are identical apart from whitespace. The 50th
+loses a heading that 5.8.4 printed twice: it had glued the heading, a code
+block and the following prose into one paragraph.
+
+**Found and fixed before release:** the first version overwrote the start of
+a code line when the line before it ended in spaces (`abc   ⏎def` came out as
+`abc···f`). The corpus has no `<pre>`, so only the library sample showed it.
+It is covered by regression tests and by a device case.
+
+### Device verification
+
+**The device claim rests on the Kindle Voyage 7th generation (2014), firmware
+5.13.6**, the tier-4 device with the oldest fonts:
+
+| Device | Firmware | Check | Result |
+|---|---|---|---|
+| Voyage 7th gen (2014) | 5.13.6 | verse with `<br>` shows line by line; a `<br>` with no space beside it no longer fuses words | pass |
+| Voyage 7th gen (2014) | 5.13.6 | code indentation drawn, including an indented first line; tabs; CSS `pre-wrap` and `pre-line` | pass |
+| Voyage 7th gen (2014) | 5.13.6 | code lines ending in spaces keep every letter of the next line | pass |
+| Voyage 7th gen (2014) | 5.13.6 | an ordinary paragraph still reflows as one; no stretched lines in verse or code | pass |
+| Voyage 7th gen (2014) | 5.13.6 | Shakespeare's sonnets, 5.8.4 against 5.8.5: 14 lines each with the number on its own line, where 5.8.4 ran them together | pass |
+
+The six-item release checklist was not rerun for 5.8.5. The change touches
+only the whitespace inside paragraph text, and those checks cover navigation,
+notes, images, raised text, the contents page and the cover. The Paperwhite
+and the Oasis were not run.
+
 ## 5.8.4 — Lists keep their numbers
 
 **Fixed (#201, #206): list items lost their numbers and bullets.** kfxgen has
