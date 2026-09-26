@@ -200,3 +200,27 @@ def test_the_white_space_mode_never_becomes_a_style_span():
     assert _blocks("<p>x\n y</p>", _ws("pre-line"))[0]["spans"] == []
     [block] = _blocks("<pre><i>it</i> x</pre>")
     assert all(not (f & {FLAG_PRE, FLAG_PRE_LINE}) for _s, _n, f in block["spans"])
+
+
+@pytest.mark.parametrize(
+    "src,expected",
+    [
+        ("abc   \ndef", "abc\ndef"),
+        ("abc \n  import sys", f"abc\n{NB * 2}import sys"),
+        ("x\t\nyz", "x\nyz"),
+        ("end of block   ", "end of block"),
+    ],
+    ids=[
+        "trailing-spaces",
+        "trailing-space-then-indent",
+        "trailing-tab",
+        "at-block-end",
+    ],
+)
+def test_trailing_spaces_before_a_line_break_never_eat_the_next_line(src, expected):
+    """Found by the library A/B: a line of code ending in spaces lost letters
+    on the next line. The trailing spaces were dropped before the break, but
+    their positions were still marked as kept spaces, and the next line's
+    first letters, now at those positions, were turned into non-breaking
+    spaces."""
+    assert _texts(f"<pre>{src}</pre>") == [expected]

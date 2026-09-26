@@ -98,13 +98,22 @@ def normalize_runs_with_anchors(
     pre_spaces = []  # indexes of spaces kept in preformatted text
     prev_space = True  # strip leading whitespace
 
+    def _drop_last():
+        chars.pop()
+        flags_per_char.pop()
+        # A dropped kept space must lose its mark too. Otherwise the next
+        # character appended at that position is taken for a kept space and
+        # overwritten with a non-breaking one: a code line ending in spaces
+        # ate the first letters of the line after it.
+        while pre_spaces and pre_spaces[-1] >= len(chars):
+            pre_spaces.pop()
+
     def _break(flags):
         # Trailing spaces before a line break are invisible; drop them. A
         # break before any text is dropped too: a paragraph never opens on an
         # empty line.
         while chars and chars[-1] == " ":
-            chars.pop()
-            flags_per_char.pop()
+            _drop_last()
         if chars:
             chars.append("\n")
             flags_per_char.append(flags)
@@ -150,8 +159,7 @@ def normalize_runs_with_anchors(
                 prev_space = False
     # strip trailing space and line breaks
     while chars and chars[-1] in (" ", "\n"):
-        chars.pop()
-        flags_per_char.pop()
+        _drop_last()
 
     # A kept space that starts a line or sits beside another one would be
     # collapsed or stripped by a reader; a non-breaking space is not. A single
