@@ -291,3 +291,37 @@ def test_resolver_reads_inherited_list_style_type_and_own_display():
     css = resolver(object())
     assert css["list-style-type"] == "none"
     assert css["display"] == "list-item"
+
+
+# ── Typed bullets (#206 review) ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "glyph", ["•", "◦", "▪", "■", "●", "○", "‣", "⁃", "–", "—", "-", "*", "·"]
+)
+def test_an_item_that_types_its_own_bullet_gets_no_second_one(glyph):
+    """Found in a library book: items typed `◦ ` in a list whose CSS doesn't
+    hide the marker read `• ◦ …`. A typed bullet is the marker, the same way
+    a typed number is."""
+    assert _texts(f"<ul><li>{glyph} typed</li><li>plain</li></ul>") == [
+        f"{glyph} typed",
+        "• plain",
+    ]
+
+
+def test_a_numbered_item_that_starts_with_a_dash_still_gets_its_number():
+    """Adversarial: only a *bullet* marker yields to a typed bullet. In a
+    numbered list the number is content and the dash is part of the text."""
+    assert _texts("<ol><li>– a dash item</li><li>– another</li></ol>") == [
+        "1. – a dash item",
+        "2. – another",
+    ]
+
+
+@pytest.mark.parametrize(
+    "text", ["-5 degrees", "*emphasis* here", "•no space after", "—em dash lead"]
+)
+def test_a_glyph_not_followed_by_a_space_is_text_not_a_bullet(text):
+    """Adversarial: a leading glyph counts as a typed bullet only when a space
+    follows it. "-5 degrees" is a negative number, not a list marker."""
+    assert _texts(f"<ul><li>{text}</li></ul>") == [f"• {text}"]
