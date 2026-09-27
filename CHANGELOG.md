@@ -1,5 +1,46 @@
 # Changelog
 
+## 5.8.7 — The cover fills the screen
+
+**Fixed (#217): the cover was drawn as an ordinary page, inside the margins.**
+A KFX marks its cover with a landmark, and the Kindle draws the page it names
+as a full-screen cover: scaled to the screen and outside the reader's margin
+setting, which is how a book bought from Amazon shows its cover. kfxgen wrote
+that landmark but pointed it at the first chapter, labelled with the chapter's
+title, so the real cover sat inside the margins like any other page. At the
+widest margin setting that is a wide white border. The landmark now names the
+cover page, as Kindle Previewer does.
+
+**How it was found.** #160 had changed the cover section to the shape Amazon
+emits, and no device showed a difference. Its author, kmnkv1, pointed out that
+no pass had tested Amazon's complete shape. Decoding a Kindle Previewer 3.106
+build of the same book showed the cover section and the cover image's style
+were not what differed; the landmark was. On the device, fixing the landmark
+alone was enough, and #160 was closed unmerged.
+
+**Nothing else changes.** Only a book with a cover is affected, and only its
+navigation (`$389`): the cover landmark moves from the first chapter to the
+cover page. A book with no cover is byte-identical to 5.8.6. Of the 13 golden
+files, the two with a cover change in that one fragment and the other 11 are
+identical. The 90-book corpus was not run for this release.
+
+### Device verification
+
+**The device claim rests on the Kindle Paperwhite 11th generation (2021),
+firmware 5.19.2**, the last version recorded for it; the firmware was not
+re-read for this run. One book was built with a 1236 x 1648 cover framed in
+black at the image edge, so any border added by the layout shows as white:
+
+| Device | Firmware | Check | Result |
+|---|---|---|---|
+| Paperwhite 11th gen (2021) | 5.19.2 | cover at the widest margins: 5.8.6 has a white border inside the bezel, 5.8.7 fills the screen | pass |
+| Paperwhite 11th gen (2021) | 5.19.2 | #160's cover section, with and without the cover image's own style: still a white border, so the landmark alone decides it | confirmed |
+| Paperwhite 11th gen (2021) | 5.19.2 | opens on the cover; Go To Cover and Go To Beginning go to the cover; chapter entries land on their chapters | pass |
+| Paperwhite 11th gen (2021) | 5.19.2 | home-screen tile shows the cover, as in 5.8.6 | pass |
+
+The six-item release checklist was not rerun for 5.8.7. The change touches
+only the cover landmark. The Oasis and the Voyage were not run.
+
 ## 5.8.6 — A typed bullet without a space
 
 **Fixed (#214): a bullet shape typed directly against an item's text got a
