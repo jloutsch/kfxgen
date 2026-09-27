@@ -2611,6 +2611,61 @@ class TestLandmarkFollowsTheFirstListedChapter:
 
 @pytest.mark.tier1
 @pytest.mark.unit
+class TestCoverLandmarkMarksTheCover:
+    """The $233 landmark names the cover section when the book has one (#160).
+
+    Kindle Previewer 3.106 points it at the cover section, labelled
+    'cover-nav-unit', and the device draws that page as a full-screen cover,
+    outside the margin setting. kfxgen pointed it at the first chapter, so the
+    cover sat inside the margins. On a Paperwhite 11th gen at the widest
+    margins, fixing only this landmark turned an inset cover into a
+    full-screen one.
+    """
+
+    def _landmarks_and_cover_section(self, cover):
+        from tests._helpers import jpeg_of
+
+        gen = NativeKFXGenerator()
+        path = tempfile.mktemp(suffix=".kfx")
+        chapters = [
+            {"title": "Chapter One", "text": "Body."},
+            {"title": "Chapter Two", "text": "More."},
+        ]
+        try:
+            gen.generate_full_book(
+                "T",
+                "A",
+                chapters,
+                output_path=path,
+                cover_image=jpeg_of(1236, 1648) if cover else None,
+            )
+            frags = load_fragments(Path(path))
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+        (nav,) = by_type(frags, "$389")
+        containers = val(nav)[0][IS("$392")]
+        (landmarks,) = [c for c in containers if str(c.value[IS("$235")]) == "$236"]
+        sections = {str(f.fid): val(f) for f in by_type(frags, "$260")}
+        c0 = sections["c0"][IS("$141")][0]
+        return landmarks.value[IS("$247")], c0
+
+    def test_cover_landmark_points_at_the_cover_section(self):
+        (unit,), c0 = self._landmarks_and_cover_section(cover=True)
+        assert str(unit.value[IS("$238")]) == "$233"
+        assert unit.value[IS("$241")][IS("$244")] == "cover-nav-unit"
+        assert unit.value[IS("$246")][IS("$155")] == c0[IS("$155")], (
+            "the cover landmark must name the cover section's position, or the "
+            "device lays the cover out as an ordinary page inside the margins"
+        )
+
+    def test_a_book_without_a_cover_keeps_the_first_chapter(self):
+        (unit,), _c0 = self._landmarks_and_cover_section(cover=False)
+        assert unit.value[IS("$241")][IS("$244")] == "Chapter One"
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
 class TestImageWidthFollowsIntrinsicSize:
     """#145: every image that was not classified `page` or `small` was given
     `$56: 9.626%` — a width under a tenth of the text column. 55% of corpus

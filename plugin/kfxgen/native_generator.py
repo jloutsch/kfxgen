@@ -831,7 +831,7 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS("$348"), ftype=IS("$538"), value=value)
 
-    def build_fragment_389_toc(self, toc_entries):
+    def build_fragment_389_toc(self, toc_entries, cover_position=None):
         """
         Builds Fragment $389 (Navigation) with TOC and landmarks.
 
@@ -844,6 +844,8 @@ class NativeKFXGenerator:
 
         Args:
             toc_entries: List of dicts with 'title' and 'position' keys
+            cover_position: Position of the synthetic cover section, when the
+                book has one. The $233 landmark then marks the cover (#160).
 
         Returns:
             YJFragment with type $389
@@ -926,7 +928,23 @@ class NativeKFXGenerator:
             ),
         )
 
-        # Landmarks container annotated with $391, type $236
+        # Landmarks container annotated with $391, type $236.
+        #
+        # $233 is the cover landmark. Kindle Previewer 3.106 points it at the
+        # cover section, labelled 'cover-nav-unit', and the device draws the
+        # page it names as a full-screen cover: scaled to the screen, outside
+        # the reader's margin setting. kfxgen pointed it at the first listed
+        # chapter instead, so the real cover was an ordinary page and sat
+        # inside the margins. A Paperwhite 11th gen (5.19.2) A/B at the widest
+        # margins shows the landmark alone decides it: neither the cover
+        # section's layout nor the image's own style changed anything (#160).
+        #
+        # A book with no cover keeps the old target, which is where it opens.
+        if cover_position is not None:
+            landmark_label, landmark_position = "cover-nav-unit", cover_position
+        else:
+            landmark_label = toc_entries[0]["title"] if toc_entries else "Start"
+            landmark_position = first_position
         landmarks_units = [
             IonAnnotation(
                 [IS("$393")],
@@ -934,11 +952,9 @@ class NativeKFXGenerator:
                     IS("$238"),
                     IS("$233"),
                     IS("$241"),
-                    IonStruct(
-                        IS("$244"), toc_entries[0]["title"] if toc_entries else "Start"
-                    ),
+                    IonStruct(IS("$244"), landmark_label),
                     IS("$246"),
-                    IonStruct(IS("$155"), first_position, IS("$143"), 0),
+                    IonStruct(IS("$155"), landmark_position, IS("$143"), 0),
                 ),
             )
         ]
@@ -2435,7 +2451,11 @@ class NativeKFXGenerator:
             for ch, pos in zip(chapters, toc_positions)
             if not ch.get("_omit_from_toc")
         ]
-        self.fragments.append(self.build_fragment_389_toc(nav_entries))
+        # The synthetic cover chapter is always first when present (#32).
+        cover_position = section_positions[0] if chapters[0].get("_is_cover") else None
+        self.fragments.append(
+            self.build_fragment_389_toc(nav_entries, cover_position=cover_position)
+        )
 
         # 7. Build Fragment $258 (Reading Order Metadata)
         # Lists ALL sections in reading order (same as $538)
