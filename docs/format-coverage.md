@@ -38,46 +38,46 @@ Stylizer, so **CSS-dependent behaviour is only exercised for list markers**
 
 ## 2. Gaps not yet accounted for
 
-Ranked by harm. "Loses content" means text or meaning is gone or misleading,
+Each gap has its own issue, shown next to its number. G2 is the existing #219. Ranked by harm. "Loses content" means text or meaning is gone or misleading,
 not just styled differently.
 
 ### Loses or garbles content
 
 | # | Gap | Genres hit | Evidence |
 |---|---|---|---|
-| G1 | **`<dl>` runs together with no spaces.** `<dt>Term</dt><dd>Def</dd>` comes out as one block, `TermDef.Term2Def two.` | Glossaries, dictionaries, cast lists, notes laid out as definition lists, cookbook ingredient/quantity pairs | Probe; the same on the #221 branch |
-| G2 | **Tables have no row or column layout.** Cells are joined into one paragraph. PR #221 gives one paragraph per row; there are still no columns, and `colspan` is ignored | Reference, textbooks, cookbooks (nutrition), sports and finance, notes laid out as a table | #219 (open), #221, #222 |
-| G3 | **Scene breaks vanish.** `<hr/>` is dropped with nothing in its place, and the spacing between paragraphs (`margin-top`/`-bottom`) isn't read, so a break made only by a gap disappears too. A typed `* * *` survives | Fiction, most commercial novels | Probe; resolver fields at `converter.py:88-135` |
-| G4 | **Text drawn inside inline SVG is dropped.** `<svg><image/><text>Once upon</text></svg>` keeps the picture and loses the words | Picture books with text over the art, comics with SVG lettering | Probe |
-| G5 | **`display:none` content is emitted.** `display` is read only to suppress list markers (`converter.py:931`); hidden elements are otherwise walked like visible ones | Textbooks (hidden answers), EPUB 3 content with a hidden fallback, publisher boilerplate | Code reading; unconfirmed, because the shim has no Stylizer |
-| G6 | **Lines made with `display:block` spans run together.** `<span class="line">A</span><span class="line">B</span>` becomes `AB` | Verse from some producers, song lyrics, addresses | Probe (no CSS applied; the extractor ignores `display` on spans either way) |
-| G7 | **`<epub:switch>` renders every branch.** The MathML case and the fallback are both emitted (`MDefault`) | Maths and science EPUB 3 | Probe |
-| G8 | **MathML is flattened to linear text.** `r<sup>2</sup>` in MathML reads `r2`, and fractions, roots and matrices are lost | Textbooks, academic, science | Probe |
-| G9 | **Ruby annotations are run into the base text.** `漢<rt>kan</rt>字<rt>ji</rt>` reads `漢kan字ji` | Japanese (furigana), Chinese (pinyin), language learners | Probe |
-| G10 | **Strike-through and inserted text look unmarked.** `<s>`, `<del>`, `<u>`, `<ins>` get no style (only generated TOC links carry underline), so deleted text reads as current | Legal, errata, annotated editions, some fiction | Probe; `native_generator.py:1394` is the only underline |
+| G1 (#229) | **`<dl>` runs together with no spaces.** `<dt>Term</dt><dd>Def</dd>` comes out as one block, `TermDef.Term2Def two.` | Glossaries, dictionaries, cast lists, notes laid out as definition lists, cookbook ingredient/quantity pairs | Probe; the same on the #221 branch |
+| G2 (#219) | **Tables have no row or column layout.** Cells are joined into one paragraph. PR #221 gives one paragraph per row; there are still no columns, and `colspan` is ignored | Reference, textbooks, cookbooks (nutrition), sports and finance, notes laid out as a table | #219 (open), #221, #222 |
+| G3 (#230) | **Scene breaks vanish.** `<hr/>` is dropped with nothing in its place, and the spacing between paragraphs (`margin-top`/`-bottom`) isn't read, so a break made only by a gap disappears too. A typed `* * *` survives | Fiction, most commercial novels | Probe; resolver fields at `converter.py:88-135` |
+| G4 (#231) | **Text drawn inside inline SVG is dropped.** `<svg><image/><text>Once upon</text></svg>` keeps the picture and loses the words | Picture books with text over the art, comics with SVG lettering | Probe |
+| G5 (#232) | **`display:none` content is emitted.** `display` is read only to suppress list markers (`converter.py:931`); hidden elements are otherwise walked like visible ones | Textbooks (hidden answers), EPUB 3 content with a hidden fallback, publisher boilerplate | Code reading; unconfirmed, because the shim has no Stylizer |
+| G6 (#233) | **Lines made with `display:block` spans run together.** `<span class="line">A</span><span class="line">B</span>` becomes `AB` | Verse from some producers, song lyrics, addresses | Probe (no CSS applied; the extractor ignores `display` on spans either way) |
+| G7 (#234) | **`<epub:switch>` renders every branch.** The MathML case and the fallback are both emitted (`MDefault`) | Maths and science EPUB 3 | Probe |
+| G8 (#235) | **MathML is flattened to linear text.** An exponent in MathML (`<msup>`) reads as `r2`, and fractions, roots and matrices are lost | Textbooks, academic, science | Probe |
+| G9 (#236) | **Ruby annotations are run into the base text.** `漢<rt>kan</rt>字<rt>ji</rt>` reads `漢kan字ji` | Japanese (furigana), Chinese (pinyin), language learners | Probe |
+| G10 (#237) | **Strike-through and inserted text look unmarked.** `<s>`, `<del>`, `<u>`, `<ins>` get no style (only generated TOC links carry underline), so deleted text reads as current | Legal, errata, annotated editions, some fiction | Probe; `native_generator.py:1394` is the only underline |
 
 ### Loses styling, text intact
 
 | # | Gap | Genres hit |
 |---|---|---|
-| G11 | Boxed sidebars and callouts (`border`, `background-color`) come out as ordinary paragraphs | Textbooks, cookbooks, how-to, children's non-fiction |
-| G12 | Small caps, `text-transform`, `letter-spacing`, colour are not carried | Literary fiction openers, headings, children's books (coloured text) |
-| G13 | Drop caps (`::first-letter`, float spans) come out as plain first letters | Literary fiction, classics |
-| G14 | `font-size` is carried only for headings and sub/sup, so large-type or small-print blocks lose their size | Picture books (large type), legal small print, epigraphs |
-| G15 | Inline `<code>` loses its monospace font (`<pre>` is fine) | Technical |
-| G16 | A floated image doesn't wrap text, and a figure's caption shares the image's block (the effect on a device is unverified) | Textbooks, magazines, illustrated non-fiction |
-| G17 | Leading `&nbsp;` indentation is stripped | Verse set with non-breaking spaces, older conversions |
-| G18 | WOFF and WOFF2 fonts are skipped with a warning (`font_table.py:169`) | Modern EPUB 3 exports |
+| G11 (#238) | Boxed sidebars and callouts (`border`, `background-color`) come out as ordinary paragraphs | Textbooks, cookbooks, how-to, children's non-fiction |
+| G12 (#239) | Small caps, `text-transform`, `letter-spacing`, colour are not carried | Literary fiction openers, headings, children's books (coloured text) |
+| G13 (#240) | Drop caps (`::first-letter`, float spans) come out as plain first letters | Literary fiction, classics |
+| G14 (#241) | `font-size` is carried only for headings and sub/sup, so large-type or small-print blocks lose their size | Picture books (large type), legal small print, epigraphs |
+| G15 (#242) | Inline `<code>` loses its monospace font (`<pre>` is fine) | Technical |
+| G16 (#243) | A floated image doesn't wrap text, and a figure's caption shares the image's block (the effect on a device is unverified) | Textbooks, magazines, illustrated non-fiction |
+| G17 (#244) | Leading `&nbsp;` indentation is stripped | Verse set with non-breaking spaces, older conversions |
+| G18 (#245) | WOFF and WOFF2 fonts are skipped with a warning (`font_table.py:169`) | Modern EPUB 3 exports |
 
 ### Genres or features never tried
 
 | # | What | Why it matters |
 |---|---|---|
-| G19 | **Right-to-left books.** Arabic and Hebrew text passes through, but `dir` and `page-progression-direction="rtl"` are not carried, so manga and Arabic books page in the wrong direction | Manga, Arabic, Hebrew, Persian |
-| G20 | **Vertical writing** (`writing-mode: vertical-rl`) | Japanese novels and manga |
-| G21 | **Read-aloud (media overlays, audio).** Audio and video show only their fallback text, which is acceptable, but read-aloud children's books lose their narration without any warning | Children's EPUB 3 |
-| G22 | **Cookbooks, textbooks, magazines** as whole genres: no book of these types has been converted and read | They combine G1, G2, G11, G14, G16 |
-| G23 | **CSS against the real Stylizer.** Apart from list markers (#205), no test runs CSS through Calibre's real Stylizer. #222 covers tables | Every CSS-dependent gap above |
+| G19 (#246) | **Right-to-left books.** Arabic and Hebrew text passes through, but `dir` and `page-progression-direction="rtl"` are not carried, so manga and Arabic books page in the wrong direction | Manga, Arabic, Hebrew, Persian |
+| G20 (#247) | **Vertical writing** (`writing-mode: vertical-rl`) | Japanese novels and manga |
+| G21 (#248) | **Read-aloud (media overlays, audio).** Audio and video show only their fallback text, which is acceptable, but read-aloud children's books lose their narration without any warning | Children's EPUB 3 |
+| G22 (#249) | **Cookbooks, textbooks, magazines** as whole genres: no book of these types has been converted and read | They combine G1, G2, G11, G14, G16 |
+| G23 (#250) | **CSS against the real Stylizer.** Apart from list markers (#205), no test runs CSS through Calibre's real Stylizer. #222 covers tables | Every CSS-dependent gap above |
 
 Known and accepted: `max-width` and `max-height` are ignored, matching
 Previewer (`converter.py:233`); there is no tap-to-zoom (#118) and no on-device
