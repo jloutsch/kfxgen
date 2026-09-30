@@ -970,10 +970,12 @@ def extract_blocks_from_html(
     contents rebuild rather than simply deleted, or the book loses its
     contents page (#132).
 
-    `tables_seen`, when given, collects the block index at which each rendered
-    table starts, so the caller can say how many were written as rows of text
-    rather than laid out (#219). A table nested inside a cell is part of that
-    cell's row and is not counted separately.
+    `tables_seen`, when given, collects the first block of each table that
+    produced one, so the caller can say how many were written as rows of text
+    rather than laid out (#219). It is the block itself, not its index, so the
+    caller can tell whether it survived into the final chapters: a contents
+    page is discarded after extraction, tables and all. A table nested inside
+    a cell is part of that cell's row and is not counted separately.
 
     `base_href` is the spine file this markup came from. It qualifies both
     sides of an in-book link: `anchor_keys` are the block's ids as
@@ -1104,7 +1106,14 @@ def extract_blocks_from_html(
 
     def _walk(elem):
         if _local_tag(elem.tag) != "li" or _is_non_rendered(elem):
+            start = len(blocks)
             _walk_element(elem)
+            if (
+                tables_seen is not None
+                and _local_tag(elem.tag) == "table"
+                and len(blocks) > start
+            ):
+                tables_seen.append(blocks[start])
             return
         parent = elem.getparent()
         if parent not in list_ordinals:
@@ -1145,8 +1154,6 @@ def extract_blocks_from_html(
                 elem, background, "", _img_size_hint(elem, style_resolver)
             )
             return
-        if tables_seen is not None and _local_tag(elem.tag) == "table":
-            tables_seen.append(len(blocks))
 
         is_block = elem.tag in block_tags
         has_block_child = any(child.tag in block_tags for child in elem)
@@ -1788,8 +1795,7 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
     # Build spine item map: normalized href -> text
     spine_map = {}
     spine_items_ordered = []
-    table_count = 0
-    table_files = 0
+    table_blocks = []  # (href, first block) per table, for the #219 warning
 
     log.info(f"Processing {len(oeb_book.spine)} spine items...")
 
@@ -1821,9 +1827,6 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
                 tables_seen=tables_seen,
             )
             text = "\n\n".join(b["text"] for b in blocks)
-            if tables_seen:
-                table_count += len(tables_seen)
-                table_files += 1
         except Exception as e:
             href_for_log = getattr(item, "href", "") or "<unknown>"
             log.warn(f"  Spine item {i + 1} parse failed ({href_for_log}): {e}")
@@ -1847,17 +1850,8 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
                 "note_ids": _note_target_ids(item.data),
             }
         )
+        table_blocks.extend((href, b) for b in tables_seen)
         log.info(f"  Spine item {i + 1}: {len(text)} chars ({norm_href})")
-
-    if table_count:
-        # Said once per book, not per table: a book with tables usually has
-        # dozens, and the limitation is the same for all of them.
-        tables = f"{table_count} table{'s' if table_count != 1 else ''}"
-        files = f"{table_files} file{'s' if table_files != 1 else ''}"
-        log.warn(
-            f"  {tables} in {files} written as one paragraph per row: KFX "
-            "output has no table layout yet, so columns do not line up (#219)"
-        )
 
     if not spine_items_ordered:
         # Raise instead of returning a "No content extracted." sentinel (#72).
@@ -1879,6 +1873,7 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
         if chapters:
             log.info(f"Assembled {len(chapters)} chapters from TOC coordinates")
             _replace_title_page(chapters, metadata, log)
+            _warn_flattened_tables(chapters, table_blocks, log)
             return chapters
         log.info("TOC produced no chapters; using spine items as chapters")
 
@@ -1894,7 +1889,32 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
 
     log.info(f"Using {len(chapters)} spine items as chapters (no TOC mapping)")
     _replace_title_page(chapters, metadata, log)
+    _warn_flattened_tables(chapters, table_blocks, log)
     return chapters
+
+
+def _warn_flattened_tables(chapters, table_blocks, log):
+    """Say once per book how many tables were written as rows of text (#219).
+
+    Counted against the final chapters, not at extraction: a contents page, a
+    title page or a cover-only page is dropped after its blocks were extracted,
+    and many books print their contents listing as a table. Counting those
+    warned about tables the book never contained — in 28 of 63 corpus books,
+    every counted table had been discarded. A table counts when its first
+    block is still in a chapter.
+    """
+    kept = {id(b) for ch in chapters for b in ch.get("blocks") or ()}
+    written = [href for href, block in table_blocks if id(block) in kept]
+    if not written:
+        return
+    # Said once per book, not per table: a book with tables usually has
+    # dozens, and the limitation is the same for all of them.
+    n, f = len(written), len(set(written))
+    log.warn(
+        f"  {n} table{'s' if n != 1 else ''} in {f} file{'s' if f != 1 else ''} "
+        "written as one paragraph per row: KFX output has no table layout yet, "
+        "so columns do not line up (#219)"
+    )
 
 
 # Chapter titles come from a book's TOC, where a label is routinely typeset

@@ -2035,7 +2035,9 @@ def test_a_nested_table_marked_as_contents_is_discarded_like_any_listing():
 
 
 @pytest.mark.unit
-def test_tables_seen_counts_each_rendered_table():
+def test_tables_seen_counts_each_extracted_table():
+    # Extraction time only: a table kept here can still be discarded later
+    # with a contents page, which the warning tests below cover.
     seen = []
     _conv.extract_blocks_from_html(
         _doc(
@@ -2071,6 +2073,51 @@ def test_flattened_tables_are_warned_about_once_per_book():
     assert len(table_warnings) == 1, warnings
     assert "3 tables" in table_warnings[0]
     assert "2 files" in table_warnings[0]
+
+
+def _table_warnings(log):
+    return [str(c) for c in log.warn.call_args_list if "table" in str(c).lower()]
+
+
+def _contents_book(*chapters):
+    """A book whose TOC names each (title, body) chapter, one file each."""
+    oeb = _table_book(*(body for _, body in chapters))
+    oeb.toc = [_TOCNode(title, f"ch{i}.xhtml") for i, (title, _) in enumerate(chapters)]
+    return oeb
+
+
+_METADATA = {"title": "Table Book", "author": "Table Author"}
+
+
+@pytest.mark.unit
+def test_a_table_on_a_discarded_contents_page_is_not_counted():
+    # Many Gutenberg books print their contents listing as a <table>. The
+    # page titled "Contents" is rebuilt from the chapter titles after
+    # extraction and its blocks dropped, so the table is never written. It
+    # was counted anyway: in 28 of the 63 corpus books that warned, every
+    # counted table had been discarded.
+    log = _silent_log()
+    log.warn = MagicMock()
+    oeb = _contents_book(
+        ("Contents", f"<p>Listing.</p>{_ISSUE_219_TABLE}"),
+        ("Chapter One", f"<p>One.</p>{_ISSUE_219_TABLE}"),
+    )
+    extract_chapters_from_oeb(oeb, log, metadata=_METADATA)
+    warnings = _table_warnings(log)
+    assert len(warnings) == 1, warnings
+    assert "1 table in 1 file" in warnings[0]
+
+
+@pytest.mark.unit
+def test_no_table_warning_when_every_table_is_discarded():
+    log = _silent_log()
+    log.warn = MagicMock()
+    oeb = _contents_book(
+        ("Contents", f"<p>Listing.</p>{_ISSUE_219_TABLE}"),
+        ("Chapter One", "<p>One.</p>"),
+    )
+    extract_chapters_from_oeb(oeb, log, metadata=_METADATA)
+    assert _table_warnings(log) == []
 
 
 @pytest.mark.unit
