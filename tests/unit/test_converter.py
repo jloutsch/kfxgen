@@ -2262,8 +2262,17 @@ def test_thead_tbody_tfoot_colspan_rowspan_go_native():
         "<table><tr><td><p>one</p><p>two</p></td></tr></table>",
         "<table><caption>only a caption</caption></table>",
         "<table><td>cell with no row</td></table>",
+        "<table><tr></tr></table>",
     ],
-    ids=["nested", "img", "svg", "two-paragraph-cell", "no-rows", "cell-outside-row"],
+    ids=[
+        "nested",
+        "img",
+        "svg",
+        "two-paragraph-cell",
+        "no-rows",
+        "cell-outside-row",
+        "no-cells",
+    ],
 )
 def test_tables_that_fall_back_to_rows(html):
     assert not _conv._table_is_native(_first_table(html))

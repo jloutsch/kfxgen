@@ -3139,3 +3139,82 @@ def test_header_colspan_rowspan_reach_the_cell_style(tmp_path):
     assert h["$148"] == 2 and str(h["$13"]) == "$361" and str(h["$34"]) == "$320"
     b = styles[str(body["$146"][0]["$146"][0]["$157"])]
     assert b["$149"] == 2 and "$148" not in b
+
+
+def _cell_style_for_block_style(block_style):
+    """Generate a book with embedded foo faces and one native table whose only
+    cell has `block_style`; return that cell's $157 value (#219, #50)."""
+    from kfxgen.font_table import Face, FontTable
+
+    faces = [
+        Face("foo", 400, False, b"\x00\x01\x00\x00r", "foo-400", "resource/font0"),
+        Face("foo", 700, False, b"\x00\x01\x00\x00b", "foo-700", "resource/font1"),
+        Face("foo", 400, True, b"\x00\x01\x00\x00i", "foo-400i", "resource/font2"),
+    ]
+    block = _table_block([["cell"]])
+    block["table"]["rows"][0]["cells"][0]["block_style"] = block_style
+    g = NativeKFXGenerator()
+    g.generate_full_book(
+        title="T",
+        author="A",
+        chapters=[{"title": "C1", "text": "x", "blocks": [block]}],
+        font_table=FontTable(faces),
+    )
+    cells = [
+        f.value
+        for f in g.fragments
+        if str(f.ftype) == "$157" and str(f.fid).endswith("_td")
+    ]
+    assert len(cells) == 1
+    return cells[0]
+
+
+@pytest.mark.unit
+def test_css_bold_cell_style_declares_the_bold_face_weight():
+    v = _cell_style_for_block_style({"font_family": ["foo"], "bold": True})
+    assert v[IS("$13")] == IS("$361")
+    assert v[IS("$11")] == "foo-700"
+
+
+@pytest.mark.unit
+def test_css_italic_cell_style_declares_the_italic_face_style():
+    v = _cell_style_for_block_style({"font_family": ["foo"], "italic": True})
+    assert v[IS("$12")] == IS("$382")
+    assert v[IS("$11")] == "foo-400i"
+    assert IS("$13") not in v
+
+
+def _open_keys(chunks):
+    return [
+        (c.get("node"), c.get("anchor_keys")) for c in chunks if c["type"] == "open"
+    ]
+
+
+@pytest.mark.unit
+def test_empty_row_is_skipped_and_its_keys_move_to_the_next_row():
+    block = _table_block([["a"], [], ["b"]])
+    block["table"]["rows"][1]["anchor_keys"] = ["k_empty"]
+    block["table"]["rows"][2]["anchor_keys"] = ["k_next"]
+    ch = _content([block])
+    assert _open_keys(ch["all_chunks"]) == [
+        ("table", []),
+        ("body", None),
+        ("row", []),
+        ("row", ["k_empty", "k_next"]),
+    ]
+    last_row = [c for c in ch["all_chunks"] if c.get("node") == "row"][-1]
+    assert last_row["anchor_offsets"] == {"k_empty": 0, "k_next": 0}
+
+
+@pytest.mark.unit
+def test_trailing_empty_row_keys_move_to_the_table():
+    block = _table_block([["a"], []])
+    block["table"]["rows"][1]["anchor_keys"] = ["k_last"]
+    ch = _content([block])
+    assert _open_keys(ch["all_chunks"]) == [
+        ("table", ["k_last"]),
+        ("body", None),
+        ("row", []),
+    ]
+    table_open = next(c for c in ch["all_chunks"] if c.get("node") == "table")
+    assert table_open["anchor_offsets"] == {"k_last": 0}

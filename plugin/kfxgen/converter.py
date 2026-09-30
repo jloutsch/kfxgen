@@ -660,9 +660,10 @@ def _table_is_native(table):
 
     Anything else keeps rows as paragraphs: a nested table, an image or other
     object, a cell holding more than one block, a cell longer than the
-    generator's chunk size, a cell outside a row, or no rows at all.
+    generator's chunk size, a cell outside a row, or no rows or cells at all.
     """
     rows = 0
+    cells = 0
     for e in table.iter():
         tag = _local_tag(e.tag)
         if tag is None:
@@ -676,6 +677,7 @@ def _table_is_native(table):
         elif tag in _CELL_TAGS:
             if _local_tag(e.getparent().tag) != "tr":
                 return False
+            cells += 1
             blocks = [
                 d
                 for d in e.iter()
@@ -688,7 +690,7 @@ def _table_is_native(table):
             )
             if cell_length > _MAX_NATIVE_CELL_CHARS:
                 return False
-    return rows > 0
+    return rows > 0 and cells > 0
 
 
 _ROW_GROUPS = {"thead": "head", "tbody": "body", "tfoot": "foot"}

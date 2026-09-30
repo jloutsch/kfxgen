@@ -1460,6 +1460,7 @@ class NativeKFXGenerator:
         entity_name,
         align=None,
         bold=False,
+        italic=False,
         colspan=1,
         rowspan=1,
         font_family=None,
@@ -1479,6 +1480,8 @@ class NativeKFXGenerator:
             value[IS("$34")] = IS(ALIGN_MAP[align])
         if bold:
             value[IS("$13")] = IS("$361")
+        if italic:
+            value[IS("$12")] = IS("$382")
         if colspan > 1:
             value[IS("$148")] = colspan
         if rowspan > 1:
@@ -1839,9 +1842,8 @@ class NativeKFXGenerator:
 
             stack[-1].append(entry)
 
-        # FLAT shape (pre-Phase-3) — used for the TOC-regression test.
-        # Whether to revert nesting permanently or fix the nested shape
-        # depends on the device test outcome.
+        # Flat: one entry per chunk, except a native table (#219), which
+        # nests its row groups, rows and cells under a $278 entry.
         value = IonStruct(
             IS("$176"),
             IS(entity_name),
@@ -3011,7 +3013,9 @@ class NativeKFXGenerator:
         def _emit_table_chunks(block):
             """Marker chunks around a native table's cells (#219). `open`
             becomes a container entry with one position; `close` ends it and
-            takes none. Cells are ordinary text chunks with a `cell` key."""
+            takes none. Cells are ordinary text chunks with a `cell` key.
+            A row with no cells is not emitted; its anchor keys move to the
+            next emitted row, or to the table when none follows."""
             tbl = block["table"]
             inner = {k for r in tbl["rows"] for k in (r.get("anchor_keys") or [])} | {
                 k
@@ -3020,22 +3024,26 @@ class NativeKFXGenerator:
                 for k in (c.get("anchor_keys") or [])
             }
             own = [k for k in (tbl.get("anchor_keys") or []) if k not in inner]
-            all_chunks.append(
-                {
-                    "type": "open",
-                    "node": "table",
-                    "anchor_keys": own,
-                    "anchor_offsets": dict.fromkeys(own, 0),
-                }
-            )
+            table_open = {
+                "type": "open",
+                "node": "table",
+                "anchor_keys": own,
+                "anchor_offsets": dict.fromkeys(own, 0),
+            }
+            all_chunks.append(table_open)
             group = None
+            carried = []  # anchor keys of skipped cell-less rows
             for row in tbl["rows"]:
+                if not row["cells"]:
+                    carried.extend(row.get("anchor_keys") or [])
+                    continue
                 if row["group"] != group:
                     if group is not None:
                         all_chunks.append({"type": "close"})
                     group = row["group"]
                     all_chunks.append({"type": "open", "node": group})
-                keys = row.get("anchor_keys") or []
+                keys = _dedupe_keys(carried + (row.get("anchor_keys") or []))
+                carried = []
                 all_chunks.append(
                     {
                         "type": "open",
@@ -3063,6 +3071,11 @@ class NativeKFXGenerator:
                 all_chunks.append({"type": "close"})
             if group is not None:
                 all_chunks.append({"type": "close"})
+            if carried:
+                table_open["anchor_keys"] = _dedupe_keys(own + carried)
+                table_open["anchor_offsets"] = dict.fromkeys(
+                    table_open["anchor_keys"], 0
+                )
             all_chunks.append({"type": "close"})
 
         for ch_idx, chapter in enumerate(chapters):
@@ -3739,15 +3752,26 @@ class NativeKFXGenerator:
                             attrs["italic"] = True
                     cell = chunk.get("cell")
                     if cell is not None:
+                        # The cell style must declare the weight and style of
+                        # the face it names, or the Kindle falls back from the
+                        # embedded face (#50). A header is bold on its own.
+                        cell_bold = bool(cell["header"]) or blk_bold
+                        cell_italic = blk_italic
+                        cell_fam = self.font_table.match(
+                            bs.get("font_family", []),
+                            bold=cell_bold,
+                            italic=cell_italic,
+                        )
                         cattrs = {
                             "align": bs.get("align")
                             or ("center" if cell["header"] else None),
-                            "bold": bool(cell["header"]),
+                            "bold": cell_bold,
+                            "italic": cell_italic,
                             "colspan": cell["colspan"],
                             "rowspan": cell["rowspan"],
                         }
-                        if fam:
-                            cattrs["font_family"] = fam
+                        if cell_fam:
+                            cattrs["font_family"] = cell_fam
                         entry_styles.append(
                             _allocate_style(
                                 "_td", builder=self.build_cell_style_157, **cattrs
