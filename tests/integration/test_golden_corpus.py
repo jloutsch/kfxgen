@@ -441,6 +441,26 @@ def test_fixture_table_cells_do_not_fuse(tmp_path):
 
 @pytest.mark.tier3
 @pytest.mark.integration
+def test_fixture_table_rows_are_separate_paragraphs(tmp_path):
+    """table_cells: each table row reaches the file as its own paragraph (#219).
+
+    The test above joins every string with a space, so it passes whether the
+    rows are one paragraph or three. This one compares the strings themselves:
+    a row merged back into its neighbour is a different list.
+    """
+    from tests.fixtures.golden.inputs import make_table_cells
+
+    written = tmp_path / "fresh_table.kfx"
+    written.write_bytes(_build_fresh("table_cells", make_table_cells, tmp_path))
+    strings = [
+        s for chunk in _content_fragment_strings(load_fragments(written)) for s in chunk
+    ]
+
+    assert strings[1:4] == ["Year Population", "1801 8,893", "1811 12,289"], strings
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
 def test_fixture_contents_illustration_survives(tmp_path):
     """contents_illustration: a plate on the contents page reaches the file.
 

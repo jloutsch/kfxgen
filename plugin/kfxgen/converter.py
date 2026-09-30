@@ -39,10 +39,10 @@ _BOLD_TAGS = {"strong", "b"}
 _SUPER_TAGS = {"sup"}
 _SUB_TAGS = {"sub"}
 
-# Table cells run together without this. kfxgen has no table structure — a
-# <table> is walked as an ordinary container and its cells land in one
-# paragraph — so the only thing separating two cells was whatever whitespace
-# happened to sit between the tags in the source. Where an author wrote
+# Table cells run together without this. kfxgen has no table layout — each
+# row is one paragraph (#219) and its cells are inline text within it — so the
+# only thing separating two cells was whatever whitespace happened to sit
+# between the tags in the source. Where an author wrote
 # `</td><td>` with nothing between, adjacent values fused: `1801` and `8,893`
 # came out as `18018,893`, a number that is not in the source and cannot be
 # read back apart. 12 of the 77 corpus books contain adjacent cell pairs, and
@@ -573,6 +573,48 @@ def _subtree_anchor_ids(elem):
     return ids
 
 
+_ROW_GROUP_TAGS = {"table", "thead", "tbody", "tfoot"}
+
+
+def _is_empty_anchor(elem):
+    """An <a> that only names a place: an id or name, and no content."""
+    return (
+        isinstance(elem.tag, str)
+        and _local_tag(elem.tag) == "a"
+        and bool(_own_anchor_ids(elem))
+        and not (elem.text or "").strip()
+        and len(elem) == 0
+    )
+
+
+def _anchors_follow_rows(elem):
+    """True when a table's link targets sit after the row each one names.
+
+    Calibre's MOBI→EPUB output lays out notes this way — `<tr>note 1</tr>
+    <a id="…"/><tr>note 2</tr>…`, with no anchor before the first row and one
+    after the last — and an anchor with no text of its own otherwise carries
+    forward to the next block, which is the next note. Decided per row group
+    from both ends, because the opposite layout (an anchor before each row)
+    is carried forward correctly already. (#221, #223)
+
+    An anchor *between* two rows is also required. Anchors that sit only
+    after the last row usually name what comes next — the next section's
+    link target just inside `</table>` — and moving one onto the last row put
+    that row in the next chapter. A table holding a single note therefore
+    keeps carrying forward, as every table did before. (#221 review)
+    """
+    if _local_tag(elem.tag) not in _ROW_GROUP_TAGS:
+        return False
+    kinds = "".join(
+        "A" if _is_empty_anchor(c) else "R"
+        for c in elem
+        if _is_empty_anchor(c) or (isinstance(c.tag, str) and _local_tag(c.tag) == "tr")
+    )
+    # Starts with a row, ends with an anchor, and — once the trailing anchors
+    # are set aside — still has an anchor, which then sits between two rows.
+    return kinds[:1] == "R" and kinds.endswith("A") and "A" in kinds.rstrip("A")
+
+
 #: Semantics that make an element a note reference, a back-link, or one note,
 #: by epub:type, ARIA role, or the classes Python-Markdown's footnotes
 #: extension writes. A note *section* (epub:type footnotes/endnotes, a
@@ -955,7 +997,7 @@ def _prefix_marker(marker, text, spans, mark_offsets):
 
 
 def extract_blocks_from_html(
-    element, style_resolver=None, base_href=None, nav_listing_at=None
+    element, style_resolver=None, base_href=None, nav_listing_at=None, tables_seen=None
 ):
     """Like extract_text_from_html but returns structured blocks:
     [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None,
@@ -969,6 +1011,13 @@ def extract_blocks_from_html(
     one. A listing that *was* the chapter's content has to be handed to the
     contents rebuild rather than simply deleted, or the book loses its
     contents page (#132).
+
+    `tables_seen`, when given, collects the first block of each table that
+    produced one, so the caller can say how many were written as rows of text
+    rather than laid out (#219). It is the block itself, not its index, so the
+    caller can tell whether it survived into the final chapters: a contents
+    page is discarded after extraction, tables and all. A table nested inside
+    a cell is part of that cell's row and is not counted separately.
 
     `base_href` is the spine file this markup came from. It qualifies both
     sides of an in-book link: `anchor_keys` are the block's ids as
@@ -1003,6 +1052,17 @@ def extract_blocks_from_html(
         "section",
         "article",
         "figure",
+        # KFX output has no table layout — Amazon nests a table's rows and
+        # cells inside the storyline, and ours is flat on purpose (nesting it
+        # in 5.3.0 removed the device TOC button). Short of that, each row is
+        # its own paragraph, so values that belong together stay together.
+        # The row is the leaf; the rest are containers around it. (#219)
+        "table",
+        "caption",
+        "thead",
+        "tbody",
+        "tfoot",
+        "tr",
     ):
         block_tags.add(tag)
         block_tags.add(ns + tag)
@@ -1088,7 +1148,14 @@ def extract_blocks_from_html(
 
     def _walk(elem):
         if _local_tag(elem.tag) != "li" or _is_non_rendered(elem):
+            start = len(blocks)
             _walk_element(elem)
+            if (
+                tables_seen is not None
+                and _local_tag(elem.tag) == "table"
+                and len(blocks) > start
+            ):
+                tables_seen.append(blocks[start])
             return
         parent = elem.getparent()
         if parent not in list_ordinals:
@@ -1198,9 +1265,9 @@ def extract_blocks_from_html(
             # The plain version silently discards the anchor marks
             # `_walk_inline` emits, which is why an `id` on a table cell used
             # to vanish while the same id on a `<p>` or `<li>` survived:
-            # `table`/`tr`/`td` are not in `block_tags`, so a whole table is
-            # walked here rather than there, and a link into a cell resolved
-            # to nothing at all (#130).
+            # tables were walked here rather than there, and a link into a cell
+            # resolved to nothing at all (#130). Rows are blocks now (#219),
+            # but a cell with no `<tr>` around it still arrives here.
             text, spans, mark_offsets = normalize_runs_with_anchors(inline_parts)
             inline_parts.clear()
             if not text:
@@ -1232,10 +1299,24 @@ def extract_blocks_from_html(
         ws = _white_space_flags(elem, style_resolver, frozenset())
         if elem.text:
             inline_parts.append((elem.text, ws))
+        # In a table whose link targets follow their rows, an anchor after a
+        # row belongs to that row, at its start — not to the next one. A row
+        # that produced no block leaves `row_block` unset, and the anchor then
+        # carries forward as usual.
+        follow = _anchors_follow_rows(elem)
+        row_block = None
         for child in elem:
-            if child.tag in block_tags or _local_tag(child.tag) in ("img", "svg"):
+            if follow and row_block is not None and _is_empty_anchor(child):
+                for aid in _own_anchor_ids(child):
+                    if aid not in row_block["anchor_ids"]:
+                        row_block["anchor_ids"].append(aid)
+                        row_block["anchor_offsets"][aid] = 0
+            elif child.tag in block_tags or _local_tag(child.tag) in ("img", "svg"):
                 _flush_inline()
+                start = len(blocks)
                 _walk(child)
+                if follow and _local_tag(child.tag) == "tr":
+                    row_block = blocks[start] if len(blocks) > start else None
             elif not _is_non_rendered(child):
                 inline_parts.extend(
                     _walk_inline(
@@ -1770,6 +1851,7 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
     # Build spine item map: normalized href -> text
     spine_map = {}
     spine_items_ordered = []
+    table_blocks = []  # (href, first block) per table, for the #219 warning
 
     log.info(f"Processing {len(oeb_book.spine)} spine items...")
 
@@ -1792,11 +1874,13 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
                 continue
             resolver = _build_style_resolver(oeb_book, item, log)
             nav_listing_at = []
+            tables_seen = []
             blocks = extract_blocks_from_html(
                 item.data,
                 style_resolver=resolver,
                 base_href=getattr(item, "href", "") or "",
                 nav_listing_at=nav_listing_at,
+                tables_seen=tables_seen,
             )
             text = "\n\n".join(b["text"] for b in blocks)
         except Exception as e:
@@ -1822,6 +1906,7 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
                 "note_ids": _note_target_ids(item.data),
             }
         )
+        table_blocks.extend((href, b) for b in tables_seen)
         log.info(f"  Spine item {i + 1}: {len(text)} chars ({norm_href})")
 
     if not spine_items_ordered:
@@ -1844,6 +1929,7 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
         if chapters:
             log.info(f"Assembled {len(chapters)} chapters from TOC coordinates")
             _replace_title_page(chapters, metadata, log)
+            _warn_flattened_tables(chapters, table_blocks, log)
             return chapters
         log.info("TOC produced no chapters; using spine items as chapters")
 
@@ -1859,7 +1945,32 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
 
     log.info(f"Using {len(chapters)} spine items as chapters (no TOC mapping)")
     _replace_title_page(chapters, metadata, log)
+    _warn_flattened_tables(chapters, table_blocks, log)
     return chapters
+
+
+def _warn_flattened_tables(chapters, table_blocks, log):
+    """Say once per book how many tables were written as rows of text (#219).
+
+    Counted against the final chapters, not at extraction: a contents page, a
+    title page or a cover-only page is dropped after its blocks were extracted,
+    and many books print their contents listing as a table. Counting those
+    warned about tables the book never contained — in 28 of 63 corpus books,
+    every counted table had been discarded. A table counts when its first
+    block is still in a chapter.
+    """
+    kept = {id(b) for ch in chapters for b in ch.get("blocks") or ()}
+    written = [href for href, block in table_blocks if id(block) in kept]
+    if not written:
+        return
+    # Said once per book, not per table: a book with tables usually has
+    # dozens, and the limitation is the same for all of them.
+    n, f = len(written), len(set(written))
+    log.warn(
+        f"  {n} table{'s' if n != 1 else ''} in {f} file{'s' if f != 1 else ''} "
+        "written as one paragraph per row: KFX output has no table layout yet, "
+        "so columns do not line up (#219)"
+    )
 
 
 # Chapter titles come from a book's TOC, where a label is routinely typeset

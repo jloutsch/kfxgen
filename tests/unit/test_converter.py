@@ -1859,14 +1859,14 @@ def test_adjacent_header_cells_do_not_fuse():
 @pytest.mark.unit
 def test_cells_separate_across_row_boundary():
     # The last cell of one row and the first of the next are adjacent too:
-    # `</td></tr><tr><td>`. The separator closes the cell, so the row boundary
-    # is covered by the same rule.
+    # `</td></tr><tr><td>`. Each row is its own block (#219), so the boundary
+    # is a paragraph break rather than a space.
     blocks = _conv.extract_blocks_from_html(
         _doc(
             "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>"
         )
     )
-    assert blocks[0]["text"] == "a b c d"
+    assert [b["text"] for b in blocks] == ["a b", "c d"]
 
 
 @pytest.mark.unit
@@ -1940,7 +1940,7 @@ def test_cells_separate_through_thead_and_tbody():
             "<tbody><tr><td>c</td><td>d</td></tr></tbody></table>"
         )
     )
-    assert blocks[0]["text"] == "A B c d"
+    assert [b["text"] for b in blocks] == ["A B", "c d"]
 
 
 @pytest.mark.unit
@@ -1953,6 +1953,280 @@ def test_cell_does_not_fuse_onto_following_text():
         _doc("<table><tr><td>a</td>tail<td>b</td></tr></table>")
     )
     assert blocks[0]["text"] == "a tail b"
+
+
+# --- one block per table row (#219) -----------------------------------------
+#
+# KFX output has no table layout: Amazon writes a table as nested storyline
+# containers, and kfxgen's storyline is flat on purpose (nesting it in 5.3.0
+# removed the device TOC button). Short of that, each row becomes its own
+# paragraph, so a reader can still tell which values belong together. Before
+# this, a whole table was one paragraph: "Year A B 1 100 200 2 110 220".
+
+_ISSUE_219_TABLE = (
+    "<table>"
+    "<tr><th>Year</th><th>A</th><th>B</th></tr>"
+    "<tr><td>1</td><td>100</td><td>200</td></tr>"
+    "<tr><td>2</td><td>110</td><td>220</td></tr>"
+    "</table>"
+)
+
+
+@pytest.mark.unit
+def test_each_table_row_is_its_own_block():
+    blocks = _conv.extract_blocks_from_html(_doc(_ISSUE_219_TABLE))
+    assert [b["text"] for b in blocks] == ["Year A B", "1 100 200", "2 110 220"]
+
+
+@pytest.mark.unit
+def test_table_inside_a_div_is_split_by_row():
+    # A <div> whose only child is a table looked like a leaf block, and the
+    # leaf branch walks its whole subtree inline — so the table has to count
+    # as a block child, not just be handled when it is walked directly.
+    blocks = _conv.extract_blocks_from_html(_doc(f"<div>{_ISSUE_219_TABLE}</div>"))
+    assert [b["text"] for b in blocks] == ["Year A B", "1 100 200", "2 110 220"]
+
+
+@pytest.mark.unit
+def test_text_around_a_table_stays_in_its_own_blocks():
+    blocks = _conv.extract_blocks_from_html(
+        _doc("<p>Before.</p><table><tr><td>a</td><td>b</td></tr></table><p>After.</p>")
+    )
+    assert [b["text"] for b in blocks] == ["Before.", "a b", "After."]
+
+
+@pytest.mark.unit
+def test_table_caption_is_its_own_block():
+    blocks = _conv.extract_blocks_from_html(
+        _doc("<table><caption>Census</caption><tr><td>a</td><td>b</td></tr></table>")
+    )
+    assert [b["text"] for b in blocks] == ["Census", "a b"]
+
+
+@pytest.mark.unit
+def test_anchor_on_a_cell_lands_in_its_row():
+    # Rows are separate blocks now, so a link into a cell resolves to the
+    # row holding it, at the cell's offset within that row (#130).
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            "<table><tr><td>a</td><td>b</td></tr>"
+            '<tr><td>c</td><td id="x">d</td></tr></table>'
+        ),
+        base_href="ch.xhtml",
+    )
+    assert blocks[0]["anchor_ids"] == []
+    assert blocks[1]["anchor_ids"] == ["x"]
+    assert blocks[1]["anchor_offsets"] == {"ch.xhtml#x": 2}
+
+
+@pytest.mark.unit
+def test_a_nested_table_marked_as_contents_is_discarded_like_any_listing():
+    # Inside a container, a table was walked inline, so the #132
+    # contents-listing check never saw it and a `class="toc"` table printed a
+    # duplicate listing. (Directly under <body> it was already checked.) As a
+    # block it goes through the same check as a <div> or <ul>.
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<div><table class="toc"><tr><td>Chapter I</td><td>1</td></tr></table>'
+            "<p>Body.</p></div>"
+        )
+    )
+    assert [b["text"] for b in blocks] == ["Body."]
+
+
+@pytest.mark.unit
+def test_tables_seen_counts_each_extracted_table():
+    # Extraction time only: a table kept here can still be discarded later
+    # with a contents page, which the warning tests below cover.
+    seen = []
+    _conv.extract_blocks_from_html(
+        _doc(
+            f"{_ISSUE_219_TABLE}<p>x</p>{_ISSUE_219_TABLE}"
+            '<table class="toc"><tr><td>Chapter I</td></tr></table>'
+            '<table hidden="hidden"><tr><td>gone</td></tr></table>'
+        ),
+        tables_seen=seen,
+    )
+    assert len(seen) == 2
+
+
+def _table_book(*bodies):
+    spine = []
+    for i, body in enumerate(bodies):
+        item = _SpineItem(f"ch{i}.xhtml", "")
+        item.data = _xhtml_raw(body)
+        spine.append(item)
+    return _OEBBook(spine=spine, toc=[])
+
+
+@pytest.mark.unit
+def test_flattened_tables_are_warned_about_once_per_book():
+    log = _silent_log()
+    log.warn = MagicMock()
+    oeb = _table_book(
+        f"<p>One.</p>{_ISSUE_219_TABLE}{_ISSUE_219_TABLE}",
+        f"<p>Two.</p>{_ISSUE_219_TABLE}",
+    )
+    extract_chapters_from_oeb(oeb, log)
+    warnings = [str(c) for c in log.warn.call_args_list]
+    table_warnings = [w for w in warnings if "table" in w.lower()]
+    assert len(table_warnings) == 1, warnings
+    assert "3 tables" in table_warnings[0]
+    assert "2 files" in table_warnings[0]
+
+
+def _table_warnings(log):
+    return [str(c) for c in log.warn.call_args_list if "table" in str(c).lower()]
+
+
+def _contents_book(*chapters):
+    """A book whose TOC names each (title, body) chapter, one file each."""
+    oeb = _table_book(*(body for _, body in chapters))
+    oeb.toc = [_TOCNode(title, f"ch{i}.xhtml") for i, (title, _) in enumerate(chapters)]
+    return oeb
+
+
+_METADATA = {"title": "Table Book", "author": "Table Author"}
+
+
+@pytest.mark.unit
+def test_a_table_on_a_discarded_contents_page_is_not_counted():
+    # Many Gutenberg books print their contents listing as a <table>. The
+    # page titled "Contents" is rebuilt from the chapter titles after
+    # extraction and its blocks dropped, so the table is never written. It
+    # was counted anyway: in 28 of the 63 corpus books that warned, every
+    # counted table had been discarded.
+    log = _silent_log()
+    log.warn = MagicMock()
+    oeb = _contents_book(
+        ("Contents", f"<p>Listing.</p>{_ISSUE_219_TABLE}"),
+        ("Chapter One", f"<p>One.</p>{_ISSUE_219_TABLE}"),
+    )
+    extract_chapters_from_oeb(oeb, log, metadata=_METADATA)
+    warnings = _table_warnings(log)
+    assert len(warnings) == 1, warnings
+    assert "1 table in 1 file" in warnings[0]
+
+
+@pytest.mark.unit
+def test_no_table_warning_when_every_table_is_discarded():
+    log = _silent_log()
+    log.warn = MagicMock()
+    oeb = _contents_book(
+        ("Contents", f"<p>Listing.</p>{_ISSUE_219_TABLE}"),
+        ("Chapter One", "<p>One.</p>"),
+    )
+    extract_chapters_from_oeb(oeb, log, metadata=_METADATA)
+    assert _table_warnings(log) == []
+
+
+@pytest.mark.unit
+def test_no_table_warning_without_tables():
+    log = _silent_log()
+    log.warn = MagicMock()
+    extract_chapters_from_oeb(_table_book("<p>One.</p>"), log)
+    assert not [c for c in log.warn.call_args_list if "table" in str(c).lower()]
+
+
+# --- note anchors between table rows (#221, #223) ---------------------------
+#
+# Calibre's MOBI→EPUB output lays out notes as a table and puts each note's
+# link target *after* its row: `<tr>note 1</tr><a id="n1"/><tr>note 2</tr>…`,
+# with nothing before the first row and an anchor after the last. An anchor
+# with no text of its own carries forward to the next block, so every note link
+# landed on the next note — 859 of 871 in the book behind #223, and on a
+# Paperwhite reference 2 opened the page starting at note 3. Before #221 the
+# whole table was one paragraph, which hid it.
+
+
+def _row_anchors(blocks):
+    return [(b["text"], b["anchor_ids"]) for b in blocks]
+
+
+@pytest.mark.unit
+def test_an_anchor_after_each_row_belongs_to_that_row():
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<table><tr><td>1.</td><td>First.</td></tr><a id="n1"></a>'
+            '<tr><td>2.</td><td>Second.</td></tr><a id="n2"></a></table>'
+            "<p>After.</p>"
+        ),
+        base_href="notes.xhtml",
+    )
+    assert _row_anchors(blocks) == [
+        ("1. First.", ["n1"]),
+        ("2. Second.", ["n2"]),
+        ("After.", []),
+    ]
+    # At the row's start, so a link lands on the note's own first line.
+    assert blocks[1]["anchor_offsets"] == {"notes.xhtml#n2": 0}
+
+
+@pytest.mark.unit
+def test_an_anchor_after_each_row_belongs_to_that_row_inside_tbody():
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<table><tbody><tr><td>1.</td><td>First.</td></tr><a id="n1"></a>'
+            '<tr><td>2.</td><td>Second.</td></tr><a id="n2"></a></tbody></table>'
+        )
+    )
+    assert _row_anchors(blocks) == [("1. First.", ["n1"]), ("2. Second.", ["n2"])]
+
+
+@pytest.mark.unit
+def test_an_anchor_before_each_row_still_belongs_to_the_next_row():
+    # The other layout (#225's reproduction): each anchor precedes its row.
+    # Carrying forward is already right for it and must stay so.
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<table><a id="n1"></a><tr><td>1.</td><td>First.</td></tr>'
+            '<a id="n2"></a><tr><td>2.</td><td>Second.</td></tr></table>'
+        )
+    )
+    assert _row_anchors(blocks) == [("1. First.", ["n1"]), ("2. Second.", ["n2"])]
+
+
+@pytest.mark.unit
+def test_an_anchor_only_after_the_last_row_still_carries_forward():
+    # A table's only anchor, just inside </table>, usually names what comes
+    # next — here the next chapter. Moving it onto the last row put that row in
+    # the next chapter and printed the chapter heading twice (#221 review).
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            "<p>Some text.</p><table><tr><td>Year</td><td>Pop</td></tr>"
+            '<tr><td>1811</td><td>12,289</td></tr><a id="ch2"></a></table>'
+            "<h2>Chapter 2</h2>"
+        )
+    )
+    assert _row_anchors(blocks) == [
+        ("Some text.", []),
+        ("Year Pop", []),
+        ("1811 12,289", []),
+        ("Chapter 2", ["ch2"]),
+    ]
+
+
+@pytest.mark.unit
+def test_two_anchors_only_after_the_last_row_still_carry_forward():
+    # "At least two anchors" is not the signal: both of these sit past the
+    # table. What marks the notes layout is an anchor *between* two rows.
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            "<table><tr><td>a</td></tr><tr><td>b</td></tr>"
+            '<a id="x"></a><a id="y"></a></table><h2>Next</h2>'
+        )
+    )
+    assert _row_anchors(blocks) == [("a", []), ("b", []), ("Next", ["x", "y"])]
+
+
+@pytest.mark.unit
+def test_a_lone_anchor_between_rows_still_carries_forward():
+    # Nothing before the first row or after the last says which way the
+    # table runs, so the long-standing rule holds.
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<table><tr><td>a</td></tr><a id="x"></a><tr><td>b</td></tr></table>')
+    )
+    assert _row_anchors(blocks) == [("a", []), ("b", ["x"])]
 
 
 # --- illustrations inside a discarded contents section (#117) ---------------
