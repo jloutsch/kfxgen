@@ -2827,8 +2827,15 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
 
     # Extract structured chapters
     log.info("Extracting chapters...")
+    native_tables = not getattr(opts, "kfxgen_disable_native_tables", False)
+    if not native_tables:
+        log.info("  Native tables disabled (kfxgen_disable_native_tables=True)")
     chapters = extract_chapters_from_oeb(
-        oeb_book, log, metadata=metadata, cover_href=cover_href
+        oeb_book,
+        log,
+        metadata=metadata,
+        cover_href=cover_href,
+        native_tables=native_tables,
     )
     total_chars = sum(len(ch["text"]) for ch in chapters)
     log.info(f"  Chapters: {len(chapters)}")

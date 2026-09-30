@@ -66,6 +66,15 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
                 "this to use the font installed/selected on the Kindle instead."
             ),
         ),
+        OptionRecommendation(
+            name="kfxgen_disable_native_tables",
+            recommended_value=False,
+            help=(
+                "Write every table as one paragraph per row instead of as a "
+                "native Kindle table. Native tables are on by default; enable "
+                "this if a book's tables display badly on your Kindle."
+            ),
+        ),
     }
 
     # --- Customization (Preferences -> Plugins -> Customize) ---
@@ -86,7 +95,8 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
 
         The Customize-dialog checkbox and the per-conversion
         `--kfxgen-disable-font-embedding` option are OR'd: either disables
-        font embedding. Default (both off) embeds.
+        font embedding. Default (both off) embeds. The native-table setting
+        works the same way: either disables native tables (#219).
         """
         try:
             from calibre_plugins.kfxgen.prefs import prefs
@@ -94,6 +104,9 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
             if prefs["disable_font_embedding"]:
                 opts.kfxgen_disable_font_embedding = True
                 log.info("  Font embedding disabled by plugin setting")
+            if prefs["disable_native_tables"]:
+                opts.kfxgen_disable_native_tables = True
+                log.info("  Native tables disabled by plugin setting")
         except Exception as e:
             log.warn("Could not read kfxgen plugin settings ({})".format(e))
 

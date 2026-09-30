@@ -1258,6 +1258,83 @@ def test_font_table_for_default_embeds_delegating_to_build(monkeypatch):
     assert _conv._font_table_for(object(), None, _silent_log()) is sentinel
 
 
+# --- native-table toggle: opt-out via kfxgen_disable_native_tables (#219) ---
+
+
+def _table_oeb(directory):
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.golden.inputs import _xhtml_page
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    body = f"<p>Before.</p>{_ISSUE_219_TABLE}<p>After.</p>"
+    epub = (
+        EpubBuilder()
+        .set_metadata(title="Table Book", author="Table Author")
+        .add_chapter("Chapter", _xhtml_page("Chapter", body).encode("utf-8"))
+        .build(directory, "t")
+    )
+    return EpubAsOeb(str(epub))
+
+
+def _convert_table_book(directory, opts):
+    out = directory / "t.kfx"
+    _conv.convert_oeb_to_kfx(
+        _table_oeb(directory), str(out), opts=opts, log=_silent_log()
+    )
+    return out
+
+
+def _storyline_node_types(path):
+    from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
+
+    frags = load_fragments(path)
+    return {
+        str(e.get("$159"))
+        for f in by_type(frags, "$259")
+        for e in iter_entries(val(f).get("$146"))
+    }
+
+
+@pytest.mark.unit
+def test_native_tables_are_on_by_default(tmp_path):
+    kfx = _convert_table_book(tmp_path, opts=None)
+    assert "$278" in _storyline_node_types(kfx)
+
+
+@pytest.mark.unit
+def test_disabling_native_tables_restores_rows(tmp_path):
+    class Opts:
+        kfxgen_disable_native_tables = True
+
+    assert "$278" not in _storyline_node_types(
+        _convert_table_book(tmp_path, opts=Opts())
+    )
+
+
+@pytest.mark.unit
+def test_disabled_output_is_byte_identical_to_a_book_built_without_native_support(
+    tmp_path, monkeypatch
+):
+    class Opts:
+        kfxgen_disable_native_tables = True
+
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    a = _convert_table_book(tmp_path / "a", opts=Opts()).read_bytes()
+
+    # The same conversion with the flag never passed at all: the extractor's
+    # own default, which is what 5.8.8 did.
+    real = _conv.extract_chapters_from_oeb
+
+    def without_native_support(oeb, log, **kwargs):
+        kwargs.pop("native_tables", None)
+        return real(oeb, log, **kwargs)
+
+    monkeypatch.setattr(_conv, "extract_chapters_from_oeb", without_native_support)
+    b = _convert_table_book(tmp_path / "b", opts=None).read_bytes()
+    assert a == b
+
+
 # ── #52: superscript / subscript inline runs ─────────────────────────────────
 
 from kfxgen.inline_style import FLAG_SUB as Sb  # noqa: E402
