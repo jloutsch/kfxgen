@@ -49,6 +49,46 @@ _SUB_TAGS = {"sub"}
 # one fuses 2249 of its 4864 cells. (#128)
 _CELL_TAGS = {"td", "th"}
 
+# Native table layout (#219). A table the first version can't express
+# correctly keeps 5.8.8's one paragraph per row instead.
+
+#: Block-level tags a cell may hold at most one of. Two or more would need a
+#: cell holding several paragraphs, which v1 doesn't write.
+_CELL_BLOCK_TAGS = {
+    "p",
+    "div",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "blockquote",
+    "pre",
+    "ul",
+    "ol",
+    "li",
+    "dl",
+    "section",
+    "article",
+    "figure",
+}
+#: Content v1 can't place inside a cell.
+_NON_TEXT_TAGS = {
+    "img",
+    "svg",
+    "image",
+    "math",
+    "video",
+    "audio",
+    "object",
+    "embed",
+    "iframe",
+}
+#: `NativeKFXGenerator.CHUNK_SIZE`. Longer text is cut into two storyline
+#: entries, which inside a row would be two cells (#226).
+_MAX_NATIVE_CELL_CHARS = 2000
+
 _security_log = logging.getLogger(__name__ + ".security")
 
 
@@ -613,6 +653,39 @@ def _anchors_follow_rows(elem):
     # Starts with a row, ends with an anchor, and — once the trailing anchors
     # are set aside — still has an anchor, which then sits between two rows.
     return kinds[:1] == "R" and kinds.endswith("A") and "A" in kinds.rstrip("A")
+
+
+def _table_is_native(table):
+    """True when `table` can be written as a real KFX table (#219).
+
+    Anything else keeps rows as paragraphs: a nested table, an image or other
+    object, a cell holding more than one block, a cell longer than the
+    generator's chunk size, a cell outside a row, or no rows at all.
+    """
+    rows = 0
+    for e in table.iter():
+        tag = _local_tag(e.tag)
+        if tag is None:
+            continue
+        if tag == "tr":
+            rows += 1
+        elif tag == "table" and e is not table:
+            return False
+        elif tag in _NON_TEXT_TAGS:
+            return False
+        elif tag in _CELL_TAGS:
+            if _local_tag(e.getparent().tag) != "tr":
+                return False
+            blocks = [
+                d
+                for d in e.iter()
+                if d is not e and _local_tag(d.tag) in _CELL_BLOCK_TAGS
+            ]
+            if len(blocks) > 1:
+                return False
+            if len("".join(e.itertext())) > _MAX_NATIVE_CELL_CHARS:
+                return False
+    return rows > 0
 
 
 #: Semantics that make an element a note reference, a back-link, or one note,

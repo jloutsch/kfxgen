@@ -2229,6 +2229,63 @@ def test_a_lone_anchor_between_rows_still_carries_forward():
     assert _row_anchors(blocks) == [("a", []), ("b", ["x"])]
 
 
+# --- native table eligibility (#219) ----------------------------------------
+
+
+def _first_table(html):
+    return next(e for e in _doc(html).iter() if _conv._local_tag(e.tag) == "table")
+
+
+@pytest.mark.unit
+def test_a_plain_table_goes_native():
+    assert _conv._table_is_native(_first_table(_ISSUE_219_TABLE))
+
+
+@pytest.mark.unit
+def test_thead_tbody_tfoot_colspan_rowspan_go_native():
+    assert _conv._table_is_native(
+        _first_table(
+            "<table><thead><tr><th colspan='2'>H</th></tr></thead>"
+            "<tbody><tr><td rowspan='2'>a</td><td>b</td></tr><tr><td>c</td></tr></tbody>"
+            "<tfoot><tr><td>f</td><td>g</td></tr></tfoot></table>"
+        )
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html",
+    [
+        "<table><tr><td><table><tr><td>x</td></tr></table></td></tr></table>",
+        '<table><tr><td><img src="a.png"/></td></tr></table>',
+        "<table><tr><td><svg/></td></tr></table>",
+        "<table><tr><td><p>one</p><p>two</p></td></tr></table>",
+        "<table><caption>only a caption</caption></table>",
+        "<table><td>cell with no row</td></table>",
+    ],
+    ids=["nested", "img", "svg", "two-paragraph-cell", "no-rows", "cell-outside-row"],
+)
+def test_tables_that_fall_back_to_rows(html):
+    assert not _conv._table_is_native(_first_table(html))
+
+
+@pytest.mark.unit
+def test_a_cell_over_the_chunk_size_falls_back():
+    # The generator cuts text at CHUNK_SIZE (2,000); inside a table that cut
+    # would turn one cell into two and shift every later column (#226).
+    long_cell = "x" * (_conv._MAX_NATIVE_CELL_CHARS + 1)
+    assert not _conv._table_is_native(
+        _first_table(f"<table><tr><td>{long_cell}</td></tr></table>")
+    )
+
+
+@pytest.mark.unit
+def test_max_native_cell_chars_matches_the_generator_chunk_size():
+    from kfxgen.native_generator import NativeKFXGenerator
+
+    assert _conv._MAX_NATIVE_CELL_CHARS == NativeKFXGenerator.CHUNK_SIZE
+
+
 # --- illustrations inside a discarded contents section (#117) ---------------
 #
 # The source contents section is replaced because its *text* duplicates the
