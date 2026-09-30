@@ -738,6 +738,7 @@ def _table_block(table, style_resolver=None, base_href=None):
         for child in container:
             tag = _local_tag(child.tag)
             if tag in _ROW_GROUPS:
+                carry.extend(_own_anchor_ids(child))
                 take(child, _ROW_GROUPS[tag])
                 last = None
             elif tag == "caption" and caption is None:
@@ -746,8 +747,10 @@ def _table_block(table, style_resolver=None, base_href=None):
                         child, style_resolver=style_resolver, base_href=base_href
                     )
                 )
-                if text:
-                    ids = list(marks)
+                ids = _dedupe_keep_order(_own_anchor_ids(child) + list(marks))
+                if not text:
+                    carry.extend(ids)
+                else:
                     caption = {
                         "text": text,
                         "spans": spans,
@@ -758,7 +761,14 @@ def _table_block(table, style_resolver=None, base_href=None):
             elif tag == "tr":
                 last = {
                     "group": group,
-                    "anchor_ids": carry + _own_anchor_ids(child),
+                    "anchor_ids": carry
+                    + _own_anchor_ids(child)
+                    + [
+                        a
+                        for c in child
+                        if _is_empty_anchor(c)
+                        for a in _own_anchor_ids(c)
+                    ],
                     "cells": [
                         _table_cell(c, style_resolver, base_href)
                         for c in child
@@ -784,7 +794,11 @@ def _table_block(table, style_resolver=None, base_href=None):
     block = {
         "type": "table",
         "text": "\n".join(
-            " ".join(c["text"] for c in r["cells"] if c["text"]) for r in rows
+            line
+            for line in (
+                " ".join(c["text"] for c in r["cells"] if c["text"]) for r in rows
+            )
+            if line
         ),
         "spans": [],
         "block_style": None,

@@ -2359,6 +2359,8 @@ def test_table_block_row_groups_header_cells_and_spans():
 def test_span_attributes_are_clamped(raw, expected):
     _, table, _ = _block(f"<table><tr><td colspan='{raw}'>a</td></tr></table>")
     assert table["table"]["rows"][0]["cells"][0]["colspan"] == expected
+    _, table, _ = _block(f"<table><tr><td rowspan='{raw}'>a</td></tr></table>")
+    assert table["table"]["rows"][0]["cells"][0]["rowspan"] == expected
 
 
 @pytest.mark.unit
@@ -2416,6 +2418,76 @@ def test_table_own_id_is_kept_separately():
     assert table["table"]["rows"][0]["anchor_ids"] == ["r"]
     assert table["table"]["rows"][0]["cells"][0]["anchor_ids"] == ["c"]
     assert table["anchor_ids"] == ["t", "r", "c"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("group", ["thead", "tbody", "tfoot"])
+def test_row_group_own_id_lands_on_its_first_row(group):
+    _, table, _ = _block(
+        f'<table><{group} id="g"><tr><td>a</td></tr><tr><td>b</td></tr></{group}></table>'
+    )
+    assert [r["anchor_ids"] for r in table["table"]["rows"]] == [["g"], []]
+    assert "g" in table["anchor_ids"]
+
+
+@pytest.mark.unit
+def test_caption_own_id_is_on_the_caption_block():
+    caption, table, _ = _block(
+        '<table><caption id="cp">Census <a id="in"></a>now</caption>'
+        "<tr><td>a</td></tr></table>"
+    )
+    assert caption["anchor_ids"] == ["cp", "in"]
+    assert caption["anchor_offsets"] == {"cp": 0, "in": 7}
+
+
+@pytest.mark.unit
+def test_empty_caption_keeps_its_id_on_the_first_row():
+    caption, table, _ = _block(
+        '<table><caption id="cp"></caption><tr><td>a</td></tr></table>'
+    )
+    assert caption is None
+    assert table["table"]["rows"][0]["anchor_ids"] == ["cp"]
+
+
+@pytest.mark.unit
+def test_anchor_inside_a_row_but_outside_any_cell_stays_with_the_row():
+    _, table, _ = _block('<table><tr><td>1</td><a id="mid"></a><td>2</td></tr></table>')
+    assert table["table"]["rows"][0]["anchor_ids"] == ["mid"]
+    assert _cells(table) == [["1", "2"]]
+    assert "mid" in table["anchor_ids"]
+
+
+@pytest.mark.unit
+def test_anchors_across_two_row_groups_each_stay_with_their_row():
+    _, table, trailing = _block(
+        '<table><tbody><tr><td>1</td></tr><a id="n1"></a><tr><td>2</td></tr><a id="n2"></a></tbody>'
+        '<tbody><tr><td>3</td></tr><a id="n3"></a><tr><td>4</td></tr><a id="n4"></a></tbody></table>'
+    )
+    assert [r["anchor_ids"] for r in table["table"]["rows"]] == [
+        ["n1"],
+        ["n2"],
+        ["n3"],
+        ["n4"],
+    ]
+    assert trailing == []
+
+
+@pytest.mark.unit
+def test_an_anchor_after_the_last_row_group_carries_past_the_table():
+    _, table, trailing = _block(
+        '<table><tbody><tr><td>a</td></tr></tbody><a id="x"></a></table>'
+    )
+    assert table["table"]["rows"][0]["anchor_ids"] == []
+    assert trailing == ["x"]
+
+
+@pytest.mark.unit
+def test_rows_with_only_empty_cells_add_no_blank_line_to_the_text():
+    _, table, _ = _block(
+        "<table><tr><td>a</td></tr><tr><td></td><td></td></tr><tr><td>b</td></tr></table>"
+    )
+    assert table["text"] == "a\nb"
+    assert len(table["table"]["rows"]) == 3
 
 
 # --- illustrations inside a discarded contents section (#117) ---------------
