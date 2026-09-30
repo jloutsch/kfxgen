@@ -45,7 +45,12 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "plugin"))
 sys.path.insert(0, str(REPO))
 
-from tests._kfx_introspect import by_type, load_fragments, val  # noqa: E402
+from tests._kfx_introspect import (  # noqa: E402
+    by_type,
+    iter_entries,
+    load_fragments,
+    val,
+)
 from tests.integration.test_calibre_list_markers import (  # noqa: E402
     CALIBRE_CUSTOMIZE,
     EBOOK_CONVERT,
@@ -173,7 +178,7 @@ def _paragraphs(kfx):
     }
     out = []
     for story in by_type(frags, "$259"):
-        for entry in val(story)["$146"]:
+        for entry in iter_entries(val(story)["$146"]):
             ref = entry.get("$145")
             if ref is not None:
                 text = str(content[str(ref["name"])][int(ref["$403"])])
@@ -328,7 +333,7 @@ def _link_landings(kfx):
     }
     entries, landings = {}, []
     for story in by_type(frags, "$259"):
-        for entry in val(story)["$146"]:
+        for entry in iter_entries(val(story)["$146"]):
             ref = entry.get("$145")
             if ref is not None:
                 text = str(content[str(ref["name"])][int(ref["$403"])])

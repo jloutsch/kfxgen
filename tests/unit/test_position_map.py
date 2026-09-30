@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin")
 from kfxgen.native_generator import NativeKFXGenerator
 from kfxgen.kfxlib_minimal.ion import IS
 
-from tests._kfx_introspect import by_type as _by_type, val as _val
+from tests._kfx_introspect import by_type as _by_type, iter_entries, val as _val
 
 
 def _generate_book(chapters):
@@ -179,7 +179,7 @@ class TestPositionRangeSeparation:
             section_positions = set()
             for f in _by_type(frags, "$259"):
                 v = _val(f)
-                entries = v.get(IS("$146")) or v.get(IS("$181")) or []
+                entries = iter_entries(v.get(IS("$146")) or v.get(IS("$181")) or [])
                 for entry in entries:
                     if hasattr(entry, "get"):
                         pos = entry.get(IS("$155"))
@@ -315,22 +315,14 @@ def _image_entry_positions(frags) -> set[int]:
     image_positions: set[int] = set()
     for f in _by_type(frags, "$259"):
         v = _val(f)
-        outers = v.get(IS("$146")) or v.get(IS("$181")) or []
-        for outer in outers:
-            if not hasattr(outer, "get"):
+        for e in iter_entries(v.get(IS("$146")) or v.get(IS("$181")) or []):
+            if not hasattr(e, "get"):
                 continue
-            entries = [outer]
-            nested = outer.get(IS("$146"))
-            if nested:
-                entries = nested
-            for e in entries:
-                if not hasattr(e, "get"):
-                    continue
-                if e.get(IS("$175")) is None:
-                    continue
-                p = e.get(IS("$155"))
-                if p is not None:
-                    image_positions.add(int(p))
+            if e.get(IS("$175")) is None:
+                continue
+            p = e.get(IS("$155"))
+            if p is not None:
+                image_positions.add(int(p))
     return image_positions
 
 

@@ -43,7 +43,13 @@ def _png_bytes(w, h):
     )
 
 
-from tests._kfx_introspect import by_type, load_fragments, val, walk_for_key  # noqa: E402
+from tests._kfx_introspect import (  # noqa: E402
+    by_type,
+    iter_entries,
+    load_fragments,
+    val,
+    walk_for_key,
+)
 
 
 class TestNativeGeneratorInit:
@@ -426,12 +432,7 @@ class TestStyleSharing:
                     continue
                 v = f.value.value if hasattr(f.value, "value") else f.value
                 outers = v.get(IS("$146")) or v.get(IS("$181")) or []
-                # Phase 3: descend into nested $146 children when present
-                children = []
-                for outer in outers:
-                    if hasattr(outer, "get"):
-                        nested = outer.get(IS("$146"))
-                        children.extend(nested if nested else [outer])
+                children = list(iter_entries(outers))
                 # First child is the chapter heading; remaining are body paragraphs
                 for entry in children[1:]:
                     if hasattr(entry, "get"):
@@ -544,24 +545,17 @@ class TestPerChapterContentFragments:
                 expected = f"content_{ch_idx + 1}"
                 v = f.value.value if hasattr(f.value, "value") else f.value
                 outers = v.get(IS("$146")) or v.get(IS("$181")) or []
-                for outer in outers:
-                    if not hasattr(outer, "get"):
+                for e in iter_entries(outers):
+                    if not hasattr(e, "get"):
                         continue
-                    entries = [outer]
-                    nested = outer.get(IS("$146"))
-                    if nested:
-                        entries = nested
-                    for e in entries:
-                        if not hasattr(e, "get"):
-                            continue
-                        cref = e.get(IS("$145"))
-                        if cref is None:
-                            continue  # image entry — skip
-                        name = cref.get(IS("name")) if hasattr(cref, "get") else None
-                        assert str(name) == expected, (
-                            f"Storyline {sl_fid} child references {name!s}; "
-                            f"expected {expected}"
-                        )
+                    cref = e.get(IS("$145"))
+                    if cref is None:
+                        continue  # image entry — skip
+                    name = cref.get(IS("name")) if hasattr(cref, "get") else None
+                    assert str(name) == expected, (
+                        f"Storyline {sl_fid} child references {name!s}; "
+                        f"expected {expected}"
+                    )
         finally:
             os.unlink(path)
 
@@ -613,18 +607,11 @@ class TestInlineHyperlinks:
                     continue
                 v = f.value.value if hasattr(f.value, "value") else f.value
                 outers = v.get(IS("$146")) or v.get(IS("$181")) or []
-                for outer in outers:
-                    if not hasattr(outer, "get"):
+                for e in iter_entries(outers):
+                    if not hasattr(e, "get"):
                         continue
-                    entries = [outer]
-                    nested = outer.get(IS("$146"))
-                    if nested:
-                        entries = nested
-                    for e in entries:
-                        if not hasattr(e, "get"):
-                            continue
-                        if e.get(IS("$142")) is not None:
-                            link_entries.append(e)
+                    if e.get(IS("$142")) is not None:
+                        link_entries.append(e)
 
             assert link_entries, (
                 "Expected at least one $259 entry with $142 character-span "
@@ -715,7 +702,7 @@ class TestInlineHyperlinks:
                 if str(f.ftype) != "$259":
                     continue
                 v = f.value.value if hasattr(f.value, "value") else f.value
-                for e in v.get(IS("$146")) or []:
+                for e in iter_entries(v.get(IS("$146")) or []):
                     if not hasattr(e, "get"):
                         continue
                     for span in e.get(IS("$142")) or []:
@@ -767,16 +754,9 @@ class TestCoverInReadingFlow:
                     continue
                 v = f.value.value if hasattr(f.value, "value") else f.value
                 outers = v.get(IS("$146")) or v.get(IS("$181")) or []
-                for outer in outers:
-                    if not hasattr(outer, "get"):
-                        continue
-                    entries = [outer]
-                    nested = outer.get(IS("$146"))
-                    if nested:
-                        entries = nested
-                    for e in entries:
-                        if hasattr(e, "get") and str(e.get(IS("$175"))) == "cover_img":
-                            cover_refs += 1
+                for e in iter_entries(outers):
+                    if hasattr(e, "get") and str(e.get(IS("$175"))) == "cover_img":
+                        cover_refs += 1
             assert cover_refs == 1, (
                 f"Expected exactly 1 $259 entry referencing cover_img "
                 f"(cover-in-reading-flow); got {cover_refs}."
@@ -867,23 +847,16 @@ class TestImageOnlyChapterHeadings:
                 continue
             v = f.value.value if hasattr(f.value, "value") else f.value
             outers = v.get(IS("$146")) or v.get(IS("$181")) or []
-            for outer in outers:
-                if not hasattr(outer, "get"):
+            for e in iter_entries(outers):
+                if not hasattr(e, "get"):
                     continue
-                entries = [outer]
-                nested = outer.get(IS("$146"))
-                if nested:
-                    entries = nested
-                for e in entries:
-                    if not hasattr(e, "get"):
-                        continue
-                    p = e.get(IS("$155"))
-                    if p is not None and int(p) == target_pos:
-                        if e.get(IS("$175")) is not None:
-                            return "image"
-                        if e.get(IS("$145")) is not None:
-                            return "text"
-                        return "unknown"
+                p = e.get(IS("$155"))
+                if p is not None and int(p) == target_pos:
+                    if e.get(IS("$175")) is not None:
+                        return "image"
+                    if e.get(IS("$145")) is not None:
+                        return "text"
+                    return "unknown"
         return None
 
     def _toc_pos(self, path, load_kfx_fragments, want_title):
@@ -981,8 +954,7 @@ class TestImageOnlyChapterHeadings:
                     v = f.value.value if hasattr(f.value, "value") else f.value
                     outers = v.get(IS("$146")) or []
                     if outers and hasattr(outers[0], "get"):
-                        nested = outers[0].get(IS("$146"))
-                        children = nested if nested else outers
+                        children = list(iter_entries(outers))
                         # Without omit: heading + 3 body paragraphs = 4 chunks
                         # With omit:    3 body paragraphs = 3 chunks
                         assert len(children) == 3, (
@@ -1764,7 +1736,7 @@ def _link_spans(gen):
         if str(f.ftype) != "$259":
             continue
         v = f.value.value if hasattr(f.value, "value") else f.value
-        for e in v.get(IS("$146")) or []:
+        for e in iter_entries(v.get(IS("$146")) or []):
             for span in e.get(IS("$142")) or []:
                 if IS("$179") in span:
                     found.append((e, span))
@@ -1814,7 +1786,9 @@ def test_body_link_anchor_points_at_the_target_chapter(tmp_path):
         if str(f.ftype) != "$259":
             continue
         v = f.value.value if hasattr(f.value, "value") else f.value
-        per_story[str(f.fid)] = [e[IS("$155")] for e in v.get(IS("$146")) or []]
+        per_story[str(f.fid)] = [
+            e[IS("$155")] for e in iter_entries(v.get(IS("$146")) or [])
+        ]
 
     owning = [name for name, eids in per_story.items() if target_pos in eids]
     assert owning == ["l1"], (
@@ -1964,7 +1938,7 @@ def _collect_link_targets(gen):
         if str(f.ftype) != "$259":
             continue
         v = f.value.value if hasattr(f.value, "value") else f.value
-        for e in v.get(IS("$146")) or []:
+        for e in iter_entries(v.get(IS("$146")) or []):
             for sp in e.get(IS("$142")) or []:
                 if IS("$179") in sp:
                     out.append(str(sp[IS("$179")]))
@@ -1989,7 +1963,7 @@ def _first_texts(gen, storyline):
             continue
         v = f.value.value if hasattr(f.value, "value") else f.value
         out = []
-        for e in v.get(IS("$146")) or []:
+        for e in iter_entries(v.get(IS("$146")) or []):
             if IS("$145") not in e:
                 continue
             ref = e[IS("$145")]

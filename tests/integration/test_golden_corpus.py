@@ -53,7 +53,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin")
 from kfxgen import converter  # noqa: E402
 from kfxgen.kfxlib_minimal.ion import IS  # noqa: E402
 
-from tests._kfx_introspect import by_type, load_fragments, val  # noqa: E402
+from tests._kfx_introspect import (  # noqa: E402
+    by_type,
+    iter_entries,
+    load_fragments,
+    val,
+)
 from tests.fixtures.golden.inputs import GOLDEN_INPUTS  # noqa: E402
 from tests.fixtures.oeb_shim import EpubAsOeb  # noqa: E402
 
@@ -214,14 +219,9 @@ def _count_image_resource_entries(frags) -> int:
     n = 0
     for f in by_type(frags, "$259"):
         v = val(f)
-        outers = v.get(IS("$146")) or v.get(IS("$181")) or []
-        for outer in outers:
-            if not hasattr(outer, "get"):
-                continue
-            nested = outer.get(IS("$146")) or [outer]
-            for e in nested:
-                if hasattr(e, "get") and e.get(IS("$175")) is not None:
-                    n += 1
+        for e in iter_entries(v.get(IS("$146")) or v.get(IS("$181")) or []):
+            if hasattr(e, "get") and e.get(IS("$175")) is not None:
+                n += 1
     return n
 
 
@@ -617,7 +617,7 @@ def test_fixture_publisher_structure_shape(tmp_path):
     book's body text (#58). Text-level damage needs asserting directly.
     """
     from kfxgen.kfxlib_minimal.ion import IS
-    from tests._kfx_introspect import by_type, load_fragments, val
+    from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
     from tests.fixtures.golden.inputs import make_publisher_structure
 
     # Build from the CURRENT code, not the committed golden — otherwise a
@@ -677,7 +677,7 @@ def test_fixture_publisher_structure_shape(tmp_path):
     targets = [
         str(sp[IS("$179")])
         for x in by_type(frags, "$259")
-        for e in (val(x).get(IS("$146")) or [])
+        for e in iter_entries(val(x).get(IS("$146")) or [])
         for sp in (e.get(IS("$142")) or [])
         if IS("$179") in sp
     ]
@@ -790,7 +790,7 @@ def test_fixture_long_chapter_shape(tmp_path):
     }
     refs = 0
     for storyline in by_type(frags, "$259"):
-        for entry in val(storyline).get(IS("$146")) or []:
+        for entry in iter_entries(val(storyline).get(IS("$146")) or []):
             ref = entry.get(IS("$145"))
             if not ref:
                 continue
