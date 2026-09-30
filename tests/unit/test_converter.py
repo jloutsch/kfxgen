@@ -3838,3 +3838,86 @@ def test_a_paragraph_that_contains_a_note_marker_can_still_start_a_chapter(tmp_p
         [("Chapter One", "index.xhtml#one"), ("Chapter Two", "index.xhtml#start2")],
     )
     assert _chapter_titles(epub) == ["Chapter One", "Chapter Two"]
+
+
+# ── native tables in the block stream (#219) ─────────────────────────────────
+
+
+@pytest.mark.unit
+def test_native_tables_become_one_block_between_paragraphs():
+    blocks = _conv.extract_blocks_from_html(
+        _doc(f"<p>Before.</p>{_ISSUE_219_TABLE}<p>After.</p>"), native_tables=True
+    )
+    assert [b.get("type", "text") for b in blocks] == ["text", "table", "text"]
+
+
+@pytest.mark.unit
+def test_native_tables_off_keeps_rows_as_paragraphs():
+    blocks = _conv.extract_blocks_from_html(_doc(_ISSUE_219_TABLE))
+    assert [b["text"] for b in blocks] == ["Year A B", "1 100 200", "2 110 220"]
+
+
+@pytest.mark.unit
+def test_an_ineligible_table_falls_back_to_rows_with_native_tables_on():
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<table><tr><td>a</td><td><img src="i.png"/></td></tr></table>'),
+        native_tables=True,
+    )
+    assert all(b.get("type", "text") != "table" for b in blocks)
+
+
+@pytest.mark.unit
+def test_only_fallback_tables_count_for_the_warning():
+    seen = []
+    _conv.extract_blocks_from_html(
+        _doc(f'{_ISSUE_219_TABLE}<table><tr><td><img src="i.png"/></td></tr></table>'),
+        native_tables=True,
+        tables_seen=seen,
+    )
+    assert len(seen) == 1
+
+
+@pytest.mark.unit
+def test_anchor_keys_reach_rows_and_cells():
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<table id="t"><tr id="r"><td id="c">a</td></tr></table>'),
+        native_tables=True,
+        base_href="ch.xhtml",
+    )
+    tbl = blocks[0]["table"]
+    assert tbl["anchor_keys"][-1] == "ch.xhtml#t"
+    assert tbl["rows"][0]["anchor_keys"] == ["ch.xhtml#r"]
+    assert tbl["rows"][0]["cells"][0]["anchor_keys"] == ["ch.xhtml#c"]
+    assert tbl["rows"][0]["cells"][0]["anchor_offsets"] == {"ch.xhtml#c": 0}
+
+
+@pytest.mark.unit
+def test_toc_entries_into_one_table_do_not_make_empty_chapters():
+    # Review Focus 1: several TOC entries pointing at rows of one native table
+    # all resolve to the table's block, so they must not produce empty chapters.
+    notes = (
+        "<p>Notes intro.</p><table>"
+        + "".join(
+            f'<tr><td>{n}.</td><td>Note {n}.</td></tr><a id="n{n}"></a>'
+            for n in (1, 2, 3)
+        )
+        + "</table>"
+    )
+    oeb = _contents_book(("Chapter One", "<p>One.</p>"), ("Notes", notes))
+    oeb.toc = oeb.toc + [_TOCNode(f"{n}", f"ch1.xhtml#n{n}") for n in (1, 2, 3)]
+    chapters = extract_chapters_from_oeb(oeb, _silent_log(), native_tables=True)
+    assert all(c.get("blocks") or c.get("text", "").strip() for c in chapters)
+    tables = [
+        b for c in chapters for b in c.get("blocks") or () if b.get("type") == "table"
+    ]
+    assert len(tables) == 1
+
+
+@pytest.mark.unit
+def test_native_tables_are_counted_in_the_log():
+    log = _silent_log()
+    log.info = MagicMock()
+    extract_chapters_from_oeb(
+        _table_book(f"<p>One.</p>{_ISSUE_219_TABLE}"), log, native_tables=True
+    )
+    assert any("1 table written as native" in str(c) for c in log.info.call_args_list)

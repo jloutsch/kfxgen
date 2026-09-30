@@ -987,6 +987,21 @@ def _attach_anchor_keys(blocks, base_href):
             if normalized
             else {}
         )
+        tbl = block.get("table")
+        if tbl:
+            for part in (
+                [tbl] + tbl["rows"] + [c for r in tbl["rows"] for c in r["cells"]]
+            ):
+                by_part = part.get("anchor_offsets") or {}
+                ids = part.get("anchor_ids", ())
+                part["anchor_keys"] = (
+                    [f"{normalized}#{a}" for a in ids] if normalized else []
+                )
+                part["anchor_offsets"] = (
+                    {f"{normalized}#{a}": by_part.get(a, 0) for a in ids}
+                    if normalized
+                    else {}
+                )
     # A TOC entry may link to a whole file with no fragment
     # (`<a href="about.xhtml">About the Author</a>`). Give the document's first
     # block a bare-filename key so such links have something to resolve to —
@@ -995,6 +1010,10 @@ def _attach_anchor_keys(blocks, base_href):
     if normalized and blocks:
         blocks[0]["anchor_keys"] = [normalized] + blocks[0]["anchor_keys"]
         blocks[0]["anchor_offsets"][normalized] = 0
+        if blocks[0].get("table"):
+            blocks[0]["table"]["anchor_keys"] = [normalized] + blocks[0]["table"][
+                "anchor_keys"
+            ]
     return blocks
 
 
@@ -1191,7 +1210,12 @@ def _prefix_marker(marker, text, spans, mark_offsets):
 
 
 def extract_blocks_from_html(
-    element, style_resolver=None, base_href=None, nav_listing_at=None, tables_seen=None
+    element,
+    style_resolver=None,
+    base_href=None,
+    nav_listing_at=None,
+    tables_seen=None,
+    native_tables=False,
 ):
     """Like extract_text_from_html but returns structured blocks:
     [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None,
@@ -1212,6 +1236,11 @@ def extract_blocks_from_html(
     caller can tell whether it survived into the final chapters: a contents
     page is discarded after extraction, tables and all. A table nested inside
     a cell is part of that cell's row and is not counted separately.
+
+    `native_tables`: when set, an eligible `<table>` becomes one
+    `{"type": "table"}` block (#219); otherwise each row is its own paragraph.
+    A table that is not eligible still falls back to rows, and only those
+    count toward `tables_seen`.
 
     `base_href` is the spine file this markup came from. It qualifies both
     sides of an in-book link: `anchor_keys` are the block's ids as
@@ -1348,6 +1377,7 @@ def extract_blocks_from_html(
                 tables_seen is not None
                 and _local_tag(elem.tag) == "table"
                 and len(blocks) > start
+                and not any(b.get("type") == "table" for b in blocks[start:])
             ):
                 tables_seen.append(blocks[start])
             return
@@ -1389,6 +1419,31 @@ def extract_blocks_from_html(
             _emit_image_block(
                 elem, background, "", _img_size_hint(elem, style_resolver)
             )
+            return
+
+        if native_tables and _local_tag(elem.tag) == "table" and _table_is_native(elem):
+            caption, table, trailing = _table_block(elem, style_resolver, base_href)
+            if caption is not None:
+                ids = pending_ids[:] + caption["anchor_ids"]
+                pending_ids.clear()
+                caption["anchor_ids"] = _dedupe_keep_order(ids)
+                caption["anchor_offsets"] = {
+                    a: caption["anchor_offsets"].get(a, 0)
+                    for a in caption["anchor_ids"]
+                }
+                blocks.append(caption)
+            if pending_ids:
+                # Anchors carried from before the table name its start.
+                table["table"]["anchor_ids"] = _dedupe_keep_order(
+                    pending_ids + table["table"]["anchor_ids"]
+                )
+                table["anchor_ids"] = _dedupe_keep_order(
+                    pending_ids + table["anchor_ids"]
+                )
+                table["anchor_offsets"] = dict.fromkeys(table["anchor_ids"], 0)
+                pending_ids.clear()
+            blocks.append(table)
+            pending_ids.extend(trailing)
             return
 
         is_block = elem.tag in block_tags
@@ -2026,7 +2081,9 @@ def _assemble_chapters_by_coordinate(
     return chapters
 
 
-def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
+def extract_chapters_from_oeb(
+    oeb_book, log, metadata=None, cover_href=None, native_tables=False
+):
     """
     Extract structured chapters from OEB book by mapping TOC to spine items.
 
@@ -2038,6 +2095,7 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
         log: Calibre logger
         metadata: Optional dict with 'title' and 'author' for title page replacement
         cover_href: Manifest href of the cover image, when one was found
+        native_tables: Write eligible tables as one table block each (#219)
 
     Returns:
         list: List of chapter dicts with 'title' and 'text' keys
@@ -2075,6 +2133,7 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
                 base_href=getattr(item, "href", "") or "",
                 nav_listing_at=nav_listing_at,
                 tables_seen=tables_seen,
+                native_tables=native_tables,
             )
             text = "\n\n".join(b["text"] for b in blocks)
         except Exception as e:
@@ -2155,6 +2214,14 @@ def _warn_flattened_tables(chapters, table_blocks, log):
     """
     kept = {id(b) for ch in chapters for b in ch.get("blocks") or ()}
     written = [href for href, block in table_blocks if id(block) in kept]
+    native = sum(
+        1 for ch in chapters for b in ch.get("blocks") or () if b.get("type") == "table"
+    )
+    if native:
+        log.info(
+            f"  {native} table{'s' if native != 1 else ''} written as native "
+            "Kindle tables (#219)"
+        )
     if not written:
         return
     # Said once per book, not per table: a book with tables usually has
