@@ -39,10 +39,10 @@ _BOLD_TAGS = {"strong", "b"}
 _SUPER_TAGS = {"sup"}
 _SUB_TAGS = {"sub"}
 
-# Table cells run together without this. kfxgen has no table structure — a
-# <table> is walked as an ordinary container and its cells land in one
-# paragraph — so the only thing separating two cells was whatever whitespace
-# happened to sit between the tags in the source. Where an author wrote
+# Table cells run together without this. kfxgen has no table layout — each
+# row is one paragraph (#219) and its cells are inline text within it — so the
+# only thing separating two cells was whatever whitespace happened to sit
+# between the tags in the source. Where an author wrote
 # `</td><td>` with nothing between, adjacent values fused: `1801` and `8,893`
 # came out as `18018,893`, a number that is not in the source and cannot be
 # read back apart. 12 of the 77 corpus books contain adjacent cell pairs, and
@@ -955,7 +955,7 @@ def _prefix_marker(marker, text, spans, mark_offsets):
 
 
 def extract_blocks_from_html(
-    element, style_resolver=None, base_href=None, nav_listing_at=None
+    element, style_resolver=None, base_href=None, nav_listing_at=None, tables_seen=None
 ):
     """Like extract_text_from_html but returns structured blocks:
     [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None,
@@ -969,6 +969,11 @@ def extract_blocks_from_html(
     one. A listing that *was* the chapter's content has to be handed to the
     contents rebuild rather than simply deleted, or the book loses its
     contents page (#132).
+
+    `tables_seen`, when given, collects the block index at which each rendered
+    table starts, so the caller can say how many were written as rows of text
+    rather than laid out (#219). A table nested inside a cell is part of that
+    cell's row and is not counted separately.
 
     `base_href` is the spine file this markup came from. It qualifies both
     sides of an in-book link: `anchor_keys` are the block's ids as
@@ -1003,6 +1008,17 @@ def extract_blocks_from_html(
         "section",
         "article",
         "figure",
+        # KFX output has no table layout — Amazon nests a table's rows and
+        # cells inside the storyline, and ours is flat on purpose (nesting it
+        # in 5.3.0 removed the device TOC button). Short of that, each row is
+        # its own paragraph, so values that belong together stay together.
+        # The row is the leaf; the rest are containers around it. (#219)
+        "table",
+        "caption",
+        "thead",
+        "tbody",
+        "tfoot",
+        "tr",
     ):
         block_tags.add(tag)
         block_tags.add(ns + tag)
@@ -1129,6 +1145,8 @@ def extract_blocks_from_html(
                 elem, background, "", _img_size_hint(elem, style_resolver)
             )
             return
+        if tables_seen is not None and _local_tag(elem.tag) == "table":
+            tables_seen.append(len(blocks))
 
         is_block = elem.tag in block_tags
         has_block_child = any(child.tag in block_tags for child in elem)
@@ -1198,9 +1216,9 @@ def extract_blocks_from_html(
             # The plain version silently discards the anchor marks
             # `_walk_inline` emits, which is why an `id` on a table cell used
             # to vanish while the same id on a `<p>` or `<li>` survived:
-            # `table`/`tr`/`td` are not in `block_tags`, so a whole table is
-            # walked here rather than there, and a link into a cell resolved
-            # to nothing at all (#130).
+            # tables were walked here rather than there, and a link into a cell
+            # resolved to nothing at all (#130). Rows are blocks now (#219),
+            # but a cell with no `<tr>` around it still arrives here.
             text, spans, mark_offsets = normalize_runs_with_anchors(inline_parts)
             inline_parts.clear()
             if not text:
@@ -1770,6 +1788,8 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
     # Build spine item map: normalized href -> text
     spine_map = {}
     spine_items_ordered = []
+    table_count = 0
+    table_files = 0
 
     log.info(f"Processing {len(oeb_book.spine)} spine items...")
 
@@ -1792,13 +1812,18 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
                 continue
             resolver = _build_style_resolver(oeb_book, item, log)
             nav_listing_at = []
+            tables_seen = []
             blocks = extract_blocks_from_html(
                 item.data,
                 style_resolver=resolver,
                 base_href=getattr(item, "href", "") or "",
                 nav_listing_at=nav_listing_at,
+                tables_seen=tables_seen,
             )
             text = "\n\n".join(b["text"] for b in blocks)
+            if tables_seen:
+                table_count += len(tables_seen)
+                table_files += 1
         except Exception as e:
             href_for_log = getattr(item, "href", "") or "<unknown>"
             log.warn(f"  Spine item {i + 1} parse failed ({href_for_log}): {e}")
@@ -1823,6 +1848,16 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
             }
         )
         log.info(f"  Spine item {i + 1}: {len(text)} chars ({norm_href})")
+
+    if table_count:
+        # Said once per book, not per table: a book with tables usually has
+        # dozens, and the limitation is the same for all of them.
+        tables = f"{table_count} table{'s' if table_count != 1 else ''}"
+        files = f"{table_files} file{'s' if table_files != 1 else ''}"
+        log.warn(
+            f"  {tables} in {files} written as one paragraph per row: KFX "
+            "output has no table layout yet, so columns do not line up (#219)"
+        )
 
     if not spine_items_ordered:
         # Raise instead of returning a "No content extracted." sentinel (#72).

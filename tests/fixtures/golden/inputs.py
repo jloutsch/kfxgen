@@ -602,12 +602,13 @@ def make_long_chapter(out_dir: Path) -> Path:
 
 
 def make_table_cells(out_dir: Path) -> Path:
-    """Adjacent table cells, which used to fuse into one value (#128).
+    """Adjacent table cells, which used to fuse into one value (#128), and
+    table rows, which used to share one paragraph (#219).
 
-    kfxgen has no table structure — a `<table>` is walked as an ordinary
-    container and every cell lands in one paragraph. The only thing separating
-    two cells was whatever whitespace the source happened to carry between the
-    tags, so `</td><td>` with nothing between it merged the values: `1801` and
+    kfxgen has no table layout — each row is one paragraph and its cells are
+    inline text within it. The only thing separating two cells was whatever
+    whitespace the source happened to carry between the tags, so `</td><td>`
+    with nothing between it merged the values: `1801` and
     `8,893` came out as `18018,893`, a number absent from the source that
     cannot be read back apart.
 
