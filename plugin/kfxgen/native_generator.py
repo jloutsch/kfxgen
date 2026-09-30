@@ -384,6 +384,19 @@ def _may_fall_back_by_basename(href, resolved_image_refs):
     return href.startswith("/") or ".." in href.replace("\\", "/").split("/")
 
 
+def _table_feature_version(chapters):
+    """`yj_table` version the book needs: 3 when a native table uses rowspan
+    (firmware 5.8.7+, Kindle Previewer 3.106), otherwise 1 (#219)."""
+    for chapter in chapters:
+        for block in chapter.get("blocks") or ():
+            tbl = block.get("table") if isinstance(block, dict) else None
+            if tbl and any(
+                c.get("rowspan", 1) > 1 for r in tbl["rows"] for c in r["cells"]
+            ):
+                return 3
+    return 1
+
+
 class NativeKFXGenerator:
     """
     Generates KFX files from scratch using standard symbols and deterministic
@@ -444,7 +457,7 @@ class NativeKFXGenerator:
 
         return data
 
-    def build_fragment_585(self):
+    def build_fragment_585(self, table_version=1):
         """
         Builds Fragment $585 (Content Features)
         Standard structure for reflowable books.
@@ -479,7 +492,7 @@ class NativeKFXGenerator:
                 IS("$492"),
                 "yj_table",
                 IS("$589"),
-                make_version(1),
+                make_version(table_version),
             ),
             IonStruct(
                 IS("$586"),
@@ -2267,7 +2280,9 @@ class NativeKFXGenerator:
         self.font_table = font_table if font_table is not None else FontTable([])
 
         # 1. Build metadata fragments
-        self.fragments.append(self.build_fragment_585())
+        self.fragments.append(
+            self.build_fragment_585(table_version=_table_feature_version(chapters))
+        )
 
         # Detect cover image format and build resource fragments
         # $164 (metadata) and $417 (raw data) MUST have different fids, linked by $165

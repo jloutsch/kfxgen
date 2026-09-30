@@ -3218,3 +3218,55 @@ def test_trailing_empty_row_keys_move_to_the_table():
     ]
     table_open = next(c for c in ch["all_chunks"] if c.get("node") == "table")
     assert table_open["anchor_offsets"] == {"k_last": 0}
+
+
+def _anchor_targets(frags):
+    return {
+        str(val(f)["$180"]): val(f)["$183"] for f in frags if str(f.ftype) == "$266"
+    }
+
+
+@pytest.mark.unit
+def test_link_into_a_cell_targets_the_cell_and_to_a_row_targets_the_row(tmp_path):
+    from kfxgen.inline_style import make_link_flag
+
+    block = _table_block([["a", "b"], ["c", "d"]])
+    block["table"]["rows"][1]["anchor_keys"] = ["ch.xhtml#r2"]
+    cell = block["table"]["rows"][0]["cells"][1]
+    cell["anchor_keys"], cell["anchor_offsets"] = ["ch.xhtml#cb"], {"ch.xhtml#cb": 0}
+    link = {
+        "text": "see b and row 2",
+        "spans": [
+            (4, 1, frozenset({make_link_flag("ch.xhtml#cb")})),
+            (10, 5, frozenset({make_link_flag("ch.xhtml#r2")})),
+        ],
+    }
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    gen.generate_full_book(
+        "T",
+        "A",
+        [{"title": "C", "text": "x", "blocks": [link, block]}],
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    story = [f for f in frags if str(f.ftype) == "$259"][-1]
+    by_eid = {e["$155"]: e for e in iter_entries(val(story)["$146"])}
+    targets = [by_eid[t["$155"]] for t in _anchor_targets(frags).values()]
+    kinds = sorted(str(e["$159"]) for e in targets)
+    assert kinds == ["$269", "$279"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rowspan, expected", [(1, 1), (2, 3)])
+def test_yj_table_version_follows_rowspan(tmp_path, rowspan, expected):
+    block = _table_block([["a"], ["b"]])
+    block["table"]["rows"][0]["cells"][0]["rowspan"] = rowspan
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    gen.generate_full_book(
+        "T", "A", [{"title": "C", "text": "x", "blocks": [block]}], output_path=str(out)
+    )
+    f585 = next(val(f) for f in load_fragments(out) if str(f.ftype) == "$585")
+    tables = [e for e in f585["$590"] if e["$492"] == "yj_table"]
+    assert tables[0]["$589"]["version"]["$587"] == expected
