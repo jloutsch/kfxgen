@@ -439,24 +439,57 @@ def test_fixture_table_cells_do_not_fuse(tmp_path):
         assert fused not in text, f"adjacent cells fused into {fused!r} (#128)"
 
 
+def _storyline_entries(frags):
+    """Every storyline entry of every `$259`, containers included."""
+    return [e for f in by_type(frags, "$259") for e in iter_entries(val(f)["$146"])]
+
+
+def _entry_texts(frags, entries):
+    """Text of every text entry among `entries`, in order."""
+    content = {
+        str(val(f)["name"]): list(val(f)["$146"]) for f in by_type(frags, "$145")
+    }
+    return [
+        str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+        for e in entries
+        if e.get("$145") is not None
+    ]
+
+
 @pytest.mark.tier3
 @pytest.mark.integration
-def test_fixture_table_rows_are_separate_paragraphs(tmp_path):
-    """table_cells: each table row reaches the file as its own paragraph (#219).
+def test_fixture_table_cells_is_a_native_table(tmp_path):
+    """table_cells: the six cells are text entries inside one `$278` (#219).
 
     The test above joins every string with a space, so it passes whether the
-    rows are one paragraph or three. This one compares the strings themselves:
-    a row merged back into its neighbour is a different list.
+    cells are separate entries or one fused run. This one compares the
+    strings themselves, in storyline order, and checks they sit inside a
+    single table rather than being loose paragraphs.
     """
     from tests.fixtures.golden.inputs import make_table_cells
 
     written = tmp_path / "fresh_table.kfx"
     written.write_bytes(_build_fresh("table_cells", make_table_cells, tmp_path))
-    strings = [
-        s for chunk in _content_fragment_strings(load_fragments(written)) for s in chunk
-    ]
+    frags = load_fragments(written)
 
-    assert strings[1:4] == ["Year Population", "1801 8,893", "1811 12,289"], strings
+    tables = [e for e in _storyline_entries(frags) if str(e["$159"]) == "$278"]
+    assert len(tables) == 1, f"expected one $278, got {len(tables)}"
+    inside = _entry_texts(frags, iter_entries(tables[0]["$146"]))
+    assert inside == ["Year", "Population", "1801", "8,893", "1811", "12,289"], inside
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
+def test_fixture_table_layout_is_a_native_table(tmp_path):
+    """table_layout: thead, colspan, rowspan and a link into a cell (#219)."""
+    from tests.fixtures.golden.inputs import make_table_layout
+
+    written = tmp_path / "t.kfx"
+    written.write_bytes(_build_fresh("table_layout", make_table_layout, tmp_path))
+    frags = load_fragments(written)
+    types = [str(e["$159"]) for e in _storyline_entries(frags)]
+    assert types.count("$278") == 1
+    assert "$151" in types and "$454" in types and types.count("$279") == 3
 
 
 @pytest.mark.tier3

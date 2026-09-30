@@ -42,6 +42,7 @@ Refresh procedure: see CONTRIBUTING.md → The upstream kfxlib copy.
 
 from __future__ import annotations
 
+import decimal
 import os
 import sys
 import zipfile
@@ -308,6 +309,112 @@ def test_upstream_reports_no_unreferenced_fragments(
 
     unreferenced = [m for m in messages if "Unreferenced fragments" in m]
     assert not unreferenced, f"{name}: {unreferenced[0]}"
+
+
+class _LevelCollector:
+    """Like `_MessageCollector`, but keeps the level each message came in on."""
+
+    def __init__(self, sink):
+        self.sink = sink
+
+    def __getattr__(self, level):
+        def _record(msg, *args, **kwargs):
+            self.sink.append((level, str(msg) % args if args else str(msg)))
+
+        return _record
+
+
+#: Warnings upstream logs for every golden fixture, `minimal` included, so they
+#: say nothing about tables. See the module docstring on what is tolerated.
+_BASELINE_WARNINGS = (
+    "yj_hdv-1 without HDV",
+    "yj_jpg_rst_marker_present=1",
+    "reflow-section-size is",
+    "Symbol table contains",
+)
+
+
+@pytest.mark.tier2
+@pytest.mark.integration
+@pytest.mark.filterwarnings("ignore:datetime.datetime.utcnow:DeprecationWarning")
+def test_upstream_decodes_table_layout_to_an_epub_table(upstream_kfxlib, built_kfx):
+    """KFX Input reads kfxgen's native table back as an HTML table (#219).
+
+    The other tier-2 tests only decode the container. This one runs upstream's
+    own KFX-to-EPUB conversion, the path a reader of this file would take, and
+    checks the table survives it: one `<table>`, the header group, the spans,
+    every cell's text, and the link into a cell pointing at that cell.
+
+    Upstream logs a few warnings on every fixture (`_BASELINE_WARNINGS`). Any
+    other warning or error fails: a table node upstream does not recognise is
+    reported that way rather than raised.
+    """
+    import xml.etree.ElementTree as ET
+    from io import BytesIO
+
+    from kfxlib.message_logging import set_logger
+
+    from tests.fixtures.golden.inputs import make_table_layout
+
+    messages: list[tuple[str, str]] = []
+    set_logger(_LevelCollector(messages))
+    # `convert_to_epub` sets the process-wide decimal precision to 6
+    # (kfxlib/yj_to_epub.py). Left in place it truncates Decimals in every
+    # test that runs after this one, so the change is undone on the way out.
+    try:
+        with decimal.localcontext():
+            book = upstream_kfxlib(str(built_kfx("table_layout", make_table_layout)))
+            book.decode_book()
+            epub = book.convert_to_epub()
+    finally:
+        set_logger(None)
+
+    unexpected = [
+        (level, m)
+        for level, m in messages
+        if level in ("warning", "error")
+        and not any(known in m for known in _BASELINE_WARNINGS)
+    ]
+    assert not unexpected, f"upstream logged on table_layout: {unexpected}"
+
+    xhtml = "{http://www.w3.org/1999/xhtml}"
+    tables, links = [], []
+    ids = {}
+    with zipfile.ZipFile(BytesIO(epub)) as zf:
+        for name in zf.namelist():
+            if not name.endswith(".xhtml") or name.endswith("nav.xhtml"):
+                continue
+            root = ET.fromstring(zf.read(name))
+            tables += list(root.iter(f"{xhtml}table"))
+            links += [a.get("href") for a in root.iter(f"{xhtml}a")]
+            ids.update({el.get("id"): el for el in root.iter() if el.get("id")})
+
+    assert len(tables) == 1, f"expected one <table> in the EPUB, got {len(tables)}"
+    table = tables[0]
+    cells = {
+        "".join(c.itertext()): c
+        for c in table.iter()
+        if c.tag in (f"{xhtml}td", f"{xhtml}th")
+    }
+    assert list(cells) == [
+        "Year",
+        "Population",
+        "1801",
+        "8,893",
+        "urban",
+        "3,102",
+        "rural",
+    ]
+    assert cells["Population"].get("colspan") == "2"
+    assert cells["1801"].get("rowspan") == "2"
+    assert len(list(table.iter(f"{xhtml}tr"))) == 3
+    assert len(list(table.iter(f"{xhtml}thead"))) == 1
+
+    cell_links = [h for h in links if h and "#" in h]
+    assert len(cell_links) == 1, links
+    assert ids[cell_links[0].split("#", 1)[1]] is cells["rural"], (
+        "the link to the 1811 cell does not land on that cell"
+    )
 
 
 def _read_vendored(member: str) -> str:
