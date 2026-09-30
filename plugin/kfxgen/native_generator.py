@@ -1099,9 +1099,12 @@ class NativeKFXGenerator:
 
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
-                is_image = isinstance(chunk, dict) and chunk.get("type") == "image"
-                if is_image:
-                    chunk_text_len = 1  # synthetic; images take one offset slot
+                kind = chunk.get("type") if isinstance(chunk, dict) else "text"
+                if kind == "close":
+                    continue  # ends a container; takes no position (#219)
+                if kind in ("image", "open"):
+                    # synthetic; an image or a container takes one offset slot
+                    chunk_text_len = 1
                 elif isinstance(chunk, dict):
                     chunk_text_len = len(chunk["text"])
                 else:
@@ -1130,12 +1133,14 @@ class NativeKFXGenerator:
         section_positions_264 = {}
         for ch_idx, sec_name in enumerate(section_names):
             start, end = chapter_chunk_ranges[ch_idx]
-            pids = [section_positions[ch_idx]] + chunk_positions[start:end]
+            pids = [section_positions[ch_idx]] + [
+                p for p in chunk_positions[start:end] if p is not None
+            ]
             section_positions_264[sec_name] = pids
 
         # All position IDs for $550 (section + every chunk in reading order)
         all_position_ids = list(section_positions)
-        all_position_ids.extend(chunk_positions)
+        all_position_ids.extend(p for p in chunk_positions if p is not None)
 
         return {
             "position_entries_265": entries_265_raw,
@@ -2917,6 +2922,63 @@ class NativeKFXGenerator:
                 pos += self.CHUNK_SIZE
             return assigned
 
+        def _emit_table_chunks(block):
+            """Marker chunks around a native table's cells (#219). `open`
+            becomes a container entry with one position; `close` ends it and
+            takes none. Cells are ordinary text chunks with a `cell` key."""
+            tbl = block["table"]
+            inner = {k for r in tbl["rows"] for k in (r.get("anchor_keys") or [])} | {
+                k
+                for r in tbl["rows"]
+                for c in r["cells"]
+                for k in (c.get("anchor_keys") or [])
+            }
+            own = [k for k in (tbl.get("anchor_keys") or []) if k not in inner]
+            all_chunks.append(
+                {
+                    "type": "open",
+                    "node": "table",
+                    "anchor_keys": own,
+                    "anchor_offsets": dict.fromkeys(own, 0),
+                }
+            )
+            group = None
+            for row in tbl["rows"]:
+                if row["group"] != group:
+                    if group is not None:
+                        all_chunks.append({"type": "close"})
+                    group = row["group"]
+                    all_chunks.append({"type": "open", "node": group})
+                keys = row.get("anchor_keys") or []
+                all_chunks.append(
+                    {
+                        "type": "open",
+                        "node": "row",
+                        "anchor_keys": keys,
+                        "anchor_offsets": dict.fromkeys(keys, 0),
+                    }
+                )
+                for cell in row["cells"]:
+                    all_chunks.append(
+                        {
+                            "type": "text",
+                            "text": cell["text"] or " ",
+                            "spans": (cell.get("spans") or []) if cell["text"] else [],
+                            "block_style": cell.get("block_style"),
+                            "anchor_keys": cell.get("anchor_keys") or [],
+                            "anchor_offsets": cell.get("anchor_offsets") or {},
+                            "cell": {
+                                "header": bool(cell.get("header")),
+                                "colspan": cell.get("colspan", 1),
+                                "rowspan": cell.get("rowspan", 1),
+                            },
+                        }
+                    )
+                all_chunks.append({"type": "close"})
+            if group is not None:
+                all_chunks.append({"type": "close"})
+            all_chunks.append({"type": "close"})
+
         for ch_idx, chapter in enumerate(chapters):
             start_idx = len(all_chunks)
             # Anchor ids belonging to blocks this chapter drops (a heading that
@@ -3027,6 +3089,9 @@ class NativeKFXGenerator:
                         ]
 
                     for block in para_iter:
+                        if block.get("type") == "table":
+                            _emit_table_chunks(block)
+                            continue
                         preformatted = bool(block.get("preformatted"))
                         para = (
                             block["text"].rstrip()
@@ -3138,6 +3203,8 @@ class NativeKFXGenerator:
             outer_positions.append(content_pos_id)
             content_pos_id += self.CONTENT_POS_STEP
             for chunk_idx in range(start, end):
+                if all_chunks[chunk_idx].get("type") == "close":
+                    continue  # ends a container; takes no position (#219)
                 chunk_positions[chunk_idx] = content_pos_id
                 content_pos_id += self.CONTENT_POS_STEP
 
@@ -3157,8 +3224,16 @@ class NativeKFXGenerator:
         # first child of the outer wrapper. Kindle treats outer wrapper
         # positions as non-navigable (no $145 ref, no $790:1), so TOC
         # entries that target wrappers behave as no-ops on tap.
+        def _first_leaf_position(start, end):
+            # A TOC target must be a leaf with content, never a container:
+            # 5.3.0 pointed the TOC at a wrapper and taps did nothing. (#219)
+            for i in range(start, end):
+                if all_chunks[i].get("type") in ("text", "image"):
+                    return chunk_positions[i]
+            return chunk_positions[start]
+
         chapter_start_positions = [
-            chunk_positions[chapter_chunk_ranges[i][0]] for i in range(len(chapters))
+            _first_leaf_position(*chapter_chunk_ranges[i]) for i in range(len(chapters))
         ]
 
         # Build $266 anchor fragments for TOC link entries
@@ -3497,7 +3572,15 @@ class NativeKFXGenerator:
             entry_kinds = []
             entry_image_specs = []
             entry_emphasis_spans = []
-            for chunk_idx in range(start, end):
+            # Container markers (#219) have no flat entry. Until the nested
+            # $259 is built for them, only leaf chunks reach the storyline, so
+            # the positions and content references below are filtered to match.
+            leaf_idx = [
+                i
+                for i in range(start, end)
+                if all_chunks[i].get("type") not in ("open", "close")
+            ]
+            for chunk_idx in leaf_idx:
                 chunk = all_chunks[chunk_idx]
                 if chunk.get("type") == "image":
                     entry_styles.append(_image_style_for(chunk) or story_names[ch_idx])
@@ -3586,9 +3669,11 @@ class NativeKFXGenerator:
 
             frag_259 = self.build_fragment_259(
                 entry_styles,
-                content_refs=content_refs_per_chapter[ch_idx],
+                content_refs=[
+                    content_refs_per_chapter[ch_idx][i - start] for i in leaf_idx
+                ],
                 entity_name=sl_name,
-                positions=chunk_positions[start:end],
+                positions=[chunk_positions[i] for i in leaf_idx],
                 link_targets=entry_link_targets,
                 link_styles=entry_link_styles,
                 link_text_lengths=entry_link_text_lengths,

@@ -554,3 +554,40 @@ class TestTOCPointsToContent:
                 )
         finally:
             os.unlink(path)
+
+
+@pytest.mark.unit
+def test_table_containers_take_one_position_and_cells_their_length():
+    # Amazon's rule (Kindle Previewer 3.106): each container 1 position, each
+    # cell's text its length, every eid in $264 and $550 (#219). Checked on
+    # _build_position_data directly: the $259 for a table is built later.
+    from tests.unit.test_native_generator import _table_block
+
+    chapters = [{"title": "T", "text": "x", "blocks": [_table_block([["ab", "cde"]])]}]
+    gen = NativeKFXGenerator()
+    ch_data = gen._build_chapter_content(chapters)
+    names = [f"c{i}" for i in range(len(chapters))]
+    pd = gen._build_position_data(chapters, names, ch_data)
+
+    chunks = ch_data["all_chunks"]
+    positions = ch_data["chunk_positions"]
+    offsets = {eid: off for off, eid in pd["position_entries_265"] if eid}
+    # table, body, row, cell "ab", cell "cde" (the chapter heading is first)
+    t, body, row, c1, c2 = [
+        p for c, p in zip(chunks, positions) if c["type"] == "open" or "cell" in c
+    ]
+    assert [
+        offsets[body] - offsets[t],
+        offsets[row] - offsets[body],
+        offsets[c1] - offsets[row],
+        offsets[c2] - offsets[c1],
+    ] == [1, 1, 1, 2]
+
+    real = [p for p in positions if p is not None]
+    assert set(real) <= set(pd["section_positions_264"]["c0"])
+    assert set(real) <= set(pd["all_position_ids"])
+    # no `close` marker has a position, so none may appear anywhere
+    assert None not in pd["all_position_ids"]
+    assert None not in pd["section_positions_264"]["c0"]
+    assert None not in [eid for _, eid in pd["position_entries_265"]]
+    assert len(real) == len(set(real))

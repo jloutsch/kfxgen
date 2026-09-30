@@ -2884,3 +2884,109 @@ class TestImageReferenceMatching:
         assert self._refs(
             ["images/pic.jpg"], {"OEBPS/images/pic.jpg": MINIMAL_JPEG}
         ) == ["img_0"]
+
+
+def _table_block(rows, own_keys=()):
+    """A converter-shaped native table block (#219); rows are lists of cell texts."""
+    return {
+        "type": "table",
+        "text": "\n".join(" ".join(r) for r in rows),
+        "spans": [],
+        "block_style": None,
+        "anchor_ids": [],
+        "anchor_keys": list(own_keys),
+        "anchor_offsets": {},
+        "table": {
+            "anchor_ids": [],
+            "anchor_keys": list(own_keys),
+            "anchor_offsets": {},
+            "rows": [
+                {
+                    "group": "body",
+                    "anchor_ids": [],
+                    "anchor_keys": [],
+                    "cells": [
+                        {
+                            "text": t,
+                            "spans": [],
+                            "anchor_ids": [],
+                            "anchor_keys": [],
+                            "anchor_offsets": {},
+                            "block_style": None,
+                            "header": False,
+                            "colspan": 1,
+                            "rowspan": 1,
+                        }
+                        for t in r
+                    ],
+                }
+                for r in rows
+            ],
+        },
+    }
+
+
+def _content(blocks, title="Chapter"):
+    gen = NativeKFXGenerator()
+    return gen._build_chapter_content([{"title": title, "text": "x", "blocks": blocks}])
+
+
+@pytest.mark.unit
+def test_table_emits_marker_chunks_around_cells():
+    ch = _content(
+        [{"text": "Before.", "spans": []}, _table_block([["a", "b"], ["c", "d"]])]
+    )
+    kinds = [(c["type"], c.get("node"), c.get("text")) for c in ch["all_chunks"]]
+    assert kinds == [
+        ("text", None, "Chapter"),
+        ("text", None, "Before."),
+        ("open", "table", None),
+        ("open", "body", None),
+        ("open", "row", None),
+        ("text", None, "a"),
+        ("text", None, "b"),
+        ("close", None, None),
+        ("open", "row", None),
+        ("text", None, "c"),
+        ("text", None, "d"),
+        ("close", None, None),
+        ("close", None, None),
+        ("close", None, None),
+    ]
+
+
+@pytest.mark.unit
+def test_close_markers_take_no_position_and_opens_take_one():
+    ch = _content([_table_block([["a"]])])
+    pos = [(c["type"], p) for c, p in zip(ch["all_chunks"], ch["chunk_positions"])]
+    assert [p is None for t, p in pos if t == "close"] == [True, True, True]
+    assert all(p is not None for t, p in pos if t != "close")
+    real = [p for _, p in pos if p is not None]
+    assert real == sorted(real) and len(set(real)) == len(real)
+
+
+@pytest.mark.unit
+def test_empty_cell_is_still_a_cell():
+    ch = _content([_table_block([["a", "", "c"]])])
+    cells = [c for c in ch["all_chunks"] if "cell" in c]
+    assert [c["text"] for c in cells] == ["a", " ", "c"]
+
+
+@pytest.mark.unit
+def test_chapter_start_skips_container_markers():
+    # Review Focus 2: a chapter whose heading is omitted and whose first
+    # content is a table must still target a text leaf, never a container.
+    gen = NativeKFXGenerator()
+    ch = gen._build_chapter_content(
+        [
+            {
+                "title": "T",
+                "text": "x",
+                "_omit_title_heading": True,
+                "blocks": [_table_block([["a"]])],
+            }
+        ]
+    )
+    first = ch["chapter_start_positions"][0]
+    idx = ch["chunk_positions"].index(first)
+    assert ch["all_chunks"][idx]["type"] == "text"
