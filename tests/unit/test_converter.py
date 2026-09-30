@@ -2286,6 +2286,36 @@ def test_max_native_cell_chars_matches_the_generator_chunk_size():
     assert _conv._MAX_NATIVE_CELL_CHARS == NativeKFXGenerator.CHUNK_SIZE
 
 
+@pytest.mark.unit
+def test_a_cell_at_exactly_the_chunk_size_stays_native():
+    # Boundary case: exactly at the limit stays native.
+    cell_at_limit = "x" * _conv._MAX_NATIVE_CELL_CHARS
+    assert _conv._table_is_native(
+        _first_table(f"<table><tr><td>{cell_at_limit}</td></tr></table>")
+    )
+
+
+@pytest.mark.unit
+def test_a_cell_with_line_breaks_counts_them_in_length():
+    # itertext() doesn't include <br/>, but the converter turns each into a
+    # newline. A cell of (MAX - 10) chars + 20 <br/> would normalize to 2010
+    # chars and must fall back (#226).
+    text = "x" * (_conv._MAX_NATIVE_CELL_CHARS - 10)
+    br_tags = "".join("<br/>" for _ in range(20))
+    assert not _conv._table_is_native(
+        _first_table(f"<table><tr><td>{text}{br_tags}</td></tr></table>")
+    )
+
+
+@pytest.mark.unit
+def test_a_cell_holding_exactly_one_block_stays_native():
+    # A cell with one block-level child is fine; only two or more trigger
+    # fallback.
+    assert _conv._table_is_native(
+        _first_table("<table><tr><td><p>x</p></td></tr></table>")
+    )
+
+
 # --- illustrations inside a discarded contents section (#117) ---------------
 #
 # The source contents section is replaced because its *text* duplicates the

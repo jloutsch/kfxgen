@@ -683,7 +683,10 @@ def _table_is_native(table):
             ]
             if len(blocks) > 1:
                 return False
-            if len("".join(e.itertext())) > _MAX_NATIVE_CELL_CHARS:
+            cell_length = len("".join(e.itertext())) + sum(
+                1 for d in e.iter() if _local_tag(d.tag) == "br"
+            )
+            if cell_length > _MAX_NATIVE_CELL_CHARS:
                 return False
     return rows > 0
 
