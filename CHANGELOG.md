@@ -37,9 +37,16 @@ black at the image edge, so any border added by the layout shows as white:
 | Paperwhite 11th gen (2021) | 5.19.2 | #160's cover section, with and without the cover image's own style: still a white border, so the landmark alone decides it | confirmed |
 | Paperwhite 11th gen (2021) | 5.19.2 | opens on the cover; Go To Cover and Go To Beginning go to the cover; chapter entries land on their chapters | pass |
 | Paperwhite 11th gen (2021) | 5.19.2 | home-screen tile shows the cover, as in 5.8.6 | pass |
+| Oasis 10th gen (2019) | 5.18.2.1.1 | the same cover test, file D (5.8.6 plus only the landmark fix): the cover fills the screen | pass |
+
+**Added after release:** the Oasis result, from the same test file D. As with
+the Paperwhite, the firmware is the last version recorded for the device
+(CONTRIBUTING, tier-4 table) and was not re-read for this run. The Oasis is
+the tier-4 device kept behind current firmware, so this confirms the fix on
+a firmware older than the Paperwhite's as well.
 
 The six-item release checklist was not rerun for 5.8.7. The change touches
-only the cover landmark. The Oasis and the Voyage were not run.
+only the cover landmark. The Voyage was not run.
 
 ## 5.8.6 — A typed bullet without a space
 
