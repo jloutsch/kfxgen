@@ -247,6 +247,123 @@ def converted_fonts(calibre):
     return _convert(calibre, "tables-fonts", FONT_CASES, FONT_CSS, fonts=fonts)
 
 
+#: Note tables in both layouts. Notes 1-3: each anchor *after* its row, the
+#: calibre MOBI→EPUB shape behind #223. Notes 4-6: each anchor *before* its row,
+#: #225's reproduction. `rowN` is the row for note N.
+def _note_row(n):
+    return f'<tr><td><a href="ch.xhtml#r{n}">{n}.</a></td><td>Note {n} text.</td></tr>'
+
+
+_NOTES_HTML = (
+    "<h1>Notes</h1>"
+    "<table>"
+    + "".join(f'{_note_row(n)}<a id="n{n}"></a>' for n in (1, 2, 3))
+    + "</table><p>Between the tables.</p><table>"
+    + "".join(f'<a id="n{n}"></a>{_note_row(n)}' for n in (4, 5, 6))
+    + "</table>"
+)
+_CHAPTER_HTML = (
+    "<h1>Chapter</h1><p>"
+    + " ".join(
+        f'Claim {n}<a id="r{n}" href="notes.xhtml#n{n}"><sup>{n}</sup></a>.'
+        for n in range(1, 7)
+    )
+    + "</p>"
+)
+
+
+def _page(title, body):
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<html xmlns="http://www.w3.org/1999/xhtml">'
+        f"<head><title>{title}</title></head><body>{body}</body></html>"
+    )
+
+
+def _build_notes_epub(path):
+    """Chapter + notes, with an NCX: without one calibre adds the note links
+    to its generated TOC and the notes split into chapters (#225)."""
+    ncx = (
+        '<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" '
+        'version="2005-1"><head><meta name="dtb:uid" content="t"/></head>'
+        "<docTitle><text>Notes</text></docTitle><navMap>"
+        '<navPoint id="p1" playOrder="1"><navLabel><text>Chapter</text></navLabel>'
+        '<content src="ch.xhtml"/></navPoint>'
+        '<navPoint id="p2" playOrder="2"><navLabel><text>Notes</text></navLabel>'
+        '<content src="notes.xhtml"/></navPoint></navMap></ncx>'
+    )
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        z.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0" '
+            'xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles>'
+            '<rootfile full-path="content.opf" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>',
+        )
+        z.writestr(
+            "content.opf",
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" '
+            'version="2.0" unique-identifier="i"><metadata '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="i">t'
+            "</dc:identifier><dc:title>Note tables</dc:title><dc:language>en"
+            "</dc:language></metadata><manifest>"
+            '<item id="ch" href="ch.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="notes" href="notes.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
+            '</manifest><spine toc="ncx"><itemref idref="ch"/>'
+            '<itemref idref="notes"/></spine></package>',
+        )
+        z.writestr("ch.xhtml", _page("Chapter", _CHAPTER_HTML))
+        z.writestr("notes.xhtml", _page("Notes", _NOTES_HTML))
+        z.writestr("toc.ncx", ncx)
+
+
+def _link_landings(kfx):
+    """For each link whose visible text is a bare number: (that number, the
+    text at the position its anchor names)."""
+    frags = load_fragments(kfx)
+    content = {
+        str(val(f)["name"]): list(val(f)["$146"]) for f in by_type(frags, "$145")
+    }
+    entries, landings = {}, []
+    for story in by_type(frags, "$259"):
+        for entry in val(story)["$146"]:
+            ref = entry.get("$145")
+            if ref is not None:
+                text = str(content[str(ref["name"])][int(ref["$403"])])
+                entries[int(entry["$155"])] = (text, entry.get("$142") or [])
+    anchors = {}
+    for f in by_type(frags, "$266"):
+        pos = val(f).get("$183")
+        if pos is not None:
+            anchors[str(val(f)["$180"])] = (int(pos["$155"]), int(pos.get("$143") or 0))
+    for text, spans in entries.values():
+        for span in spans:
+            if span.get("$179") is None:
+                continue
+            start = int(span["$143"])
+            label = text[start : start + int(span["$144"])]
+            if not label.isdigit():
+                continue
+            eid, offset = anchors[str(span["$179"])]
+            landings.append((label, entries[eid][0][offset:]))
+    return sorted(landings)
+
+
+@pytest.fixture(scope="module")
+def note_landings(calibre):
+    tmp, env, calibre_version = calibre
+    epub = tmp / "notes.epub"
+    _build_notes_epub(epub)
+    kfx = tmp / "notes.kfx"
+    run = subprocess.run(
+        [EBOOK_CONVERT, str(epub), str(kfx)], env=env, capture_output=True, text=True
+    )
+    assert run.returncode == 0 and kfx.exists(), run.stdout[-2000:] + run.stderr[-2000:]
+    return _link_landings(kfx), calibre_version
+
+
 def _case(converted, cid):
     by_case, calibre_version = converted
     case = by_case.get(cid)
@@ -337,4 +454,17 @@ def test_a_plain_tables_rows_use_the_books_regular_face(converted_fonts):
         assert style.get("$11") == regular, (
             f"calibre {v}: {text!r} font {style.get('$11')!r}, "
             f"an ordinary paragraph uses {regular!r}"
+        )
+
+
+def test_each_note_link_lands_on_its_own_note(note_landings):
+    # Both layouts: notes 1-3 with the anchor after the row (#223's book, where
+    # links used to land on the next note), notes 4-6 with it before the row.
+    landings, v = note_landings
+    assert [label for label, _ in landings] == ["1", "2", "3", "4", "5", "6"], (
+        f"calibre {v}: expected six note links, got {landings}"
+    )
+    for label, target in landings:
+        assert target.startswith(f"{label}. Note {label} text."), (
+            f"calibre {v}: note link {label} lands on {target[:40]!r}"
         )

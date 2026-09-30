@@ -573,6 +573,42 @@ def _subtree_anchor_ids(elem):
     return ids
 
 
+_ROW_GROUP_TAGS = {"table", "thead", "tbody", "tfoot"}
+
+
+def _is_empty_anchor(elem):
+    """An <a> that only names a place: an id or name, and no content."""
+    return (
+        isinstance(elem.tag, str)
+        and _local_tag(elem.tag) == "a"
+        and bool(_own_anchor_ids(elem))
+        and not (elem.text or "").strip()
+        and len(elem) == 0
+    )
+
+
+def _anchors_follow_rows(elem):
+    """True when a table's link targets sit after the row each one names.
+
+    Calibre's MOBI→EPUB output lays out notes this way — `<tr>note 1</tr>
+    <a id="…"/><tr>note 2</tr>…`, with no anchor before the first row and one
+    after the last — and an anchor with no text of its own otherwise carries
+    forward to the next block, which is the next note. Decided per row group
+    from both ends, because the opposite layout (an anchor before each row)
+    is carried forward correctly already. (#221, #223)
+    """
+    if _local_tag(elem.tag) not in _ROW_GROUP_TAGS:
+        return False
+    marks = [
+        c
+        for c in elem
+        if _is_empty_anchor(c) or (isinstance(c.tag, str) and _local_tag(c.tag) == "tr")
+    ]
+    return (
+        bool(marks) and not _is_empty_anchor(marks[0]) and _is_empty_anchor(marks[-1])
+    )
+
+
 #: Semantics that make an element a note reference, a back-link, or one note,
 #: by epub:type, ARIA role, or the classes Python-Markdown's footnotes
 #: extension writes. A note *section* (epub:type footnotes/endnotes, a
@@ -1257,10 +1293,24 @@ def extract_blocks_from_html(
         ws = _white_space_flags(elem, style_resolver, frozenset())
         if elem.text:
             inline_parts.append((elem.text, ws))
+        # In a table whose link targets follow their rows, an anchor after a
+        # row belongs to that row, at its start — not to the next one. A row
+        # that produced no block leaves `row_block` unset, and the anchor then
+        # carries forward as usual.
+        follow = _anchors_follow_rows(elem)
+        row_block = None
         for child in elem:
-            if child.tag in block_tags or _local_tag(child.tag) in ("img", "svg"):
+            if follow and row_block is not None and _is_empty_anchor(child):
+                for aid in _own_anchor_ids(child):
+                    if aid not in row_block["anchor_ids"]:
+                        row_block["anchor_ids"].append(aid)
+                        row_block["anchor_offsets"][aid] = 0
+            elif child.tag in block_tags or _local_tag(child.tag) in ("img", "svg"):
                 _flush_inline()
+                start = len(blocks)
                 _walk(child)
+                if follow and _local_tag(child.tag) == "tr":
+                    row_block = blocks[start] if len(blocks) > start else None
             elif not _is_non_rendered(child):
                 inline_parts.extend(
                     _walk_inline(

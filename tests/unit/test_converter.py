@@ -2128,6 +2128,74 @@ def test_no_table_warning_without_tables():
     assert not [c for c in log.warn.call_args_list if "table" in str(c).lower()]
 
 
+# --- note anchors between table rows (#221, #223) ---------------------------
+#
+# Calibre's MOBI→EPUB output lays out notes as a table and puts each note's
+# link target *after* its row: `<tr>note 1</tr><a id="n1"/><tr>note 2</tr>…`,
+# with nothing before the first row and an anchor after the last. An anchor
+# with no text of its own carries forward to the next block, so every note link
+# landed on the next note — 859 of 871 in the book behind #223, and on a
+# Paperwhite reference 2 opened the page starting at note 3. Before #221 the
+# whole table was one paragraph, which hid it.
+
+
+def _row_anchors(blocks):
+    return [(b["text"], b["anchor_ids"]) for b in blocks]
+
+
+@pytest.mark.unit
+def test_an_anchor_after_each_row_belongs_to_that_row():
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<table><tr><td>1.</td><td>First.</td></tr><a id="n1"></a>'
+            '<tr><td>2.</td><td>Second.</td></tr><a id="n2"></a></table>'
+            "<p>After.</p>"
+        ),
+        base_href="notes.xhtml",
+    )
+    assert _row_anchors(blocks) == [
+        ("1. First.", ["n1"]),
+        ("2. Second.", ["n2"]),
+        ("After.", []),
+    ]
+    # At the row's start, so a link lands on the note's own first line.
+    assert blocks[1]["anchor_offsets"] == {"notes.xhtml#n2": 0}
+
+
+@pytest.mark.unit
+def test_an_anchor_after_each_row_belongs_to_that_row_inside_tbody():
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<table><tbody><tr><td>1.</td><td>First.</td></tr><a id="n1"></a>'
+            '<tr><td>2.</td><td>Second.</td></tr><a id="n2"></a></tbody></table>'
+        )
+    )
+    assert _row_anchors(blocks) == [("1. First.", ["n1"]), ("2. Second.", ["n2"])]
+
+
+@pytest.mark.unit
+def test_an_anchor_before_each_row_still_belongs_to_the_next_row():
+    # The other layout (#225's reproduction): each anchor precedes its row.
+    # Carrying forward is already right for it and must stay so.
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<table><a id="n1"></a><tr><td>1.</td><td>First.</td></tr>'
+            '<a id="n2"></a><tr><td>2.</td><td>Second.</td></tr></table>'
+        )
+    )
+    assert _row_anchors(blocks) == [("1. First.", ["n1"]), ("2. Second.", ["n2"])]
+
+
+@pytest.mark.unit
+def test_a_lone_anchor_between_rows_still_carries_forward():
+    # Nothing before the first row or after the last says which way the
+    # table runs, so the long-standing rule holds.
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<table><tr><td>a</td></tr><a id="x"></a><tr><td>b</td></tr></table>')
+    )
+    assert _row_anchors(blocks) == [("a", []), ("b", ["x"])]
+
+
 # --- illustrations inside a discarded contents section (#117) ---------------
 #
 # The source contents section is replaced because its *text* duplicates the
