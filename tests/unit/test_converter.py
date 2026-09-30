@@ -2316,6 +2316,108 @@ def test_a_cell_holding_exactly_one_block_stays_native():
     )
 
 
+def _block(html, **kw):
+    caption, table, trailing = _conv._table_block(_first_table(html), **kw)
+    return caption, table, trailing
+
+
+def _cells(table):
+    return [[c["text"] for c in r["cells"]] for r in table["table"]["rows"]]
+
+
+@pytest.mark.unit
+def test_table_block_keeps_rows_and_cells():
+    _, table, _ = _block(_ISSUE_219_TABLE)
+    assert table["type"] == "table"
+    assert _cells(table) == [
+        ["Year", "A", "B"],
+        ["1", "100", "200"],
+        ["2", "110", "220"],
+    ]
+    assert table["text"] == "Year A B\n1 100 200\n2 110 220"
+    assert [r["group"] for r in table["table"]["rows"]] == ["body"] * 3
+
+
+@pytest.mark.unit
+def test_table_block_row_groups_header_cells_and_spans():
+    _, table, _ = _block(
+        "<table><thead><tr><th colspan='2'>H</th></tr></thead>"
+        "<tbody><tr><td rowspan='2'>a</td><td>b</td></tr><tr><td>c</td></tr></tbody>"
+        "<tfoot><tr><td>f</td><td>g</td></tr></tfoot></table>"
+    )
+    rows = table["table"]["rows"]
+    assert [r["group"] for r in rows] == ["head", "body", "body", "foot"]
+    head = rows[0]["cells"][0]
+    assert (head["header"], head["colspan"], head["rowspan"]) == (True, 2, 1)
+    assert rows[1]["cells"][0]["rowspan"] == 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "raw, expected", [("0", 1), ("-3", 1), ("x", 1), ("5000", 1000), (" 3 ", 3)]
+)
+def test_span_attributes_are_clamped(raw, expected):
+    _, table, _ = _block(f"<table><tr><td colspan='{raw}'>a</td></tr></table>")
+    assert table["table"]["rows"][0]["cells"][0]["colspan"] == expected
+
+
+@pytest.mark.unit
+def test_cell_emphasis_and_anchor_offsets_are_cell_relative():
+    _, table, _ = _block(
+        '<table><tr><td>ab</td><td>x <em>cd</em> <a id="k"></a>e</td></tr></table>'
+    )
+    cell = table["table"]["rows"][0]["cells"][1]
+    assert cell["text"] == "x cd e"
+    assert cell["spans"] == [(2, 2, frozenset({I}))]
+    assert cell["anchor_offsets"]["k"] == 5
+    assert "k" in table["anchor_ids"]  # block level too, for chapter assembly
+
+
+@pytest.mark.unit
+def test_notes_layout_anchor_after_row_stays_with_row():
+    _, table, _ = _block(
+        '<table><tr><td>1.</td><td>First.</td></tr><a id="n1"></a>'
+        '<tr><td>2.</td><td>Second.</td></tr><a id="n2"></a></table>'
+    )
+    assert [r["anchor_ids"] for r in table["table"]["rows"]] == [["n1"], ["n2"]]
+
+
+@pytest.mark.unit
+def test_anchor_before_each_row_belongs_to_the_next_row():
+    _, table, trailing = _block(
+        '<table><a id="n1"></a><tr><td>1.</td></tr><a id="n2"></a><tr><td>2.</td></tr></table>'
+    )
+    assert [r["anchor_ids"] for r in table["table"]["rows"]] == [["n1"], ["n2"]]
+    assert trailing == []
+
+
+@pytest.mark.unit
+def test_an_anchor_only_after_the_last_row_carries_past_the_table():
+    _, table, trailing = _block(
+        '<table><tr><td>a</td></tr><tr><td>b</td></tr><a id="ch2"></a></table>'
+    )
+    assert [r["anchor_ids"] for r in table["table"]["rows"]] == [[], []]
+    assert trailing == ["ch2"]
+
+
+@pytest.mark.unit
+def test_caption_becomes_its_own_paragraph():
+    caption, table, _ = _block(
+        "<table><caption>Census</caption><tr><td>a</td></tr></table>"
+    )
+    assert caption["text"] == "Census"
+    assert "Census" not in table["text"]
+
+
+@pytest.mark.unit
+def test_table_own_id_is_kept_separately():
+    _, table, _ = _block('<table id="t"><tr id="r"><td id="c">a</td></tr></table>')
+    assert table["table"]["anchor_ids"] == ["t"]
+    assert table["table"]["rows"][0]["anchor_ids"] == ["r"]
+    assert table["table"]["rows"][0]["cells"][0]["anchor_ids"] == ["c"]
+    assert table["anchor_ids"] == ["t", "r", "c"]
+
+
 # --- illustrations inside a discarded contents section (#117) ---------------
 #
 # The source contents section is replaced because its *text* duplicates the

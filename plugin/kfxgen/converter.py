@@ -691,6 +691,110 @@ def _table_is_native(table):
     return rows > 0
 
 
+_ROW_GROUPS = {"thead": "head", "tbody": "body", "tfoot": "foot"}
+
+
+def _span_attr(cell, name):
+    """colspan/rowspan as an int in 1..1000; anything malformed counts as 1."""
+    try:
+        n = int((cell.get(name) or "1").strip())
+    except ValueError:
+        return 1
+    return min(max(n, 1), 1000)
+
+
+def _table_cell(cell, style_resolver, base_href):
+    text, spans, marks = normalize_runs_with_anchors(
+        _walk_inline(cell, style_resolver=style_resolver, base_href=base_href)
+    )
+    ids = _dedupe_keep_order(_own_anchor_ids(cell) + list(marks))
+    css = style_resolver(cell) if style_resolver is not None else None
+    return {
+        "text": text,
+        "spans": spans,
+        "anchor_ids": ids,
+        "anchor_offsets": {aid: marks.get(aid, 0) for aid in ids},
+        "block_style": compute_block_style(css) if css is not None else None,
+        "header": _local_tag(cell.tag) == "th",
+        "colspan": _span_attr(cell, "colspan"),
+        "rowspan": _span_attr(cell, "rowspan"),
+    }
+
+
+def _table_block(table, style_resolver=None, base_href=None):
+    """A native table as one block, plus its caption and any anchors left over.
+
+    Returns (caption_block or None, table_block, trailing_ids). Anchors between
+    rows follow 5.8.8's rule (`_anchors_follow_rows`): in calibre's notes
+    layout an anchor after a row belongs to that row, otherwise to the next
+    row; anchors with no row left to take them carry past the table. (#219)
+    """
+    rows, carry, caption = [], [], None
+
+    def take(container, group):
+        nonlocal carry, caption
+        follow = _anchors_follow_rows(container)
+        last = None
+        for child in container:
+            tag = _local_tag(child.tag)
+            if tag in _ROW_GROUPS:
+                take(child, _ROW_GROUPS[tag])
+                last = None
+            elif tag == "caption" and caption is None:
+                text, spans, marks = normalize_runs_with_anchors(
+                    _walk_inline(
+                        child, style_resolver=style_resolver, base_href=base_href
+                    )
+                )
+                if text:
+                    ids = list(marks)
+                    caption = {
+                        "text": text,
+                        "spans": spans,
+                        "block_style": None,
+                        "anchor_ids": ids,
+                        "anchor_offsets": {a: marks.get(a, 0) for a in ids},
+                    }
+            elif tag == "tr":
+                last = {
+                    "group": group,
+                    "anchor_ids": carry + _own_anchor_ids(child),
+                    "cells": [
+                        _table_cell(c, style_resolver, base_href)
+                        for c in child
+                        if _local_tag(c.tag) in _CELL_TAGS
+                    ],
+                }
+                carry = []
+                rows.append(last)
+            elif _is_empty_anchor(child):
+                ids = _own_anchor_ids(child)
+                if follow and last is not None:
+                    last["anchor_ids"].extend(ids)
+                else:
+                    carry.extend(ids)
+
+    take(table, "body")
+    own = _own_anchor_ids(table)
+    every = _dedupe_keep_order(
+        own
+        + [a for r in rows for a in r["anchor_ids"]]
+        + [a for r in rows for c in r["cells"] for a in c["anchor_ids"]]
+    )
+    block = {
+        "type": "table",
+        "text": "\n".join(
+            " ".join(c["text"] for c in r["cells"] if c["text"]) for r in rows
+        ),
+        "spans": [],
+        "block_style": None,
+        "anchor_ids": every,
+        "anchor_offsets": dict.fromkeys(every, 0),
+        "table": {"anchor_ids": own, "rows": rows},
+    }
+    return caption, block, carry
+
+
 #: Semantics that make an element a note reference, a back-link, or one note,
 #: by epub:type, ARIA role, or the classes Python-Markdown's footnotes
 #: extension writes. A note *section* (epub:type footnotes/endnotes, a
