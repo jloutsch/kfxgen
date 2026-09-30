@@ -1,5 +1,88 @@
 # Changelog
 
+## 5.8.8 — Tables read row by row
+
+**Fixed (#219, #221): a table came out as one run-on paragraph.** Every row
+of a table ran together, for example `Year A B 1 100 200 2 110 220`, so a
+reader couldn't tell which values belonged to which row. Each row is now its
+own paragraph. Within a row, cells stay separated by a space, as since #128.
+
+Columns still don't line up. Real table layout needs table containers nested
+inside the storyline, and kfxgen's storyline is flat on purpose: nesting it
+in 5.3.0 removed the Kindle's TOC button. #219 stays open for that.
+
+**Fixed (#223): note links in calibre's MOBI→EPUB notes tables landed on the
+next note.** These books lay out their endnotes as a table, one row per
+note, and put each note's link target *after* its own row. kfxgen gave that
+target to the following row, so every note link pointed at the next note.
+While the table was one run-on paragraph that stayed hidden: the Kindle
+lands a link at the start of its paragraph, which held many notes. A table whose link targets follow its
+rows is now recognised, and each target stays with its own row. In the book
+behind #223, 871 of 871 note links now land on their own note. Tables laid
+out the other way, with each target before its row, are unchanged.
+
+**New: a warning when a book has tables.** Conversion logs one line per book,
+for example "12 tables in 3 files written as one paragraph per row: KFX
+output has no table layout yet, so columns do not line up (#219)". Tables
+dropped along with a contents or title page are not counted. 35 of the 90
+Gutenberg test books warn.
+
+**Also changed by the row split:**
+- **Contents listings:** a table, or a row, header, body, footer or caption
+  inside one, that is marked as a contents listing (`class="toc"`,
+  `epub:type="toc"` or `role="doc-toc"`) is now discarded like any other
+  printed contents listing (#132). No book in the test sets has one.
+- **Embedded fonts:** in a book that embeds its own fonts, table rows now use
+  the book's font, and its bold face when the table is bold. In 5.8.7, table
+  text had no font set, so it drew in the Kindle's own font.
+- **Alignment:** a row takes `text-align` from its table, for example a
+  centered table centers its rows. A table's indent and margins don't reach
+  its rows.
+
+**Known limits, all tracked:**
+- **Cell alignment is lost** (#224). A row takes its table's alignment, so
+  some tables looked better in 5.8.7. On the device, pg22210's two-photo
+  table had its names centered under the pictures in 5.8.7; now they're one
+  left-aligned line.
+- **Tables that need columns** (#219). A two-column comparison, or a list of
+  number, title and page number, reads as one sentence per row.
+- **`rowspan`** (#219). A value that spans rows appears only in its first
+  row.
+- **A table's own left margin** (#219). It is not kept, as in 5.8.7.
+- **Progress** (#227). On the Paperwhite, the progress percentage follows the
+  number of paragraphs, not the amount of text, so a book with many table
+  rows now reads lower than before at the same place. The cause predates this
+  release.
+- **Long paragraphs** (#226). A paragraph over 2,000 characters is still cut
+  into pieces, often mid-word. The cause predates this release.
+
+**Checks:**
+- **Gutenberg 90 (test shim):** no text lost, and all 8,723 chapters keep
+  their titles and lengths.
+- **Real calibre 9.14.0, main against the branch (#222):**
+  - the 513,636 paragraphs outside tables keep their style;
+  - `text-align` is the only property that reaches a row.
+- **Golden files:** only `table_cells` changes.
+- **New calibre-gated test:** `tests/integration/test_calibre_table_rows.py`
+  covers row styles, embedded fonts and note-link landing. It is local-only,
+  since CI has no calibre.
+
+### Device verification
+
+**On the Kindle Paperwhite 11th generation (2021), firmware 5.19.2**, the last
+version recorded for it; the firmware was not re-read for these runs. Each
+check compared an A/B pair with distinct titles, built from one source:
+
+| Device | Firmware | Check | Result |
+|---|---|---|---|
+| Paperwhite 11th gen (2021) | 5.19.2 | each table row on its own line; TOC jumps, page turns and progress through a multi-page table; a link into a table row | pass |
+| Paperwhite 11th gen (2021) | 5.19.2 | #223's notes book: note references land on their own note (5.8.7 landed at the start of a run-on block of many notes) | pass |
+| Paperwhite 11th gen (2021) | 5.19.2 | a book with embedded fonts: table rows in the book's regular and bold faces (5.8.7 used the device font) | pass |
+| Paperwhite 11th gen (2021) | 5.19.2 | pg22210 and pg28428 through real calibre: rows separate; cell alignment lost in places (#224) | as expected |
+
+The Oasis and the Voyage were not run. An Oasis run is planned for #227. The
+six-item release checklist was not rerun for 5.8.8.
+
 ## 5.8.7 — The cover fills the screen
 
 **Fixed (#217): the cover was drawn as an ordinary page, inside the margins.**
