@@ -2187,6 +2187,39 @@ def test_an_anchor_before_each_row_still_belongs_to_the_next_row():
 
 
 @pytest.mark.unit
+def test_an_anchor_only_after_the_last_row_still_carries_forward():
+    # A table's only anchor, just inside </table>, usually names what comes
+    # next — here the next chapter. Moving it onto the last row put that row in
+    # the next chapter and printed the chapter heading twice (#221 review).
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            "<p>Some text.</p><table><tr><td>Year</td><td>Pop</td></tr>"
+            '<tr><td>1811</td><td>12,289</td></tr><a id="ch2"></a></table>'
+            "<h2>Chapter 2</h2>"
+        )
+    )
+    assert _row_anchors(blocks) == [
+        ("Some text.", []),
+        ("Year Pop", []),
+        ("1811 12,289", []),
+        ("Chapter 2", ["ch2"]),
+    ]
+
+
+@pytest.mark.unit
+def test_two_anchors_only_after_the_last_row_still_carry_forward():
+    # "At least two anchors" is not the signal: both of these sit past the
+    # table. What marks the notes layout is an anchor *between* two rows.
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            "<table><tr><td>a</td></tr><tr><td>b</td></tr>"
+            '<a id="x"></a><a id="y"></a></table><h2>Next</h2>'
+        )
+    )
+    assert _row_anchors(blocks) == [("a", []), ("b", []), ("Next", ["x", "y"])]
+
+
+@pytest.mark.unit
 def test_a_lone_anchor_between_rows_still_carries_forward():
     # Nothing before the first row or after the last says which way the
     # table runs, so the long-standing rule holds.

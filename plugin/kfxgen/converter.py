@@ -596,17 +596,23 @@ def _anchors_follow_rows(elem):
     forward to the next block, which is the next note. Decided per row group
     from both ends, because the opposite layout (an anchor before each row)
     is carried forward correctly already. (#221, #223)
+
+    An anchor *between* two rows is also required. Anchors that sit only
+    after the last row usually name what comes next — the next section's
+    link target just inside `</table>` — and moving one onto the last row put
+    that row in the next chapter. A table holding a single note therefore
+    keeps carrying forward, as every table did before. (#221 review)
     """
     if _local_tag(elem.tag) not in _ROW_GROUP_TAGS:
         return False
-    marks = [
-        c
+    kinds = "".join(
+        "A" if _is_empty_anchor(c) else "R"
         for c in elem
         if _is_empty_anchor(c) or (isinstance(c.tag, str) and _local_tag(c.tag) == "tr")
-    ]
-    return (
-        bool(marks) and not _is_empty_anchor(marks[0]) and _is_empty_anchor(marks[-1])
     )
+    # Starts with a row, ends with an anchor, and — once the trailing anchors
+    # are set aside — still has an anchor, which then sits between two rows.
+    return kinds[:1] == "R" and kinds.endswith("A") and "A" in kinds.rstrip("A")
 
 
 #: Semantics that make an element a note reference, a back-link, or one note,
