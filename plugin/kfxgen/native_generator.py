@@ -86,6 +86,15 @@ SUBSCRIPT_FONT_SIZE = 0.75
 BASELINE_STYLE_SUPER = "$370"
 BASELINE_STYLE_SUB = "$371"
 
+#: Storyline node types for native table containers (#219).
+_TABLE_NODE_TYPES = {
+    "table": "$278",
+    "head": "$151",
+    "body": "$454",
+    "foot": "$455",
+    "row": "$279",
+}
+
 #: Overrides retired by #123. Warned about rather than ignored: a variable that
 #: used to change output and now cannot is exactly the silent no-op this
 #: codebase keeps paying for elsewhere.
@@ -1434,6 +1443,50 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
+    def build_table_style_157(self, entity_name):
+        """$157 for a native table node, as Kindle Previewer writes it (#219)."""
+        self.symtab.create_local_symbol(entity_name)
+        value = IonStruct(
+            IS("$16"), IonStruct(IS("$307"), IonDecimal("1"), IS("$306"), IS("$505")),
+            IS("$65"), IonStruct(IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")),
+            IS("$42"), IonStruct(IS("$307"), IonDecimal("1"), IS("$306"), IS("$310")),
+            IS("$173"), IS(entity_name),
+            IS("$83"), 4286611584,
+        )  # fmt: skip
+        return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
+
+    def build_cell_style_157(
+        self,
+        entity_name,
+        align=None,
+        bold=False,
+        colspan=1,
+        rowspan=1,
+        font_family=None,
+    ):
+        """$157 for a table cell: Previewer's padding and vertical centring,
+        plus the cell's own alignment, header weight and spans (#219)."""
+        self.symtab.create_local_symbol(entity_name)
+        lh = lambda v: IonStruct(IS("$307"), IonDecimal(v), IS("$306"), IS("$310"))  # noqa: E731
+        pct = lambda v: IonStruct(IS("$307"), IonDecimal(v), IS("$306"), IS("$314"))  # noqa: E731
+        value = IonStruct(
+            IS("$633"), IS("$320"),
+            IS("$52"), lh("0.03125"), IS("$53"), pct("0.117"),
+            IS("$54"), lh("0.03125"), IS("$55"), pct("0.117"),
+            IS("$173"), IS(entity_name),
+        )  # fmt: skip
+        if align in ALIGN_MAP:
+            value[IS("$34")] = IS(ALIGN_MAP[align])
+        if bold:
+            value[IS("$13")] = IS("$361")
+        if colspan > 1:
+            value[IS("$148")] = colspan
+        if rowspan > 1:
+            value[IS("$149")] = rowspan
+        if font_family:
+            value[IS("$11")] = font_family
+        return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
+
     def build_fragment_157_image(
         self, entity_name, kind="inline", width_pct=None, height_pct=None
     ):
@@ -1590,6 +1643,7 @@ class NativeKFXGenerator:
         chunk_kinds=None,
         image_specs=None,
         emphasis_spans=None,
+        container_nodes=None,
     ):
         """
         Builds Fragment $259 (Storyline / Flow Map)
@@ -1602,6 +1656,12 @@ class NativeKFXGenerator:
               { $155: pos[1], $157: story[1],         ..., $145: ... },
               ...
             ]
+
+        The one exception is a native table (#219): an `open` kind starts a
+        container ($278 table → $151/$454/$455 row group → $279 row) whose
+        $146 holds the entries up to its matching `close`, so cells nest
+        under their row. `close` entries take no position. `$790` goes on the
+        first leaf entry, never on a container.
 
         (A nested single-outer-wrapper shape was tried during the Phase-3 work
         but reverted; the flat shape is what ships and is device-verified. The
@@ -1649,10 +1709,34 @@ class NativeKFXGenerator:
             if ref:
                 self.symtab.create_local_symbol(ref[0])
 
-        children = []
+        root = []
+        stack = [root]
+        first_leaf = True
         for i, story_name in enumerate(story_names):
-            position = positions[i] if positions and i < len(positions) else 1000 + i
             kind = chunk_kinds[i] if chunk_kinds and i < len(chunk_kinds) else "text"
+            if kind == "close":
+                stack.pop()
+                continue
+            position = positions[i] if positions and i < len(positions) else 1000 + i
+            if kind == "open":
+                node = container_nodes[i]
+                entry = IonStruct(
+                    IS("$155"), position, IS("$159"), IS(_TABLE_NODE_TYPES[node])
+                )
+                if node == "table":
+                    self.symtab.create_local_symbol(story_name)
+                    entry[IS("$157")] = IS(story_name)
+                    entry[IS("$150")] = False
+                    entry[IS("$456")] = IonStruct(
+                        IS("$307"), IonDecimal("0.9"), IS("$306"), IS("$318")
+                    )
+                    entry[IS("$457")] = IonStruct(
+                        IS("$307"), IonDecimal("0.9"), IS("$306"), IS("$318")
+                    )
+                entry[IS("$146")] = []
+                stack[-1].append(entry)
+                stack.append(entry[IS("$146")])
+                continue
 
             if (
                 kind == "image"
@@ -1679,9 +1763,10 @@ class NativeKFXGenerator:
                     entry[IS("$175")] = IS(resource_name)
                 # Image entries hold no text, so they carry no content
                 # reference — their slot in content_refs is None.
-                if i == 0:
+                if first_leaf:
                     entry[IS("$790")] = 1
-                children.append(entry)
+                    first_leaf = False
+                stack[-1].append(entry)
                 continue
 
             # Text entry
@@ -1696,8 +1781,9 @@ class NativeKFXGenerator:
                 IS("$145"),
                 IonStruct(IS("$4"), IS(ref_name), IS("$403"), ref_index),
             )
-            if i == 0:
+            if first_leaf:
                 entry[IS("$790")] = 1
+                first_leaf = False
 
             if link_targets and i < len(link_targets) and link_targets[i]:
                 anchor_name = link_targets[i]
@@ -1751,7 +1837,7 @@ class NativeKFXGenerator:
                     existing.append(span)
                 entry[IS("$142")] = existing
 
-            children.append(entry)
+            stack[-1].append(entry)
 
         # FLAT shape (pre-Phase-3) — used for the TOC-regression test.
         # Whether to revert nesting permanently or fix the nested shape
@@ -1760,7 +1846,7 @@ class NativeKFXGenerator:
             IS("$176"),
             IS(entity_name),
             IS("$146"),
-            children,
+            root,
         )
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$259"), value=value)
@@ -3177,7 +3263,11 @@ class NativeKFXGenerator:
             # trailing empty chapter made chapter_start_positions index
             # chunk_positions out of range (IndexError), and a middle empty
             # chapter silently pointed its TOC entry at the next chapter.
-            if len(all_chunks) == start_idx:
+            # Container markers (#219) don't count: a table with no cells
+            # leaves only markers, and the chapter would start on a container.
+            if not any(
+                c.get("type") in ("text", "image") for c in all_chunks[start_idx:]
+            ):
                 all_chunks.append({"type": "text", "text": " "})
 
             if carried_anchor_keys:
@@ -3352,7 +3442,7 @@ class NativeKFXGenerator:
         style_cache = {}  # (kind, sorted-attrs-tuple) -> entity_name
         kind_counts = {}  # kind -> next index for that kind
 
-        def _allocate_style(kind, **attrs):
+        def _allocate_style(kind, builder=None, **attrs):
             key = (kind, tuple(sorted(attrs.items())))
             if key in style_cache:
                 return style_cache[key]
@@ -3360,7 +3450,9 @@ class NativeKFXGenerator:
             kind_counts[kind] = idx + 1
             name = f"s{idx}{kind}"
             style_cache[key] = name
-            self.fragments.append(self.build_fragment_157(entity_name=name, **attrs))
+            self.fragments.append(
+                (builder or self.build_fragment_157)(entity_name=name, **attrs)
+            )
             if kind == "_em" and name not in extra_style_names:
                 extra_style_names.append(name)
             return name
@@ -3572,16 +3664,25 @@ class NativeKFXGenerator:
             entry_kinds = []
             entry_image_specs = []
             entry_emphasis_spans = []
-            # Container markers (#219) have no flat entry. Until the nested
-            # $259 is built for them, only leaf chunks reach the storyline, so
-            # the positions and content references below are filtered to match.
-            leaf_idx = [
-                i
-                for i in range(start, end)
-                if all_chunks[i].get("type") not in ("open", "close")
-            ]
-            for chunk_idx in leaf_idx:
+            entry_nodes = []
+            for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
+                if chunk.get("type") in ("open", "close"):
+                    node = chunk.get("node")
+                    entry_styles.append(
+                        _allocate_style("_tbl", builder=self.build_table_style_157)
+                        if node == "table"
+                        else story_names[ch_idx]
+                    )
+                    entry_link_targets.append(None)
+                    entry_link_styles.append(None)
+                    entry_link_text_lengths.append(None)
+                    entry_kinds.append(chunk["type"])
+                    entry_image_specs.append(None)
+                    entry_emphasis_spans.append(None)
+                    entry_nodes.append(node)
+                    continue
+                entry_nodes.append(None)
                 if chunk.get("type") == "image":
                     entry_styles.append(_image_style_for(chunk) or story_names[ch_idx])
                     entry_link_targets.append(None)
@@ -3636,7 +3737,24 @@ class NativeKFXGenerator:
                             attrs["bold"] = True
                         if blk_italic:
                             attrs["italic"] = True
-                    entry_styles.append(_allocate_style("", **attrs))
+                    cell = chunk.get("cell")
+                    if cell is not None:
+                        cattrs = {
+                            "align": bs.get("align")
+                            or ("center" if cell["header"] else None),
+                            "bold": bool(cell["header"]),
+                            "colspan": cell["colspan"],
+                            "rowspan": cell["rowspan"],
+                        }
+                        if fam:
+                            cattrs["font_family"] = fam
+                        entry_styles.append(
+                            _allocate_style(
+                                "_td", builder=self.build_cell_style_157, **cattrs
+                            )
+                        )
+                    else:
+                        entry_styles.append(_allocate_style("", **attrs))
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)
@@ -3669,11 +3787,9 @@ class NativeKFXGenerator:
 
             frag_259 = self.build_fragment_259(
                 entry_styles,
-                content_refs=[
-                    content_refs_per_chapter[ch_idx][i - start] for i in leaf_idx
-                ],
+                content_refs=content_refs_per_chapter[ch_idx],
                 entity_name=sl_name,
-                positions=[chunk_positions[i] for i in leaf_idx],
+                positions=chunk_positions[start:end],
                 link_targets=entry_link_targets,
                 link_styles=entry_link_styles,
                 link_text_lengths=entry_link_text_lengths,
@@ -3682,6 +3798,7 @@ class NativeKFXGenerator:
                 chunk_kinds=entry_kinds,
                 image_specs=entry_image_specs,
                 emphasis_spans=entry_emphasis_spans,
+                container_nodes=entry_nodes,
             )
             storyline_names.append(sl_name)
             self.fragments.append(frag_259)

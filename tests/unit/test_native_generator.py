@@ -2990,3 +2990,152 @@ def test_chapter_start_skips_container_markers():
     first = ch["chapter_start_positions"][0]
     idx = ch["chunk_positions"].index(first)
     assert ch["all_chunks"][idx]["type"] == "text"
+
+
+@pytest.mark.unit
+def test_chapter_whose_only_table_has_no_cells_still_starts_on_text():
+    # A heading-less chapter whose table has a row but no cells emits only
+    # container markers; the placeholder must still give it a text leaf so
+    # its TOC target is never a container (the 5.3.0 lesson, #219).
+    gen = NativeKFXGenerator()
+    ch = gen._build_chapter_content(
+        [
+            {
+                "title": "T",
+                "text": "x",
+                "_omit_title_heading": True,
+                "blocks": [_table_block([[]])],
+            }
+        ]
+    )
+    first = ch["chapter_start_positions"][0]
+    idx = ch["chunk_positions"].index(first)
+    assert ch["all_chunks"][idx]["type"] == "text"
+
+
+@pytest.mark.unit
+def test_row_groups_open_and_close_in_order():
+    block = _table_block([["h"], ["b"], ["f"]])
+    for row, group in zip(block["table"]["rows"], ("head", "body", "foot")):
+        row["group"] = group
+    ch = _content([block])
+    kinds = [(c["type"], c.get("node"), c.get("text")) for c in ch["all_chunks"]]
+    assert kinds[1:] == [
+        ("open", "table", None),
+        ("open", "head", None),
+        ("open", "row", None),
+        ("text", None, "h"),
+        ("close", None, None),
+        ("close", None, None),
+        ("open", "body", None),
+        ("open", "row", None),
+        ("text", None, "b"),
+        ("close", None, None),
+        ("close", None, None),
+        ("open", "foot", None),
+        ("open", "row", None),
+        ("text", None, "f"),
+        ("close", None, None),
+        ("close", None, None),
+        ("close", None, None),
+    ]
+
+
+@pytest.mark.unit
+def test_table_open_keeps_only_its_own_anchor_keys():
+    block = _table_block([["a"]], own_keys=("k_tbl", "k_row", "k_cell"))
+    block["table"]["rows"][0]["anchor_keys"] = ["k_row"]
+    block["table"]["rows"][0]["cells"][0]["anchor_keys"] = ["k_cell"]
+    ch = _content([block])
+    table_open = next(c for c in ch["all_chunks"] if c.get("node") == "table")
+    assert table_open["anchor_keys"] == ["k_tbl"]
+    assert table_open["anchor_offsets"] == {"k_tbl": 0}
+
+
+def _storyline(tmp_path, blocks):
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    gen.generate_full_book(
+        "T",
+        "A",
+        [{"title": "Chapter", "text": "x", "blocks": blocks}],
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    story = [f for f in frags if str(f.ftype) == "$259"][-1]
+    styles = {str(f.fid): val(f) for f in frags if str(f.ftype) == "$157"}
+    return val(story)["$146"], styles
+
+
+@pytest.mark.unit
+def test_table_nests_like_amazons_minimal_table(tmp_path):
+    top, styles = _storyline(
+        tmp_path,
+        [{"text": "Before.", "spans": []}, _table_block([["a1", "b1"], ["a2", "b2"]])],
+    )
+    table = top[2]
+    assert str(table["$159"]) == "$278"
+    assert table["$150"] is False
+    assert [str(k) for k in table] == [
+        "$155",
+        "$159",
+        "$157",
+        "$150",
+        "$456",
+        "$457",
+        "$146",
+    ]
+    (body,) = table["$146"]
+    assert str(body["$159"]) == "$454" and set(map(str, body)) == {
+        "$155",
+        "$159",
+        "$146",
+    }
+    rows = body["$146"]
+    assert [str(r["$159"]) for r in rows] == ["$279", "$279"]
+    assert all(set(map(str, r)) == {"$155", "$159", "$146"} for r in rows)
+    cell = rows[0]["$146"][0]
+    assert str(cell["$159"]) == "$269" and "$145" in cell
+    cell_style = styles[str(cell["$157"])]
+    assert str(cell_style["$633"]) == "$320"
+    table_style = styles[str(table["$157"])]
+    assert table_style["$83"] == 4286611584
+
+
+@pytest.mark.unit
+def test_790_goes_on_the_first_leaf_not_a_container(tmp_path):
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    gen.generate_full_book(
+        "T",
+        "A",
+        [
+            {
+                "title": "Chapter",
+                "text": "x",
+                "_omit_title_heading": True,
+                "blocks": [_table_block([["a"]])],
+            }
+        ],
+        output_path=str(out),
+    )
+    story = [f for f in load_fragments(out) if str(f.ftype) == "$259"][-1]
+    carriers = [e for e in iter_entries(val(story)["$146"]) if "$790" in e]
+    assert len(carriers) == 1 and str(carriers[0]["$159"]) == "$269"
+
+
+@pytest.mark.unit
+def test_header_colspan_rowspan_reach_the_cell_style(tmp_path):
+    block = _table_block([["H"], ["a"]])
+    block["table"]["rows"][0]["group"] = "head"
+    head = block["table"]["rows"][0]["cells"][0]
+    head.update(header=True, colspan=2)
+    block["table"]["rows"][1]["cells"][0]["rowspan"] = 2
+    top, styles = _storyline(tmp_path, [block])
+    table = next(e for e in top if str(e["$159"]) == "$278")
+    head_group, body = table["$146"]
+    assert (str(head_group["$159"]), str(body["$159"])) == ("$151", "$454")
+    h = styles[str(head_group["$146"][0]["$146"][0]["$157"])]
+    assert h["$148"] == 2 and str(h["$13"]) == "$361" and str(h["$34"]) == "$320"
+    b = styles[str(body["$146"][0]["$146"][0]["$157"])]
+    assert b["$149"] == 2 and "$148" not in b
