@@ -753,10 +753,14 @@ def _table_block(table, style_resolver=None, base_href=None):
                 if not text:
                     carry.extend(ids)
                 else:
+                    # Styled like any paragraph, as the row path styles it.
+                    css = style_resolver(child) if style_resolver is not None else None
                     caption = {
                         "text": text,
                         "spans": spans,
-                        "block_style": None,
+                        "block_style": compute_block_style(css)
+                        if css is not None
+                        else None,
                         "anchor_ids": ids,
                         "anchor_offsets": {a: marks.get(a, 0) for a in ids},
                     }

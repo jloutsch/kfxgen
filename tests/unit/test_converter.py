@@ -4056,3 +4056,26 @@ def test_a_link_to_an_anchor_after_a_files_last_native_table_resolves(tmp_path):
         ("Two", f'<p>Table.</p>{_ISSUE_219_TABLE}<a id="eof"></a>'),
     )
     assert _book_link_target_kinds(oeb, tmp_path) == ["$279"]
+
+
+@pytest.mark.unit
+def test_a_caption_keeps_its_css_block_style():
+    # I2: the caption is an ordinary paragraph and takes its style from CSS
+    # like any other, or a centred caption comes out justified.
+    from kfxgen.inline_style import compute_block_style
+
+    css = {"text-align": "center"}
+    caption, _, _ = _block(
+        f"<table><caption>Harbour lamps</caption>{_ISSUE_219_TABLE[7:]}",
+        style_resolver=lambda e: css,
+    )
+    assert caption["block_style"] == compute_block_style(css)
+    assert caption["block_style"]["align"] == "center"
+
+
+@pytest.mark.unit
+def test_a_caption_without_a_resolver_has_no_block_style():
+    caption, _, _ = _block(
+        f"<table><caption>Harbour lamps</caption>{_ISSUE_219_TABLE[7:]}"
+    )
+    assert caption["block_style"] is None
