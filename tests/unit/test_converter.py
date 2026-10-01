@@ -4527,3 +4527,37 @@ def test_ids_before_a_table_with_an_empty_caption_go_on_the_table():
     )
     assert captions == []
     assert table["table"]["anchor_ids"] == ["pre", "cp"]
+
+
+@pytest.mark.unit
+def test_row_groups_are_written_head_body_foot_whatever_the_source_order():
+    # QA-4: an HTML4-style <tfoot> before <tbody> came out between the head
+    # and the body. Browsers draw it last; so does the Kindle now.
+    _, chunks = _chapter_texts(
+        "Tides",
+        "<table><thead><tr><th>H</th></tr></thead>"
+        "<tfoot><tr><td>F</td></tr></tfoot>"
+        "<tbody><tr><td>B1</td></tr></tbody>"
+        "<tbody><tr><td>B2</td></tr></tbody></table>",
+        native=True,
+    )
+    groups = [c["node"] for c in chunks if c.get("node") in ("head", "body", "foot")]
+    assert groups == ["head", "body", "foot"]
+    assert _cell_rows(chunks) == [["H"], ["B1"], ["B2"], ["F"]]
+
+
+@pytest.mark.unit
+def test_a_moved_footer_keeps_its_anchors():
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<table><tfoot id="f"><tr><td id="fc">F</td></tr></tfoot><a id="n"></a>'
+            '<tbody><tr id="b"><td>B</td></tr></tbody></table>'
+        ),
+        native_tables=True,
+    )
+    rows = blocks[0]["table"]["rows"]
+    assert [r["group"] for r in rows] == ["body", "foot"]
+    assert rows[0]["anchor_ids"] == ["n", "b"]
+    assert rows[1]["anchor_ids"] == ["f"]
+    assert rows[1]["cells"][0]["anchor_ids"] == ["fc"]
+    assert blocks[0]["text"] == "B\nF"

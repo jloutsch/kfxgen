@@ -200,6 +200,7 @@ The whole branch stays unmerged until a sideloaded A/B pair passes on all three 
 - **`colspan` or `rowspan` values** that are malformed, zero or over 1,000. Clamp them to 1–1,000.
 - **A `rowspan` past its row group's last row.** Clamp it to the rows left in the group, counting from the cell's row, as HTML does. Rows directly in the table count as a group of their own.
 - **A `colspan` wider than the table.** Left as is, up to HTML's own maximum of 1,000: the Kindle gets the value the source wrote. Neither corpus has one more than 7 columns past its table's width.
+- **A `<tfoot>` before `<tbody>`** (HTML4 allowed it). Row groups are written head, then body, then foot, whatever the source order, as a browser draws them; rows of one kind keep their order. Anchors are placed in source order first and move with their rows. Neither corpus has this shape.
 - **A row with fewer cells than its neighbours.** Emit what's there; the Kindle lays it out.
 - **A table inside a list item** that carries a list marker. The marker waits for the next text block (`_take_marker` only touches text blocks).
 - **Very wide tables.** Without the table viewer, behaviour is unknown, and the device gate includes one.

@@ -736,6 +736,7 @@ def _table_is_native(table):
 
 
 _ROW_GROUPS = {"thead": "head", "tbody": "body", "tfoot": "foot"}
+_ROW_GROUP_ORDER = {"head": 0, "body": 1, "foot": 2}
 
 
 def _span_attr(cell, name):
@@ -828,6 +829,11 @@ def _table_block(table, style_resolver=None, base_href=None):
         clamp_rowspans(run)
 
     take(table, "body")
+    # Head, then body, then foot, whatever the source order: an HTML4-style
+    # <tfoot> before <tbody> is drawn last by a browser. Stable, so rows of
+    # one kind keep their order. Anchors were placed in source order and
+    # travel with their rows. (#219)
+    rows.sort(key=lambda r: _ROW_GROUP_ORDER[r["group"]])
     own = _own_anchor_ids(table)
     every = _dedupe_keep_order(
         own
