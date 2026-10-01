@@ -780,10 +780,12 @@ def _table_block(table, style_resolver=None, base_href=None):
     rows, carry, captions = [], [], []
 
     def clamp_rowspans(group_rows):
-        """A rowspan ends at its row group's last row, as HTML ends it."""
-        for i, row in enumerate(group_rows):
+        """A rowspan ends at its row group's last row, as HTML ends it.
+        Only rows with cells count: the generator writes no other row."""
+        written = [r for r in group_rows if r["cells"]]
+        for i, row in enumerate(written):
             for cell in row["cells"]:
-                cell["rowspan"] = min(cell["rowspan"], len(group_rows) - i)
+                cell["rowspan"] = min(cell["rowspan"], len(written) - i)
 
     def take(container, group):
         nonlocal carry

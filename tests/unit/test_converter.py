@@ -4653,3 +4653,22 @@ def test_a_title_split_over_a_leading_tfoot_and_the_body_is_eaten():
     rows_build, _ = _chapter_texts("CHAPTER I. The Title", body, native=False)
     assert _words(native) == _words(rows_build)
     assert _cell_rows(chunks) == [["a"]]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "middle", ["<tr></tr><tr></tr>", '<tr><a id="x"></a></tr>'], ids=["empty", "anchor"]
+)
+def test_rowspan_clamp_counts_only_rows_the_generator_writes(middle):
+    # Round 1, M2: a row with no cells is never written, so it cannot hold a
+    # spanned cell; counting it left a span past the last row written.
+    _, table, _ = _block(
+        f"<table><tbody><tr><td rowspan='5'>a</td><td>b</td></tr>{middle}"
+        "</tbody></table>"
+    )
+    assert table["table"]["rows"][0]["cells"][0]["rowspan"] == 1
+    _, table, _ = _block(
+        f"<table><tbody><tr><td rowspan='5'>a</td></tr>{middle}<tr><td>c</td></tr>"
+        "</tbody></table>"
+    )
+    assert table["table"]["rows"][0]["cells"][0]["rowspan"] == 2
