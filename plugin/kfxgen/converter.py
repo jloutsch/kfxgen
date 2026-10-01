@@ -829,6 +829,20 @@ def _table_block(table, style_resolver=None, base_href=None):
     return caption, block, carry
 
 
+def _table_start_ids(table_block):
+    """Ids that name a native table's start: its own, and those of its first
+    row and that row's first cell. A cell-less row is skipped on output and
+    its ids move to the next row, so they count too. (#219)"""
+    tbl = table_block["table"]
+    start = set(tbl["anchor_ids"])
+    for row in tbl["rows"]:
+        start.update(row["anchor_ids"])
+        if row["cells"]:
+            start.update(row["cells"][0]["anchor_ids"])
+            break
+    return start
+
+
 #: Semantics that make an element a note reference, a back-link, or one note,
 #: by epub:type, ARIA role, or the classes Python-Markdown's footnotes
 #: extension writes. A note *section* (epub:type footnotes/endnotes, a
@@ -1236,6 +1250,7 @@ def extract_blocks_from_html(
     nav_listing_at=None,
     tables_seen=None,
     native_tables=False,
+    toc_targets=None,
 ):
     """Like extract_text_from_html but returns structured blocks:
     [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None,
@@ -1261,6 +1276,12 @@ def extract_blocks_from_html(
     `{"type": "table"}` block (#219); otherwise each row is its own paragraph.
     A table that is not eligible still falls back to rows, and only those
     count toward `tables_seen`.
+
+    `toc_targets`: the fragment ids this file's TOC entries name. A chapter
+    is a range of blocks and a native table is one block, so a TOC entry
+    pointing past a table's start (its own id, an anchor just before it, its
+    first row or first cell) cannot start a chapter there. Such a table falls
+    back to rows, which keeps 5.8.8's chapters. (#219)
 
     `base_href` is the spine file this markup came from. It qualifies both
     sides of an in-book link: `anchor_keys` are the block's ids as
@@ -1441,8 +1462,14 @@ def extract_blocks_from_html(
             )
             return
 
-        if native_tables and _local_tag(elem.tag) == "table" and _table_is_native(elem):
+        native = (
+            native_tables and _local_tag(elem.tag) == "table" and _table_is_native(elem)
+        )
+        if native:
             caption, table, trailing = _table_block(elem, style_resolver, base_href)
+            past_start = set(table["anchor_ids"]) - _table_start_ids(table)
+            native = not (toc_targets and past_start & set(toc_targets))
+        if native:
             if caption is not None:
                 ids = pending_ids[:] + caption["anchor_ids"]
                 pending_ids.clear()
@@ -2134,6 +2161,17 @@ def extract_chapters_from_oeb(
     spine_items_ordered = []
     table_blocks = []  # (href, first block) per table, for the #219 warning
 
+    toc_entries = _extract_toc_with_hrefs(oeb_book, log)
+    # Fragment ids the TOC names, per file, matched the way chapter assembly
+    # matches them, so a table holding one past its start keeps rows. (#219)
+    toc_targets = {}
+    for entry in toc_entries:
+        frag = _href_fragment(entry["href"])
+        if frag:
+            toc_targets.setdefault(_normalize_href(entry["href"]), set()).update(
+                (frag, unquote(frag))
+            )
+
     log.info(f"Processing {len(oeb_book.spine)} spine items...")
 
     for i, item in enumerate(oeb_book.spine):
@@ -2156,6 +2194,7 @@ def extract_chapters_from_oeb(
             resolver = _build_style_resolver(oeb_book, item, log)
             nav_listing_at = []
             tables_seen = []
+            note_ids = _note_target_ids(item.data)
             blocks = extract_blocks_from_html(
                 item.data,
                 style_resolver=resolver,
@@ -2163,6 +2202,11 @@ def extract_chapters_from_oeb(
                 nav_listing_at=nav_listing_at,
                 tables_seen=tables_seen,
                 native_tables=native_tables,
+                # Assembly skips entries naming a footnote; so does this.
+                toc_targets=toc_targets.get(
+                    _normalize_href(getattr(item, "href", "") or ""), set()
+                )
+                - note_ids,
             )
             text = "\n\n".join(b["text"] for b in blocks)
         except Exception as e:
@@ -2185,7 +2229,7 @@ def extract_chapters_from_oeb(
                 "text": text,
                 "blocks": blocks,
                 "nav_listing_at": nav_listing_at,
-                "note_ids": _note_target_ids(item.data),
+                "note_ids": note_ids,
             }
         )
         table_blocks.extend((href, b) for b in tables_seen)
@@ -2200,9 +2244,6 @@ def extract_chapters_from_oeb(
         raise ValueError(
             "No spine items with extractable text — EPUB has no convertible content"
         )
-
-    # Try to extract TOC with hrefs
-    toc_entries = _extract_toc_with_hrefs(oeb_book, log)
 
     if toc_entries:
         chapters = _assemble_chapters_by_coordinate(

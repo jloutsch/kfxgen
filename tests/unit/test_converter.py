@@ -3979,8 +3979,9 @@ def test_anchor_keys_reach_rows_and_cells():
 
 @pytest.mark.unit
 def test_toc_entries_into_one_table_do_not_make_empty_chapters():
-    # Review Focus 1: several TOC entries pointing at rows of one native table
-    # all resolve to the table's block, so they must not produce empty chapters.
+    # Review Focus 1: several TOC entries pointing at rows of one table must
+    # not produce empty chapters. Entries past the table's start make it fall
+    # back to rows (I4), so each entry keeps a chapter of its own.
     notes = (
         "<p>Notes intro.</p><table>"
         + "".join(
@@ -3993,6 +3994,21 @@ def test_toc_entries_into_one_table_do_not_make_empty_chapters():
     oeb.toc = oeb.toc + [_TOCNode(f"{n}", f"ch1.xhtml#n{n}") for n in (1, 2, 3)]
     chapters = extract_chapters_from_oeb(oeb, _silent_log(), native_tables=True)
     assert all(c.get("blocks") or c.get("text", "").strip() for c in chapters)
+    assert [c["title"] for c in chapters] == ["Chapter One", "Notes", "1", "2", "3"]
+    tables = [
+        b for c in chapters for b in c.get("blocks") or () if b.get("type") == "table"
+    ]
+    assert tables == []
+
+
+@pytest.mark.unit
+def test_toc_entries_at_one_tables_start_collapse_onto_it():
+    # Entries naming the table, its first row and its first cell all resolve
+    # to the table's block: one chapter, no empty ones, and the table native.
+    oeb = _notes_book(["t", "n1", "c1"])
+    chapters = extract_chapters_from_oeb(oeb, _silent_log(), native_tables=True)
+    assert all(c.get("blocks") or c.get("text", "").strip() for c in chapters)
+    assert [c["title"] for c in chapters] == ["Chapter One", "Notes", "Note t"]
     tables = [
         b for c in chapters for b in c.get("blocks") or () if b.get("type") == "table"
     ]
@@ -4142,3 +4158,61 @@ def test_markup_only_the_row_path_honours_falls_back(html):
 )
 def test_ordinary_whitespace_and_anchors_stay_native(html):
     assert _conv._table_is_native(_first_table(html))
+
+
+def _notes_book(toc_ids):
+    """A chapter, then a notes table with a TOC entry per id in `toc_ids`."""
+    rows = "".join(
+        f'<tr id="n{n}"><td id="c{n}">{n}.</td><td>Note {n}.</td></tr>'
+        for n in (1, 2, 3)
+    )
+    notes = f'<p>Notes intro.</p><a id="before"></a><table id="t">{rows}</table>'
+    oeb = _contents_book(("Chapter One", "<p>One.</p>"), ("Notes", notes))
+    oeb.toc = oeb.toc + [_TOCNode(f"Note {i}", f"ch1.xhtml#{i}") for i in toc_ids]
+    return oeb
+
+
+def _titles_and_tables(oeb, native):
+    chapters = extract_chapters_from_oeb(oeb, _silent_log(), native_tables=native)
+    tables = sum(
+        1 for c in chapters for b in c.get("blocks") or () if b.get("type") == "table"
+    )
+    return [c["title"] for c in chapters], tables
+
+
+@pytest.mark.unit
+def test_a_table_with_toc_entries_inside_falls_back_to_rows():
+    # I4: a chapter is a block range and a native table is one block, so a
+    # second TOC entry into it was dropped and the rows before it moved under
+    # its title. Such a table keeps rows, and the TOC 5.8.8 gave.
+    oeb = _notes_book(["n2", "n3"])
+    off = _titles_and_tables(oeb, native=False)
+    on = _titles_and_tables(oeb, native=True)
+    assert off == (["Chapter One", "Notes", "Note n2", "Note n3"], 0)
+    assert on == off
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("target", ["t", "n1", "c1", "before"])
+def test_a_toc_entry_at_the_tables_start_keeps_it_native(target):
+    # Its start: the table's own id, its first row's or first cell's, or an
+    # anchor just before it that carries into it.
+    titles, tables = _titles_and_tables(_notes_book([target]), native=True)
+    assert titles == ["Chapter One", "Notes", f"Note {target}"]
+    assert tables == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "targets, native",
+    [(None, True), ({"t"}, True), ({"r1", "c1"}, True), ({"r2"}, False)],
+)
+def test_toc_targets_past_a_tables_start_keep_rows(targets, native):
+    html = (
+        '<table id="t"><tr id="r1"><td id="c1">a</td><td id="c2">b</td></tr>'
+        '<tr id="r2"><td>c</td><td>d</td></tr></table>'
+    )
+    blocks = _conv.extract_blocks_from_html(
+        _doc(html), native_tables=True, toc_targets=targets
+    )
+    assert any(b.get("type") == "table" for b in blocks) is native
