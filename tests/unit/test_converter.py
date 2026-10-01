@@ -4079,3 +4079,66 @@ def test_a_caption_without_a_resolver_has_no_block_style():
         f"<table><caption>Harbour lamps</caption>{_ISSUE_219_TABLE[7:]}"
     )
     assert caption["block_style"] is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html",
+    [
+        '<table><tr><td>a</td></tr><tr hidden="hidden"><td>SECRET</td></tr></table>',
+        '<table><tbody hidden="hidden"><tr><td>SECRET</td></tr></tbody>'
+        "<tbody><tr><td>a</td></tr></tbody></table>",
+        '<table><tr><td>a</td><td hidden="hidden">SECRET</td></tr></table>',
+        '<table><tr epub:type="page-list"><td>1</td></tr><tr><td>a</td></tr></table>',
+        '<table><tr><td>a</td></tr><tr class="toc"><td>Listing</td></tr></table>',
+        "<table><tr>LOOSE<td>a</td></tr></table>",
+        "<table><tr><td>a</td>between<td>b</td></tr></table>",
+        "<table><form><tr><td>a</td></tr></form><tr><td>b</td></tr></table>",
+        "<table><tbody>stray<tr><td>a</td></tr></tbody></table>",
+        "<table>loose<tr><td>a</td></tr></table>",
+        "<table><tr><td>a</td></tr>after a row<tr><td>b</td></tr></table>",
+        '<table><tr><td>a</td></tr><a id="x"></a>after an anchor<tr><td>b</td></tr>'
+        "</table>",
+    ],
+    ids=[
+        "hidden-tr",
+        "hidden-tbody",
+        "hidden-td",
+        "page-list-tr",
+        "toc-class-tr",
+        "text-in-tr",
+        "text-between-cells",
+        "tr-under-form",
+        "stray-text-in-tbody",
+        "text-in-table",
+        "text-after-a-row",
+        "text-after-an-anchor",
+    ],
+)
+def test_markup_only_the_row_path_honours_falls_back(html):
+    # I3: the native path walks rows and cells directly, so it would show
+    # what the row path hides and drop text the row path keeps.
+    assert not _conv._table_is_native(_first_table(html))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html",
+    [
+        "<table>\n  <tr><td>a</td></tr>\n  <tr><td>b</td></tr>\n</table>",
+        "<table>\n<tbody>\n<tr>\n<td>a</td>\n<td>b</td>\n</tr>\n</tbody>\n</table>",
+        '<table><tr><td>a</td></tr>\n<a id="n1"></a>\n<tr><td>b</td></tr>'
+        '<a id="n2"></a></table>',
+        "<table><caption>Lamps</caption>\n<tr><td>a</td></tr></table>",
+        '<table><tr><td>a <span hidden="hidden">x</span></td></tr></table>',
+    ],
+    ids=[
+        "whitespace-between-rows",
+        "whitespace-everywhere",
+        "anchors-between-rows",
+        "caption",
+        "hidden-inline-in-a-cell",
+    ],
+)
+def test_ordinary_whitespace_and_anchors_stay_native(html):
+    assert _conv._table_is_native(_first_table(html))

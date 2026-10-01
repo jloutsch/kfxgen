@@ -661,6 +661,12 @@ def _table_is_native(table):
     Anything else keeps rows as paragraphs: a nested table, an image or other
     object, a cell holding more than one block, a cell longer than the
     generator's chunk size, a cell outside a row, or no rows or cells at all.
+
+    Also anything the row path handles and the native walk would not: a
+    hidden or contents-listing row, row group or cell (the row path drops it;
+    native would show it), a row outside table/thead/tbody/tfoot, or text
+    loose in the table, a row group or a row, before or between its children
+    (the row path keeps it; native would lose it).
     """
     rows = 0
     cells = 0
@@ -668,7 +674,15 @@ def _table_is_native(table):
         tag = _local_tag(e.tag)
         if tag is None:
             continue
+        if tag in _ROW_GROUP_TAGS or tag == "tr" or tag in _CELL_TAGS:
+            if e is not table and (_is_non_rendered(e) or _is_nav_listing(e)):
+                return False
+        if tag in _ROW_GROUP_TAGS or tag == "tr":
+            if (e.text or "").strip() or any((c.tail or "").strip() for c in e):
+                return False
         if tag == "tr":
+            if _local_tag(e.getparent().tag) not in _ROW_GROUP_TAGS:
+                return False
             rows += 1
         elif tag == "table" and e is not table:
             return False
