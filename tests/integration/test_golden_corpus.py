@@ -68,16 +68,17 @@ EXPECTED_DIR = Path(__file__).parent.parent / "fixtures" / "golden" / "expected"
 from tests._helpers import NullLog as _NullLog  # noqa: E402
 
 
-def _build_fresh(name: str, builder, work_dir: Path) -> bytes:
+def _build_fresh(name: str, builder, work_dir: Path, opts=None) -> bytes:
     """Run the same pipeline regenerate.py uses. Kept in lockstep with
     `tests/fixtures/golden/regenerate.py::build_kfx` — divergence here
-    means the test no longer reproduces the regenerate path."""
+    means the test no longer reproduces the regenerate path. `opts` is for
+    the one golden built with a non-default option (`table_cells_rows`)."""
     out_dir = work_dir / name
     out_dir.mkdir(parents=True, exist_ok=True)
     epub_path = builder(out_dir)
     oeb = EpubAsOeb(epub_path)
     kfx_path = out_dir / f"{name}.kfx"
-    converter.convert_oeb_to_kfx(oeb, str(kfx_path), opts=None, log=_NullLog())
+    converter.convert_oeb_to_kfx(oeb, str(kfx_path), opts=opts, log=_NullLog())
     return kfx_path.read_bytes()
 
 
@@ -202,6 +203,29 @@ def test_golden_byte_identical(name, builder, tmp_path):
         f"Run `pytest -m tier3` to see what changed at the structural level. "
         f"To accept intentional changes: regenerate goldens."
     )
+
+
+@pytest.mark.tier3_strict
+@pytest.mark.integration
+def test_native_tables_opt_out_is_byte_identical_to_5_8_8(tmp_path):
+    """With `kfxgen_disable_native_tables`, `table_cells` must come out
+    byte-for-byte as v5.8.8 wrote it (#219). `table_cells_rows.kfx` is
+    v5.8.8's own `table_cells.kfx`, copied from the v5.8.8 tag, and
+    regenerate.py never writes it: it pins the opt-out to the release,
+    not to whatever this branch last produced."""
+    import hashlib
+    from types import SimpleNamespace
+
+    from tests.fixtures.golden.inputs import make_table_cells
+
+    fresh = _build_fresh(
+        "table_cells",
+        make_table_cells,
+        tmp_path,
+        opts=SimpleNamespace(kfxgen_disable_native_tables=True),
+    )
+    pinned = (EXPECTED_DIR / "table_cells_rows.kfx").read_bytes()
+    assert hashlib.sha256(fresh).hexdigest() == hashlib.sha256(pinned).hexdigest()
 
 
 # ---------------------------------------------------------------------------
