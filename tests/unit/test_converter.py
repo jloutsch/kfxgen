@@ -4255,3 +4255,32 @@ def test_a_non_row_element_in_a_table_or_row_group_falls_back(html, native):
     # The native walk reads only rows, row groups, the caption and empty
     # anchors there; anything else would lose its text. (#219)
     assert _conv._table_is_native(_first_table(html)) is native
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html",
+    [
+        "<table><tr><p>lost</p><td>a</td></tr></table>",
+        "<table><tr><span>lost</span><td>a</td></tr></table>",
+        '<table><caption hidden="hidden">SECRET</caption><tr><td>a</td></tr></table>',
+        "<table><caption>One</caption><caption>Two</caption><tr><td>a</td></tr>"
+        "</table>",
+    ],
+    ids=["p-in-tr", "span-in-tr", "hidden-caption", "two-captions"],
+)
+def test_row_children_and_captions_the_native_walk_misreads_fall_back(html):
+    # A non-cell element in a row loses its text natively; a hidden caption
+    # would be shown; only the first caption is kept. The row path handles
+    # all three. (#219)
+    assert not _conv._table_is_native(_first_table(html))
+
+
+@pytest.mark.unit
+def test_one_visible_caption_and_an_anchor_between_cells_stay_native():
+    assert _conv._table_is_native(
+        _first_table(
+            "<table><caption>Lamps</caption><!-- note -->"
+            '<tr><td>a</td><a id="x"></a><td>b</td></tr></table>'
+        )
+    )

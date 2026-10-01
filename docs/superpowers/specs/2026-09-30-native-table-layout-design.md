@@ -108,9 +108,11 @@ $278 {$155 eid, $157 tableStyle, $150 false, $456 {0.9 $318}, $457 {0.9 $318}, $
 - a `<tr>` whose parent is not `table`, `thead`, `tbody` or `tfoot`;
 - text loose in the table, a row group or a row, before or between its children;
 - an element directly in the table or a row group other than `tr`, `thead`, `tbody`, `tfoot`, `caption`, `col`, `colgroup` or an empty anchor, such as a `<p>`;
+- an element directly in a row other than a cell or an empty anchor, such as a `<span>`;
+- a hidden caption (native would show it), or more than one caption (native keeps only the first);
 - a TOC entry that targets the table anywhere but its start. The start is the table's own id, an anchor just before it, its first row's ids and its first cell's ids. `extract_chapters_from_oeb` passes each file's TOC fragment ids to `extract_blocks_from_html` as `toc_targets`.
 
-The middle four rules keep text the native walk would otherwise lose or hidden content it would show. The last keeps 5.8.8's chapters: a chapter is a range of blocks, and a native table is one block.
+The hidden-content, `<tr>`-parent, loose-text, element-child and caption rules keep text the native walk would otherwise lose, or hidden content it would show. The TOC rule keeps 5.8.8's chapters: a chapter is a range of blocks, and a native table is one block.
 
 A caption is emitted as its own paragraph block just before the table.
 

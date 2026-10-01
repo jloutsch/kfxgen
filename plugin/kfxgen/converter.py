@@ -669,10 +669,13 @@ def _table_is_native(table):
     native would show it), a row outside table/thead/tbody/tfoot, or text
     loose in the table, a row group or a row, before or between its children,
     or any other element directly in the table or a row group, such as a
-    `<p>` (the row path keeps it; native would lose it).
+    `<p>`, or in a row other than a cell or empty anchor (the row path keeps
+    it; native would lose it). Likewise a hidden caption, which native would
+    show, or a second caption, which native would drop.
     """
     rows = 0
     cells = 0
+    captions = 0
     for e in table.iter():
         tag = _local_tag(e.tag)
         if tag is None:
@@ -690,8 +693,23 @@ def _table_is_native(table):
             for c in e
         ):
             return False
+        if tag == "caption":
+            # A hidden caption would be shown; only the first is kept.
+            if _is_non_rendered(e):
+                return False
+            captions += 1
+            if captions > 1:
+                return False
         if tag == "tr":
             if _local_tag(e.getparent().tag) not in _ROW_GROUP_TAGS:
+                return False
+            # Only cells and empty anchors are read from a row.
+            if any(
+                isinstance(c.tag, str)
+                and _local_tag(c.tag) not in _CELL_TAGS
+                and not _is_empty_anchor(c)
+                for c in e
+            ):
                 return False
             rows += 1
         elif tag == "table" and e is not table:
