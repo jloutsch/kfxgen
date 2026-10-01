@@ -14,24 +14,33 @@ This builds a controlled pair: one source text, converted twice.
     "Table Gate Rows"     `kfxgen_disable_native_tables = True`, the 5.8.8 shape
 
 The titles differ so the two files get different ASINs and neither replaces the
-other on the device. Six chapters, each a different table shape:
+other on the device. Eight chapters, each a different table shape:
 
-    1  plain 3x4 table of numbers; also holds the 10 note links and a link
-       into a cell of chapter 6
+    1  plain 3x4 table of numbers; also holds the 10 note links, a link into
+       a cell of chapter 6, and the links to chapters 7 and 8
     2  <thead>, colspan, rowspan
     3  60 rows (page turns forward and back through a long table)
     4  8 columns of 3-5 words (wide: does it fit, wrap, or pan?)
     5  notes table in calibre's MOBI-to-EPUB layout: each `<a id="nN">` sits
        AFTER its own `<tr>`; the 10 links come from chapter 1
-    6  the TOC entry points at a cell id, and a body link elsewhere points at
-       another cell
+    6  the TOC entry points at the first cell's id, and a body link elsewhere
+       points at a cell in row 8. (A TOC entry past a table's start makes
+       that table fall back to rows, so the entry names the start.)
+    7  table-level link targets: `<a id="before">` just before a table with
+       `id="tbl"`. Chapter 1 links to `#before` and to `#tbl`.
+    8  a separate file whose first block is a table; chapter 1 links to the
+       whole file. kfxgen writes the three table-level targets (7's two, 8's
+       file) on the table's first row (`$279`), never on the `$278`; each
+       should land at that row.
 
 Decision table, per device (Voyage 5.13.6, Oasis 5.18.2, Paperwhite 5.19.2;
 read the firmware off each device):
 
-    TOC button missing, or TOC jumps break, on the Native file
-        -> stop. Do not merge. Post on #219 with device and firmware. Next
-           step is a narrower spike: one table, no row groups.
+    TOC button missing, TOC jumps break, or any body link (notes, cell,
+    chapters 7 and 8) does nothing or lands on the wrong page, on the Native file
+        -> stop. Leave the branch unmerged; 5.8.8's rows stay. Post on #219
+           with device and firmware. Next step is a narrower spike: one
+           table, no row groups.
     Native tables render on every device, all checks pass
         -> record the result below, add `native_tables` to
            tests/device/checklist.py, continue.
@@ -43,15 +52,15 @@ read the firmware off each device):
         -> the opt-out is not byte-faithful to 5.8.8. Investigate before
            anything else.
 
-Per device, record for both files: TOC button present; each of the 6 TOC
+Per device, record for both files: TOC button present; each of the 8 TOC
 entries opens at its chapter start (chapter 6 opens at the top of its table,
-because the converter starts the chapter at the table holding the targeted
-cell, with the chapter title repeated above it); tables show rows and columns
+with the chapter title above it); tables show rows and columns
 with the header row distinct and colspan/rowspan cells spanning; wide table
 readable (fits / wraps / pan-zoom: say which); long table pages through all 60
 rows both ways; progress rises and is never stuck at 0% or 100%; each of the
 10 note links opens the page holding its own note; the link into a cell lands
-on the page with that row.
+on the page with that row; the links to `#before`, `#tbl` and the whole file
+each land on the page with the first row of the table they name.
 
     .venv/bin/python research/make_table_sideload.py [out_dir]
 
@@ -83,6 +92,11 @@ LONG_TABLE_ROWS = 60
 TOC_CELL_ID = "toc-cell"
 LINK_CELL_ID = "link-cell"
 
+#: Chapter 7's table-level link targets, and the file that opens with a table.
+BEFORE_ID = "before"
+TABLE_ID = "tbl"
+TABLE_FIRST_FILE = "chapter_8.xhtml"
+
 _FILLER = (
     "The keeper walked the harbour wall at dusk and counted the lamps that "
     "still burned. Rope creaked against the bollards. Somewhere beyond the "
@@ -97,6 +111,8 @@ _TITLES = [
     "4. Wide table",
     "5. Notes table",
     "6. Table with cell targets",
+    "7. Table link targets",
+    "8. File opening with a table",
 ]
 
 _WIDE_CELLS = [
@@ -190,7 +206,7 @@ def _notes():
 def _cells_table():
     rows = []
     for r in range(1, 11):
-        a = f' id="{TOC_CELL_ID}"' if r == 6 else ""
+        a = f' id="{TOC_CELL_ID}"' if r == 1 else ""
         b = f' id="{LINK_CELL_ID}"' if r == 8 else ""
         rows.append(f"<tr><td{a}>Row {r} left</td><td{b}>Row {r} right</td></tr>")
     return _table(rows)
@@ -203,10 +219,39 @@ def _chapter_one():
         for n in range(1, NOTES + 1)
     )
     cell_link = (
-        f'<p>See <a href="chapter_6.xhtml#{LINK_CELL_ID}">row 8 of the last '
-        "table</a>.</p>"
+        f'<p>See <a href="chapter_6.xhtml#{LINK_CELL_ID}">row 8 of the '
+        "chapter 6 table</a>.</p>"
     )
-    return _chapter(1, _plain(), after=links + "\n" + cell_link)
+    table_links = (
+        f'<p>Table targets: <a href="chapter_7.xhtml#{BEFORE_ID}">before the table</a>,'
+        f' <a href="chapter_7.xhtml#{TABLE_ID}">the table</a>, and'
+        f' <a href="{TABLE_FIRST_FILE}">the file that opens with a table</a>.</p>'
+    )
+    return _chapter(1, _plain(), after="\n".join([links, cell_link, table_links]))
+
+
+def _target_table(label, table_id=""):
+    rows = [
+        _tr([f"{label} row {r} left", f"{label} row {r} right"]) for r in range(1, 9)
+    ]
+    open_tag = f'<table id="{table_id}">' if table_id else "<table>"
+    return "\n".join([open_tag, *rows, "</table>"])
+
+
+def _chapter_seven():
+    return _chapter(
+        7,
+        _target_table("Chapter 7", TABLE_ID),
+        before=f'<a id="{BEFORE_ID}"></a>',
+        table_after=6,
+    )
+
+
+def _table_first_file():
+    """Chapter 8: a spine file whose first block is a table, with no heading
+    of its own; chapter 1 links to the whole file."""
+    body = "\n".join([_target_table("File")] + [_para(8, p) for p in range(1, 4)])
+    return _xhtml_page(_TITLES[7], body)
 
 
 class _Builder(EpubBuilder):
@@ -230,6 +275,8 @@ def build_source(out_dir, title):
         _chapter(4, _wide()),
         _chapter(5, _notes(), table_after=2),
         _chapter(6, _cells_table(), table_after=2),
+        _chapter_seven(),
+        _table_first_file(),
     ]
     builder = _Builder().set_metadata(title=title, author=AUTHOR)
     for name, body in zip(_TITLES, bodies):
@@ -239,12 +286,15 @@ def build_source(out_dir, title):
 
 
 def facts(kfx):
-    """(`$278` tables, `$279` rows, `$269` cells under a row, yj_table version)."""
+    """(`$278` tables, `$279` rows, `$269` cells under a row, yj_table version,
+    {entry kind: body links targeting it})."""
     frags = load_fragments(kfx)
     tables = rows = cells = 0
+    kind_of = {}
     for story in by_type(frags, "$259"):
         for entry in iter_entries(val(story)["$146"]):
             kind = str(entry.get("$159"))
+            kind_of[entry["$155"]] = kind
             if kind == "$278":
                 tables += 1
             elif kind == "$279":
@@ -257,7 +307,12 @@ def facts(kfx):
         for feat in val(f).get("$590") or []:
             if str(feat["$492"]) == "yj_table":
                 version = int(feat["$589"]["version"]["$587"])
-    return tables, rows, cells, version
+    targets = {}
+    for f in by_type(frags, "$266"):
+        if str(val(f)["$180"]).startswith("body_anchor"):
+            kind = kind_of[val(f)["$183"]["$155"]]
+            targets[kind] = targets.get(kind, 0) + 1
+    return tables, rows, cells, version, targets
 
 
 def main():
@@ -279,12 +334,14 @@ def main():
 
     print(f"\nwrote to {out_dir}\n")
     print(
-        f"  {'title':<20} {'author':<12} {'$278':>5} {'$279':>6} {'$269':>6}  yj_table"
+        f"  {'title':<20} {'author':<12} {'$278':>5} {'$279':>6} {'$269':>6}  "
+        "yj_table  body links by target kind"
     )
-    for title, kfx, (tables, rows, cells, version) in results:
+    for title, kfx, (tables, rows, cells, version, targets) in results:
         print(
             f"  {title:<20} {AUTHOR:<12} {tables:>5} {rows:>6} {cells:>6}  "
-            f"{version if version is not None else '-'}"
+            f"{version if version is not None else '-':<8}  "
+            + " ".join(f"{k}:{n}" for k, n in sorted(targets.items()))
         )
     for _, kfx, _ in results:
         print(f"  {kfx.name:<28} {kfx.stat().st_size / 1e3:>8.1f} kB")
@@ -294,7 +351,7 @@ def main():
         "on each device, for both books (see the docstring for the decision table)\n"
         "---------------------------------------------------------------------\n"
         "  1. Read the firmware off the device and write it down.\n"
-        "  2. Open the TOC. Is the button present? Tap each of the 6 entries.\n"
+        "  2. Open the TOC. Is the button present? Tap each of the 8 entries.\n"
         "  3. Ch 1 to 4: tables show rows and columns; ch 2 header row is\n"
         "     distinct and the Year cell spans two header rows, 'Harbour traffic'\n"
         "     spans 3 columns, 1902 spans two rows.\n"
@@ -303,8 +360,14 @@ def main():
         "  6. Ch 1: tap each of the 10 superscript note links. Each should open\n"
         "     the page holding its own note in ch 5. Tap 'row 8' link: it should\n"
         "     land on the page with row 8 of ch 6's table.\n"
-        "  7. Ch 6 TOC entry should open at the top of the table, under the\n     heading '6. Table with cell targets' (it is not expected at row 6).\n"
-        "  8. Progress rises through the book, never stuck at 0% or 100%.\n"
+        "  7. Ch 6 TOC entry should open at the top of the table, under the\n"
+        "     heading '6. Table with cell targets'.\n"
+        "  8. Ch 1: tap 'before the table' and 'the table'. Each should land on\n"
+        "     the page with 'Chapter 7 row 1' (the first row of ch 7's table).\n"
+        "     Tap 'the file that opens with a table': it should land on the page\n"
+        "     with 'File row 1', the top of ch 8. Any of the three doing\n"
+        "     nothing is a navigation failure (see the decision table).\n"
+        "  9. Progress rises through the book, never stuck at 0% or 100%.\n"
     )
     return 0
 
