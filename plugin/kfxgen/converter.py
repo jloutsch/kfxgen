@@ -766,17 +766,20 @@ def _table_cell(cell, style_resolver, base_href):
 
 
 def _table_block(table, style_resolver=None, base_href=None):
-    """A native table as one block, plus its caption and any anchors left over.
+    """A native table as one block, plus its captions and any anchors left over.
 
-    Returns (caption_block or None, table_block, trailing_ids). Anchors between
-    rows follow 5.8.8's rule (`_anchors_follow_rows`): in calibre's notes
-    layout an anchor after a row belongs to that row, otherwise to the next
-    row; anchors with no row left to take them carry past the table. (#219)
+    Returns (caption_elements, table_block, trailing_ids). The caller walks
+    each caption with the ordinary block walker, so it becomes the same
+    paragraphs the rows build writes (5.8.8), however many blocks it holds.
+    Anchors between rows follow 5.8.8's rule (`_anchors_follow_rows`): in
+    calibre's notes layout an anchor after a row belongs to that row,
+    otherwise to the next row; anchors with no row left to take them carry
+    past the table. (#219)
     """
-    rows, carry, caption = [], [], None
+    rows, carry, captions = [], [], []
 
     def take(container, group):
-        nonlocal carry, caption
+        nonlocal carry
         follow = _anchors_follow_rows(container)
         last = None
         for child in container:
@@ -785,27 +788,8 @@ def _table_block(table, style_resolver=None, base_href=None):
                 carry.extend(_own_anchor_ids(child))
                 take(child, _ROW_GROUPS[tag])
                 last = None
-            elif tag == "caption" and caption is None:
-                text, spans, marks = normalize_runs_with_anchors(
-                    _walk_inline(
-                        child, style_resolver=style_resolver, base_href=base_href
-                    )
-                )
-                ids = _dedupe_keep_order(_own_anchor_ids(child) + list(marks))
-                if not text:
-                    carry.extend(ids)
-                else:
-                    # Styled like any paragraph, as the row path styles it.
-                    css = style_resolver(child) if style_resolver is not None else None
-                    caption = {
-                        "text": text,
-                        "spans": spans,
-                        "block_style": compute_block_style(css)
-                        if css is not None
-                        else None,
-                        "anchor_ids": ids,
-                        "anchor_offsets": {a: marks.get(a, 0) for a in ids},
-                    }
+            elif tag == "caption":
+                captions.append(child)
             elif tag == "tr":
                 last = {
                     "group": group,
@@ -854,7 +838,7 @@ def _table_block(table, style_resolver=None, base_href=None):
         "anchor_offsets": dict.fromkeys(every, 0),
         "table": {"anchor_ids": own, "rows": rows},
     }
-    return caption, block, carry
+    return captions, block, carry
 
 
 def _table_start_ids(table_block):
@@ -1494,19 +1478,17 @@ def extract_blocks_from_html(
             native_tables and _local_tag(elem.tag) == "table" and _table_is_native(elem)
         )
         if native:
-            caption, table, trailing = _table_block(elem, style_resolver, base_href)
+            captions, table, trailing = _table_block(elem, style_resolver, base_href)
             past_start = set(table["anchor_ids"]) - _table_start_ids(table)
             native = not (toc_targets and past_start & set(toc_targets))
         if native:
-            if caption is not None:
-                ids = pending_ids[:] + caption["anchor_ids"]
-                pending_ids.clear()
-                caption["anchor_ids"] = _dedupe_keep_order(ids)
-                caption["anchor_offsets"] = {
-                    a: caption["anchor_offsets"].get(a, 0)
-                    for a in caption["anchor_ids"]
-                }
-                blocks.append(caption)
+            # The caption is walked like any block, as the rows build walks
+            # it: each block in it is its own paragraph, with its style and
+            # ids, and anchors carried from before the table land on its
+            # first paragraph. An empty caption leaves its ids pending for
+            # the table's start. (#219)
+            for caption in captions:
+                _walk(caption)
             if pending_ids:
                 # Anchors carried from before the table name its start.
                 table["table"]["anchor_ids"] = _dedupe_keep_order(

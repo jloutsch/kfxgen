@@ -2403,8 +2403,8 @@ def test_a_cell_holding_exactly_one_block_stays_native():
 
 
 def _block(html, **kw):
-    caption, table, trailing = _conv._table_block(_first_table(html), **kw)
-    return caption, table, trailing
+    captions, table, trailing = _conv._table_block(_first_table(html), **kw)
+    return captions, table, trailing
 
 
 def _cells(table):
@@ -2490,10 +2490,10 @@ def test_an_anchor_only_after_the_last_row_carries_past_the_table():
 
 @pytest.mark.unit
 def test_caption_becomes_its_own_paragraph():
-    caption, table, _ = _block(
+    captions, table = _caption_and_table(
         "<table><caption>Census</caption><tr><td>a</td></tr></table>"
     )
-    assert caption["text"] == "Census"
+    assert [b["text"] for b in captions] == ["Census"]
     assert "Census" not in table["text"]
 
 
@@ -2518,21 +2518,27 @@ def test_row_group_own_id_lands_on_its_first_row(group):
 
 @pytest.mark.unit
 def test_caption_own_id_is_on_the_caption_block():
-    caption, table, _ = _block(
+    captions, table = _caption_and_table(
         '<table><caption id="cp">Census <a id="in"></a>now</caption>'
-        "<tr><td>a</td></tr></table>"
+        "<tr><td>a</td></tr></table>",
+        base_href="ch.xhtml",
     )
-    assert caption["anchor_ids"] == ["cp", "in"]
-    assert caption["anchor_offsets"] == {"cp": 0, "in": 7}
+    assert captions[0]["anchor_ids"] == ["cp", "in"]
+    assert captions[0]["anchor_offsets"] == {
+        "ch.xhtml": 0,
+        "ch.xhtml#cp": 0,
+        "ch.xhtml#in": 7,
+    }
 
 
 @pytest.mark.unit
-def test_empty_caption_keeps_its_id_on_the_first_row():
-    caption, table, _ = _block(
+def test_empty_caption_keeps_its_id_at_the_table_start():
+    # The table's own ids go on its first row in the generator.
+    captions, table = _caption_and_table(
         '<table><caption id="cp"></caption><tr><td>a</td></tr></table>'
     )
-    assert caption is None
-    assert table["table"]["rows"][0]["anchor_ids"] == ["cp"]
+    assert captions == []
+    assert table["table"]["anchor_ids"] == ["cp"]
 
 
 @pytest.mark.unit
@@ -4081,20 +4087,20 @@ def test_a_caption_keeps_its_css_block_style():
     from kfxgen.inline_style import compute_block_style
 
     css = {"text-align": "center"}
-    caption, _, _ = _block(
+    captions, _ = _caption_and_table(
         f"<table><caption>Harbour lamps</caption>{_ISSUE_219_TABLE[7:]}",
         style_resolver=lambda e: css,
     )
-    assert caption["block_style"] == compute_block_style(css)
-    assert caption["block_style"]["align"] == "center"
+    assert captions[0]["block_style"] == compute_block_style(css)
+    assert captions[0]["block_style"]["align"] == "center"
 
 
 @pytest.mark.unit
 def test_a_caption_without_a_resolver_has_no_block_style():
-    caption, _, _ = _block(
+    captions, _ = _caption_and_table(
         f"<table><caption>Harbour lamps</caption>{_ISSUE_219_TABLE[7:]}"
     )
-    assert caption["block_style"] is None
+    assert captions[0]["block_style"] is None
 
 
 @pytest.mark.unit
@@ -4426,3 +4432,69 @@ def test_a_trimmed_title_cell_keeps_its_spans_and_anchor_offsets():
     assert cell["text"] == "The Start of"
     assert [(s, n) for s, n, _ in cell["spans"]] == [(4, 5)]
     assert cell["anchor_offsets"] == {"ch0.xhtml#m": 10}
+
+
+def _caption_and_table(html, **kw):
+    """A native table's blocks: the caption paragraphs before it, and it."""
+    blocks = _conv.extract_blocks_from_html(_doc(html), native_tables=True, **kw)
+    assert blocks[-1].get("type") == "table"
+    return blocks[:-1], blocks[-1]
+
+
+@pytest.mark.unit
+def test_a_caption_of_several_blocks_stays_several_paragraphs():
+    # QA-2: the caption was read inline as one run, so two paragraphs fused
+    # into "Table 1-1Monthly totals". It is walked like any block now.
+    captions, _ = _caption_and_table(
+        "<table><caption><p>Table 1-1</p><p>Monthly totals</p></caption>"
+        "<tr><td>a</td></tr></table>"
+    )
+    assert [b["text"] for b in captions] == ["Table 1-1", "Monthly totals"]
+
+
+_CAPTION_SHAPES = {
+    "plain": "<caption>Census</caption>",
+    "two-p": "<caption><p>Table 1-1</p><p>Monthly totals</p></caption>",
+    "two-div": "<caption><div>Table 2-1</div><div>Yearly totals</div></caption>",
+    "br": "<caption>Table 3-1<br/>With break</caption>",
+    "ids": '<caption id="cp">Census <a id="in"></a><em>now</em></caption>',
+    "ids-in-blocks": '<caption id="cp"><p id="p1">One</p><p>Two <a id="in"></a>x</p>'
+    "</caption>",
+    "ids-before-table": '<caption id="cp">Census</caption>',
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("shape", list(_CAPTION_SHAPES), ids=list(_CAPTION_SHAPES))
+def test_caption_paragraphs_match_the_rows_build(shape):
+    # Same paragraphs, styles, ids and offsets as 5.8.8's rows build writes.
+    before = '<a id="pre"></a>' if shape == "ids-before-table" else ""
+    html = (
+        f"{before}<table>{_CAPTION_SHAPES[shape]}<tr><td>a</td><td>b</td></tr></table>"
+    )
+    css = {"text-align": "center"}
+    kw = {"style_resolver": lambda e: css, "base_href": "ch.xhtml"}
+    captions, _ = _caption_and_table(html, **kw)
+    rows_build = _conv.extract_blocks_from_html(_doc(html), **kw)
+    assert captions
+    assert captions == rows_build[: len(captions)]
+    assert rows_build[len(captions)]["text"] == "a b"
+
+
+@pytest.mark.unit
+def test_ids_before_a_table_go_on_its_caption():
+    captions, table = _caption_and_table(
+        '<a id="pre"></a><table><caption id="cp">Census</caption>'
+        "<tr><td>a</td></tr></table>"
+    )
+    assert captions[0]["anchor_ids"] == ["pre", "cp"]
+    assert table["table"]["anchor_ids"] == []
+
+
+@pytest.mark.unit
+def test_ids_before_a_table_with_an_empty_caption_go_on_the_table():
+    captions, table = _caption_and_table(
+        '<a id="pre"></a><table><caption id="cp"></caption><tr><td>a</td></tr></table>'
+    )
+    assert captions == []
+    assert table["table"]["anchor_ids"] == ["pre", "cp"]

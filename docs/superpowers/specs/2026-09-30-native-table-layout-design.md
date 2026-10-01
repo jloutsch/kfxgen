@@ -114,7 +114,7 @@ $278 {$155 eid, $157 tableStyle, $150 false, $456 {0.9 $318}, $457 {0.9 $318}, $
 
 The hidden-content, `<tr>`-parent, loose-text, element-child and caption rules keep text the native walk would otherwise lose, or hidden content it would show. The TOC rule keeps 5.8.8's chapters: a chapter is a range of blocks, and a native table is one block.
 
-A caption is emitted as its own paragraph block just before the table.
+A caption is emitted just before the table, walked by the ordinary block walker as the rows build walks it: each block inside it is its own paragraph, with its style and ids, and anchors carried from before the table land on its first paragraph. An empty caption's ids go to the table's start.
 
 **Anchors between rows** follow 5.8.8's rule (`_anchors_follow_rows`):
 - In the calibre notes layout, an empty anchor after a row belongs to that row.
