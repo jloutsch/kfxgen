@@ -778,13 +778,22 @@ def _table_block(table, style_resolver=None, base_href=None):
     """
     rows, carry, captions = [], [], []
 
+    def clamp_rowspans(group_rows):
+        """A rowspan ends at its row group's last row, as HTML ends it."""
+        for i, row in enumerate(group_rows):
+            for cell in row["cells"]:
+                cell["rowspan"] = min(cell["rowspan"], len(group_rows) - i)
+
     def take(container, group):
         nonlocal carry
         follow = _anchors_follow_rows(container)
         last = None
+        run = []  # this row group's rows; rows loose in <table> form their own
         for child in container:
             tag = _local_tag(child.tag)
             if tag in _ROW_GROUPS:
+                clamp_rowspans(run)
+                run = []
                 carry.extend(_own_anchor_ids(child))
                 take(child, _ROW_GROUPS[tag])
                 last = None
@@ -809,12 +818,14 @@ def _table_block(table, style_resolver=None, base_href=None):
                 }
                 carry = []
                 rows.append(last)
+                run.append(last)
             elif _is_empty_anchor(child):
                 ids = _own_anchor_ids(child)
                 if follow and last is not None:
                     last["anchor_ids"].extend(ids)
                 else:
                     carry.extend(ids)
+        clamp_rowspans(run)
 
     take(table, "body")
     own = _own_anchor_ids(table)

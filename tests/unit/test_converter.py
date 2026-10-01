@@ -2445,8 +2445,37 @@ def test_table_block_row_groups_header_cells_and_spans():
 def test_span_attributes_are_clamped(raw, expected):
     _, table, _ = _block(f"<table><tr><td colspan='{raw}'>a</td></tr></table>")
     assert table["table"]["rows"][0]["cells"][0]["colspan"] == expected
-    _, table, _ = _block(f"<table><tr><td rowspan='{raw}'>a</td></tr></table>")
-    assert table["table"]["rows"][0]["cells"][0]["rowspan"] == expected
+    # A rowspan also stops at its row group's last row (QA-3).
+    _, table, _ = _block(
+        f"<table><tr><td rowspan='{raw}'>a</td></tr><tr><td>b</td></tr>"
+        "<tr><td>c</td></tr></table>"
+    )
+    assert table["table"]["rows"][0]["cells"][0]["rowspan"] == min(expected, 3)
+
+
+@pytest.mark.unit
+def test_rowspan_clamps_to_the_rows_left_in_its_row_group():
+    # QA-3: a rowspan past its group's last row reached the Kindle as is
+    # (up to 1,000). HTML ends a rowspan at its row group's end.
+    _, table, _ = _block(
+        "<table><thead><tr><th rowspan='5'>h</th></tr></thead><tbody>"
+        "<tr><td rowspan='50'>a</td><td>x</td></tr>"
+        "<tr><td rowspan='50'>b</td></tr>"
+        "<tr><td>c</td><td rowspan='2'>d</td></tr></tbody>"
+        "<tfoot><tr><td rowspan='9'>f</td></tr></tfoot></table>"
+    )
+    spans = [[c["rowspan"] for c in r["cells"]] for r in table["table"]["rows"]]
+    assert spans == [[1], [3, 1], [2], [1, 1], [1]]
+
+
+@pytest.mark.unit
+def test_rows_directly_in_the_table_count_as_their_own_group():
+    _, table, _ = _block(
+        "<table><tr><td rowspan='9'>a</td></tr><tr><td>b</td></tr>"
+        "<tbody><tr><td rowspan='9'>c</td></tr></tbody></table>"
+    )
+    spans = [[c["rowspan"] for c in r["cells"]] for r in table["table"]["rows"]]
+    assert spans == [[2], [1], [1]]
 
 
 @pytest.mark.unit

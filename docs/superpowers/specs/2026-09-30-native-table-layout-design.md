@@ -198,6 +198,8 @@ The whole branch stays unmerged until a sideloaded A/B pair passes on all three 
 - **An empty cell.** It becomes a one-space text entry, so the cell still exists and the columns stay aligned.
 - **A chapter whose first table row holds its title.** The title dedupe cuts the title from that row's cells, as 5.8.8 cut it from the row's paragraph. A cell the cut covers becomes empty but stays, a cell it reaches into is trimmed (spans and anchor offsets rebased), and a row left with no text is dropped, its anchors moving to the next row. A title split over rows, or over a paragraph and a row, counts one block per row, as 5.8.8 saw it. A table with no text left is dropped and its anchors go on the chapter's first chunk.
 - **`colspan` or `rowspan` values** that are malformed, zero or over 1,000. Clamp them to 1–1,000.
+- **A `rowspan` past its row group's last row.** Clamp it to the rows left in the group, counting from the cell's row, as HTML does. Rows directly in the table count as a group of their own.
+- **A `colspan` wider than the table.** Left as is, up to HTML's own maximum of 1,000: the Kindle gets the value the source wrote. Neither corpus has one more than 7 columns past its table's width.
 - **A row with fewer cells than its neighbours.** Emit what's there; the Kindle lays it out.
 - **A table inside a list item** that carries a list marker. The marker waits for the next text block (`_take_marker` only touches text blocks).
 - **Very wide tables.** Without the table viewer, behaviour is unknown, and the device gate includes one.
