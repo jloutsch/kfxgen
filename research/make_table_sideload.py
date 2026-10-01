@@ -16,9 +16,11 @@ does for users, and the user's own calibre setup is not touched):
     "Table Gate Native"   default options, native tables on
     "Table Gate Rows"     `--kfxgen-disable-native-tables`, the 5.8.8 shape
 
-If `ebook-convert` is not found, it falls back to the test shim (`EpubAsOeb`)
-and prints a WARNING: the shim has no Stylizer, so cells carry no CSS-derived
-alignment or fonts, and that pair is not fit for the device gate.
+If `ebook-convert` or `calibre-customize` is not found (on PATH, in
+/Applications/calibre.app, or next to $KFXGEN_EBOOK_CONVERT), it exits
+non-zero and writes nothing. The test shim (`EpubAsOeb`) has no Stylizer, so
+a pair built through it carries no CSS-derived alignment or fonts and is not
+fit for the device gate.
 
 The titles differ so the two files get different ASINs and neither replaces the
 other on the device. Twelve chapters, each a different table shape:
@@ -116,17 +118,14 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "plugin"))
 sys.path.insert(0, str(ROOT))
 
-from kfxgen import converter as conv  # noqa: E402
 from tests._kfx_introspect import by_type, iter_entries, load_fragments, val  # noqa: E402
 from tests.fixtures.epub_builder import EpubBuilder  # noqa: E402
 from tests.fixtures.golden.inputs import _xhtml_page  # noqa: E402
-from tests.fixtures.oeb_shim import EpubAsOeb  # noqa: E402
 from tests.integration.test_calibre_list_markers import (  # noqa: E402
     CALIBRE_CUSTOMIZE,
     EBOOK_CONVERT,
@@ -195,11 +194,6 @@ _WIDE_CELLS = [
     "spring swell report",
     "rope and bollard check",
 ]
-
-
-class _Log:
-    def __getattr__(self, _):
-        return lambda *a, **k: None
 
 
 def _css():
@@ -471,9 +465,9 @@ def convert_with_calibre(env, source, kfx, title, native):
         sys.exit(f"ebook-convert failed:\n{run.stdout[-3000:]}\n{run.stderr[-3000:]}")
 
 
-def calibre_version():
+def calibre_version(env):
     out = subprocess.run(
-        [EBOOK_CONVERT, "--version"], capture_output=True, text=True
+        [EBOOK_CONVERT, "--version"], env=env, capture_output=True, text=True
     ).stdout
     return out.splitlines()[0] if out else "unknown"
 
@@ -510,39 +504,28 @@ def facts(kfx):
 
 
 def main():
+    if not (EBOOK_CONVERT and CALIBRE_CUSTOMIZE):
+        print(
+            "error: ebook-convert / calibre-customize not found (install calibre, "
+            "or set KFXGEN_EBOOK_CONVERT to its ebook-convert). The gate pair is "
+            "only built through the real calibre path; nothing was written.",
+            file=sys.stderr,
+        )
+        return 1
     out_dir = Path(
         sys.argv[1] if len(sys.argv) > 1 else ROOT / "test_books/table-native"
     )
     out_dir.mkdir(parents=True, exist_ok=True)
 
     builds = [("Table Gate Native", True), ("Table Gate Rows", False)]
-    calibre = bool(EBOOK_CONVERT and CALIBRE_CUSTOMIZE)
-    if calibre:
-        env = install_plugin(out_dir)
-        how = f"real ebook-convert ({calibre_version()}), isolated config"
-    else:
-        how = "test shim (EpubAsOeb), NOT the calibre path"
-        print(
-            "WARNING: ebook-convert / calibre-customize not found (set "
-            "KFXGEN_EBOOK_CONVERT). Building through the test shim, which has no "
-            "Stylizer: cells carry no CSS alignment or fonts. Do not use this "
-            "pair for the device gate.",
-            file=sys.stderr,
-        )
+    env = install_plugin(out_dir)
+    how = f"real ebook-convert ({calibre_version(env)}), isolated config"
     results = []
     for title, native in builds:
         source = build_source(out_dir, title)
         kfx = out_dir / (title.lower().replace(" ", "-") + ".kfx")
         kfx.unlink(missing_ok=True)
-        if calibre:
-            convert_with_calibre(env, source, kfx, title, native)
-        else:
-            opts = (
-                None if native else SimpleNamespace(kfxgen_disable_native_tables=True)
-            )
-            conv.convert_oeb_to_kfx(
-                EpubAsOeb(str(source)), str(kfx), opts=opts, log=_Log()
-            )
+        convert_with_calibre(env, source, kfx, title, native)
         results.append((title, kfx, facts(kfx)))
 
     print(f"\nwrote to {out_dir}\nbuilt with: {how}\n")
