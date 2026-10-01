@@ -103,14 +103,21 @@ $278 {$155 eid, $157 tableStyle, $150 false, $456 {0.9 $318}, $457 {0.9 $318}, $
 - an image (`img`, `svg`, `image`) or other embedded object anywhere in it;
 - a cell with more than one block child;
 - a cell with more than 2,000 characters (the generator's `CHUNK_SIZE`, #226);
-- a table with no rows.
+- a cell outside a row, or a table with no rows or no cells (it needs at least one cell);
+- a hidden or contents-listing row, row group or cell (`_is_non_rendered`, `_is_nav_listing`): the row path drops it, and native would show it;
+- a `<tr>` whose parent is not `table`, `thead`, `tbody` or `tfoot`;
+- text loose in the table, a row group or a row, before or between its children;
+- an element directly in the table or a row group other than `tr`, `thead`, `tbody`, `tfoot`, `caption`, `col`, `colgroup` or an empty anchor, such as a `<p>`;
+- a TOC entry that targets the table anywhere but its start. The start is the table's own id, an anchor just before it, its first row's ids and its first cell's ids. `extract_chapters_from_oeb` passes each file's TOC fragment ids to `extract_blocks_from_html` as `toc_targets`.
+
+The middle four rules keep text the native walk would otherwise lose or hidden content it would show. The last keeps 5.8.8's chapters: a chapter is a range of blocks, and a native table is one block.
 
 A caption is emitted as its own paragraph block just before the table.
 
 **Anchors between rows** follow 5.8.8's rule (`_anchors_follow_rows`):
 - In the calibre notes layout, an empty anchor after a row belongs to that row.
 - Otherwise it belongs to the next row.
-- Trailing anchors with no row to take them carry forward past the table, as they do today.
+- Trailing anchors with no row to take them carry forward past the table, as they do today. At the end of a file they go on the table's last row.
 
 **The #221 warning** counts only tables that fell back to rows. Its wording names that: "…written as one paragraph per row…".
 
@@ -144,7 +151,15 @@ A caption is emitted as its own paragraph block just before the table.
 
 ### Anchors
 
-A cell's and a row's anchor keys ride on their chunks: the row's on its `open` chunk, a cell's on its text chunk. `key_to_chunk` takes the first chunk declaring a key, so the table's own `open` chunk carries only the table's own ids (plus the file's bare key when the table is the file's first block). A link into a cell lands on the cell's text entry at the cell-relative offset. A link to a row lands on the row container, as Amazon does.
+A cell's and a row's anchor keys ride on their chunks: the row's on its `open` chunk, a cell's on its text chunk. A link into a cell lands on the cell's text entry at the cell-relative offset. A link to a row lands on the row container, as Amazon does.
+
+The table's own `open` chunk (`$278`) carries no keys. Amazon uses rows and cells as link targets, never a `$278`, and 5.3.0 showed a container target can do nothing on tap. These table-level keys go on the first row's `open` chunk (`$279`), at offset 0:
+- the table's own id;
+- anchors carried in from just before the table;
+- the file's bare key, when the table is the file's first block;
+- title anchors carried onto the chapter's first chunk, when that chunk is a table.
+
+Keys of a cell-less row move to the next row, or to the last row when none follows. Any key on the table block that no table part declares also goes on the last row.
 
 ### The off switch
 
@@ -176,8 +191,8 @@ The whole branch stays unmerged until a sideloaded A/B pair passes on all three 
 ## Edge cases
 
 - **A chapter that starts with a table and has no heading.** Its TOC target must still be a text leaf.
-- **A TOC entry or `id` pointing into a table.** Chapter assembly slices at block granularity, so the chapter starts at the table.
-- **Several TOC entries into one table** (the #225 shape). They collapse onto one block index. That needs a test: no empty chapters, no crash.
+- **A TOC entry pointing into a table.** At the table's start, the table stays native and the chapter starts at it. Past its start, the table keeps rows, so the chapter starts at the targeted row as in 5.8.8.
+- **Several TOC entries into one table** (the #225 shape). If any is past the table's start, the table keeps rows and each entry keeps its chapter. Entries at the start collapse onto the table's block: no empty chapters, no crash.
 - **An empty cell.** It becomes a one-space text entry, so the cell still exists and the columns stay aligned.
 - **`colspan` or `rowspan` values** that are malformed, zero or over 1,000. Clamp them to 1–1,000.
 - **A row with fewer cells than its neighbours.** Emit what's there; the Kindle lays it out.
