@@ -1477,9 +1477,11 @@ class NativeKFXGenerator:
         colspan=1,
         rowspan=1,
         font_family=None,
+        font_size=1.0,
     ):
         """$157 for a table cell: Previewer's padding and vertical centring,
-        plus the cell's own alignment, header weight and spans (#219)."""
+        plus the cell's own alignment, header weight and spans (#219), and
+        the chapter's font size, omitted at 1.0 as build_fragment_157 does."""
         self.symtab.create_local_symbol(entity_name)
         lh = lambda v: IonStruct(IS("$307"), IonDecimal(v), IS("$306"), IS("$310"))  # noqa: E731
         pct = lambda v: IonStruct(IS("$307"), IonDecimal(v), IS("$306"), IS("$314"))  # noqa: E731
@@ -1501,6 +1503,10 @@ class NativeKFXGenerator:
             value[IS("$149")] = rowspan
         if font_family:
             value[IS("$11")] = font_family
+        if font_size != 1.0:
+            value[IS("$16")] = IonStruct(
+                IS("$307"), IonDecimal(str(font_size)), IS("$306"), IS("$505")
+            )  # rem
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_fragment_157_image(
@@ -3807,6 +3813,7 @@ class NativeKFXGenerator:
                             "italic": cell_italic,
                             "colspan": cell["colspan"],
                             "rowspan": cell["rowspan"],
+                            "font_size": attrs["font_size"],
                         }
                         if cell_fam:
                             cattrs["font_family"] = cell_fam

@@ -3364,3 +3364,33 @@ def test_an_italic_run_in_a_body_cell_is_not_bold(tmp_path):
 
     style = _header_cell_span_style(tmp_path, {FLAG_ITALIC}, header=False)
     assert str(style["$13"]) == "$350"
+
+
+def _cell_styles_at_font_size(tmp_path, font_size):
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    chapter = {"title": "C", "text": "x", "blocks": [_table_block([["a"]])]}
+    if font_size is not None:
+        chapter["font_size"] = font_size
+    gen.generate_full_book("T", "A", [chapter], output_path=str(out))
+    return [
+        val(f)
+        for f in load_fragments(out)
+        if str(f.ftype) == "$157" and str(f.fid).endswith("_td")
+    ]
+
+
+@pytest.mark.unit
+def test_cell_style_carries_the_chapters_font_size(tmp_path):
+    # M3: a table on a 0.75rem copyright page is set at that size too, as
+    # its paragraphs are, written the way build_fragment_157 writes it.
+    (style,) = _cell_styles_at_font_size(tmp_path, 0.75)
+    assert float(style["$16"]["$307"]) == 0.75
+    assert str(style["$16"]["$306"]) == "$505"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("font_size", [None, 1.0])
+def test_cell_style_omits_a_default_font_size(tmp_path, font_size):
+    (style,) = _cell_styles_at_font_size(tmp_path, font_size)
+    assert "$16" not in style
