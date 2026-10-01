@@ -4284,3 +4284,145 @@ def test_one_visible_caption_and_an_anchor_between_cells_stay_native():
             '<tr><td>a</td><a id="x"></a><td>b</td></tr></table>'
         )
     )
+
+
+# ── QA review fixes for native tables (#219, PR #251) ────────────────────────
+
+
+def _chapter_texts(title, body, native):
+    """The visible text chunks of a one-chapter book titled `title`, in order,
+    and the chunk list itself."""
+    from kfxgen.native_generator import NativeKFXGenerator
+
+    chapters = extract_chapters_from_oeb(
+        _contents_book((title, body)), _silent_log(), native_tables=native
+    )
+    chunks = NativeKFXGenerator()._build_chapter_content(chapters)["all_chunks"]
+    return [c["text"] for c in chunks if c["type"] == "text"], chunks
+
+
+def _words(texts):
+    return " ".join(texts).split()
+
+
+def _cell_rows(chunks):
+    """Each emitted row as the list of its cells' texts."""
+    rows, row = [], None
+    for c in chunks:
+        if c.get("node") == "row":
+            row = []
+            rows.append(row)
+        elif "cell" in c:
+            row.append(c["text"])
+    return rows
+
+
+_TITLE_TABLE_CASES = [
+    (
+        "CHAPTER I",
+        "<table><tr><td>CHAPTER I</td></tr>"
+        "<tr><td>The beginning</td><td>p. 1</td></tr></table>",
+        [["The beginning", "p. 1"]],
+    ),
+    (
+        "CHAPTER I. The Title",
+        "<table><tr><td>CHAPTER I.</td><td>The Title</td></tr>"
+        "<tr><td>a</td><td>b</td></tr></table>",
+        [["a", "b"]],
+    ),
+    (
+        "CHAPTER I",
+        "<table><tr><td>CHAPTER I The Start of</td><td>x</td></tr>"
+        "<tr><td>a</td><td>b</td></tr></table>",
+        [["The Start of", "x"], ["a", "b"]],
+    ),
+    (
+        "CHAPTER I",
+        "<table><tr><td>CHAPTER</td><td>I</td><td>y</td></tr>"
+        "<tr><td>a</td><td>b</td><td>c</td></tr></table>",
+        [[" ", " ", "y"], ["a", "b", "c"]],
+    ),
+    (
+        "CHAPTER I. The Title",
+        "<table><tr><td>CHAPTER I.</td></tr><tr><td>The Title</td></tr>"
+        "<tr><td>a</td><td>b</td></tr></table>",
+        [["a", "b"]],
+    ),
+    (
+        "CHAPTER I. The Title",
+        "<p>CHAPTER I.</p><table><tr><td>The Title</td></tr>"
+        "<tr><td>a</td><td>b</td></tr></table>",
+        [["a", "b"]],
+    ),
+    (
+        "CHAPTER I",
+        "<table><tr><td>a</td><td>b</td></tr></table>",
+        [["a", "b"]],
+    ),
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "title, body, rows",
+    _TITLE_TABLE_CASES,
+    ids=[
+        "row-is-title",
+        "cells-make-title",
+        "cell-starts-with-title",
+        "title-spans-cells",
+        "title-split-over-rows",
+        "title-split-paragraph-then-row",
+        "no-cut",
+    ],
+)
+def test_a_chapter_title_in_a_leading_table_is_shown_once(title, body, rows):
+    # QA-1: the title dedupe cut the title from the table block's text but
+    # wrote cells from its rows, so the heading and the first cell both
+    # showed it. The cut now reaches the cells, and the words a reader sees
+    # match the rows build (5.8.8's bytes).
+    native, chunks = _chapter_texts(title, body, native=True)
+    rows_build, _ = _chapter_texts(title, body, native=False)
+    assert native[0] == title
+    assert _cell_rows(chunks) == rows
+    assert _words(native) == _words(rows_build)
+
+
+@pytest.mark.unit
+def test_a_dropped_title_row_moves_its_ids_to_the_next_row():
+    _, chunks = _chapter_texts(
+        "CHAPTER I",
+        '<table><tr id="r1"><td id="c1">CHAPTER I</td></tr>'
+        '<tr id="r2"><td>a</td></tr></table>',
+        native=True,
+    )
+    row_keys = [c["anchor_keys"] for c in chunks if c.get("node") == "row"]
+    assert len(row_keys) == 1
+    assert {"ch0.xhtml#r1", "ch0.xhtml#c1", "ch0.xhtml#r2"} <= set(row_keys[0])
+
+
+@pytest.mark.unit
+def test_a_table_that_is_only_the_title_is_dropped_and_keeps_its_ids():
+    texts, chunks = _chapter_texts(
+        "CHAPTER I",
+        '<table id="t"><tr><td id="c1">CHAPTER I</td></tr></table><p>Body.</p>',
+        native=True,
+    )
+    assert texts == ["CHAPTER I", "Body."]
+    assert not any(c.get("node") == "table" for c in chunks)
+    assert "ch0.xhtml#t" in chunks[0]["anchor_keys"]
+    assert "ch0.xhtml#c1" in chunks[0]["anchor_keys"]
+
+
+@pytest.mark.unit
+def test_a_trimmed_title_cell_keeps_its_spans_and_anchor_offsets():
+    _, chunks = _chapter_texts(
+        "CHAPTER I",
+        "<table><tr><td>CHAPTER I The <em>Start</em> <a id='m'></a>of</td>"
+        "<td>x</td></tr></table>",
+        native=True,
+    )
+    cell = next(c for c in chunks if "cell" in c)
+    assert cell["text"] == "The Start of"
+    assert [(s, n) for s, n, _ in cell["spans"]] == [(4, 5)]
+    assert cell["anchor_offsets"] == {"ch0.xhtml#m": 10}

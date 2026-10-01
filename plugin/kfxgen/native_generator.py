@@ -199,6 +199,132 @@ def _consume_split_title(blocks, title):
     return 0
 
 
+def _row_text(row):
+    """A native table row's text as the rows build wrote it: its non-empty
+    cells joined by a space."""
+    return " ".join(c["text"] for c in row["cells"] if c["text"])
+
+
+def _with_rows(block, rows):
+    """Copy of native table `block` holding `rows` instead of its own."""
+    return {
+        **block,
+        "text": "\n".join(t for t in map(_row_text, rows) if t),
+        "table": {**block["table"], "rows": rows},
+    }
+
+
+def _drop_table_rows(block, upto):
+    """Copy of native table `block` without the cells of rows[:upto].
+
+    Each dropped row stays as a row with no cells, holding its own and its
+    cells' anchor keys, so they move to the next emitted row as an empty
+    row's keys do. Returns None when no row with text is left: the rows build
+    would then have nothing of this table to show. (#219)
+    """
+    rows = []
+    for j, row in enumerate(block["table"]["rows"]):
+        if j < upto:
+            keys = list(row.get("anchor_keys") or []) + [
+                k for c in row["cells"] for k in c.get("anchor_keys") or []
+            ]
+            row = {**row, "cells": [], "anchor_keys": keys}
+        rows.append(row)
+    if not any(_row_text(r) for r in rows):
+        return None
+    return _with_rows(block, rows)
+
+
+def _cut_row_text(row, removed):
+    """Copy of `row` with the first `removed` characters of its text cut.
+
+    The cut runs cell by cell over `_row_text`'s layout. A cell it covers
+    becomes empty but stays, so later columns keep their places; a cell it
+    reaches into is trimmed, with its spans and anchor offsets rebased as the
+    paragraph path rebases a cut paragraph's spans. (#219)
+    """
+    cells = []
+    pos = 0
+    for cell in row["cells"]:
+        text = cell["text"]
+        cut = min(max(removed - pos, 0), len(text)) if text else 0
+        if text:
+            pos += len(text) + 1
+        if not cut:
+            cells.append(cell)
+            continue
+        rest = text[cut:]
+        spans = []
+        for s, length, flags in cell.get("spans") or []:
+            start = max(s - cut, 0)
+            end = min(s + length - cut, len(rest))
+            if end > start:
+                spans.append((start, end - start, flags))
+        offsets = {
+            k: min(max(v - cut, 0), len(rest))
+            for k, v in (cell.get("anchor_offsets") or {}).items()
+        }
+        cells.append({**cell, "text": rest, "spans": spans, "anchor_offsets": offsets})
+    return {**row, "cells": cells}
+
+
+def _cut_title_from_table(block, title):
+    """Cut a chapter title from a native table's first row with text.
+
+    The rows build wrote that row as the chapter's first paragraph, and the
+    title dedupe cut the title from it; this does the same to the row's
+    cells. Returns (block, matched); the block is None when nothing with
+    text is left of the table. (#219)
+    """
+    rows = block["table"]["rows"]
+    j = next((j for j, r in enumerate(rows) if _row_text(r)), None)
+    if j is None:
+        return block, False
+    text = _row_text(rows[j])
+    stripped = text.lstrip()
+    if stripped[: len(title)].lower() != title.lower():
+        return block, False
+    remainder = stripped[len(title) :].lstrip()
+    row = _cut_row_text(rows[j], len(text) - len(remainder))
+    cut = _with_rows(block, rows[:j] + [row] + rows[j + 1 :])
+    if any(c["text"] for c in row["cells"]):
+        return cut, True
+    return _drop_table_rows(cut, j + 1), True
+
+
+def _eat_split_title(blocks, title):
+    """Drop the leading blocks that together make up `title` (#64).
+
+    A native table counts as one block per row with text, as the rows build
+    saw it, so a title split over rows, or over a paragraph and a row, is
+    eaten as it was in 5.8.8; a table only partly eaten keeps its other rows.
+    Returns (blocks, the dropped blocks' anchor keys). (#219)
+    """
+    entries = []
+    for i, blk in enumerate(blocks):
+        if len(entries) >= _MAX_SPLIT_TITLE_BLOCKS:
+            break
+        if blk.get("type") == "table":
+            entries.extend(
+                (i, j, _row_text(r))
+                for j, r in enumerate(blk["table"]["rows"])
+                if _row_text(r)
+            )
+        else:
+            entries.append((i, None, blk.get("text", "")))
+    eaten = _consume_split_title([{"text": t} for _, _, t in entries], title)
+    if not eaten:
+        return blocks, []
+    last, last_row, _ = entries[eaten - 1]
+    carried = [k for blk in blocks[:last] for k in blk.get("anchor_keys") or []]
+    if last_row is not None:
+        kept = _drop_table_rows(blocks[last], last_row + 1)
+        if kept is not None:
+            return [kept] + blocks[last + 1 :], carried
+    carried.extend(blocks[last].get("anchor_keys") or [])
+    return blocks[last + 1 :], carried
+
+
 def _dedupe_keys(keys):
     """Order-preserving dedupe for anchor-key lists."""
     seen = set()
@@ -3167,7 +3293,26 @@ class NativeKFXGenerator:
                         if iter_blocks:
                             first = iter_blocks[0]
                             first_stripped = first["text"].lstrip()
-                            if first_stripped[: len(title)].lower() == title.lower():
+                            table_cut = None
+                            if first.get("type") == "table":
+                                # A table's text joins all its rows; the
+                                # title can only be cut from its first row's
+                                # cells, which are what get written. (#219)
+                                table_cut = _cut_title_from_table(first, title)
+                            if table_cut is not None and table_cut[1]:
+                                if table_cut[0] is None:
+                                    carried_anchor_keys.extend(
+                                        first.get("anchor_keys") or []
+                                    )
+                                    iter_blocks = iter_blocks[1:]
+                                else:
+                                    iter_blocks[0] = table_cut[0]
+                            elif table_cut is not None:
+                                iter_blocks, eaten_keys = _eat_split_title(
+                                    iter_blocks, title
+                                )
+                                carried_anchor_keys.extend(eaten_keys)
+                            elif first_stripped[: len(title)].lower() == title.lower():
                                 remainder = first_stripped[len(title) :].lstrip()
                                 removed = len(first["text"]) - len(remainder)
                                 rebased_spans = []
@@ -3207,13 +3352,12 @@ class NativeKFXGenerator:
                                 # that, so the synthesized heading landed on top
                                 # of the book's own opener and the chapter name
                                 # rendered twice. (#64)
-                                eaten = _consume_split_title(iter_blocks, title)
-                                if eaten:
-                                    for blk in iter_blocks[:eaten]:
-                                        carried_anchor_keys.extend(
-                                            blk.get("anchor_keys") or []
-                                        )
-                                    iter_blocks = iter_blocks[eaten:]
+                                # A native table among them counts one block
+                                # per row, as the rows build saw it. (#219)
+                                iter_blocks, eaten_keys = _eat_split_title(
+                                    iter_blocks, title
+                                )
+                                carried_anchor_keys.extend(eaten_keys)
                         para_iter = iter_blocks
                     else:
                         para_iter = [

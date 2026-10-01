@@ -196,6 +196,7 @@ The whole branch stays unmerged until a sideloaded A/B pair passes on all three 
 - **A TOC entry pointing into a table.** At the table's start, the table stays native and the chapter starts at it. Past its start, the table keeps rows, so the chapter starts at the targeted row as in 5.8.8.
 - **Several TOC entries into one table** (the #225 shape). If any is past the table's start, the table keeps rows and each entry keeps its chapter. Entries at the start collapse onto the table's block: no empty chapters, no crash.
 - **An empty cell.** It becomes a one-space text entry, so the cell still exists and the columns stay aligned.
+- **A chapter whose first table row holds its title.** The title dedupe cuts the title from that row's cells, as 5.8.8 cut it from the row's paragraph. A cell the cut covers becomes empty but stays, a cell it reaches into is trimmed (spans and anchor offsets rebased), and a row left with no text is dropped, its anchors moving to the next row. A title split over rows, or over a paragraph and a row, counts one block per row, as 5.8.8 saw it. A table with no text left is dropped and its anchors go on the chapter's first chunk.
 - **`colspan` or `rowspan` values** that are malformed, zero or over 1,000. Clamp them to 1–1,000.
 - **A row with fewer cells than its neighbours.** Emit what's there; the Kindle lays it out.
 - **A table inside a list item** that carries a list marker. The marker waits for the next text block (`_take_marker` only touches text blocks).
