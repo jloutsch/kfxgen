@@ -4237,3 +4237,21 @@ def test_links_to_a_table_its_preceding_anchor_or_its_file_target_a_row(tmp_path
         ("Three", f"{_ISSUE_219_TABLE}<p>After.</p>"),
     )
     assert _book_link_target_kinds(oeb, tmp_path) == ["$279", "$279", "$279"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html, native",
+    [
+        ("<table><p>x</p><tr><td>a</td></tr></table>", False),
+        ("<table><tbody><p>x</p><tr><td>a</td></tr></tbody></table>", False),
+        ("<table><div>x</div><tr><td>a</td></tr></table>", False),
+        ("<table><colgroup><col/></colgroup><tr><td>a</td></tr></table>", True),
+        ("<table><!-- note --><tr><td>a</td></tr></table>", True),
+    ],
+    ids=["p-in-table", "p-in-tbody", "div-in-table", "colgroup", "comment"],
+)
+def test_a_non_row_element_in_a_table_or_row_group_falls_back(html, native):
+    # The native walk reads only rows, row groups, the caption and empty
+    # anchors there; anything else would lose its text. (#219)
+    assert _conv._table_is_native(_first_table(html)) is native

@@ -614,6 +614,8 @@ def _subtree_anchor_ids(elem):
 
 
 _ROW_GROUP_TAGS = {"table", "thead", "tbody", "tfoot"}
+#: What a table or row group may hold directly and still be written natively.
+_TABLE_PART_TAGS = {"tr", "thead", "tbody", "tfoot", "caption", "col", "colgroup"}
 
 
 def _is_empty_anchor(elem):
@@ -665,8 +667,9 @@ def _table_is_native(table):
     Also anything the row path handles and the native walk would not: a
     hidden or contents-listing row, row group or cell (the row path drops it;
     native would show it), a row outside table/thead/tbody/tfoot, or text
-    loose in the table, a row group or a row, before or between its children
-    (the row path keeps it; native would lose it).
+    loose in the table, a row group or a row, before or between its children,
+    or any other element directly in the table or a row group, such as a
+    `<p>` (the row path keeps it; native would lose it).
     """
     rows = 0
     cells = 0
@@ -680,6 +683,13 @@ def _table_is_native(table):
         if tag in _ROW_GROUP_TAGS or tag == "tr":
             if (e.text or "").strip() or any((c.tail or "").strip() for c in e):
                 return False
+        if tag in _ROW_GROUP_TAGS and any(
+            isinstance(c.tag, str)
+            and _local_tag(c.tag) not in _TABLE_PART_TAGS
+            and not _is_empty_anchor(c)
+            for c in e
+        ):
+            return False
         if tag == "tr":
             if _local_tag(e.getparent().tag) not in _ROW_GROUP_TAGS:
                 return False
