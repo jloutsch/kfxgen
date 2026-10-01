@@ -4216,3 +4216,24 @@ def test_toc_targets_past_a_tables_start_keep_rows(targets, native):
         _doc(html), native_tables=True, toc_targets=targets
     )
     assert any(b.get("type") == "table" for b in blocks) is native
+
+
+@pytest.mark.unit
+def test_links_to_a_table_its_preceding_anchor_or_its_file_target_a_row(tmp_path):
+    # I5: a link to the table's own id, to an anchor just before it, or to a
+    # whole file that opens with a table must target the first row (`$279`,
+    # a kind Amazon uses as a target), never the `$278` container.
+    oeb = _contents_book(
+        (
+            "One",
+            '<p><a href="ch1.xhtml#t">table</a>, <a href="ch1.xhtml#before">before'
+            '</a> and <a href="ch2.xhtml">file</a>.</p>',
+        ),
+        (
+            "Two",
+            f'<p>Intro.</p><a id="before"></a>{_ISSUE_219_TABLE[:6]} id="t"'
+            f"{_ISSUE_219_TABLE[6:]}",
+        ),
+        ("Three", f"{_ISSUE_219_TABLE}<p>After.</p>"),
+    )
+    assert _book_link_target_kinds(oeb, tmp_path) == ["$279", "$279", "$279"]

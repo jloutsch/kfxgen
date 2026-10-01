@@ -3030,7 +3030,14 @@ class NativeKFXGenerator:
             becomes a container entry with one position; `close` ends it and
             takes none. Cells are ordinary text chunks with a `cell` key.
             A row with no cells is not emitted; its anchor keys move to the
-            next emitted row, or to the table when none follows."""
+            next emitted row, or to the last one when none follows.
+
+            The table's `open` carries no anchor keys. Its own keys (its id,
+            anchors carried in from before it, the bare-filename key) go on
+            its first row, a `$279`: Amazon uses rows and cells as link
+            targets and was never seen to use a `$278`, and a container as a
+            target was a no-op on tap in 5.3.0. Only a table with no emitted
+            row keeps them, and the converter never sends one."""
             tbl = block["table"]
             inner = {k for r in tbl["rows"] for k in (r.get("anchor_keys") or [])} | {
                 k
@@ -3039,12 +3046,7 @@ class NativeKFXGenerator:
                 for k in (c.get("anchor_keys") or [])
             }
             own = [k for k in (tbl.get("anchor_keys") or []) if k not in inner]
-            table_open = {
-                "type": "open",
-                "node": "table",
-                "anchor_keys": own,
-                "anchor_offsets": dict.fromkeys(own, 0),
-            }
+            table_open = {"type": "open", "node": "table", "anchor_keys": []}
             all_chunks.append(table_open)
             group = None
             last_row = None
@@ -3058,7 +3060,8 @@ class NativeKFXGenerator:
                         all_chunks.append({"type": "close"})
                     group = row["group"]
                     all_chunks.append({"type": "open", "node": group})
-                keys = _dedupe_keys(carried + (row.get("anchor_keys") or []))
+                leading = own if last_row is None else []
+                keys = _dedupe_keys(leading + carried + (row.get("anchor_keys") or []))
                 carried = []
                 last_row = {
                     "type": "open",
@@ -3086,18 +3089,20 @@ class NativeKFXGenerator:
                 all_chunks.append({"type": "close"})
             if group is not None:
                 all_chunks.append({"type": "close"})
-            if carried:
-                table_open["anchor_keys"] = _dedupe_keys(own + carried)
-                table_open["anchor_offsets"] = dict.fromkeys(
-                    table_open["anchor_keys"], 0
-                )
             # Backstop: a key on the block that no part of the table declares
             # would otherwise be on no chunk, and a link to it is dropped.
             declared = inner | set(tbl.get("anchor_keys") or [])
             stray = [k for k in block.get("anchor_keys") or () if k not in declared]
-            if stray and last_row is not None:
-                last_row["anchor_keys"] = _dedupe_keys(last_row["anchor_keys"] + stray)
-                last_row["anchor_offsets"].update(dict.fromkeys(stray, 0))
+            leftover = _dedupe_keys(carried + stray)
+            if last_row is None:
+                keys = _dedupe_keys(own + leftover)
+                table_open["anchor_keys"] = keys
+                table_open["anchor_offsets"] = dict.fromkeys(keys, 0)
+            elif leftover:
+                last_row["anchor_keys"] = _dedupe_keys(
+                    last_row["anchor_keys"] + leftover
+                )
+                last_row["anchor_offsets"].update(dict.fromkeys(leftover, 0))
             all_chunks.append({"type": "close"})
 
         for ch_idx, chapter in enumerate(chapters):
@@ -3307,6 +3312,17 @@ class NativeKFXGenerator:
 
             if carried_anchor_keys:
                 first_chunk = all_chunks[start_idx]
+                if first_chunk.get("node") == "table":
+                    # Not the `$278`: its first row, as for the table's own
+                    # keys (#219). The search stops at the table's close.
+                    depth = 0
+                    for c in all_chunks[start_idx:]:
+                        depth += {"open": 1, "close": -1}.get(c["type"], 0)
+                        if depth == 0:
+                            break
+                        if c.get("node") == "row":
+                            first_chunk = c
+                            break
                 first_chunk["anchor_keys"] = _dedupe_keys(
                     (first_chunk.get("anchor_keys") or []) + carried_anchor_keys
                 )

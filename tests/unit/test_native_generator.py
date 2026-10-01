@@ -3042,14 +3042,50 @@ def test_row_groups_open_and_close_in_order():
 
 
 @pytest.mark.unit
-def test_table_open_keeps_only_its_own_anchor_keys():
-    block = _table_block([["a"]], own_keys=("k_tbl", "k_row", "k_cell"))
+def test_table_keys_go_on_the_first_row_not_the_table():
+    # I5: the table's own keys (its id, anchors before it, the bare-filename
+    # key) go on its first row, a `$279`, which Amazon uses as a link target;
+    # the `$278` carries none. Row and cell keys stay where they are.
+    block = _table_block([["a"], ["b"]], own_keys=("k_tbl", "k_row", "k_cell"))
     block["table"]["rows"][0]["anchor_keys"] = ["k_row"]
     block["table"]["rows"][0]["cells"][0]["anchor_keys"] = ["k_cell"]
     ch = _content([block])
-    table_open = next(c for c in ch["all_chunks"] if c.get("node") == "table")
-    assert table_open["anchor_keys"] == ["k_tbl"]
-    assert table_open["anchor_offsets"] == {"k_tbl": 0}
+    assert _open_keys(ch["all_chunks"]) == [
+        ("table", []),
+        ("body", None),
+        ("row", ["k_tbl", "k_row"]),
+        ("row", []),
+    ]
+    first_row = next(c for c in ch["all_chunks"] if c.get("node") == "row")
+    assert first_row["anchor_offsets"] == {"k_tbl": 0, "k_row": 0}
+
+
+@pytest.mark.unit
+def test_carried_title_keys_skip_a_leading_table_open():
+    # M5: a dropped title block's keys go on the chapter's first chunk. With
+    # no heading and a table first, that chunk is the `$278`; they go on its
+    # first row instead.
+    gen = NativeKFXGenerator()
+    ch = gen._build_chapter_content(
+        [
+            {
+                "title": "Tides",
+                "text": "x",
+                "_omit_title_heading": True,
+                "blocks": [
+                    {"text": "Tides", "spans": [], "anchor_keys": ["k_title"]},
+                    _table_block([["a"], ["b"]]),
+                ],
+            }
+        ]
+    )
+    assert ch["all_chunks"][0].get("node") == "table"
+    assert _open_keys(ch["all_chunks"]) == [
+        ("table", []),
+        ("body", None),
+        ("row", ["k_title"]),
+        ("row", []),
+    ]
 
 
 def _storyline(tmp_path, blocks):
@@ -3207,17 +3243,20 @@ def test_empty_row_is_skipped_and_its_keys_move_to_the_next_row():
 
 
 @pytest.mark.unit
-def test_trailing_empty_row_keys_move_to_the_table():
-    block = _table_block([["a"], []])
-    block["table"]["rows"][1]["anchor_keys"] = ["k_last"]
+def test_trailing_empty_row_keys_move_to_the_last_row():
+    # Not the table: a `$278` is not a link target Amazon uses (I5). The last
+    # row is nearest to where the row path put them, just after the table.
+    block = _table_block([["a"], ["b"], []])
+    block["table"]["rows"][2]["anchor_keys"] = ["k_last"]
     ch = _content([block])
     assert _open_keys(ch["all_chunks"]) == [
-        ("table", ["k_last"]),
+        ("table", []),
         ("body", None),
         ("row", []),
+        ("row", ["k_last"]),
     ]
-    table_open = next(c for c in ch["all_chunks"] if c.get("node") == "table")
-    assert table_open["anchor_offsets"] == {"k_last": 0}
+    last_row = [c for c in ch["all_chunks"] if c.get("node") == "row"][-1]
+    assert last_row["anchor_offsets"] == {"k_last": 0}
 
 
 def _anchor_targets(frags):
