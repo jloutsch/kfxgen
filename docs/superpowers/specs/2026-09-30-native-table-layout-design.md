@@ -114,7 +114,7 @@ $278 {$155 eid, $157 tableStyle, $150 false, $456 {0.9 $318}, $457 {0.9 $318}, $
 
 The hidden-content, `<tr>`-parent, loose-text, element-child and caption rules keep text the native walk would otherwise lose, or hidden content it would show. The TOC rule keeps 5.8.8's chapters: a chapter is a range of blocks, and a native table is one block.
 
-A caption is emitted just before the table, walked by the ordinary block walker as the rows build walks it: each block inside it is its own paragraph, with its style and ids, and anchors carried from before the table land on its first paragraph. An empty caption's ids go to the table's start.
+A caption is emitted just before the table, walked by the ordinary block walker as the rows build walks it: each block inside it is its own paragraph, with its style and ids, and anchors carried from before the table, and the table's own id, land on its first paragraph, so a TOC entry or link to the table opens at its caption as in 5.8.8. An empty caption's ids, and then the table's own id, go to the table's start. A caption is always written before the table, wherever it sits in the source: HTML makes the caption the table's first child, and browsers draw it above the table by default.
 
 **Anchors between rows** follow 5.8.8's rule (`_anchors_follow_rows`):
 - In the calibre notes layout, an empty anchor after a row belongs to that row.

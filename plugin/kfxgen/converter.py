@@ -1504,6 +1504,15 @@ def extract_blocks_from_html(
             # ids, and anchors carried from before the table land on its
             # first paragraph. An empty caption leaves its ids pending for
             # the table's start. (#219)
+            if captions:
+                # The table's own ids are pending when the rows build walks
+                # its caption, so they name the caption's first paragraph: a
+                # TOC entry to the table starts its chapter there. They come
+                # back to the table if the caption holds no text.
+                own = table["table"]["anchor_ids"]
+                pending_ids.extend(own)
+                table["table"]["anchor_ids"] = []
+                table["anchor_ids"] = [a for a in table["anchor_ids"] if a not in own]
             for caption in captions:
                 _walk(caption)
             if pending_ids:

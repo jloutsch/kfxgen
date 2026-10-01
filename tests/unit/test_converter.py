@@ -4490,6 +4490,8 @@ _CAPTION_SHAPES = {
     "ids-in-blocks": '<caption id="cp"><p id="p1">One</p><p>Two <a id="in"></a>x</p>'
     "</caption>",
     "ids-before-table": '<caption id="cp">Census</caption>',
+    "table-id": '<caption id="cp">Census</caption>',
+    "table-id-two-p": "<caption><p>Table 1-1</p><p>Monthly totals</p></caption>",
 }
 
 
@@ -4497,9 +4499,10 @@ _CAPTION_SHAPES = {
 @pytest.mark.parametrize("shape", list(_CAPTION_SHAPES), ids=list(_CAPTION_SHAPES))
 def test_caption_paragraphs_match_the_rows_build(shape):
     # Same paragraphs, styles, ids and offsets as 5.8.8's rows build writes.
-    before = '<a id="pre"></a>' if shape == "ids-before-table" else ""
+    before = '<a id="pre"></a>' if shape in ("ids-before-table", "table-id") else ""
+    table = '<table id="t">' if shape.startswith("table-id") else "<table>"
     html = (
-        f"{before}<table>{_CAPTION_SHAPES[shape]}<tr><td>a</td><td>b</td></tr></table>"
+        f"{before}{table}{_CAPTION_SHAPES[shape]}<tr><td>a</td><td>b</td></tr></table>"
     )
     css = {"text-align": "center"}
     kw = {"style_resolver": lambda e: css, "base_href": "ch.xhtml"}
@@ -4561,3 +4564,63 @@ def test_a_moved_footer_keeps_its_anchors():
     assert rows[1]["anchor_ids"] == ["f"]
     assert rows[1]["cells"][0]["anchor_ids"] == ["fc"]
     assert blocks[0]["text"] == "B\nF"
+
+
+@pytest.mark.unit
+def test_a_captioned_tables_own_id_goes_on_its_caption():
+    # Round 1, I1: in the rows build the table's id is pending when the
+    # caption is walked, so it names the caption's first paragraph. It
+    # stayed on the table's first row natively.
+    captions, table = _caption_and_table(
+        '<a id="pre"></a><table id="t"><caption>Census</caption>'
+        "<tr><td>a</td></tr></table>"
+    )
+    assert captions[0]["anchor_ids"] == ["pre", "t"]
+    assert table["table"]["anchor_ids"] == []
+    assert "t" not in table["anchor_ids"]
+
+
+@pytest.mark.unit
+def test_an_empty_captions_table_keeps_its_own_id():
+    captions, table = _caption_and_table(
+        '<a id="pre"></a><table id="t"><caption id="cp"></caption>'
+        "<tr><td>a</td></tr></table>"
+    )
+    assert captions == []
+    assert table["table"]["anchor_ids"] == ["pre", "t", "cp"]
+
+
+_CAPTIONED_TABLE_BOOK = (
+    '<p>Intro text. <a href="ch0.xhtml#t">See the table.</a></p>'
+    '<table id="t"><caption>Table 1 caption</caption>'
+    "<tr><td>a</td><td>b</td></tr></table><p>After.</p>"
+)
+
+
+def _toc_book_chapters(body, toc, native):
+    from kfxgen.native_generator import NativeKFXGenerator
+
+    oeb = _table_book(body)
+    oeb.toc = [_TOCNode(title, href) for title, href in toc]
+    chapters = extract_chapters_from_oeb(oeb, _silent_log(), native_tables=native)
+    content = NativeKFXGenerator()._build_chapter_content(chapters)
+    return chapters, content["all_chunks"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("native", [True, False], ids=["native", "rows"])
+def test_a_toc_entry_and_a_link_to_a_captioned_table_land_on_its_caption(native):
+    chapters, chunks = _toc_book_chapters(
+        _CAPTIONED_TABLE_BOOK,
+        [("Start", "ch0.xhtml"), ("The Table", "ch0.xhtml#t")],
+        native,
+    )
+    words = [
+        (c["title"], " ".join(b["text"] for b in c["blocks"]).split()) for c in chapters
+    ]
+    assert words == [
+        ("Start", ["Intro", "text.", "See", "the", "table."]),
+        ("The Table", ["Table", "1", "caption", "a", "b", "After."]),
+    ]
+    target = [c for c in chunks if "ch0.xhtml#t" in (c.get("anchor_keys") or [])]
+    assert [c.get("text") for c in target] == ["Table 1 caption"]
