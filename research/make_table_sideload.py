@@ -8,13 +8,20 @@ that depends on the reader's table layout, and nothing but a Kindle can say
 whether it lays one out. Two decoders (ours, and KFX Input's) read the file
 back correctly; that predicts the device and does not confirm it.
 
-This builds a controlled pair: one source text, converted twice.
+This builds a controlled pair: one source text, converted twice through the
+real `ebook-convert`, with this checkout's plugin installed into an isolated
+calibre config under the output directory (so calibre's Stylizer runs, as it
+does for users, and the user's own calibre setup is not touched):
 
     "Table Gate Native"   default options, native tables on
-    "Table Gate Rows"     `kfxgen_disable_native_tables = True`, the 5.8.8 shape
+    "Table Gate Rows"     `--kfxgen-disable-native-tables`, the 5.8.8 shape
+
+If `ebook-convert` is not found, it falls back to the test shim (`EpubAsOeb`)
+and prints a WARNING: the shim has no Stylizer, so cells carry no CSS-derived
+alignment or fonts, and that pair is not fit for the device gate.
 
 The titles differ so the two files get different ASINs and neither replaces the
-other on the device. Eight chapters, each a different table shape:
+other on the device. Twelve chapters, each a different table shape:
 
     1  plain 3x4 table of numbers; also holds the 10 note links, a link into
        a cell of chapter 6, and the links to chapters 7 and 8
@@ -22,7 +29,8 @@ other on the device. Eight chapters, each a different table shape:
     3  60 rows (page turns forward and back through a long table)
     4  8 columns of 3-5 words (wide: does it fit, wrap, or pan?)
     5  notes table in calibre's MOBI-to-EPUB layout: each `<a id="nN">` sits
-       AFTER its own `<tr>`; the 10 links come from chapter 1
+       AFTER its own `<tr>`; the 10 links come from chapter 1, and one more
+       from a cell in chapter 10
     6  the TOC entry points at the first cell's id, and a body link elsewhere
        points at a cell in row 8. (A TOC entry past a table's start makes
        that table fall back to rows, so the entry names the start.)
@@ -32,6 +40,16 @@ other on the device. Eight chapters, each a different table shape:
        whole file. kfxgen writes the three table-level targets (7's two, 8's
        file) on the table's first row (`$279`), never on the `$278`; each
        should land at that row.
+    9  embedded Charis SIL (regular, bold, italic, bold italic, from
+       test_books/font-matching-test): a plain table, then a table whose cells
+       are bold by CSS. Cells take their face from the matched font (#50).
+   10  formatted runs in cells: a centred header cell holding an italic run,
+       a bold run and an italic run in body cells, a superscript note link
+       out of a cell to note 7 in chapter 5, and the word "marrowquill",
+       which appears only in one cell (the search check).
+   11  2,000 rows (the largest real native tables run to 1,943 rows): page
+       turns, progress, and how long the chapter takes to open
+   12  24 columns (the widest real one is 27)
 
 Decision table, per device (Voyage 5.13.6, Oasis 5.18.2, Paperwhite 5.19.2;
 read the firmware off each device):
@@ -44,31 +62,58 @@ read the firmware off each device):
     Native tables render on every device, all checks pass
         -> record the result below, add `native_tables` to
            tests/device/checklist.py, continue.
-    Only the wide table (chapter 4) fails
-        -> file an issue for the table viewer (`$629`/`$630`,
-           `yj_table_viewer`), then choose on #219: keep native tables with
-           wide tables falling back to rows by column count, or ship as is.
+    Only the large or wide tables fail (chapter 4, 11 or 12: unreadable,
+    cut off, very slow to open, or progress stuck), and the small ones pass
+        -> fall back to rows by row or column count: set the limit from the
+           largest table that passed (row count from chapters 3 and 11,
+           column count from chapters 4 and 12), add it to
+           `_table_is_native` with a test, and rebuild the pair. For a wide
+           table, also file an issue for the table viewer (`$629`/`$630`,
+           `yj_table_viewer`). Choose on #219.
+    Cells in chapter 9 or 10 lose their face or formatting (a bold table in
+    the regular face, a missing italic, bold or raised note number, the
+    header cell not centred), or the note link in the chapter 10 cell does
+    nothing
+        -> a cell style or link bug, not a layout one: file it on #219 with
+           the device and fix it before merge. The Rows file is the control
+           for the face, the runs and the link, but not for the bold table:
+           5.8.8 writes a row as one paragraph and drops a cell's own CSS
+           weight, so that table is regular there (seen in this build's
+           styles, not a device result).
+    "marrowquill" is not found on the Native file but is on the Rows file
+        -> first check the device has finished indexing (see the indexing
+           queue); if it has, the search index skips nested entries: post on
+           #219 before merge.
     Rows file differs from 5.8.8 behaviour
         -> the opt-out is not byte-faithful to 5.8.8. Investigate before
            anything else.
 
-Per device, record for both files: TOC button present; each of the 8 TOC
+Per device, record for both files: TOC button present; each of the 12 TOC
 entries opens at its chapter start (chapter 6 opens at the top of its table,
 with the chapter title above it); tables show rows and columns
-with the header row distinct and colspan/rowspan cells spanning; wide table
-readable (fits / wraps / pan-zoom: say which); long table pages through all 60
-rows both ways; progress rises and is never stuck at 0% or 100%; each of the
-10 note links opens the page holding its own note; the link into a cell lands
-on the page with that row; the links to `#before`, `#tbl` and the whole file
-each land on the page with the first row of the table they name.
+with the header row distinct and colspan/rowspan cells spanning; wide tables
+readable (fits / wraps / pan-zoom: say which, for chapters 4 and 12); long
+tables page through all rows both ways (60 in chapter 3; in chapter 11 page
+through the first and last 50 rows and note how long the chapter takes to
+open); progress rises and is never stuck at 0% or 100%; each of the 10 note
+links opens the page holding its own note; the link into a cell lands on the
+page with that row; the links to `#before`, `#tbl` and the whole file each land
+on the page with the first row of the table they name; chapter 9's cells are
+in Charis SIL, the second table bold; chapter 10's header cell is centred with
+its italic run, the body runs are bold and italic, and the raised note 7 opens
+note 7; a search for "marrowquill", after indexing, finds the chapter 10 cell.
 
     .venv/bin/python research/make_table_sideload.py [out_dir]
 
-Output is gitignored (`*.kfx`, `*.epub`). Do not commit it.
+Output is gitignored (`*.kfx`, `*.epub`, `*.zip`, and the calibre config
+directory). Do not commit it. All text in the book is invented.
 
 Result: not yet run on a device.
 """
 
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -82,11 +127,18 @@ from tests._kfx_introspect import by_type, iter_entries, load_fragments, val  # 
 from tests.fixtures.epub_builder import EpubBuilder  # noqa: E402
 from tests.fixtures.golden.inputs import _xhtml_page  # noqa: E402
 from tests.fixtures.oeb_shim import EpubAsOeb  # noqa: E402
+from tests.integration.test_calibre_list_markers import (  # noqa: E402
+    CALIBRE_CUSTOMIZE,
+    EBOOK_CONVERT,
+    _build_plugin,
+)
 
 AUTHOR = "kfxgen test"
 PARAS_PER_CHAPTER = 12
 NOTES = 10
 LONG_TABLE_ROWS = 60
+HUGE_TABLE_ROWS = 2000
+VERY_WIDE_COLUMNS = 24
 
 #: The cell the chapter 6 TOC entry points at, and the cell chapter 1 links to.
 TOC_CELL_ID = "toc-cell"
@@ -96,6 +148,20 @@ LINK_CELL_ID = "link-cell"
 BEFORE_ID = "before"
 TABLE_ID = "tbl"
 TABLE_FIRST_FILE = "chapter_8.xhtml"
+
+#: The note chapter 10's cell links to, and the word only that cell holds.
+CELL_NOTE = 7
+SEARCH_WORD = "marrowquill"
+
+FONT_DIR = ROOT / "test_books" / "font-matching-test" / "OEBPS" / "fonts"
+#: (file, font-weight, font-style) for each Charis SIL face.
+FONTS = [
+    ("CharisSILR.ttf", "normal", "normal"),
+    ("CharisSILB.ttf", "bold", "normal"),
+    ("CharisSILI.ttf", "normal", "italic"),
+    ("CharisSILBI.ttf", "bold", "italic"),
+]
+CSS_HREF = "tables.css"
 
 _FILLER = (
     "The keeper walked the harbour wall at dusk and counted the lamps that "
@@ -113,6 +179,10 @@ _TITLES = [
     "6. Table with cell targets",
     "7. Table link targets",
     "8. File opening with a table",
+    "9. Embedded font tables",
+    "10. Formatted cells",
+    "11. Two thousand rows",
+    "12. Twenty-four columns",
 ]
 
 _WIDE_CELLS = [
@@ -132,23 +202,55 @@ class _Log:
         return lambda *a, **k: None
 
 
+def _css():
+    faces = "\n".join(
+        f'@font-face {{ font-family: "Charis SIL"; font-weight: {weight}; '
+        f"font-style: {style}; src: url(fonts/{name}); }}"
+        for name, weight, style in FONTS
+    )
+    return (
+        f"{faces}\n"
+        'body.charis { font-family: "Charis SIL", serif; }\n'
+        "table.bold td { font-weight: bold; }\n"
+        "th.centre { text-align: center; }\n"
+    )
+
+
+def _styled_page(title, body_html, body_class=""):
+    """`_xhtml_page` with the shared stylesheet linked."""
+    cls = f' class="{body_class}"' if body_class else ""
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        "<!DOCTYPE html>\n"
+        '<html xmlns="http://www.w3.org/1999/xhtml">\n'
+        f'<head><title>{title}</title><link rel="stylesheet" type="text/css" '
+        f'href="{CSS_HREF}"/></head>\n'
+        f"<body{cls}>\n{body_html}\n</body>\n"
+        "</html>\n"
+    )
+
+
 def _para(chapter, p):
     return f"<p>Chapter {chapter}, paragraph {p}. {_FILLER}</p>"
 
 
-def _chapter(n, table_html, *, before="", after="", table_after=3):
+def _chapter(n, table_html, *, before="", after="", table_after=3, body_class=None):
     """Heading, filler paragraphs with `table_html` after paragraph
-    `table_after`. `before` and `after` are extra markup around the table."""
+    `table_after`. `before` and `after` are extra markup around the table.
+    `body_class`, when given, links the stylesheet and sets the body class."""
     parts = [f"<h1>{_TITLES[n - 1]}</h1>"]
     for p in range(1, PARAS_PER_CHAPTER + 1):
         parts.append(_para(n, p))
         if p == table_after:
             parts.extend([before, table_html, after])
-    return _xhtml_page(_TITLES[n - 1], "\n".join(x for x in parts if x))
+    body = "\n".join(x for x in parts if x)
+    if body_class is not None:
+        return _styled_page(_TITLES[n - 1], body, body_class)
+    return _xhtml_page(_TITLES[n - 1], body)
 
 
-def _table(rows, head=None):
-    out = ["<table>"]
+def _table(rows, head=None, attrs=""):
+    out = [f"<table{attrs}>"]
     if head:
         out += ["<thead>", head, "</thead>", "<tbody>"]
     out += rows
@@ -181,16 +283,22 @@ def _spans():
     return _table(rows, head=head)
 
 
-def _long():
-    rows = [
-        _tr([f"Row {r}", r * 7, r * 13 % 100]) for r in range(1, LONG_TABLE_ROWS + 1)
-    ]
+def _long(n_rows=LONG_TABLE_ROWS):
+    rows = [_tr([f"Row {r}", r * 7, r * 13 % 100]) for r in range(1, n_rows + 1)]
     return _table(rows, head=_tr(["Row", "Count", "Share"], tag="th"))
 
 
 def _wide():
     rows = [_tr([f"{cell} {r}" for cell in _WIDE_CELLS]) for r in range(1, 9)]
     return _table(rows, head=_tr(_WIDE_CELLS, tag="th"))
+
+
+def _very_wide():
+    head = _tr([f"C{c}" for c in range(1, VERY_WIDE_COLUMNS + 1)], tag="th")
+    rows = [
+        _tr([f"{r}.{c}" for c in range(1, VERY_WIDE_COLUMNS + 1)]) for r in range(1, 7)
+    ]
+    return _table(rows, head=head)
 
 
 def _notes():
@@ -210,6 +318,35 @@ def _cells_table():
         b = f' id="{LINK_CELL_ID}"' if r == 8 else ""
         rows.append(f"<tr><td{a}>Row {r} left</td><td{b}>Row {r} right</td></tr>")
     return _table(rows)
+
+
+def _font_tables():
+    rows = [_tr([f"Lamp {r}", f"{r * 3} hours", "lit at dusk"]) for r in range(1, 5)]
+    head = _tr(["Lamp", "Burned", "When"], tag="th")
+    return "\n".join(
+        [
+            "<p>A plain table in Charis SIL:</p>",
+            _table(rows, head=head),
+            "<p>The same table with every body cell bold:</p>",
+            _table(rows, head=head, attrs=' class="bold"'),
+        ]
+    )
+
+
+def _formatted_cells():
+    head = (
+        "<tr><th>Item</th>"
+        '<th class="centre">The <i>harbour</i> record</th>'
+        "<th>Note</th></tr>"
+    )
+    rows = [
+        "<tr><td><b>Lamp</b> oil</td><td>burned <i>slowly</i> all night</td>"
+        f'<td>Checked<sup><a href="chapter_5.xhtml#n{CELL_NOTE}">{CELL_NOTE}</a>'
+        "</sup></td></tr>",
+        f"<tr><td>Ledger</td><td>the {SEARCH_WORD} entry</td><td>kept</td></tr>",
+        "<tr><td>Rope</td><td><b>new</b> and <i>dry</i></td><td>stored</td></tr>",
+    ]
+    return _table(rows, head=head)
 
 
 def _chapter_one():
@@ -277,17 +414,73 @@ def build_source(out_dir, title):
         _chapter(6, _cells_table(), table_after=2),
         _chapter_seven(),
         _table_first_file(),
+        _chapter(9, _font_tables(), table_after=2, body_class="charis"),
+        _chapter(10, _formatted_cells(), table_after=2, body_class=""),
+        _chapter(11, _long(HUGE_TABLE_ROWS), table_after=2),
+        _chapter(12, _very_wide(), table_after=2),
     ]
     builder = _Builder().set_metadata(title=title, author=AUTHOR)
     for name, body in zip(_TITLES, bodies):
         builder.add_chapter(name, body.encode("utf-8"))
+    builder.add_manifest_item(
+        item_id="css", href=CSS_HREF, media_type="text/css", data=_css().encode()
+    )
+    for i, (name, _, _) in enumerate(FONTS):
+        builder.add_manifest_item(
+            item_id=f"font{i}",
+            href=f"fonts/{name}",
+            media_type="font/ttf",
+            data=(FONT_DIR / name).read_bytes(),
+        )
     slug = title.lower().replace(" ", "-")
     return builder.build(out_dir, f"{slug}-source")
 
 
+def install_plugin(out_dir):
+    """An isolated calibre config under `out_dir` with this checkout's plugin
+    installed. Returns the environment to run `ebook-convert` in."""
+    config = out_dir / "calibre-config"
+    shutil.rmtree(config, ignore_errors=True)
+    config.mkdir(parents=True)
+    # The config holds calibre's own files (json, plugin copies); keep them
+    # out of git whatever the repo's ignore rules say.
+    (config / ".gitignore").write_text("*\n")
+    env = dict(os.environ, CALIBRE_CONFIG_DIRECTORY=str(config))
+    plugin = out_dir / "kfxgen-plugin.zip"
+    _build_plugin(plugin)
+    subprocess.run(
+        [CALIBRE_CUSTOMIZE, "-a", str(plugin)], env=env, check=True, capture_output=True
+    )
+    return env
+
+
+def convert_with_calibre(env, source, kfx, title, native):
+    cmd = [
+        EBOOK_CONVERT,
+        str(source),
+        str(kfx),
+        "--title",
+        title,
+        "--authors",
+        AUTHOR,
+    ]
+    if not native:
+        cmd.append("--kfxgen-disable-native-tables")
+    run = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    if run.returncode != 0 or not kfx.exists():
+        sys.exit(f"ebook-convert failed:\n{run.stdout[-3000:]}\n{run.stderr[-3000:]}")
+
+
+def calibre_version():
+    out = subprocess.run(
+        [EBOOK_CONVERT, "--version"], capture_output=True, text=True
+    ).stdout
+    return out.splitlines()[0] if out else "unknown"
+
+
 def facts(kfx):
     """(`$278` tables, `$279` rows, `$269` cells under a row, yj_table version,
-    {entry kind: body links targeting it})."""
+    {entry kind: body links targeting it}, `$262` font faces)."""
     frags = load_fragments(kfx)
     tables = rows = cells = 0
     kind_of = {}
@@ -312,7 +505,8 @@ def facts(kfx):
         if str(val(f)["$180"]).startswith("body_anchor"):
             kind = kind_of[val(f)["$183"]["$155"]]
             targets[kind] = targets.get(kind, 0) + 1
-    return tables, rows, cells, version, targets
+    fonts = len(by_type(frags, "$262"))
+    return tables, rows, cells, version, targets, fonts
 
 
 def main():
@@ -321,26 +515,45 @@ def main():
     )
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    builds = [
-        ("Table Gate Native", None),
-        ("Table Gate Rows", SimpleNamespace(kfxgen_disable_native_tables=True)),
-    ]
+    builds = [("Table Gate Native", True), ("Table Gate Rows", False)]
+    calibre = bool(EBOOK_CONVERT and CALIBRE_CUSTOMIZE)
+    if calibre:
+        env = install_plugin(out_dir)
+        how = f"real ebook-convert ({calibre_version()}), isolated config"
+    else:
+        how = "test shim (EpubAsOeb), NOT the calibre path"
+        print(
+            "WARNING: ebook-convert / calibre-customize not found (set "
+            "KFXGEN_EBOOK_CONVERT). Building through the test shim, which has no "
+            "Stylizer: cells carry no CSS alignment or fonts. Do not use this "
+            "pair for the device gate.",
+            file=sys.stderr,
+        )
     results = []
-    for title, opts in builds:
+    for title, native in builds:
         source = build_source(out_dir, title)
         kfx = out_dir / (title.lower().replace(" ", "-") + ".kfx")
-        conv.convert_oeb_to_kfx(EpubAsOeb(str(source)), str(kfx), opts=opts, log=_Log())
+        kfx.unlink(missing_ok=True)
+        if calibre:
+            convert_with_calibre(env, source, kfx, title, native)
+        else:
+            opts = (
+                None if native else SimpleNamespace(kfxgen_disable_native_tables=True)
+            )
+            conv.convert_oeb_to_kfx(
+                EpubAsOeb(str(source)), str(kfx), opts=opts, log=_Log()
+            )
         results.append((title, kfx, facts(kfx)))
 
-    print(f"\nwrote to {out_dir}\n")
+    print(f"\nwrote to {out_dir}\nbuilt with: {how}\n")
     print(
         f"  {'title':<20} {'author':<12} {'$278':>5} {'$279':>6} {'$269':>6}  "
-        "yj_table  body links by target kind"
+        "yj_table  $262  body links by target kind"
     )
-    for title, kfx, (tables, rows, cells, version, targets) in results:
+    for title, kfx, (tables, rows, cells, version, targets, fonts) in results:
         print(
             f"  {title:<20} {AUTHOR:<12} {tables:>5} {rows:>6} {cells:>6}  "
-            f"{version if version is not None else '-':<8}  "
+            f"{version if version is not None else '-':<8}  {fonts:>4}  "
             + " ".join(f"{k}:{n}" for k, n in sorted(targets.items()))
         )
     for _, kfx, _ in results:
@@ -351,7 +564,7 @@ def main():
         "on each device, for both books (see the docstring for the decision table)\n"
         "---------------------------------------------------------------------\n"
         "  1. Read the firmware off the device and write it down.\n"
-        "  2. Open the TOC. Is the button present? Tap each of the 8 entries.\n"
+        "  2. Open the TOC. Is the button present? Tap each of the 12 entries.\n"
         "  3. Ch 1 to 4: tables show rows and columns; ch 2 header row is\n"
         "     distinct and the Year cell spans two header rows, 'Harbour traffic'\n"
         "     spans 3 columns, 1902 spans two rows.\n"
@@ -368,6 +581,20 @@ def main():
         "     with 'File row 1', the top of ch 8. Any of the three doing\n"
         "     nothing is a navigation failure (see the decision table).\n"
         "  9. Progress rises through the book, never stuck at 0% or 100%.\n"
+        " 10. Ch 9: both tables are in Charis SIL (compare the 'g' and 'a' with\n"
+        "     the Rows file); on the Native file every body cell of the second\n"
+        "     table is bold. (On the Rows file it is regular: 5.8.8 drops a\n"
+        "     cell's own CSS weight.)\n"
+        " 11. Ch 10: the middle header cell is centred and 'harbour' in it is\n"
+        "     italic; 'Lamp' and 'new' are bold, 'slowly' and 'dry' italic; the\n"
+        f"     raised {CELL_NOTE} after 'Checked' is small and raised, and tapping\n"
+        f"     it opens the page with note {CELL_NOTE} in ch 5.\n"
+        " 12. Ch 11: time how long the TOC jump takes to open the chapter. Page\n"
+        "     through the first 50 rows and back; jump to the end of the chapter\n"
+        "     and page back 50 rows. Progress moves as you go.\n"
+        " 13. Ch 12: is the 24-column table readable? Fits, wraps, or pan/zoom?\n"
+        f" 14. Once the book is indexed, search for '{SEARCH_WORD}'. It is only\n"
+        "     in one ch 10 cell. Does the result open that page?\n"
     )
     return 0
 
