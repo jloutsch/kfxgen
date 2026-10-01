@@ -4007,3 +4007,52 @@ def test_native_tables_are_counted_in_the_log():
         _table_book(f"<p>One.</p>{_ISSUE_219_TABLE}"), log, native_tables=True
     )
     assert any("1 table written as native" in str(c) for c in log.info.call_args_list)
+
+
+# ── final-review fixes for native tables (#219) ──────────────────────────────
+
+
+def _book_link_target_kinds(oeb, tmp_path):
+    """Convert `oeb` with native tables on and return the kind (`$159`) of the
+    storyline entry each body `$266` targets."""
+    from kfxgen.native_generator import NativeKFXGenerator
+    from tests._kfx_introspect import iter_entries, load_fragments, val
+
+    chapters = extract_chapters_from_oeb(oeb, _silent_log(), native_tables=True)
+    out = tmp_path / "links.kfx"
+    NativeKFXGenerator().generate_full_book("T", "A", chapters, output_path=str(out))
+    frags = load_fragments(out)
+    by_eid = {
+        e["$155"]: e
+        for f in frags
+        if str(f.ftype) == "$259"
+        for e in iter_entries(val(f)["$146"])
+    }
+    return [
+        str(by_eid[val(f)["$183"]["$155"]]["$159"])
+        for f in frags
+        if str(f.ftype) == "$266" and str(val(f)["$180"]).startswith("body_anchor")
+    ]
+
+
+@pytest.mark.unit
+def test_an_anchor_after_a_files_last_native_table_lands_on_its_last_row():
+    # I1: a trailing anchor after the file's last block is snapped onto that
+    # block. When the block is a native table, the id must reach a row, as it
+    # did in 5.8.8, or nothing in the table declares it.
+    blocks = _conv.extract_blocks_from_html(
+        _doc(f'{_ISSUE_219_TABLE}<a id="eof"></a>'),
+        native_tables=True,
+        base_href="ch.xhtml",
+    )
+    assert blocks[-1]["type"] == "table"
+    assert "ch.xhtml#eof" in blocks[-1]["table"]["rows"][-1]["anchor_keys"]
+
+
+@pytest.mark.unit
+def test_a_link_to_an_anchor_after_a_files_last_native_table_resolves(tmp_path):
+    oeb = _contents_book(
+        ("One", '<p>See <a href="ch1.xhtml#eof">the end</a>.</p>'),
+        ("Two", f'<p>Table.</p>{_ISSUE_219_TABLE}<a id="eof"></a>'),
+    )
+    assert _book_link_target_kinds(oeb, tmp_path) == ["$279"]

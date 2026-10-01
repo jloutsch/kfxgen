@@ -1602,6 +1602,15 @@ def extract_blocks_from_html(
         last_block["anchor_ids"] = _dedupe_keep_order(
             last_block["anchor_ids"] + pending_ids
         )
+        # A native table's chunks declare only its own, its rows' and its
+        # cells' keys, so the ids go on its last row, where 5.8.8 put them.
+        # (#219)
+        tbl = last_block.get("table")
+        if tbl and tbl["rows"]:
+            last_row = tbl["rows"][-1]
+            last_row["anchor_ids"] = _dedupe_keep_order(
+                last_row["anchor_ids"] + pending_ids
+            )
 
     if blocks:
         return _attach_anchor_keys(blocks, base_href)

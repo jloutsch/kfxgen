@@ -3047,6 +3047,7 @@ class NativeKFXGenerator:
             }
             all_chunks.append(table_open)
             group = None
+            last_row = None
             carried = []  # anchor keys of skipped cell-less rows
             for row in tbl["rows"]:
                 if not row["cells"]:
@@ -3059,14 +3060,13 @@ class NativeKFXGenerator:
                     all_chunks.append({"type": "open", "node": group})
                 keys = _dedupe_keys(carried + (row.get("anchor_keys") or []))
                 carried = []
-                all_chunks.append(
-                    {
-                        "type": "open",
-                        "node": "row",
-                        "anchor_keys": keys,
-                        "anchor_offsets": dict.fromkeys(keys, 0),
-                    }
-                )
+                last_row = {
+                    "type": "open",
+                    "node": "row",
+                    "anchor_keys": keys,
+                    "anchor_offsets": dict.fromkeys(keys, 0),
+                }
+                all_chunks.append(last_row)
                 for cell in row["cells"]:
                     all_chunks.append(
                         {
@@ -3091,6 +3091,13 @@ class NativeKFXGenerator:
                 table_open["anchor_offsets"] = dict.fromkeys(
                     table_open["anchor_keys"], 0
                 )
+            # Backstop: a key on the block that no part of the table declares
+            # would otherwise be on no chunk, and a link to it is dropped.
+            declared = inner | set(tbl.get("anchor_keys") or [])
+            stray = [k for k in block.get("anchor_keys") or () if k not in declared]
+            if stray and last_row is not None:
+                last_row["anchor_keys"] = _dedupe_keys(last_row["anchor_keys"] + stray)
+                last_row["anchor_offsets"].update(dict.fromkeys(stray, 0))
             all_chunks.append({"type": "close"})
 
         for ch_idx, chapter in enumerate(chapters):

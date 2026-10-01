@@ -3270,3 +3270,15 @@ def test_yj_table_version_follows_rowspan(tmp_path, rowspan, expected):
     f585 = next(val(f) for f in load_fragments(out) if str(f.ftype) == "$585")
     tables = [e for e in f585["$590"] if e["$492"] == "yj_table"]
     assert tables[0]["$589"]["version"]["$587"] == expected
+
+
+@pytest.mark.unit
+def test_block_keys_no_table_part_carries_go_on_the_last_row():
+    # I1 backstop: a key on the table block that neither the table, a row
+    # nor a cell declares must still land somewhere: the last emitted row.
+    block = _table_block([["a"], ["b"]])
+    block["anchor_keys"] = ["k_stray"]
+    ch = _content([block])
+    rows = [c for c in ch["all_chunks"] if c.get("node") == "row"]
+    assert rows[-1]["anchor_keys"] == ["k_stray"]
+    assert rows[-1]["anchor_offsets"] == {"k_stray": 0}
