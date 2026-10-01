@@ -3321,3 +3321,46 @@ def test_block_keys_no_table_part_carries_go_on_the_last_row():
     rows = [c for c in ch["all_chunks"] if c.get("node") == "row"]
     assert rows[-1]["anchor_keys"] == ["k_stray"]
     assert rows[-1]["anchor_offsets"] == {"k_stray": 0}
+
+
+def _header_cell_span_style(tmp_path, flags, header=True):
+    """Style of the one span in a cell holding "Name" with `flags` (#219)."""
+    block = _table_block([["Name"], ["a"]])
+    cell = block["table"]["rows"][0]["cells"][0]
+    cell["header"] = header
+    cell["spans"] = [(0, 4, frozenset(flags))]
+    top, styles = _storyline(tmp_path, [block])
+    table = next(e for e in top if str(e["$159"]) == "$278")
+    cell_entry = next(
+        e for e in iter_entries(table["$146"]) if str(e["$159"]) == "$269"
+    )
+    (span,) = cell_entry["$142"]
+    return styles[str(span["$157"])]
+
+
+@pytest.mark.unit
+def test_an_italic_run_in_a_header_cell_stays_bold(tmp_path):
+    # M1: the span style is the run's whole face. Without the header's bold
+    # it said `$13 $350`, an explicit normal weight over the cell's bold.
+    from kfxgen.inline_style import FLAG_ITALIC
+
+    style = _header_cell_span_style(tmp_path, {FLAG_ITALIC})
+    assert str(style["$13"]) == "$361"
+    assert str(style["$12"]) == "$382"
+
+
+@pytest.mark.unit
+def test_a_superscript_run_in_a_header_cell_stays_bold(tmp_path):
+    from kfxgen.inline_style import FLAG_SUPER
+
+    style = _header_cell_span_style(tmp_path, {FLAG_SUPER})
+    assert str(style["$13"]) == "$361"
+    assert "$44" in style
+
+
+@pytest.mark.unit
+def test_an_italic_run_in_a_body_cell_is_not_bold(tmp_path):
+    from kfxgen.inline_style import FLAG_ITALIC
+
+    style = _header_cell_span_style(tmp_path, {FLAG_ITALIC}, header=False)
+    assert str(style["$13"]) == "$350"

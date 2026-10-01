@@ -3823,7 +3823,12 @@ class NativeKFXGenerator:
                 chunk_spans = chunk.get("spans", [])
                 _cbs = chunk.get("block_style") or {}
                 chunk_fam = _cbs.get("font_family", [])
-                _blk_b = bool(_cbs.get("bold")) if has_fonts else False
+                # A header cell is bold on its own, with or without embedded
+                # fonts, exactly as its cell style is; a span style names the
+                # run's whole face, so it must say bold too. (#219)
+                _blk_b = (bool(_cbs.get("bold")) if has_fonts else False) or bool(
+                    (chunk.get("cell") or {}).get("header")
+                )
                 _blk_i = bool(_cbs.get("italic")) if has_fonts else False
                 # A run may be emphasis, a link, or both. Its visual style is
                 # whatever the flags say; its $179 is the resolved anchor, or
