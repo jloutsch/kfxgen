@@ -833,6 +833,10 @@ def _table_block(table, style_resolver=None, base_href=None):
     # <tfoot> before <tbody> is drawn last by a browser. Stable, so rows of
     # one kind keep their order. Anchors were placed in source order and
     # travel with their rows. (#219)
+    # `source_order` keeps the order the rows build wrote them in, which
+    # the generator's chapter-title cut follows.
+    for i, row in enumerate(rows):
+        row["source_order"] = i
     rows.sort(key=lambda r: _ROW_GROUP_ORDER[r["group"]])
     own = _own_anchor_ids(table)
     every = _dedupe_keep_order(

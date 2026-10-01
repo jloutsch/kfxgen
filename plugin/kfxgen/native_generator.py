@@ -214,25 +214,36 @@ def _with_rows(block, rows):
     }
 
 
-def _drop_table_rows(block, upto):
-    """Copy of native table `block` without the cells of rows[:upto].
+def _source_order(rows):
+    """Row indices in source order. Rows are written head, body, foot; the
+    converter records where each sat in the source, which is the order the
+    rows build wrote them in and so the order the title cut follows."""
+    return sorted(range(len(rows)), key=lambda j: rows[j].get("source_order", j))
 
-    Each dropped row stays as a row with no cells, holding its own and its
-    cells' anchor keys, so they move to the next emitted row as an empty
-    row's keys do. Returns None when no row with text is left: the rows build
-    would then have nothing of this table to show. (#219)
+
+def _drop_table_rows(block, dropped):
+    """Copy of native table `block` without the rows at indices `dropped`.
+
+    Their own and their cells' anchor keys join the table's own keys, which
+    go on the first row written, where the dropped rows' text began. Returns
+    None when no row with text is left: the rows build would then have
+    nothing of this table to show. (#219)
     """
-    rows = []
-    for j, row in enumerate(block["table"]["rows"]):
-        if j < upto:
-            keys = list(row.get("anchor_keys") or []) + [
-                k for c in row["cells"] for k in c.get("anchor_keys") or []
-            ]
-            row = {**row, "cells": [], "anchor_keys": keys}
-        rows.append(row)
-    if not any(_row_text(r) for r in rows):
+    rows = block["table"]["rows"]
+    moved = [
+        k
+        for j in sorted(dropped)
+        for k in (rows[j].get("anchor_keys") or [])
+        + [k for c in rows[j]["cells"] for k in c.get("anchor_keys") or []]
+    ]
+    kept = [r for j, r in enumerate(rows) if j not in dropped]
+    if not any(_row_text(r) for r in kept):
         return None
-    return _with_rows(block, rows)
+    out = _with_rows(block, kept)
+    out["table"]["anchor_keys"] = _dedupe_keys(
+        list(block["table"].get("anchor_keys") or []) + moved
+    )
+    return out
 
 
 def _cut_row_text(row, removed):
@@ -277,7 +288,8 @@ def _cut_title_from_table(block, title):
     text is left of the table. (#219)
     """
     rows = block["table"]["rows"]
-    j = next((j for j, r in enumerate(rows) if _row_text(r)), None)
+    order = _source_order(rows)
+    j = next((j for j in order if _row_text(rows[j])), None)
     if j is None:
         return block, False
     text = _row_text(rows[j])
@@ -289,7 +301,7 @@ def _cut_title_from_table(block, title):
     cut = _with_rows(block, rows[:j] + [row] + rows[j + 1 :])
     if any(c["text"] for c in row["cells"]):
         return cut, True
-    return _drop_table_rows(cut, j + 1), True
+    return _drop_table_rows(cut, set(order[: order.index(j) + 1])), True
 
 
 def _eat_split_title(blocks, title):
@@ -305,10 +317,11 @@ def _eat_split_title(blocks, title):
         if len(entries) >= _MAX_SPLIT_TITLE_BLOCKS:
             break
         if blk.get("type") == "table":
+            rows = blk["table"]["rows"]
             entries.extend(
-                (i, j, _row_text(r))
-                for j, r in enumerate(blk["table"]["rows"])
-                if _row_text(r)
+                (i, j, _row_text(rows[j]))
+                for j in _source_order(rows)
+                if _row_text(rows[j])
             )
         else:
             entries.append((i, None, blk.get("text", "")))
@@ -318,7 +331,8 @@ def _eat_split_title(blocks, title):
     last, last_row, _ = entries[eaten - 1]
     carried = [k for blk in blocks[:last] for k in blk.get("anchor_keys") or []]
     if last_row is not None:
-        kept = _drop_table_rows(blocks[last], last_row + 1)
+        order = _source_order(blocks[last]["table"]["rows"])
+        kept = _drop_table_rows(blocks[last], set(order[: order.index(last_row) + 1]))
         if kept is not None:
             return [kept] + blocks[last + 1 :], carried
     carried.extend(blocks[last].get("anchor_keys") or [])

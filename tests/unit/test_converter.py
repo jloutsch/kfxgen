@@ -4624,3 +4624,32 @@ def test_a_toc_entry_and_a_link_to_a_captioned_table_land_on_its_caption(native)
     ]
     target = [c for c in chunks if "ch0.xhtml#t" in (c.get("anchor_keys") or [])]
     assert [c.get("text") for c in target] == ["Table 1 caption"]
+
+
+@pytest.mark.unit
+def test_a_title_row_in_a_leading_tfoot_is_cut_as_the_rows_build_cuts_it():
+    # Round 1, M1: rows are written head, body, foot, but the title cut
+    # follows source order, as the rows build saw the rows, so a footer
+    # written first that holds the title is still cut.
+    body = (
+        '<table><tfoot><tr id="f"><td>CHAPTER I</td></tr></tfoot>'
+        "<tbody><tr><td>a</td></tr><tr><td>b</td></tr></tbody></table>"
+    )
+    native, chunks = _chapter_texts("CHAPTER I", body, native=True)
+    rows_build, _ = _chapter_texts("CHAPTER I", body, native=False)
+    assert _words(native) == _words(rows_build) == ["CHAPTER", "I", "a", "b"]
+    assert _cell_rows(chunks) == [["a"], ["b"]]
+    first_row = next(c for c in chunks if c.get("node") == "row")
+    assert "ch0.xhtml#f" in first_row["anchor_keys"]
+
+
+@pytest.mark.unit
+def test_a_title_split_over_a_leading_tfoot_and_the_body_is_eaten():
+    body = (
+        "<table><tfoot><tr><td>CHAPTER I.</td></tr></tfoot>"
+        "<tbody><tr><td>The Title</td></tr><tr><td>a</td></tr></tbody></table>"
+    )
+    native, chunks = _chapter_texts("CHAPTER I. The Title", body, native=True)
+    rows_build, _ = _chapter_texts("CHAPTER I. The Title", body, native=False)
+    assert _words(native) == _words(rows_build)
+    assert _cell_rows(chunks) == [["a"]]
