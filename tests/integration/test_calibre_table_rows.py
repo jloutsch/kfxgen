@@ -67,9 +67,20 @@ table.center { text-align: center; }
 .indent { text-indent: 1.5em; }
 table.auto { margin-left: auto; margin-right: auto; }
 .inset { margin-left: 4em; }
+td.l { text-align: left; }
+td.r { text-align: right; }
 """
 
 _ROWS = "<tr><td>{c}a</td><td>{c}b</td></tr><tr><td>{c}c</td><td>{c}d</td></tr>"
+
+
+def _rows(first, second):
+    """`_ROWS` with each row's two cells opened by `first` and `second`."""
+    return (
+        f"<tr>{first}{{c}}a</td>{second}{{c}}b</td></tr>"
+        f"<tr>{first}{{c}}c</td>{second}{{c}}d</td></tr>"
+    )
+
 
 #: (file, case id, markup). Each case's rows read "<id>a <id>b" / "<id>c <id>d".
 #: The body-indent case is in its own file because the rule is on <body>.
@@ -88,6 +99,22 @@ CASES = [
         f'<p class="inset">INSET control</p><table class="inset">{_ROWS}</table>',
     ),
     ("c1", "PLAIN", f"<table>{_ROWS}</table>"),
+    # A row takes its cells' alignment when they agree (#224).
+    (
+        "c1",
+        "ATTRCENTER",
+        f"<table>{_rows('<td align="center">', '<td align="center">')}</table>",
+    ),
+    (
+        "c1",
+        "CELLSLEFT",
+        f'<table class="center">{_rows('<td class="l">', '<td class="l">')}</table>',
+    ),
+    (
+        "c1",
+        "MIXED",
+        f'<table class="center">{_rows('<td class="l">', '<td class="r">')}</table>',
+    ),
     (
         "c2",
         "BODYINDENT",
@@ -443,6 +470,21 @@ def test_a_centered_table_centers_its_rows(converted):
     case, v = _case(converted, "CENTER")
     for text, style in case["rows"]:
         assert str(style["$34"]) == "$320", f"calibre {v}: {text!r} is not centered"
+
+
+@pytest.mark.parametrize(
+    "cid, align",
+    [("ATTRCENTER", "$320"), ("CELLSLEFT", "$59"), ("MIXED", "$320")],
+)
+def test_a_row_takes_its_cells_alignment_when_they_agree(converted, cid, align):
+    # ATTRCENTER is pg22210's picture tables: calibre turns align="center"
+    # into a computed text-align. CELLSLEFT is left cells in a centred table
+    # (pg24855). MIXED cells disagree, so the row keeps the table's. (#224)
+    case, v = _case(converted, cid)
+    for text, style in case["rows"]:
+        assert str(style.get("$34")) == align, (
+            f"calibre {v}: {text!r} is {style.get('$34')}, expected {align}"
+        )
 
 
 def test_an_indent_on_a_wrapping_div_does_not_indent_rows(converted):

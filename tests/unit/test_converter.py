@@ -2306,6 +2306,94 @@ def test_a_lone_anchor_between_rows_still_carries_forward():
     assert _row_anchors(blocks) == [("a", []), ("b", ["x"])]
 
 
+# --- a row's alignment from its cells (#224) ---------------------------------
+
+
+def _inherited_align(elem):
+    # Stands in for calibre's computed text-align: the nearest class naming
+    # an alignment, on the element or an ancestor, as inheritance would give.
+    for e in [elem, *elem.iterancestors()]:
+        if e.get("class") in ("left", "center", "right", "justify"):
+            return {"text-align": e.get("class")}
+    return {}
+
+
+def _row_aligns(html):
+    blocks = _conv.extract_blocks_from_html(_doc(html), style_resolver=_inherited_align)
+    return [(b["text"], b["block_style"]["align"]) for b in blocks]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html, expected",
+    [
+        # Every cell centred in a left table: the row is centred (pg22210's
+        # picture tables).
+        (
+            '<table class="left"><tr><td class="center">a</td>'
+            '<td class="center">b</td></tr></table>',
+            [("a b", "center")],
+        ),
+        # Left cells in a centred table: the row follows the cells.
+        (
+            '<table class="center"><tr><td class="left">a</td>'
+            '<td class="left">b</td></tr></table>',
+            [("a b", "left")],
+        ),
+        # Cells that inherit agree with the row, so nothing changes.
+        (
+            '<table class="right"><tr><td>a</td><td>b</td></tr></table>',
+            [("a b", "right")],
+        ),
+        # Mixed cells keep the row's alignment.
+        (
+            '<table class="center"><tr><td class="left">a</td>'
+            '<td class="right">b</td></tr></table>',
+            [("a b", "center")],
+        ),
+        # An empty spacer cell has nothing to align, so it doesn't vote.
+        (
+            '<table class="left"><tr><td class="center">a</td><td> </td>'
+            '<td class="center">b</td></tr></table>',
+            [("a b", "center")],
+        ),
+        # Each row decides on its own.
+        (
+            '<table class="left"><tr><td class="center">a</td></tr>'
+            '<tr><td class="right">b</td><td class="left">c</td></tr></table>',
+            [("a", "center"), ("b c", "left")],
+        ),
+        # No alignment anywhere: still none.
+        ("<table><tr><td>a</td><td>b</td></tr></table>", [("a b", None)]),
+    ],
+    ids=[
+        "all-center",
+        "all-left-in-center",
+        "inherited",
+        "mixed",
+        "empty-spacer",
+        "per-row",
+        "unset",
+    ],
+)
+def test_a_row_takes_its_cells_alignment_when_they_agree(html, expected):
+    assert _row_aligns(html) == expected
+
+
+@pytest.mark.unit
+def test_a_cell_holding_only_an_image_votes():
+    # pg22210's picture rows: a centred cell with an image is not a spacer.
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<table class="left"><tr><td class="center"><img src="a.png"/></td>'
+            '<td class="right">name</td></tr></table>'
+        ),
+        style_resolver=_inherited_align,
+    )
+    rows = [b for b in blocks if b.get("text")]
+    assert [b["block_style"]["align"] for b in rows] == ["left"]
+
+
 # --- native table eligibility (#219) ----------------------------------------
 
 
