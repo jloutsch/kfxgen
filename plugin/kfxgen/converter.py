@@ -782,6 +782,29 @@ def _span_attr(cell, name):
     return min(max(n, 1), 1000)
 
 
+def _row_align(tr, row_align, style_resolver):
+    """A row written as one paragraph takes its cells' alignment when every
+    cell with something in it agrees; otherwise the row's own (#224).
+
+    A paragraph has one alignment, and the row's is only what its cells would
+    inherit: a table centred around left-aligned cells, or cells each set
+    `align="center"`, show otherwise. An empty spacer cell shows nothing, so
+    it doesn't count."""
+    aligns = set()
+    for cell in tr:
+        if _local_tag(cell.tag) not in _CELL_TAGS:
+            continue
+        if not "".join(cell.itertext()).strip() and not any(
+            _local_tag(d.tag) in _NON_TEXT_TAGS for d in cell.iter()
+        ):
+            continue
+        css = style_resolver(cell)
+        aligns.add(compute_block_style(css)["align"] if css is not None else None)
+    if len(aligns) == 1 and None not in aligns:
+        return aligns.pop()
+    return row_align
+
+
 def _table_cell(cell, style_resolver, base_href):
     text, spans, marks = normalize_runs_with_anchors(
         _walk_inline(cell, style_resolver=style_resolver, base_href=base_href)
@@ -1586,6 +1609,10 @@ def extract_blocks_from_html(
                     css = style_resolver(elem)
                     if css is not None:
                         bstyle = compute_block_style(css)
+                    if bstyle is not None and _local_tag(elem.tag) == "tr":
+                        bstyle["align"] = _row_align(
+                            elem, bstyle["align"], style_resolver
+                        )
                 block_ids = _dedupe_keep_order(ids)
                 blocks.append(
                     {
