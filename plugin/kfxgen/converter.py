@@ -49,6 +49,50 @@ _SUB_TAGS = {"sub"}
 # one fuses 2249 of its 4864 cells. (#128)
 _CELL_TAGS = {"td", "th"}
 
+# Native table layout (#219). A table the first version can't express
+# correctly keeps 5.8.8's one paragraph per row instead.
+
+#: Block-level tags a cell may hold at most one of. Two or more would need a
+#: cell holding several paragraphs, which v1 doesn't write.
+_CELL_BLOCK_TAGS = {
+    "p",
+    "div",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "blockquote",
+    "pre",
+    "ul",
+    "ol",
+    "li",
+    "dl",
+    "section",
+    "article",
+    "figure",
+}
+#: Content v1 can't place inside a cell.
+_NON_TEXT_TAGS = {
+    "img",
+    "svg",
+    "image",
+    "math",
+    "video",
+    "audio",
+    "object",
+    "embed",
+    "iframe",
+}
+#: `NativeKFXGenerator.CHUNK_SIZE`. Longer text is cut into two storyline
+#: entries, which inside a row would be two cells (#226).
+_MAX_NATIVE_CELL_CHARS = 2000
+#: The widest table that fit on all three gate devices (#251). 24 columns were
+#: unreadable on the Voyage (5.13.6) and the Oasis (5.18.2); the table viewer
+#: that would let wider tables stay native is #254.
+_MAX_NATIVE_COLUMNS = 8
+
 _security_log = logging.getLogger(__name__ + ".security")
 
 
@@ -574,6 +618,8 @@ def _subtree_anchor_ids(elem):
 
 
 _ROW_GROUP_TAGS = {"table", "thead", "tbody", "tfoot"}
+#: What a table or row group may hold directly and still be written natively.
+_TABLE_PART_TAGS = {"tr", "thead", "tbody", "tfoot", "caption", "col", "colgroup"}
 
 
 def _is_empty_anchor(elem):
@@ -613,6 +659,257 @@ def _anchors_follow_rows(elem):
     # Starts with a row, ends with an anchor, and — once the trailing anchors
     # are set aside — still has an anchor, which then sits between two rows.
     return kinds[:1] == "R" and kinds.endswith("A") and "A" in kinds.rstrip("A")
+
+
+def _table_is_native(table):
+    """True when `table` can be written as a real KFX table (#219).
+
+    Anything else keeps rows as paragraphs: a nested table, an image or other
+    object, a cell holding more than one block, a cell longer than the
+    generator's chunk size, a cell outside a row, or no rows or cells at all.
+
+    Also anything the row path handles and the native walk would not: a
+    hidden or contents-listing row, row group or cell (the row path drops it;
+    native would show it), a row outside table/thead/tbody/tfoot, or text
+    loose in the table, a row group or a row, before or between its children,
+    or any other element directly in the table or a row group, such as a
+    `<p>`, or in a row other than a cell or empty anchor (the row path keeps
+    it; native would lose it). Likewise a hidden caption, which native would
+    show, or a second caption, which native would drop. And a table wider
+    than `_MAX_NATIVE_COLUMNS`, which older Kindles squeeze unreadably.
+    """
+    rows = 0
+    cells = 0
+    captions = 0
+    for e in table.iter():
+        tag = _local_tag(e.tag)
+        if tag is None:
+            continue
+        if tag in _ROW_GROUP_TAGS or tag == "tr" or tag in _CELL_TAGS:
+            if e is not table and (_is_non_rendered(e) or _is_nav_listing(e)):
+                return False
+        if tag in _ROW_GROUP_TAGS or tag == "tr":
+            if (e.text or "").strip() or any((c.tail or "").strip() for c in e):
+                return False
+        if tag in _ROW_GROUP_TAGS and any(
+            isinstance(c.tag, str)
+            and _local_tag(c.tag) not in _TABLE_PART_TAGS
+            and not _is_empty_anchor(c)
+            for c in e
+        ):
+            return False
+        if tag == "caption":
+            # A hidden caption would be shown; only the first is kept.
+            if _is_non_rendered(e):
+                return False
+            captions += 1
+            if captions > 1:
+                return False
+        if tag == "tr":
+            if _local_tag(e.getparent().tag) not in _ROW_GROUP_TAGS:
+                return False
+            # Only cells and empty anchors are read from a row.
+            if any(
+                isinstance(c.tag, str)
+                and _local_tag(c.tag) not in _CELL_TAGS
+                and not _is_empty_anchor(c)
+                for c in e
+            ):
+                return False
+            rows += 1
+        elif tag == "table" and e is not table:
+            return False
+        elif tag in _NON_TEXT_TAGS:
+            return False
+        elif tag in _CELL_TAGS:
+            if _local_tag(e.getparent().tag) != "tr":
+                return False
+            cells += 1
+            blocks = [
+                d
+                for d in e.iter()
+                if d is not e and _local_tag(d.tag) in _CELL_BLOCK_TAGS
+            ]
+            if len(blocks) > 1:
+                return False
+            cell_length = len("".join(e.itertext())) + sum(
+                1 for d in e.iter() if _local_tag(d.tag) == "br"
+            )
+            if cell_length > _MAX_NATIVE_CELL_CHARS:
+                return False
+    return rows > 0 and cells > 0 and _table_width(table) <= _MAX_NATIVE_COLUMNS
+
+
+def _table_width(table):
+    """Columns the widest row covers: its colspans plus the cells rowspan
+    carries down from earlier rows of the same row group. Stops counting once
+    past `_MAX_NATIVE_COLUMNS`."""
+    groups = [table] + [c for c in table if _local_tag(c.tag) in _ROW_GROUPS]
+    width = 0
+    for group in groups:
+        carry = []  # rows each column is still held for, from rows above
+        for tr in group:
+            if _local_tag(tr.tag) != "tr":
+                continue
+            row_cells = [c for c in tr if _local_tag(c.tag) in _CELL_TAGS]
+            if not row_cells:
+                continue  # never written, so it ends no rowspan
+            col = 0
+            for cell in row_cells:
+                while col < len(carry) and carry[col]:
+                    col += 1
+                end = col + _span_attr(cell, "colspan")
+                if end > _MAX_NATIVE_COLUMNS:
+                    return end
+                carry.extend([0] * (end - len(carry)))
+                carry[col:end] = [_span_attr(cell, "rowspan")] * (end - col)
+                col = end
+            width = max(width, len(carry))
+            carry = [max(n - 1, 0) for n in carry]
+    return width
+
+
+_ROW_GROUPS = {"thead": "head", "tbody": "body", "tfoot": "foot"}
+_ROW_GROUP_ORDER = {"head": 0, "body": 1, "foot": 2}
+
+
+def _span_attr(cell, name):
+    """colspan/rowspan as an int in 1..1000; anything malformed counts as 1."""
+    try:
+        n = int((cell.get(name) or "1").strip())
+    except ValueError:
+        return 1
+    return min(max(n, 1), 1000)
+
+
+def _table_cell(cell, style_resolver, base_href):
+    text, spans, marks = normalize_runs_with_anchors(
+        _walk_inline(cell, style_resolver=style_resolver, base_href=base_href)
+    )
+    ids = _dedupe_keep_order(_own_anchor_ids(cell) + list(marks))
+    css = style_resolver(cell) if style_resolver is not None else None
+    return {
+        "text": text,
+        "spans": spans,
+        "anchor_ids": ids,
+        "anchor_offsets": {aid: marks.get(aid, 0) for aid in ids},
+        "block_style": compute_block_style(css) if css is not None else None,
+        "header": _local_tag(cell.tag) == "th",
+        "colspan": _span_attr(cell, "colspan"),
+        "rowspan": _span_attr(cell, "rowspan"),
+    }
+
+
+def _table_block(table, style_resolver=None, base_href=None):
+    """A native table as one block, plus its captions and any anchors left over.
+
+    Returns (caption_elements, table_block, trailing_ids). The caller walks
+    each caption with the ordinary block walker, so it becomes the same
+    paragraphs the rows build writes (5.8.8), however many blocks it holds.
+    Anchors between rows follow 5.8.8's rule (`_anchors_follow_rows`): in
+    calibre's notes layout an anchor after a row belongs to that row,
+    otherwise to the next row; anchors with no row left to take them carry
+    past the table. (#219)
+    """
+    rows, carry, captions = [], [], []
+
+    def clamp_rowspans(group_rows):
+        """A rowspan ends at its row group's last row, as HTML ends it.
+        Only rows with cells count: the generator writes no other row."""
+        written = [r for r in group_rows if r["cells"]]
+        for i, row in enumerate(written):
+            for cell in row["cells"]:
+                cell["rowspan"] = min(cell["rowspan"], len(written) - i)
+
+    def take(container, group):
+        nonlocal carry
+        follow = _anchors_follow_rows(container)
+        last = None
+        run = []  # this row group's rows; rows loose in <table> form their own
+        for child in container:
+            tag = _local_tag(child.tag)
+            if tag in _ROW_GROUPS:
+                clamp_rowspans(run)
+                run = []
+                carry.extend(_own_anchor_ids(child))
+                take(child, _ROW_GROUPS[tag])
+                last = None
+            elif tag == "caption":
+                captions.append(child)
+            elif tag == "tr":
+                last = {
+                    "group": group,
+                    "anchor_ids": carry
+                    + _own_anchor_ids(child)
+                    + [
+                        a
+                        for c in child
+                        if _is_empty_anchor(c)
+                        for a in _own_anchor_ids(c)
+                    ],
+                    "cells": [
+                        _table_cell(c, style_resolver, base_href)
+                        for c in child
+                        if _local_tag(c.tag) in _CELL_TAGS
+                    ],
+                }
+                carry = []
+                rows.append(last)
+                run.append(last)
+            elif _is_empty_anchor(child):
+                ids = _own_anchor_ids(child)
+                if follow and last is not None:
+                    last["anchor_ids"].extend(ids)
+                else:
+                    carry.extend(ids)
+        clamp_rowspans(run)
+
+    take(table, "body")
+    # Head, then body, then foot, whatever the source order: an HTML4-style
+    # <tfoot> before <tbody> is drawn last by a browser. Stable, so rows of
+    # one kind keep their order. Anchors were placed in source order and
+    # travel with their rows. (#219)
+    # `source_order` keeps the order the rows build wrote them in, which
+    # the generator's chapter-title cut follows.
+    for i, row in enumerate(rows):
+        row["source_order"] = i
+    rows.sort(key=lambda r: _ROW_GROUP_ORDER[r["group"]])
+    own = _own_anchor_ids(table)
+    every = _dedupe_keep_order(
+        own
+        + [a for r in rows for a in r["anchor_ids"]]
+        + [a for r in rows for c in r["cells"] for a in c["anchor_ids"]]
+    )
+    block = {
+        "type": "table",
+        "text": "\n".join(
+            line
+            for line in (
+                " ".join(c["text"] for c in r["cells"] if c["text"]) for r in rows
+            )
+            if line
+        ),
+        "spans": [],
+        "block_style": None,
+        "anchor_ids": every,
+        "anchor_offsets": dict.fromkeys(every, 0),
+        "table": {"anchor_ids": own, "rows": rows},
+    }
+    return captions, block, carry
+
+
+def _table_start_ids(table_block):
+    """Ids that name a native table's start: its own, and those of its first
+    row and that row's first cell. A cell-less row is skipped on output and
+    its ids move to the next row, so they count too. (#219)"""
+    tbl = table_block["table"]
+    start = set(tbl["anchor_ids"])
+    for row in tbl["rows"]:
+        start.update(row["anchor_ids"])
+        if row["cells"]:
+            start.update(row["cells"][0]["anchor_ids"])
+            break
+    return start
 
 
 #: Semantics that make an element a note reference, a back-link, or one note,
@@ -793,6 +1090,21 @@ def _attach_anchor_keys(blocks, base_href):
             if normalized
             else {}
         )
+        tbl = block.get("table")
+        if tbl:
+            for part in (
+                [tbl] + tbl["rows"] + [c for r in tbl["rows"] for c in r["cells"]]
+            ):
+                by_part = part.get("anchor_offsets") or {}
+                ids = part.get("anchor_ids", ())
+                part["anchor_keys"] = (
+                    [f"{normalized}#{a}" for a in ids] if normalized else []
+                )
+                part["anchor_offsets"] = (
+                    {f"{normalized}#{a}": by_part.get(a, 0) for a in ids}
+                    if normalized
+                    else {}
+                )
     # A TOC entry may link to a whole file with no fragment
     # (`<a href="about.xhtml">About the Author</a>`). Give the document's first
     # block a bare-filename key so such links have something to resolve to —
@@ -801,6 +1113,10 @@ def _attach_anchor_keys(blocks, base_href):
     if normalized and blocks:
         blocks[0]["anchor_keys"] = [normalized] + blocks[0]["anchor_keys"]
         blocks[0]["anchor_offsets"][normalized] = 0
+        if blocks[0].get("table"):
+            blocks[0]["table"]["anchor_keys"] = [normalized] + blocks[0]["table"][
+                "anchor_keys"
+            ]
     return blocks
 
 
@@ -997,7 +1313,13 @@ def _prefix_marker(marker, text, spans, mark_offsets):
 
 
 def extract_blocks_from_html(
-    element, style_resolver=None, base_href=None, nav_listing_at=None, tables_seen=None
+    element,
+    style_resolver=None,
+    base_href=None,
+    nav_listing_at=None,
+    tables_seen=None,
+    native_tables=False,
+    toc_targets=None,
 ):
     """Like extract_text_from_html but returns structured blocks:
     [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None,
@@ -1018,6 +1340,17 @@ def extract_blocks_from_html(
     caller can tell whether it survived into the final chapters: a contents
     page is discarded after extraction, tables and all. A table nested inside
     a cell is part of that cell's row and is not counted separately.
+
+    `native_tables`: when set, an eligible `<table>` becomes one
+    `{"type": "table"}` block (#219); otherwise each row is its own paragraph.
+    A table that is not eligible still falls back to rows, and only those
+    count toward `tables_seen`.
+
+    `toc_targets`: the fragment ids this file's TOC entries name. A chapter
+    is a range of blocks and a native table is one block, so a TOC entry
+    pointing past a table's start (its own id, an anchor just before it, its
+    first row or first cell) cannot start a chapter there. Such a table falls
+    back to rows, which keeps 5.8.8's chapters. (#219)
 
     `base_href` is the spine file this markup came from. It qualifies both
     sides of an in-book link: `anchor_keys` are the block's ids as
@@ -1154,6 +1487,7 @@ def extract_blocks_from_html(
                 tables_seen is not None
                 and _local_tag(elem.tag) == "table"
                 and len(blocks) > start
+                and not any(b.get("type") == "table" for b in blocks[start:])
             ):
                 tables_seen.append(blocks[start])
             return
@@ -1195,6 +1529,44 @@ def extract_blocks_from_html(
             _emit_image_block(
                 elem, background, "", _img_size_hint(elem, style_resolver)
             )
+            return
+
+        native = (
+            native_tables and _local_tag(elem.tag) == "table" and _table_is_native(elem)
+        )
+        if native:
+            captions, table, trailing = _table_block(elem, style_resolver, base_href)
+            past_start = set(table["anchor_ids"]) - _table_start_ids(table)
+            native = not (toc_targets and past_start & set(toc_targets))
+        if native:
+            # The caption is walked like any block, as the rows build walks
+            # it: each block in it is its own paragraph, with its style and
+            # ids, and anchors carried from before the table land on its
+            # first paragraph. An empty caption leaves its ids pending for
+            # the table's start. (#219)
+            if captions:
+                # The table's own ids are pending when the rows build walks
+                # its caption, so they name the caption's first paragraph: a
+                # TOC entry to the table starts its chapter there. They come
+                # back to the table if the caption holds no text.
+                own = table["table"]["anchor_ids"]
+                pending_ids.extend(own)
+                table["table"]["anchor_ids"] = []
+                table["anchor_ids"] = [a for a in table["anchor_ids"] if a not in own]
+            for caption in captions:
+                _walk(caption)
+            if pending_ids:
+                # Anchors carried from before the table name its start.
+                table["table"]["anchor_ids"] = _dedupe_keep_order(
+                    pending_ids + table["table"]["anchor_ids"]
+                )
+                table["anchor_ids"] = _dedupe_keep_order(
+                    pending_ids + table["anchor_ids"]
+                )
+                table["anchor_offsets"] = dict.fromkeys(table["anchor_ids"], 0)
+                pending_ids.clear()
+            blocks.append(table)
+            pending_ids.extend(trailing)
             return
 
         is_block = elem.tag in block_tags
@@ -1351,6 +1723,15 @@ def extract_blocks_from_html(
         last_block["anchor_ids"] = _dedupe_keep_order(
             last_block["anchor_ids"] + pending_ids
         )
+        # A native table's chunks declare only its own, its rows' and its
+        # cells' keys, so the ids go on its last row, where 5.8.8 put them.
+        # (#219)
+        tbl = last_block.get("table")
+        if tbl and tbl["rows"]:
+            last_row = tbl["rows"][-1]
+            last_row["anchor_ids"] = _dedupe_keep_order(
+                last_row["anchor_ids"] + pending_ids
+            )
 
     if blocks:
         return _attach_anchor_keys(blocks, base_href)
@@ -1832,7 +2213,9 @@ def _assemble_chapters_by_coordinate(
     return chapters
 
 
-def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
+def extract_chapters_from_oeb(
+    oeb_book, log, metadata=None, cover_href=None, native_tables=False
+):
     """
     Extract structured chapters from OEB book by mapping TOC to spine items.
 
@@ -1844,6 +2227,7 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
         log: Calibre logger
         metadata: Optional dict with 'title' and 'author' for title page replacement
         cover_href: Manifest href of the cover image, when one was found
+        native_tables: Write eligible tables as one table block each (#219)
 
     Returns:
         list: List of chapter dicts with 'title' and 'text' keys
@@ -1852,6 +2236,17 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
     spine_map = {}
     spine_items_ordered = []
     table_blocks = []  # (href, first block) per table, for the #219 warning
+
+    toc_entries = _extract_toc_with_hrefs(oeb_book, log)
+    # Fragment ids the TOC names, per file, matched the way chapter assembly
+    # matches them, so a table holding one past its start keeps rows. (#219)
+    toc_targets = {}
+    for entry in toc_entries:
+        frag = _href_fragment(entry["href"])
+        if frag:
+            toc_targets.setdefault(_normalize_href(entry["href"]), set()).update(
+                (frag, unquote(frag))
+            )
 
     log.info(f"Processing {len(oeb_book.spine)} spine items...")
 
@@ -1875,12 +2270,19 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
             resolver = _build_style_resolver(oeb_book, item, log)
             nav_listing_at = []
             tables_seen = []
+            note_ids = _note_target_ids(item.data)
             blocks = extract_blocks_from_html(
                 item.data,
                 style_resolver=resolver,
                 base_href=getattr(item, "href", "") or "",
                 nav_listing_at=nav_listing_at,
                 tables_seen=tables_seen,
+                native_tables=native_tables,
+                # Assembly skips entries naming a footnote; so does this.
+                toc_targets=toc_targets.get(
+                    _normalize_href(getattr(item, "href", "") or ""), set()
+                )
+                - note_ids,
             )
             text = "\n\n".join(b["text"] for b in blocks)
         except Exception as e:
@@ -1903,7 +2305,7 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
                 "text": text,
                 "blocks": blocks,
                 "nav_listing_at": nav_listing_at,
-                "note_ids": _note_target_ids(item.data),
+                "note_ids": note_ids,
             }
         )
         table_blocks.extend((href, b) for b in tables_seen)
@@ -1918,9 +2320,6 @@ def extract_chapters_from_oeb(oeb_book, log, metadata=None, cover_href=None):
         raise ValueError(
             "No spine items with extractable text — EPUB has no convertible content"
         )
-
-    # Try to extract TOC with hrefs
-    toc_entries = _extract_toc_with_hrefs(oeb_book, log)
 
     if toc_entries:
         chapters = _assemble_chapters_by_coordinate(
@@ -1961,6 +2360,14 @@ def _warn_flattened_tables(chapters, table_blocks, log):
     """
     kept = {id(b) for ch in chapters for b in ch.get("blocks") or ()}
     written = [href for href, block in table_blocks if id(block) in kept]
+    native = sum(
+        1 for ch in chapters for b in ch.get("blocks") or () if b.get("type") == "table"
+    )
+    if native:
+        log.info(
+            f"  {native} table{'s' if native != 1 else ''} written as native "
+            "Kindle tables (#219)"
+        )
     if not written:
         return
     # Said once per book, not per table: a book with tables usually has
@@ -2564,8 +2971,15 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
 
     # Extract structured chapters
     log.info("Extracting chapters...")
+    native_tables = not getattr(opts, "kfxgen_disable_native_tables", False)
+    if not native_tables:
+        log.info("  Native tables disabled (kfxgen_disable_native_tables=True)")
     chapters = extract_chapters_from_oeb(
-        oeb_book, log, metadata=metadata, cover_href=cover_href
+        oeb_book,
+        log,
+        metadata=metadata,
+        cover_href=cover_href,
+        native_tables=native_tables,
     )
     total_chars = sum(len(ch["text"]) for ch in chapters)
     log.info(f"  Chapters: {len(chapters)}")

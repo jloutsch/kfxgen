@@ -1258,6 +1258,83 @@ def test_font_table_for_default_embeds_delegating_to_build(monkeypatch):
     assert _conv._font_table_for(object(), None, _silent_log()) is sentinel
 
 
+# --- native-table toggle: opt-out via kfxgen_disable_native_tables (#219) ---
+
+
+def _table_oeb(directory):
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.golden.inputs import _xhtml_page
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    body = f"<p>Before.</p>{_ISSUE_219_TABLE}<p>After.</p>"
+    epub = (
+        EpubBuilder()
+        .set_metadata(title="Table Book", author="Table Author")
+        .add_chapter("Chapter", _xhtml_page("Chapter", body).encode("utf-8"))
+        .build(directory, "t")
+    )
+    return EpubAsOeb(str(epub))
+
+
+def _convert_table_book(directory, opts):
+    out = directory / "t.kfx"
+    _conv.convert_oeb_to_kfx(
+        _table_oeb(directory), str(out), opts=opts, log=_silent_log()
+    )
+    return out
+
+
+def _storyline_node_types(path):
+    from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
+
+    frags = load_fragments(path)
+    return {
+        str(e.get("$159"))
+        for f in by_type(frags, "$259")
+        for e in iter_entries(val(f).get("$146"))
+    }
+
+
+@pytest.mark.unit
+def test_native_tables_are_on_by_default(tmp_path):
+    kfx = _convert_table_book(tmp_path, opts=None)
+    assert "$278" in _storyline_node_types(kfx)
+
+
+@pytest.mark.unit
+def test_disabling_native_tables_restores_rows(tmp_path):
+    class Opts:
+        kfxgen_disable_native_tables = True
+
+    assert "$278" not in _storyline_node_types(
+        _convert_table_book(tmp_path, opts=Opts())
+    )
+
+
+@pytest.mark.unit
+def test_disabled_output_is_byte_identical_to_a_book_built_without_native_support(
+    tmp_path, monkeypatch
+):
+    class Opts:
+        kfxgen_disable_native_tables = True
+
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    a = _convert_table_book(tmp_path / "a", opts=Opts()).read_bytes()
+
+    # The same conversion with the flag never passed at all: the extractor's
+    # own default, which is what 5.8.8 did.
+    real = _conv.extract_chapters_from_oeb
+
+    def without_native_support(oeb, log, **kwargs):
+        kwargs.pop("native_tables", None)
+        return real(oeb, log, **kwargs)
+
+    monkeypatch.setattr(_conv, "extract_chapters_from_oeb", without_native_support)
+    b = _convert_table_book(tmp_path / "b", opts=None).read_bytes()
+    assert a == b
+
+
 # ── #52: superscript / subscript inline runs ─────────────────────────────────
 
 from kfxgen.inline_style import FLAG_SUB as Sb  # noqa: E402
@@ -2227,6 +2304,363 @@ def test_a_lone_anchor_between_rows_still_carries_forward():
         _doc('<table><tr><td>a</td></tr><a id="x"></a><tr><td>b</td></tr></table>')
     )
     assert _row_anchors(blocks) == [("a", []), ("b", ["x"])]
+
+
+# --- native table eligibility (#219) ----------------------------------------
+
+
+def _first_table(html):
+    return next(e for e in _doc(html).iter() if _conv._local_tag(e.tag) == "table")
+
+
+@pytest.mark.unit
+def test_a_plain_table_goes_native():
+    assert _conv._table_is_native(_first_table(_ISSUE_219_TABLE))
+
+
+@pytest.mark.unit
+def test_thead_tbody_tfoot_colspan_rowspan_go_native():
+    assert _conv._table_is_native(
+        _first_table(
+            "<table><thead><tr><th colspan='2'>H</th></tr></thead>"
+            "<tbody><tr><td rowspan='2'>a</td><td>b</td></tr><tr><td>c</td></tr></tbody>"
+            "<tfoot><tr><td>f</td><td>g</td></tr></tfoot></table>"
+        )
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html",
+    [
+        "<table><tr><td><table><tr><td>x</td></tr></table></td></tr></table>",
+        '<table><tr><td><img src="a.png"/></td></tr></table>',
+        "<table><tr><td><svg/></td></tr></table>",
+        "<table><tr><td><p>one</p><p>two</p></td></tr></table>",
+        "<table><caption>only a caption</caption></table>",
+        "<table><td>cell with no row</td></table>",
+        "<table><tr></tr></table>",
+    ],
+    ids=[
+        "nested",
+        "img",
+        "svg",
+        "two-paragraph-cell",
+        "no-rows",
+        "cell-outside-row",
+        "no-cells",
+    ],
+)
+def test_tables_that_fall_back_to_rows(html):
+    assert not _conv._table_is_native(_first_table(html))
+
+
+@pytest.mark.unit
+def test_a_cell_over_the_chunk_size_falls_back():
+    # The generator cuts text at CHUNK_SIZE (2,000); inside a table that cut
+    # would turn one cell into two and shift every later column (#226).
+    long_cell = "x" * (_conv._MAX_NATIVE_CELL_CHARS + 1)
+    assert not _conv._table_is_native(
+        _first_table(f"<table><tr><td>{long_cell}</td></tr></table>")
+    )
+
+
+@pytest.mark.unit
+def test_max_native_cell_chars_matches_the_generator_chunk_size():
+    from kfxgen.native_generator import NativeKFXGenerator
+
+    assert _conv._MAX_NATIVE_CELL_CHARS == NativeKFXGenerator.CHUNK_SIZE
+
+
+@pytest.mark.unit
+def test_a_cell_at_exactly_the_chunk_size_stays_native():
+    # Boundary case: exactly at the limit stays native.
+    cell_at_limit = "x" * _conv._MAX_NATIVE_CELL_CHARS
+    assert _conv._table_is_native(
+        _first_table(f"<table><tr><td>{cell_at_limit}</td></tr></table>")
+    )
+
+
+@pytest.mark.unit
+def test_a_cell_with_line_breaks_counts_them_in_length():
+    # itertext() doesn't include <br/>, but the converter turns each into a
+    # newline. A cell of (MAX - 10) chars + 20 <br/> would normalize to 2010
+    # chars and must fall back (#226).
+    text = "x" * (_conv._MAX_NATIVE_CELL_CHARS - 10)
+    br_tags = "".join("<br/>" for _ in range(20))
+    assert not _conv._table_is_native(
+        _first_table(f"<table><tr><td>{text}{br_tags}</td></tr></table>")
+    )
+
+
+@pytest.mark.unit
+def test_a_cell_holding_exactly_one_block_stays_native():
+    # A cell with one block-level child is fine; only two or more trigger
+    # fallback.
+    assert _conv._table_is_native(
+        _first_table("<table><tr><td><p>x</p></td></tr></table>")
+    )
+
+
+def _row(n, cell="<td>x</td>"):
+    return "<tr>" + cell * n + "</tr>"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html, native",
+    [
+        (f"<table>{_row(8)}</table>", True),
+        (f"<table>{_row(9)}</table>", False),
+        # One wide row is enough.
+        (f"<table>{_row(3)}{_row(9)}{_row(3)}</table>", False),
+        # colspan counts: 7 cells, one spanning 2, is 8 columns; 3 is 9.
+        (f"<table>{_row(6)[:-5]}<td colspan='2'>x</td></tr></table>", True),
+        (f"<table>{_row(6)[:-5]}<td colspan='3'>x</td></tr></table>", False),
+        (f"<table>{_row(1, '<th colspan="9">H</th>')}{_row(3)}</table>", False),
+        # A cell carried down by rowspan takes a column in the next row.
+        (
+            f"<table><tr><td rowspan='2'>a</td>{'<td>x</td>' * 7}</tr>"
+            f"{_row(8)}</table>",
+            False,
+        ),
+        (
+            f"<table><tr><td rowspan='2'>a</td>{'<td>x</td>' * 7}</tr>"
+            f"{_row(7)}</table>",
+            True,
+        ),
+        # rowspan ends with its row group.
+        (
+            f"<table><thead><tr><td rowspan='5'>a</td>{'<td>x</td>' * 7}</tr>"
+            f"</thead><tbody>{_row(8)}</tbody></table>",
+            True,
+        ),
+    ],
+    ids=[
+        "8-columns",
+        "9-columns",
+        "one-wide-row",
+        "colspan-to-8",
+        "colspan-to-9",
+        "header-colspan-9",
+        "rowspan-carry-to-9",
+        "rowspan-carry-to-8",
+        "rowspan-ends-at-group",
+    ],
+)
+def test_a_table_wider_than_8_columns_falls_back(html, native):
+    # Device gate on #251: 8 columns fit on the Voyage, Oasis and Paperwhite;
+    # 24 were unreadable on the Voyage (5.13.6) and the Oasis (5.18.2).
+    assert _conv._table_is_native(_first_table(html)) is native
+
+
+def _block(html, **kw):
+    captions, table, trailing = _conv._table_block(_first_table(html), **kw)
+    return captions, table, trailing
+
+
+def _cells(table):
+    return [[c["text"] for c in r["cells"]] for r in table["table"]["rows"]]
+
+
+@pytest.mark.unit
+def test_table_block_keeps_rows_and_cells():
+    _, table, _ = _block(_ISSUE_219_TABLE)
+    assert table["type"] == "table"
+    assert _cells(table) == [
+        ["Year", "A", "B"],
+        ["1", "100", "200"],
+        ["2", "110", "220"],
+    ]
+    assert table["text"] == "Year A B\n1 100 200\n2 110 220"
+    assert [r["group"] for r in table["table"]["rows"]] == ["body"] * 3
+
+
+@pytest.mark.unit
+def test_table_block_row_groups_header_cells_and_spans():
+    _, table, _ = _block(
+        "<table><thead><tr><th colspan='2'>H</th></tr></thead>"
+        "<tbody><tr><td rowspan='2'>a</td><td>b</td></tr><tr><td>c</td></tr></tbody>"
+        "<tfoot><tr><td>f</td><td>g</td></tr></tfoot></table>"
+    )
+    rows = table["table"]["rows"]
+    assert [r["group"] for r in rows] == ["head", "body", "body", "foot"]
+    head = rows[0]["cells"][0]
+    assert (head["header"], head["colspan"], head["rowspan"]) == (True, 2, 1)
+    assert rows[1]["cells"][0]["rowspan"] == 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "raw, expected", [("0", 1), ("-3", 1), ("x", 1), ("5000", 1000), (" 3 ", 3)]
+)
+def test_span_attributes_are_clamped(raw, expected):
+    _, table, _ = _block(f"<table><tr><td colspan='{raw}'>a</td></tr></table>")
+    assert table["table"]["rows"][0]["cells"][0]["colspan"] == expected
+    # A rowspan also stops at its row group's last row (QA-3).
+    _, table, _ = _block(
+        f"<table><tr><td rowspan='{raw}'>a</td></tr><tr><td>b</td></tr>"
+        "<tr><td>c</td></tr></table>"
+    )
+    assert table["table"]["rows"][0]["cells"][0]["rowspan"] == min(expected, 3)
+
+
+@pytest.mark.unit
+def test_rowspan_clamps_to_the_rows_left_in_its_row_group():
+    # QA-3: a rowspan past its group's last row reached the Kindle as is
+    # (up to 1,000). HTML ends a rowspan at its row group's end.
+    _, table, _ = _block(
+        "<table><thead><tr><th rowspan='5'>h</th></tr></thead><tbody>"
+        "<tr><td rowspan='50'>a</td><td>x</td></tr>"
+        "<tr><td rowspan='50'>b</td></tr>"
+        "<tr><td>c</td><td rowspan='2'>d</td></tr></tbody>"
+        "<tfoot><tr><td rowspan='9'>f</td></tr></tfoot></table>"
+    )
+    spans = [[c["rowspan"] for c in r["cells"]] for r in table["table"]["rows"]]
+    assert spans == [[1], [3, 1], [2], [1, 1], [1]]
+
+
+@pytest.mark.unit
+def test_rows_directly_in_the_table_count_as_their_own_group():
+    _, table, _ = _block(
+        "<table><tr><td rowspan='9'>a</td></tr><tr><td>b</td></tr>"
+        "<tbody><tr><td rowspan='9'>c</td></tr></tbody></table>"
+    )
+    spans = [[c["rowspan"] for c in r["cells"]] for r in table["table"]["rows"]]
+    assert spans == [[2], [1], [1]]
+
+
+@pytest.mark.unit
+def test_cell_emphasis_and_anchor_offsets_are_cell_relative():
+    _, table, _ = _block(
+        '<table><tr><td>ab</td><td>x <em>cd</em> <a id="k"></a>e</td></tr></table>'
+    )
+    cell = table["table"]["rows"][0]["cells"][1]
+    assert cell["text"] == "x cd e"
+    assert cell["spans"] == [(2, 2, frozenset({I}))]
+    assert cell["anchor_offsets"]["k"] == 5
+    assert "k" in table["anchor_ids"]  # block level too, for chapter assembly
+
+
+@pytest.mark.unit
+def test_notes_layout_anchor_after_row_stays_with_row():
+    _, table, _ = _block(
+        '<table><tr><td>1.</td><td>First.</td></tr><a id="n1"></a>'
+        '<tr><td>2.</td><td>Second.</td></tr><a id="n2"></a></table>'
+    )
+    assert [r["anchor_ids"] for r in table["table"]["rows"]] == [["n1"], ["n2"]]
+
+
+@pytest.mark.unit
+def test_anchor_before_each_row_belongs_to_the_next_row():
+    _, table, trailing = _block(
+        '<table><a id="n1"></a><tr><td>1.</td></tr><a id="n2"></a><tr><td>2.</td></tr></table>'
+    )
+    assert [r["anchor_ids"] for r in table["table"]["rows"]] == [["n1"], ["n2"]]
+    assert trailing == []
+
+
+@pytest.mark.unit
+def test_an_anchor_only_after_the_last_row_carries_past_the_table():
+    _, table, trailing = _block(
+        '<table><tr><td>a</td></tr><tr><td>b</td></tr><a id="ch2"></a></table>'
+    )
+    assert [r["anchor_ids"] for r in table["table"]["rows"]] == [[], []]
+    assert trailing == ["ch2"]
+
+
+@pytest.mark.unit
+def test_caption_becomes_its_own_paragraph():
+    captions, table = _caption_and_table(
+        "<table><caption>Census</caption><tr><td>a</td></tr></table>"
+    )
+    assert [b["text"] for b in captions] == ["Census"]
+    assert "Census" not in table["text"]
+
+
+@pytest.mark.unit
+def test_table_own_id_is_kept_separately():
+    _, table, _ = _block('<table id="t"><tr id="r"><td id="c">a</td></tr></table>')
+    assert table["table"]["anchor_ids"] == ["t"]
+    assert table["table"]["rows"][0]["anchor_ids"] == ["r"]
+    assert table["table"]["rows"][0]["cells"][0]["anchor_ids"] == ["c"]
+    assert table["anchor_ids"] == ["t", "r", "c"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("group", ["thead", "tbody", "tfoot"])
+def test_row_group_own_id_lands_on_its_first_row(group):
+    _, table, _ = _block(
+        f'<table><{group} id="g"><tr><td>a</td></tr><tr><td>b</td></tr></{group}></table>'
+    )
+    assert [r["anchor_ids"] for r in table["table"]["rows"]] == [["g"], []]
+    assert "g" in table["anchor_ids"]
+
+
+@pytest.mark.unit
+def test_caption_own_id_is_on_the_caption_block():
+    captions, table = _caption_and_table(
+        '<table><caption id="cp">Census <a id="in"></a>now</caption>'
+        "<tr><td>a</td></tr></table>",
+        base_href="ch.xhtml",
+    )
+    assert captions[0]["anchor_ids"] == ["cp", "in"]
+    assert captions[0]["anchor_offsets"] == {
+        "ch.xhtml": 0,
+        "ch.xhtml#cp": 0,
+        "ch.xhtml#in": 7,
+    }
+
+
+@pytest.mark.unit
+def test_empty_caption_keeps_its_id_at_the_table_start():
+    # The table's own ids go on its first row in the generator.
+    captions, table = _caption_and_table(
+        '<table><caption id="cp"></caption><tr><td>a</td></tr></table>'
+    )
+    assert captions == []
+    assert table["table"]["anchor_ids"] == ["cp"]
+
+
+@pytest.mark.unit
+def test_anchor_inside_a_row_but_outside_any_cell_stays_with_the_row():
+    _, table, _ = _block('<table><tr><td>1</td><a id="mid"></a><td>2</td></tr></table>')
+    assert table["table"]["rows"][0]["anchor_ids"] == ["mid"]
+    assert _cells(table) == [["1", "2"]]
+    assert "mid" in table["anchor_ids"]
+
+
+@pytest.mark.unit
+def test_anchors_across_two_row_groups_each_stay_with_their_row():
+    _, table, trailing = _block(
+        '<table><tbody><tr><td>1</td></tr><a id="n1"></a><tr><td>2</td></tr><a id="n2"></a></tbody>'
+        '<tbody><tr><td>3</td></tr><a id="n3"></a><tr><td>4</td></tr><a id="n4"></a></tbody></table>'
+    )
+    assert [r["anchor_ids"] for r in table["table"]["rows"]] == [
+        ["n1"],
+        ["n2"],
+        ["n3"],
+        ["n4"],
+    ]
+    assert trailing == []
+
+
+@pytest.mark.unit
+def test_an_anchor_after_the_last_row_group_carries_past_the_table():
+    _, table, trailing = _block(
+        '<table><tbody><tr><td>a</td></tr></tbody><a id="x"></a></table>'
+    )
+    assert table["table"]["rows"][0]["anchor_ids"] == []
+    assert trailing == ["x"]
+
+
+@pytest.mark.unit
+def test_rows_with_only_empty_cells_add_no_blank_line_to_the_text():
+    _, table, _ = _block(
+        "<table><tr><td>a</td></tr><tr><td></td><td></td></tr><tr><td>b</td></tr></table>"
+    )
+    assert table["text"] == "a\nb"
+    assert len(table["table"]["rows"]) == 3
 
 
 # --- illustrations inside a discarded contents section (#117) ---------------
@@ -3577,3 +4011,716 @@ def test_a_paragraph_that_contains_a_note_marker_can_still_start_a_chapter(tmp_p
         [("Chapter One", "index.xhtml#one"), ("Chapter Two", "index.xhtml#start2")],
     )
     assert _chapter_titles(epub) == ["Chapter One", "Chapter Two"]
+
+
+# ── native tables in the block stream (#219) ─────────────────────────────────
+
+
+@pytest.mark.unit
+def test_native_tables_become_one_block_between_paragraphs():
+    blocks = _conv.extract_blocks_from_html(
+        _doc(f"<p>Before.</p>{_ISSUE_219_TABLE}<p>After.</p>"), native_tables=True
+    )
+    assert [b.get("type", "text") for b in blocks] == ["text", "table", "text"]
+
+
+@pytest.mark.unit
+def test_native_tables_off_keeps_rows_as_paragraphs():
+    blocks = _conv.extract_blocks_from_html(_doc(_ISSUE_219_TABLE))
+    assert [b["text"] for b in blocks] == ["Year A B", "1 100 200", "2 110 220"]
+
+
+@pytest.mark.unit
+def test_an_ineligible_table_falls_back_to_rows_with_native_tables_on():
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<table><tr><td>a</td><td><img src="i.png"/></td></tr></table>'),
+        native_tables=True,
+    )
+    assert all(b.get("type", "text") != "table" for b in blocks)
+
+
+@pytest.mark.unit
+def test_only_fallback_tables_count_for_the_warning():
+    seen = []
+    _conv.extract_blocks_from_html(
+        _doc(f'{_ISSUE_219_TABLE}<table><tr><td><img src="i.png"/></td></tr></table>'),
+        native_tables=True,
+        tables_seen=seen,
+    )
+    assert len(seen) == 1
+
+
+@pytest.mark.unit
+def test_anchor_keys_reach_rows_and_cells():
+    blocks = _conv.extract_blocks_from_html(
+        _doc('<table id="t"><tr id="r"><td id="c">a</td></tr></table>'),
+        native_tables=True,
+        base_href="ch.xhtml",
+    )
+    tbl = blocks[0]["table"]
+    assert tbl["anchor_keys"][-1] == "ch.xhtml#t"
+    assert tbl["rows"][0]["anchor_keys"] == ["ch.xhtml#r"]
+    assert tbl["rows"][0]["cells"][0]["anchor_keys"] == ["ch.xhtml#c"]
+    assert tbl["rows"][0]["cells"][0]["anchor_offsets"] == {"ch.xhtml#c": 0}
+
+
+@pytest.mark.unit
+def test_toc_entries_into_one_table_do_not_make_empty_chapters():
+    # Review Focus 1: several TOC entries pointing at rows of one table must
+    # not produce empty chapters. Entries past the table's start make it fall
+    # back to rows (I4), so each entry keeps a chapter of its own.
+    notes = (
+        "<p>Notes intro.</p><table>"
+        + "".join(
+            f'<tr><td>{n}.</td><td>Note {n}.</td></tr><a id="n{n}"></a>'
+            for n in (1, 2, 3)
+        )
+        + "</table>"
+    )
+    oeb = _contents_book(("Chapter One", "<p>One.</p>"), ("Notes", notes))
+    oeb.toc = oeb.toc + [_TOCNode(f"{n}", f"ch1.xhtml#n{n}") for n in (1, 2, 3)]
+    chapters = extract_chapters_from_oeb(oeb, _silent_log(), native_tables=True)
+    assert all(c.get("blocks") or c.get("text", "").strip() for c in chapters)
+    assert [c["title"] for c in chapters] == ["Chapter One", "Notes", "1", "2", "3"]
+    tables = [
+        b for c in chapters for b in c.get("blocks") or () if b.get("type") == "table"
+    ]
+    assert tables == []
+
+
+@pytest.mark.unit
+def test_toc_entries_at_one_tables_start_collapse_onto_it():
+    # Entries naming the table, its first row and its first cell all resolve
+    # to the table's block: one chapter, no empty ones, and the table native.
+    oeb = _notes_book(["t", "n1", "c1"])
+    chapters = extract_chapters_from_oeb(oeb, _silent_log(), native_tables=True)
+    assert all(c.get("blocks") or c.get("text", "").strip() for c in chapters)
+    assert [c["title"] for c in chapters] == ["Chapter One", "Notes", "Note t"]
+    tables = [
+        b for c in chapters for b in c.get("blocks") or () if b.get("type") == "table"
+    ]
+    assert len(tables) == 1
+
+
+@pytest.mark.unit
+def test_native_tables_are_counted_in_the_log():
+    log = _silent_log()
+    log.info = MagicMock()
+    extract_chapters_from_oeb(
+        _table_book(f"<p>One.</p>{_ISSUE_219_TABLE}"), log, native_tables=True
+    )
+    assert any("1 table written as native" in str(c) for c in log.info.call_args_list)
+
+
+# ── final-review fixes for native tables (#219) ──────────────────────────────
+
+
+def _book_link_target_kinds(oeb, tmp_path):
+    """Convert `oeb` with native tables on and return the kind (`$159`) of the
+    storyline entry each body `$266` targets."""
+    from kfxgen.native_generator import NativeKFXGenerator
+    from tests._kfx_introspect import iter_entries, load_fragments, val
+
+    chapters = extract_chapters_from_oeb(oeb, _silent_log(), native_tables=True)
+    out = tmp_path / "links.kfx"
+    NativeKFXGenerator().generate_full_book("T", "A", chapters, output_path=str(out))
+    frags = load_fragments(out)
+    by_eid = {
+        e["$155"]: e
+        for f in frags
+        if str(f.ftype) == "$259"
+        for e in iter_entries(val(f)["$146"])
+    }
+    return [
+        str(by_eid[val(f)["$183"]["$155"]]["$159"])
+        for f in frags
+        if str(f.ftype) == "$266" and str(val(f)["$180"]).startswith("body_anchor")
+    ]
+
+
+@pytest.mark.unit
+def test_an_anchor_after_a_files_last_native_table_lands_on_its_last_row():
+    # I1: a trailing anchor after the file's last block is snapped onto that
+    # block. When the block is a native table, the id must reach a row, as it
+    # did in 5.8.8, or nothing in the table declares it.
+    blocks = _conv.extract_blocks_from_html(
+        _doc(f'{_ISSUE_219_TABLE}<a id="eof"></a>'),
+        native_tables=True,
+        base_href="ch.xhtml",
+    )
+    assert blocks[-1]["type"] == "table"
+    assert "ch.xhtml#eof" in blocks[-1]["table"]["rows"][-1]["anchor_keys"]
+
+
+@pytest.mark.unit
+def test_a_link_to_an_anchor_after_a_files_last_native_table_resolves(tmp_path):
+    oeb = _contents_book(
+        ("One", '<p>See <a href="ch1.xhtml#eof">the end</a>.</p>'),
+        ("Two", f'<p>Table.</p>{_ISSUE_219_TABLE}<a id="eof"></a>'),
+    )
+    assert _book_link_target_kinds(oeb, tmp_path) == ["$279"]
+
+
+@pytest.mark.unit
+def test_a_caption_keeps_its_css_block_style():
+    # I2: the caption is an ordinary paragraph and takes its style from CSS
+    # like any other, or a centred caption comes out justified.
+    from kfxgen.inline_style import compute_block_style
+
+    css = {"text-align": "center"}
+    captions, _ = _caption_and_table(
+        f"<table><caption>Harbour lamps</caption>{_ISSUE_219_TABLE[7:]}",
+        style_resolver=lambda e: css,
+    )
+    assert captions[0]["block_style"] == compute_block_style(css)
+    assert captions[0]["block_style"]["align"] == "center"
+
+
+@pytest.mark.unit
+def test_a_caption_without_a_resolver_has_no_block_style():
+    captions, _ = _caption_and_table(
+        f"<table><caption>Harbour lamps</caption>{_ISSUE_219_TABLE[7:]}"
+    )
+    assert captions[0]["block_style"] is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html",
+    [
+        '<table><tr><td>a</td></tr><tr hidden="hidden"><td>SECRET</td></tr></table>',
+        '<table><tbody hidden="hidden"><tr><td>SECRET</td></tr></tbody>'
+        "<tbody><tr><td>a</td></tr></tbody></table>",
+        '<table><tr><td>a</td><td hidden="hidden">SECRET</td></tr></table>',
+        '<table><tr epub:type="page-list"><td>1</td></tr><tr><td>a</td></tr></table>',
+        '<table><tr><td>a</td></tr><tr class="toc"><td>Listing</td></tr></table>',
+        "<table><tr>LOOSE<td>a</td></tr></table>",
+        "<table><tr><td>a</td>between<td>b</td></tr></table>",
+        "<table><form><tr><td>a</td></tr></form><tr><td>b</td></tr></table>",
+        "<table><tbody>stray<tr><td>a</td></tr></tbody></table>",
+        "<table>loose<tr><td>a</td></tr></table>",
+        "<table><tr><td>a</td></tr>after a row<tr><td>b</td></tr></table>",
+        '<table><tr><td>a</td></tr><a id="x"></a>after an anchor<tr><td>b</td></tr>'
+        "</table>",
+    ],
+    ids=[
+        "hidden-tr",
+        "hidden-tbody",
+        "hidden-td",
+        "page-list-tr",
+        "toc-class-tr",
+        "text-in-tr",
+        "text-between-cells",
+        "tr-under-form",
+        "stray-text-in-tbody",
+        "text-in-table",
+        "text-after-a-row",
+        "text-after-an-anchor",
+    ],
+)
+def test_markup_only_the_row_path_honours_falls_back(html):
+    # I3: the native path walks rows and cells directly, so it would show
+    # what the row path hides and drop text the row path keeps.
+    assert not _conv._table_is_native(_first_table(html))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html",
+    [
+        "<table>\n  <tr><td>a</td></tr>\n  <tr><td>b</td></tr>\n</table>",
+        "<table>\n<tbody>\n<tr>\n<td>a</td>\n<td>b</td>\n</tr>\n</tbody>\n</table>",
+        '<table><tr><td>a</td></tr>\n<a id="n1"></a>\n<tr><td>b</td></tr>'
+        '<a id="n2"></a></table>',
+        "<table><caption>Lamps</caption>\n<tr><td>a</td></tr></table>",
+        '<table><tr><td>a <span hidden="hidden">x</span></td></tr></table>',
+    ],
+    ids=[
+        "whitespace-between-rows",
+        "whitespace-everywhere",
+        "anchors-between-rows",
+        "caption",
+        "hidden-inline-in-a-cell",
+    ],
+)
+def test_ordinary_whitespace_and_anchors_stay_native(html):
+    assert _conv._table_is_native(_first_table(html))
+
+
+def _notes_book(toc_ids):
+    """A chapter, then a notes table with a TOC entry per id in `toc_ids`."""
+    rows = "".join(
+        f'<tr id="n{n}"><td id="c{n}">{n}.</td><td>Note {n}.</td></tr>'
+        for n in (1, 2, 3)
+    )
+    notes = f'<p>Notes intro.</p><a id="before"></a><table id="t">{rows}</table>'
+    oeb = _contents_book(("Chapter One", "<p>One.</p>"), ("Notes", notes))
+    oeb.toc = oeb.toc + [_TOCNode(f"Note {i}", f"ch1.xhtml#{i}") for i in toc_ids]
+    return oeb
+
+
+def _titles_and_tables(oeb, native):
+    chapters = extract_chapters_from_oeb(oeb, _silent_log(), native_tables=native)
+    tables = sum(
+        1 for c in chapters for b in c.get("blocks") or () if b.get("type") == "table"
+    )
+    return [c["title"] for c in chapters], tables
+
+
+@pytest.mark.unit
+def test_a_table_with_toc_entries_inside_falls_back_to_rows():
+    # I4: a chapter is a block range and a native table is one block, so a
+    # second TOC entry into it was dropped and the rows before it moved under
+    # its title. Such a table keeps rows, and the TOC 5.8.8 gave.
+    oeb = _notes_book(["n2", "n3"])
+    off = _titles_and_tables(oeb, native=False)
+    on = _titles_and_tables(oeb, native=True)
+    assert off == (["Chapter One", "Notes", "Note n2", "Note n3"], 0)
+    assert on == off
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("target", ["t", "n1", "c1", "before"])
+def test_a_toc_entry_at_the_tables_start_keeps_it_native(target):
+    # Its start: the table's own id, its first row's or first cell's, or an
+    # anchor just before it that carries into it.
+    titles, tables = _titles_and_tables(_notes_book([target]), native=True)
+    assert titles == ["Chapter One", "Notes", f"Note {target}"]
+    assert tables == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "targets, native",
+    [(None, True), ({"t"}, True), ({"r1", "c1"}, True), ({"r2"}, False)],
+)
+def test_toc_targets_past_a_tables_start_keep_rows(targets, native):
+    html = (
+        '<table id="t"><tr id="r1"><td id="c1">a</td><td id="c2">b</td></tr>'
+        '<tr id="r2"><td>c</td><td>d</td></tr></table>'
+    )
+    blocks = _conv.extract_blocks_from_html(
+        _doc(html), native_tables=True, toc_targets=targets
+    )
+    assert any(b.get("type") == "table" for b in blocks) is native
+
+
+@pytest.mark.unit
+def test_links_to_a_table_its_preceding_anchor_or_its_file_target_a_row(tmp_path):
+    # I5: a link to the table's own id, to an anchor just before it, or to a
+    # whole file that opens with a table must target the first row (`$279`,
+    # a kind Amazon uses as a target), never the `$278` container.
+    oeb = _contents_book(
+        (
+            "One",
+            '<p><a href="ch1.xhtml#t">table</a>, <a href="ch1.xhtml#before">before'
+            '</a> and <a href="ch2.xhtml">file</a>.</p>',
+        ),
+        (
+            "Two",
+            f'<p>Intro.</p><a id="before"></a>{_ISSUE_219_TABLE[:6]} id="t"'
+            f"{_ISSUE_219_TABLE[6:]}",
+        ),
+        ("Three", f"{_ISSUE_219_TABLE}<p>After.</p>"),
+    )
+    assert _book_link_target_kinds(oeb, tmp_path) == ["$279", "$279", "$279"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html, native",
+    [
+        ("<table><p>x</p><tr><td>a</td></tr></table>", False),
+        ("<table><tbody><p>x</p><tr><td>a</td></tr></tbody></table>", False),
+        ("<table><div>x</div><tr><td>a</td></tr></table>", False),
+        ("<table><colgroup><col/></colgroup><tr><td>a</td></tr></table>", True),
+        ("<table><!-- note --><tr><td>a</td></tr></table>", True),
+    ],
+    ids=["p-in-table", "p-in-tbody", "div-in-table", "colgroup", "comment"],
+)
+def test_a_non_row_element_in_a_table_or_row_group_falls_back(html, native):
+    # The native walk reads only rows, row groups, the caption and empty
+    # anchors there; anything else would lose its text. (#219)
+    assert _conv._table_is_native(_first_table(html)) is native
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html",
+    [
+        "<table><tr><p>lost</p><td>a</td></tr></table>",
+        "<table><tr><span>lost</span><td>a</td></tr></table>",
+        '<table><caption hidden="hidden">SECRET</caption><tr><td>a</td></tr></table>',
+        "<table><caption>One</caption><caption>Two</caption><tr><td>a</td></tr>"
+        "</table>",
+    ],
+    ids=["p-in-tr", "span-in-tr", "hidden-caption", "two-captions"],
+)
+def test_row_children_and_captions_the_native_walk_misreads_fall_back(html):
+    # A non-cell element in a row loses its text natively; a hidden caption
+    # would be shown; only the first caption is kept. The row path handles
+    # all three. (#219)
+    assert not _conv._table_is_native(_first_table(html))
+
+
+@pytest.mark.unit
+def test_one_visible_caption_and_an_anchor_between_cells_stay_native():
+    assert _conv._table_is_native(
+        _first_table(
+            "<table><caption>Lamps</caption><!-- note -->"
+            '<tr><td>a</td><a id="x"></a><td>b</td></tr></table>'
+        )
+    )
+
+
+# ── QA review fixes for native tables (#219, PR #251) ────────────────────────
+
+
+def _chapter_texts(title, body, native):
+    """The visible text chunks of a one-chapter book titled `title`, in order,
+    and the chunk list itself."""
+    from kfxgen.native_generator import NativeKFXGenerator
+
+    chapters = extract_chapters_from_oeb(
+        _contents_book((title, body)), _silent_log(), native_tables=native
+    )
+    chunks = NativeKFXGenerator()._build_chapter_content(chapters)["all_chunks"]
+    return [c["text"] for c in chunks if c["type"] == "text"], chunks
+
+
+def _words(texts):
+    return " ".join(texts).split()
+
+
+def _cell_rows(chunks):
+    """Each emitted row as the list of its cells' texts."""
+    rows, row = [], None
+    for c in chunks:
+        if c.get("node") == "row":
+            row = []
+            rows.append(row)
+        elif "cell" in c:
+            row.append(c["text"])
+    return rows
+
+
+_TITLE_TABLE_CASES = [
+    (
+        "CHAPTER I",
+        "<table><tr><td>CHAPTER I</td></tr>"
+        "<tr><td>The beginning</td><td>p. 1</td></tr></table>",
+        [["The beginning", "p. 1"]],
+    ),
+    (
+        "CHAPTER I. The Title",
+        "<table><tr><td>CHAPTER I.</td><td>The Title</td></tr>"
+        "<tr><td>a</td><td>b</td></tr></table>",
+        [["a", "b"]],
+    ),
+    (
+        "CHAPTER I",
+        "<table><tr><td>CHAPTER I The Start of</td><td>x</td></tr>"
+        "<tr><td>a</td><td>b</td></tr></table>",
+        [["The Start of", "x"], ["a", "b"]],
+    ),
+    (
+        "CHAPTER I",
+        "<table><tr><td>CHAPTER</td><td>I</td><td>y</td></tr>"
+        "<tr><td>a</td><td>b</td><td>c</td></tr></table>",
+        [[" ", " ", "y"], ["a", "b", "c"]],
+    ),
+    (
+        "CHAPTER I. The Title",
+        "<table><tr><td>CHAPTER I.</td></tr><tr><td>The Title</td></tr>"
+        "<tr><td>a</td><td>b</td></tr></table>",
+        [["a", "b"]],
+    ),
+    (
+        "CHAPTER I. The Title",
+        "<p>CHAPTER I.</p><table><tr><td>The Title</td></tr>"
+        "<tr><td>a</td><td>b</td></tr></table>",
+        [["a", "b"]],
+    ),
+    (
+        "CHAPTER I",
+        "<table><tr><td>a</td><td>b</td></tr></table>",
+        [["a", "b"]],
+    ),
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "title, body, rows",
+    _TITLE_TABLE_CASES,
+    ids=[
+        "row-is-title",
+        "cells-make-title",
+        "cell-starts-with-title",
+        "title-spans-cells",
+        "title-split-over-rows",
+        "title-split-paragraph-then-row",
+        "no-cut",
+    ],
+)
+def test_a_chapter_title_in_a_leading_table_is_shown_once(title, body, rows):
+    # QA-1: the title dedupe cut the title from the table block's text but
+    # wrote cells from its rows, so the heading and the first cell both
+    # showed it. The cut now reaches the cells, and the words a reader sees
+    # match the rows build (5.8.8's bytes).
+    native, chunks = _chapter_texts(title, body, native=True)
+    rows_build, _ = _chapter_texts(title, body, native=False)
+    assert native[0] == title
+    assert _cell_rows(chunks) == rows
+    assert _words(native) == _words(rows_build)
+
+
+@pytest.mark.unit
+def test_a_dropped_title_row_moves_its_ids_to_the_next_row():
+    _, chunks = _chapter_texts(
+        "CHAPTER I",
+        '<table><tr id="r1"><td id="c1">CHAPTER I</td></tr>'
+        '<tr id="r2"><td>a</td></tr></table>',
+        native=True,
+    )
+    row_keys = [c["anchor_keys"] for c in chunks if c.get("node") == "row"]
+    assert len(row_keys) == 1
+    assert {"ch0.xhtml#r1", "ch0.xhtml#c1", "ch0.xhtml#r2"} <= set(row_keys[0])
+
+
+@pytest.mark.unit
+def test_a_table_that_is_only_the_title_is_dropped_and_keeps_its_ids():
+    texts, chunks = _chapter_texts(
+        "CHAPTER I",
+        '<table id="t"><tr><td id="c1">CHAPTER I</td></tr></table><p>Body.</p>',
+        native=True,
+    )
+    assert texts == ["CHAPTER I", "Body."]
+    assert not any(c.get("node") == "table" for c in chunks)
+    assert "ch0.xhtml#t" in chunks[0]["anchor_keys"]
+    assert "ch0.xhtml#c1" in chunks[0]["anchor_keys"]
+
+
+@pytest.mark.unit
+def test_a_trimmed_title_cell_keeps_its_spans_and_anchor_offsets():
+    _, chunks = _chapter_texts(
+        "CHAPTER I",
+        "<table><tr><td>CHAPTER I The <em>Start</em> <a id='m'></a>of</td>"
+        "<td>x</td></tr></table>",
+        native=True,
+    )
+    cell = next(c for c in chunks if "cell" in c)
+    assert cell["text"] == "The Start of"
+    assert [(s, n) for s, n, _ in cell["spans"]] == [(4, 5)]
+    assert cell["anchor_offsets"] == {"ch0.xhtml#m": 10}
+
+
+def _caption_and_table(html, **kw):
+    """A native table's blocks: the caption paragraphs before it, and it."""
+    blocks = _conv.extract_blocks_from_html(_doc(html), native_tables=True, **kw)
+    assert blocks[-1].get("type") == "table"
+    return blocks[:-1], blocks[-1]
+
+
+@pytest.mark.unit
+def test_a_caption_of_several_blocks_stays_several_paragraphs():
+    # QA-2: the caption was read inline as one run, so two paragraphs fused
+    # into "Table 1-1Monthly totals". It is walked like any block now.
+    captions, _ = _caption_and_table(
+        "<table><caption><p>Table 1-1</p><p>Monthly totals</p></caption>"
+        "<tr><td>a</td></tr></table>"
+    )
+    assert [b["text"] for b in captions] == ["Table 1-1", "Monthly totals"]
+
+
+_CAPTION_SHAPES = {
+    "plain": "<caption>Census</caption>",
+    "two-p": "<caption><p>Table 1-1</p><p>Monthly totals</p></caption>",
+    "two-div": "<caption><div>Table 2-1</div><div>Yearly totals</div></caption>",
+    "br": "<caption>Table 3-1<br/>With break</caption>",
+    "ids": '<caption id="cp">Census <a id="in"></a><em>now</em></caption>',
+    "ids-in-blocks": '<caption id="cp"><p id="p1">One</p><p>Two <a id="in"></a>x</p>'
+    "</caption>",
+    "ids-before-table": '<caption id="cp">Census</caption>',
+    "table-id": '<caption id="cp">Census</caption>',
+    "table-id-two-p": "<caption><p>Table 1-1</p><p>Monthly totals</p></caption>",
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("shape", list(_CAPTION_SHAPES), ids=list(_CAPTION_SHAPES))
+def test_caption_paragraphs_match_the_rows_build(shape):
+    # Same paragraphs, styles, ids and offsets as 5.8.8's rows build writes.
+    before = '<a id="pre"></a>' if shape in ("ids-before-table", "table-id") else ""
+    table = '<table id="t">' if shape.startswith("table-id") else "<table>"
+    html = (
+        f"{before}{table}{_CAPTION_SHAPES[shape]}<tr><td>a</td><td>b</td></tr></table>"
+    )
+    css = {"text-align": "center"}
+    kw = {"style_resolver": lambda e: css, "base_href": "ch.xhtml"}
+    captions, _ = _caption_and_table(html, **kw)
+    rows_build = _conv.extract_blocks_from_html(_doc(html), **kw)
+    assert captions
+    assert captions == rows_build[: len(captions)]
+    assert rows_build[len(captions)]["text"] == "a b"
+
+
+@pytest.mark.unit
+def test_ids_before_a_table_go_on_its_caption():
+    captions, table = _caption_and_table(
+        '<a id="pre"></a><table><caption id="cp">Census</caption>'
+        "<tr><td>a</td></tr></table>"
+    )
+    assert captions[0]["anchor_ids"] == ["pre", "cp"]
+    assert table["table"]["anchor_ids"] == []
+
+
+@pytest.mark.unit
+def test_ids_before_a_table_with_an_empty_caption_go_on_the_table():
+    captions, table = _caption_and_table(
+        '<a id="pre"></a><table><caption id="cp"></caption><tr><td>a</td></tr></table>'
+    )
+    assert captions == []
+    assert table["table"]["anchor_ids"] == ["pre", "cp"]
+
+
+@pytest.mark.unit
+def test_row_groups_are_written_head_body_foot_whatever_the_source_order():
+    # QA-4: an HTML4-style <tfoot> before <tbody> came out between the head
+    # and the body. Browsers draw it last; so does the Kindle now.
+    _, chunks = _chapter_texts(
+        "Tides",
+        "<table><thead><tr><th>H</th></tr></thead>"
+        "<tfoot><tr><td>F</td></tr></tfoot>"
+        "<tbody><tr><td>B1</td></tr></tbody>"
+        "<tbody><tr><td>B2</td></tr></tbody></table>",
+        native=True,
+    )
+    groups = [c["node"] for c in chunks if c.get("node") in ("head", "body", "foot")]
+    assert groups == ["head", "body", "foot"]
+    assert _cell_rows(chunks) == [["H"], ["B1"], ["B2"], ["F"]]
+
+
+@pytest.mark.unit
+def test_a_moved_footer_keeps_its_anchors():
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<table><tfoot id="f"><tr><td id="fc">F</td></tr></tfoot><a id="n"></a>'
+            '<tbody><tr id="b"><td>B</td></tr></tbody></table>'
+        ),
+        native_tables=True,
+    )
+    rows = blocks[0]["table"]["rows"]
+    assert [r["group"] for r in rows] == ["body", "foot"]
+    assert rows[0]["anchor_ids"] == ["n", "b"]
+    assert rows[1]["anchor_ids"] == ["f"]
+    assert rows[1]["cells"][0]["anchor_ids"] == ["fc"]
+    assert blocks[0]["text"] == "B\nF"
+
+
+@pytest.mark.unit
+def test_a_captioned_tables_own_id_goes_on_its_caption():
+    # Round 1, I1: in the rows build the table's id is pending when the
+    # caption is walked, so it names the caption's first paragraph. It
+    # stayed on the table's first row natively.
+    captions, table = _caption_and_table(
+        '<a id="pre"></a><table id="t"><caption>Census</caption>'
+        "<tr><td>a</td></tr></table>"
+    )
+    assert captions[0]["anchor_ids"] == ["pre", "t"]
+    assert table["table"]["anchor_ids"] == []
+    assert "t" not in table["anchor_ids"]
+
+
+@pytest.mark.unit
+def test_an_empty_captions_table_keeps_its_own_id():
+    captions, table = _caption_and_table(
+        '<a id="pre"></a><table id="t"><caption id="cp"></caption>'
+        "<tr><td>a</td></tr></table>"
+    )
+    assert captions == []
+    assert table["table"]["anchor_ids"] == ["pre", "t", "cp"]
+
+
+_CAPTIONED_TABLE_BOOK = (
+    '<p>Intro text. <a href="ch0.xhtml#t">See the table.</a></p>'
+    '<table id="t"><caption>Table 1 caption</caption>'
+    "<tr><td>a</td><td>b</td></tr></table><p>After.</p>"
+)
+
+
+def _toc_book_chapters(body, toc, native):
+    from kfxgen.native_generator import NativeKFXGenerator
+
+    oeb = _table_book(body)
+    oeb.toc = [_TOCNode(title, href) for title, href in toc]
+    chapters = extract_chapters_from_oeb(oeb, _silent_log(), native_tables=native)
+    content = NativeKFXGenerator()._build_chapter_content(chapters)
+    return chapters, content["all_chunks"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("native", [True, False], ids=["native", "rows"])
+def test_a_toc_entry_and_a_link_to_a_captioned_table_land_on_its_caption(native):
+    chapters, chunks = _toc_book_chapters(
+        _CAPTIONED_TABLE_BOOK,
+        [("Start", "ch0.xhtml"), ("The Table", "ch0.xhtml#t")],
+        native,
+    )
+    words = [
+        (c["title"], " ".join(b["text"] for b in c["blocks"]).split()) for c in chapters
+    ]
+    assert words == [
+        ("Start", ["Intro", "text.", "See", "the", "table."]),
+        ("The Table", ["Table", "1", "caption", "a", "b", "After."]),
+    ]
+    target = [c for c in chunks if "ch0.xhtml#t" in (c.get("anchor_keys") or [])]
+    assert [c.get("text") for c in target] == ["Table 1 caption"]
+
+
+@pytest.mark.unit
+def test_a_title_row_in_a_leading_tfoot_is_cut_as_the_rows_build_cuts_it():
+    # Round 1, M1: rows are written head, body, foot, but the title cut
+    # follows source order, as the rows build saw the rows, so a footer
+    # written first that holds the title is still cut.
+    body = (
+        '<table><tfoot><tr id="f"><td>CHAPTER I</td></tr></tfoot>'
+        "<tbody><tr><td>a</td></tr><tr><td>b</td></tr></tbody></table>"
+    )
+    native, chunks = _chapter_texts("CHAPTER I", body, native=True)
+    rows_build, _ = _chapter_texts("CHAPTER I", body, native=False)
+    assert _words(native) == _words(rows_build) == ["CHAPTER", "I", "a", "b"]
+    assert _cell_rows(chunks) == [["a"], ["b"]]
+    first_row = next(c for c in chunks if c.get("node") == "row")
+    assert "ch0.xhtml#f" in first_row["anchor_keys"]
+
+
+@pytest.mark.unit
+def test_a_title_split_over_a_leading_tfoot_and_the_body_is_eaten():
+    body = (
+        "<table><tfoot><tr><td>CHAPTER I.</td></tr></tfoot>"
+        "<tbody><tr><td>The Title</td></tr><tr><td>a</td></tr></tbody></table>"
+    )
+    native, chunks = _chapter_texts("CHAPTER I. The Title", body, native=True)
+    rows_build, _ = _chapter_texts("CHAPTER I. The Title", body, native=False)
+    assert _words(native) == _words(rows_build)
+    assert _cell_rows(chunks) == [["a"]]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "middle", ["<tr></tr><tr></tr>", '<tr><a id="x"></a></tr>'], ids=["empty", "anchor"]
+)
+def test_rowspan_clamp_counts_only_rows_the_generator_writes(middle):
+    # Round 1, M2: a row with no cells is never written, so it cannot hold a
+    # spanned cell; counting it left a span past the last row written.
+    _, table, _ = _block(
+        f"<table><tbody><tr><td rowspan='5'>a</td><td>b</td></tr>{middle}"
+        "</tbody></table>"
+    )
+    assert table["table"]["rows"][0]["cells"][0]["rowspan"] == 1
+    _, table, _ = _block(
+        f"<table><tbody><tr><td rowspan='5'>a</td></tr>{middle}<tr><td>c</td></tr>"
+        "</tbody></table>"
+    )
+    assert table["table"]["rows"][0]["cells"][0]["rowspan"] == 2

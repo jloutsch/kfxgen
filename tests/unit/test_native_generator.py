@@ -43,7 +43,13 @@ def _png_bytes(w, h):
     )
 
 
-from tests._kfx_introspect import by_type, load_fragments, val, walk_for_key  # noqa: E402
+from tests._kfx_introspect import (  # noqa: E402
+    by_type,
+    iter_entries,
+    load_fragments,
+    val,
+    walk_for_key,
+)
 
 
 class TestNativeGeneratorInit:
@@ -426,12 +432,7 @@ class TestStyleSharing:
                     continue
                 v = f.value.value if hasattr(f.value, "value") else f.value
                 outers = v.get(IS("$146")) or v.get(IS("$181")) or []
-                # Phase 3: descend into nested $146 children when present
-                children = []
-                for outer in outers:
-                    if hasattr(outer, "get"):
-                        nested = outer.get(IS("$146"))
-                        children.extend(nested if nested else [outer])
+                children = list(iter_entries(outers))
                 # First child is the chapter heading; remaining are body paragraphs
                 for entry in children[1:]:
                     if hasattr(entry, "get"):
@@ -544,24 +545,17 @@ class TestPerChapterContentFragments:
                 expected = f"content_{ch_idx + 1}"
                 v = f.value.value if hasattr(f.value, "value") else f.value
                 outers = v.get(IS("$146")) or v.get(IS("$181")) or []
-                for outer in outers:
-                    if not hasattr(outer, "get"):
+                for e in iter_entries(outers):
+                    if not hasattr(e, "get"):
                         continue
-                    entries = [outer]
-                    nested = outer.get(IS("$146"))
-                    if nested:
-                        entries = nested
-                    for e in entries:
-                        if not hasattr(e, "get"):
-                            continue
-                        cref = e.get(IS("$145"))
-                        if cref is None:
-                            continue  # image entry — skip
-                        name = cref.get(IS("name")) if hasattr(cref, "get") else None
-                        assert str(name) == expected, (
-                            f"Storyline {sl_fid} child references {name!s}; "
-                            f"expected {expected}"
-                        )
+                    cref = e.get(IS("$145"))
+                    if cref is None:
+                        continue  # image entry — skip
+                    name = cref.get(IS("name")) if hasattr(cref, "get") else None
+                    assert str(name) == expected, (
+                        f"Storyline {sl_fid} child references {name!s}; "
+                        f"expected {expected}"
+                    )
         finally:
             os.unlink(path)
 
@@ -613,18 +607,11 @@ class TestInlineHyperlinks:
                     continue
                 v = f.value.value if hasattr(f.value, "value") else f.value
                 outers = v.get(IS("$146")) or v.get(IS("$181")) or []
-                for outer in outers:
-                    if not hasattr(outer, "get"):
+                for e in iter_entries(outers):
+                    if not hasattr(e, "get"):
                         continue
-                    entries = [outer]
-                    nested = outer.get(IS("$146"))
-                    if nested:
-                        entries = nested
-                    for e in entries:
-                        if not hasattr(e, "get"):
-                            continue
-                        if e.get(IS("$142")) is not None:
-                            link_entries.append(e)
+                    if e.get(IS("$142")) is not None:
+                        link_entries.append(e)
 
             assert link_entries, (
                 "Expected at least one $259 entry with $142 character-span "
@@ -715,7 +702,7 @@ class TestInlineHyperlinks:
                 if str(f.ftype) != "$259":
                     continue
                 v = f.value.value if hasattr(f.value, "value") else f.value
-                for e in v.get(IS("$146")) or []:
+                for e in iter_entries(v.get(IS("$146")) or []):
                     if not hasattr(e, "get"):
                         continue
                     for span in e.get(IS("$142")) or []:
@@ -767,16 +754,9 @@ class TestCoverInReadingFlow:
                     continue
                 v = f.value.value if hasattr(f.value, "value") else f.value
                 outers = v.get(IS("$146")) or v.get(IS("$181")) or []
-                for outer in outers:
-                    if not hasattr(outer, "get"):
-                        continue
-                    entries = [outer]
-                    nested = outer.get(IS("$146"))
-                    if nested:
-                        entries = nested
-                    for e in entries:
-                        if hasattr(e, "get") and str(e.get(IS("$175"))) == "cover_img":
-                            cover_refs += 1
+                for e in iter_entries(outers):
+                    if hasattr(e, "get") and str(e.get(IS("$175"))) == "cover_img":
+                        cover_refs += 1
             assert cover_refs == 1, (
                 f"Expected exactly 1 $259 entry referencing cover_img "
                 f"(cover-in-reading-flow); got {cover_refs}."
@@ -867,23 +847,16 @@ class TestImageOnlyChapterHeadings:
                 continue
             v = f.value.value if hasattr(f.value, "value") else f.value
             outers = v.get(IS("$146")) or v.get(IS("$181")) or []
-            for outer in outers:
-                if not hasattr(outer, "get"):
+            for e in iter_entries(outers):
+                if not hasattr(e, "get"):
                     continue
-                entries = [outer]
-                nested = outer.get(IS("$146"))
-                if nested:
-                    entries = nested
-                for e in entries:
-                    if not hasattr(e, "get"):
-                        continue
-                    p = e.get(IS("$155"))
-                    if p is not None and int(p) == target_pos:
-                        if e.get(IS("$175")) is not None:
-                            return "image"
-                        if e.get(IS("$145")) is not None:
-                            return "text"
-                        return "unknown"
+                p = e.get(IS("$155"))
+                if p is not None and int(p) == target_pos:
+                    if e.get(IS("$175")) is not None:
+                        return "image"
+                    if e.get(IS("$145")) is not None:
+                        return "text"
+                    return "unknown"
         return None
 
     def _toc_pos(self, path, load_kfx_fragments, want_title):
@@ -981,8 +954,7 @@ class TestImageOnlyChapterHeadings:
                     v = f.value.value if hasattr(f.value, "value") else f.value
                     outers = v.get(IS("$146")) or []
                     if outers and hasattr(outers[0], "get"):
-                        nested = outers[0].get(IS("$146"))
-                        children = nested if nested else outers
+                        children = list(iter_entries(outers))
                         # Without omit: heading + 3 body paragraphs = 4 chunks
                         # With omit:    3 body paragraphs = 3 chunks
                         assert len(children) == 3, (
@@ -1764,7 +1736,7 @@ def _link_spans(gen):
         if str(f.ftype) != "$259":
             continue
         v = f.value.value if hasattr(f.value, "value") else f.value
-        for e in v.get(IS("$146")) or []:
+        for e in iter_entries(v.get(IS("$146")) or []):
             for span in e.get(IS("$142")) or []:
                 if IS("$179") in span:
                     found.append((e, span))
@@ -1814,7 +1786,9 @@ def test_body_link_anchor_points_at_the_target_chapter(tmp_path):
         if str(f.ftype) != "$259":
             continue
         v = f.value.value if hasattr(f.value, "value") else f.value
-        per_story[str(f.fid)] = [e[IS("$155")] for e in v.get(IS("$146")) or []]
+        per_story[str(f.fid)] = [
+            e[IS("$155")] for e in iter_entries(v.get(IS("$146")) or [])
+        ]
 
     owning = [name for name, eids in per_story.items() if target_pos in eids]
     assert owning == ["l1"], (
@@ -1964,7 +1938,7 @@ def _collect_link_targets(gen):
         if str(f.ftype) != "$259":
             continue
         v = f.value.value if hasattr(f.value, "value") else f.value
-        for e in v.get(IS("$146")) or []:
+        for e in iter_entries(v.get(IS("$146")) or []):
             for sp in e.get(IS("$142")) or []:
                 if IS("$179") in sp:
                     out.append(str(sp[IS("$179")]))
@@ -1989,7 +1963,7 @@ def _first_texts(gen, storyline):
             continue
         v = f.value.value if hasattr(f.value, "value") else f.value
         out = []
-        for e in v.get(IS("$146")) or []:
+        for e in iter_entries(v.get(IS("$146")) or []):
             if IS("$145") not in e:
                 continue
             ref = e[IS("$145")]
@@ -2910,3 +2884,513 @@ class TestImageReferenceMatching:
         assert self._refs(
             ["images/pic.jpg"], {"OEBPS/images/pic.jpg": MINIMAL_JPEG}
         ) == ["img_0"]
+
+
+def _table_block(rows, own_keys=()):
+    """A converter-shaped native table block (#219); rows are lists of cell texts."""
+    return {
+        "type": "table",
+        "text": "\n".join(" ".join(r) for r in rows),
+        "spans": [],
+        "block_style": None,
+        "anchor_ids": [],
+        "anchor_keys": list(own_keys),
+        "anchor_offsets": {},
+        "table": {
+            "anchor_ids": [],
+            "anchor_keys": list(own_keys),
+            "anchor_offsets": {},
+            "rows": [
+                {
+                    "group": "body",
+                    "anchor_ids": [],
+                    "anchor_keys": [],
+                    "cells": [
+                        {
+                            "text": t,
+                            "spans": [],
+                            "anchor_ids": [],
+                            "anchor_keys": [],
+                            "anchor_offsets": {},
+                            "block_style": None,
+                            "header": False,
+                            "colspan": 1,
+                            "rowspan": 1,
+                        }
+                        for t in r
+                    ],
+                }
+                for r in rows
+            ],
+        },
+    }
+
+
+def _content(blocks, title="Chapter"):
+    gen = NativeKFXGenerator()
+    return gen._build_chapter_content([{"title": title, "text": "x", "blocks": blocks}])
+
+
+@pytest.mark.unit
+def test_table_emits_marker_chunks_around_cells():
+    ch = _content(
+        [{"text": "Before.", "spans": []}, _table_block([["a", "b"], ["c", "d"]])]
+    )
+    kinds = [(c["type"], c.get("node"), c.get("text")) for c in ch["all_chunks"]]
+    assert kinds == [
+        ("text", None, "Chapter"),
+        ("text", None, "Before."),
+        ("open", "table", None),
+        ("open", "body", None),
+        ("open", "row", None),
+        ("text", None, "a"),
+        ("text", None, "b"),
+        ("close", None, None),
+        ("open", "row", None),
+        ("text", None, "c"),
+        ("text", None, "d"),
+        ("close", None, None),
+        ("close", None, None),
+        ("close", None, None),
+    ]
+
+
+@pytest.mark.unit
+def test_close_markers_take_no_position_and_opens_take_one():
+    ch = _content([_table_block([["a"]])])
+    pos = [(c["type"], p) for c, p in zip(ch["all_chunks"], ch["chunk_positions"])]
+    assert [p is None for t, p in pos if t == "close"] == [True, True, True]
+    assert all(p is not None for t, p in pos if t != "close")
+    real = [p for _, p in pos if p is not None]
+    assert real == sorted(real) and len(set(real)) == len(real)
+
+
+@pytest.mark.unit
+def test_empty_cell_is_still_a_cell():
+    ch = _content([_table_block([["a", "", "c"]])])
+    cells = [c for c in ch["all_chunks"] if "cell" in c]
+    assert [c["text"] for c in cells] == ["a", " ", "c"]
+
+
+@pytest.mark.unit
+def test_chapter_start_skips_container_markers():
+    # Review Focus 2: a chapter whose heading is omitted and whose first
+    # content is a table must still target a text leaf, never a container.
+    gen = NativeKFXGenerator()
+    ch = gen._build_chapter_content(
+        [
+            {
+                "title": "T",
+                "text": "x",
+                "_omit_title_heading": True,
+                "blocks": [_table_block([["a"]])],
+            }
+        ]
+    )
+    first = ch["chapter_start_positions"][0]
+    idx = ch["chunk_positions"].index(first)
+    assert ch["all_chunks"][idx]["type"] == "text"
+
+
+@pytest.mark.unit
+def test_chapter_whose_only_table_has_no_cells_still_starts_on_text():
+    # A heading-less chapter whose table has a row but no cells emits only
+    # container markers; the placeholder must still give it a text leaf so
+    # its TOC target is never a container (the 5.3.0 lesson, #219).
+    gen = NativeKFXGenerator()
+    ch = gen._build_chapter_content(
+        [
+            {
+                "title": "T",
+                "text": "x",
+                "_omit_title_heading": True,
+                "blocks": [_table_block([[]])],
+            }
+        ]
+    )
+    first = ch["chapter_start_positions"][0]
+    idx = ch["chunk_positions"].index(first)
+    assert ch["all_chunks"][idx]["type"] == "text"
+
+
+@pytest.mark.unit
+def test_row_groups_open_and_close_in_order():
+    block = _table_block([["h"], ["b"], ["f"]])
+    for row, group in zip(block["table"]["rows"], ("head", "body", "foot")):
+        row["group"] = group
+    ch = _content([block])
+    kinds = [(c["type"], c.get("node"), c.get("text")) for c in ch["all_chunks"]]
+    assert kinds[1:] == [
+        ("open", "table", None),
+        ("open", "head", None),
+        ("open", "row", None),
+        ("text", None, "h"),
+        ("close", None, None),
+        ("close", None, None),
+        ("open", "body", None),
+        ("open", "row", None),
+        ("text", None, "b"),
+        ("close", None, None),
+        ("close", None, None),
+        ("open", "foot", None),
+        ("open", "row", None),
+        ("text", None, "f"),
+        ("close", None, None),
+        ("close", None, None),
+        ("close", None, None),
+    ]
+
+
+@pytest.mark.unit
+def test_table_keys_go_on_the_first_row_not_the_table():
+    # I5: the table's own keys (its id, anchors before it, the bare-filename
+    # key) go on its first row, a `$279`, which Amazon uses as a link target;
+    # the `$278` carries none. Row and cell keys stay where they are.
+    block = _table_block([["a"], ["b"]], own_keys=("k_tbl", "k_row", "k_cell"))
+    block["table"]["rows"][0]["anchor_keys"] = ["k_row"]
+    block["table"]["rows"][0]["cells"][0]["anchor_keys"] = ["k_cell"]
+    ch = _content([block])
+    assert _open_keys(ch["all_chunks"]) == [
+        ("table", []),
+        ("body", None),
+        ("row", ["k_tbl", "k_row"]),
+        ("row", []),
+    ]
+    first_row = next(c for c in ch["all_chunks"] if c.get("node") == "row")
+    assert first_row["anchor_offsets"] == {"k_tbl": 0, "k_row": 0}
+
+
+@pytest.mark.unit
+def test_carried_title_keys_skip_a_leading_table_open():
+    # M5: a dropped title block's keys go on the chapter's first chunk. With
+    # no heading and a table first, that chunk is the `$278`; they go on its
+    # first row instead.
+    gen = NativeKFXGenerator()
+    ch = gen._build_chapter_content(
+        [
+            {
+                "title": "Tides",
+                "text": "x",
+                "_omit_title_heading": True,
+                "blocks": [
+                    {"text": "Tides", "spans": [], "anchor_keys": ["k_title"]},
+                    _table_block([["a"], ["b"]]),
+                ],
+            }
+        ]
+    )
+    assert ch["all_chunks"][0].get("node") == "table"
+    assert _open_keys(ch["all_chunks"]) == [
+        ("table", []),
+        ("body", None),
+        ("row", ["k_title"]),
+        ("row", []),
+    ]
+
+
+def _storyline(tmp_path, blocks):
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    gen.generate_full_book(
+        "T",
+        "A",
+        [{"title": "Chapter", "text": "x", "blocks": blocks}],
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    story = [f for f in frags if str(f.ftype) == "$259"][-1]
+    styles = {str(f.fid): val(f) for f in frags if str(f.ftype) == "$157"}
+    return val(story)["$146"], styles
+
+
+@pytest.mark.unit
+def test_table_nests_like_amazons_minimal_table(tmp_path):
+    top, styles = _storyline(
+        tmp_path,
+        [{"text": "Before.", "spans": []}, _table_block([["a1", "b1"], ["a2", "b2"]])],
+    )
+    table = top[2]
+    assert str(table["$159"]) == "$278"
+    assert table["$150"] is False
+    assert [str(k) for k in table] == [
+        "$155",
+        "$159",
+        "$157",
+        "$150",
+        "$456",
+        "$457",
+        "$146",
+    ]
+    (body,) = table["$146"]
+    assert str(body["$159"]) == "$454" and set(map(str, body)) == {
+        "$155",
+        "$159",
+        "$146",
+    }
+    rows = body["$146"]
+    assert [str(r["$159"]) for r in rows] == ["$279", "$279"]
+    assert all(set(map(str, r)) == {"$155", "$159", "$146"} for r in rows)
+    cell = rows[0]["$146"][0]
+    assert str(cell["$159"]) == "$269" and "$145" in cell
+    cell_style = styles[str(cell["$157"])]
+    assert str(cell_style["$633"]) == "$320"
+    table_style = styles[str(table["$157"])]
+    assert table_style["$83"] == 4286611584
+
+
+@pytest.mark.unit
+def test_790_goes_on_the_first_leaf_not_a_container(tmp_path):
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    gen.generate_full_book(
+        "T",
+        "A",
+        [
+            {
+                "title": "Chapter",
+                "text": "x",
+                "_omit_title_heading": True,
+                "blocks": [_table_block([["a"]])],
+            }
+        ],
+        output_path=str(out),
+    )
+    story = [f for f in load_fragments(out) if str(f.ftype) == "$259"][-1]
+    carriers = [e for e in iter_entries(val(story)["$146"]) if "$790" in e]
+    assert len(carriers) == 1 and str(carriers[0]["$159"]) == "$269"
+
+
+@pytest.mark.unit
+def test_header_colspan_rowspan_reach_the_cell_style(tmp_path):
+    block = _table_block([["H"], ["a"]])
+    block["table"]["rows"][0]["group"] = "head"
+    head = block["table"]["rows"][0]["cells"][0]
+    head.update(header=True, colspan=2)
+    block["table"]["rows"][1]["cells"][0]["rowspan"] = 2
+    top, styles = _storyline(tmp_path, [block])
+    table = next(e for e in top if str(e["$159"]) == "$278")
+    head_group, body = table["$146"]
+    assert (str(head_group["$159"]), str(body["$159"])) == ("$151", "$454")
+    h = styles[str(head_group["$146"][0]["$146"][0]["$157"])]
+    assert h["$148"] == 2 and str(h["$13"]) == "$361" and str(h["$34"]) == "$320"
+    b = styles[str(body["$146"][0]["$146"][0]["$157"])]
+    assert b["$149"] == 2 and "$148" not in b
+
+
+def _cell_style_for_block_style(block_style):
+    """Generate a book with embedded foo faces and one native table whose only
+    cell has `block_style`; return that cell's $157 value (#219, #50)."""
+    from kfxgen.font_table import Face, FontTable
+
+    faces = [
+        Face("foo", 400, False, b"\x00\x01\x00\x00r", "foo-400", "resource/font0"),
+        Face("foo", 700, False, b"\x00\x01\x00\x00b", "foo-700", "resource/font1"),
+        Face("foo", 400, True, b"\x00\x01\x00\x00i", "foo-400i", "resource/font2"),
+    ]
+    block = _table_block([["cell"]])
+    block["table"]["rows"][0]["cells"][0]["block_style"] = block_style
+    g = NativeKFXGenerator()
+    g.generate_full_book(
+        title="T",
+        author="A",
+        chapters=[{"title": "C1", "text": "x", "blocks": [block]}],
+        font_table=FontTable(faces),
+    )
+    cells = [
+        f.value
+        for f in g.fragments
+        if str(f.ftype) == "$157" and str(f.fid).endswith("_td")
+    ]
+    assert len(cells) == 1
+    return cells[0]
+
+
+@pytest.mark.unit
+def test_css_bold_cell_style_declares_the_bold_face_weight():
+    v = _cell_style_for_block_style({"font_family": ["foo"], "bold": True})
+    assert v[IS("$13")] == IS("$361")
+    assert v[IS("$11")] == "foo-700"
+
+
+@pytest.mark.unit
+def test_css_italic_cell_style_declares_the_italic_face_style():
+    v = _cell_style_for_block_style({"font_family": ["foo"], "italic": True})
+    assert v[IS("$12")] == IS("$382")
+    assert v[IS("$11")] == "foo-400i"
+    assert IS("$13") not in v
+
+
+def _open_keys(chunks):
+    return [
+        (c.get("node"), c.get("anchor_keys")) for c in chunks if c["type"] == "open"
+    ]
+
+
+@pytest.mark.unit
+def test_empty_row_is_skipped_and_its_keys_move_to_the_next_row():
+    block = _table_block([["a"], [], ["b"]])
+    block["table"]["rows"][1]["anchor_keys"] = ["k_empty"]
+    block["table"]["rows"][2]["anchor_keys"] = ["k_next"]
+    ch = _content([block])
+    assert _open_keys(ch["all_chunks"]) == [
+        ("table", []),
+        ("body", None),
+        ("row", []),
+        ("row", ["k_empty", "k_next"]),
+    ]
+    last_row = [c for c in ch["all_chunks"] if c.get("node") == "row"][-1]
+    assert last_row["anchor_offsets"] == {"k_empty": 0, "k_next": 0}
+
+
+@pytest.mark.unit
+def test_trailing_empty_row_keys_move_to_the_last_row():
+    # Not the table: a `$278` is not a link target Amazon uses (I5). The last
+    # row is nearest to where the row path put them, just after the table.
+    block = _table_block([["a"], ["b"], []])
+    block["table"]["rows"][2]["anchor_keys"] = ["k_last"]
+    ch = _content([block])
+    assert _open_keys(ch["all_chunks"]) == [
+        ("table", []),
+        ("body", None),
+        ("row", []),
+        ("row", ["k_last"]),
+    ]
+    last_row = [c for c in ch["all_chunks"] if c.get("node") == "row"][-1]
+    assert last_row["anchor_offsets"] == {"k_last": 0}
+
+
+def _anchor_targets(frags):
+    return {
+        str(val(f)["$180"]): val(f)["$183"] for f in frags if str(f.ftype) == "$266"
+    }
+
+
+@pytest.mark.unit
+def test_link_into_a_cell_targets_the_cell_and_to_a_row_targets_the_row(tmp_path):
+    from kfxgen.inline_style import make_link_flag
+
+    block = _table_block([["a", "b"], ["c", "d"]])
+    block["table"]["rows"][1]["anchor_keys"] = ["ch.xhtml#r2"]
+    cell = block["table"]["rows"][0]["cells"][1]
+    cell["anchor_keys"], cell["anchor_offsets"] = ["ch.xhtml#cb"], {"ch.xhtml#cb": 0}
+    link = {
+        "text": "see b and row 2",
+        "spans": [
+            (4, 1, frozenset({make_link_flag("ch.xhtml#cb")})),
+            (10, 5, frozenset({make_link_flag("ch.xhtml#r2")})),
+        ],
+    }
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    gen.generate_full_book(
+        "T",
+        "A",
+        [{"title": "C", "text": "x", "blocks": [link, block]}],
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    story = [f for f in frags if str(f.ftype) == "$259"][-1]
+    by_eid = {e["$155"]: e for e in iter_entries(val(story)["$146"])}
+    targets = [by_eid[t["$155"]] for t in _anchor_targets(frags).values()]
+    kinds = sorted(str(e["$159"]) for e in targets)
+    assert kinds == ["$269", "$279"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rowspan, expected", [(1, 1), (2, 3)])
+def test_yj_table_version_follows_rowspan(tmp_path, rowspan, expected):
+    block = _table_block([["a"], ["b"]])
+    block["table"]["rows"][0]["cells"][0]["rowspan"] = rowspan
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    gen.generate_full_book(
+        "T", "A", [{"title": "C", "text": "x", "blocks": [block]}], output_path=str(out)
+    )
+    f585 = next(val(f) for f in load_fragments(out) if str(f.ftype) == "$585")
+    tables = [e for e in f585["$590"] if e["$492"] == "yj_table"]
+    assert tables[0]["$589"]["version"]["$587"] == expected
+
+
+@pytest.mark.unit
+def test_block_keys_no_table_part_carries_go_on_the_last_row():
+    # I1 backstop: a key on the table block that neither the table, a row
+    # nor a cell declares must still land somewhere: the last emitted row.
+    block = _table_block([["a"], ["b"]])
+    block["anchor_keys"] = ["k_stray"]
+    ch = _content([block])
+    rows = [c for c in ch["all_chunks"] if c.get("node") == "row"]
+    assert rows[-1]["anchor_keys"] == ["k_stray"]
+    assert rows[-1]["anchor_offsets"] == {"k_stray": 0}
+
+
+def _header_cell_span_style(tmp_path, flags, header=True):
+    """Style of the one span in a cell holding "Name" with `flags` (#219)."""
+    block = _table_block([["Name"], ["a"]])
+    cell = block["table"]["rows"][0]["cells"][0]
+    cell["header"] = header
+    cell["spans"] = [(0, 4, frozenset(flags))]
+    top, styles = _storyline(tmp_path, [block])
+    table = next(e for e in top if str(e["$159"]) == "$278")
+    cell_entry = next(
+        e for e in iter_entries(table["$146"]) if str(e["$159"]) == "$269"
+    )
+    (span,) = cell_entry["$142"]
+    return styles[str(span["$157"])]
+
+
+@pytest.mark.unit
+def test_an_italic_run_in_a_header_cell_stays_bold(tmp_path):
+    # M1: the span style is the run's whole face. Without the header's bold
+    # it said `$13 $350`, an explicit normal weight over the cell's bold.
+    from kfxgen.inline_style import FLAG_ITALIC
+
+    style = _header_cell_span_style(tmp_path, {FLAG_ITALIC})
+    assert str(style["$13"]) == "$361"
+    assert str(style["$12"]) == "$382"
+
+
+@pytest.mark.unit
+def test_a_superscript_run_in_a_header_cell_stays_bold(tmp_path):
+    from kfxgen.inline_style import FLAG_SUPER
+
+    style = _header_cell_span_style(tmp_path, {FLAG_SUPER})
+    assert str(style["$13"]) == "$361"
+    assert "$44" in style
+
+
+@pytest.mark.unit
+def test_an_italic_run_in_a_body_cell_is_not_bold(tmp_path):
+    from kfxgen.inline_style import FLAG_ITALIC
+
+    style = _header_cell_span_style(tmp_path, {FLAG_ITALIC}, header=False)
+    assert str(style["$13"]) == "$350"
+
+
+def _cell_styles_at_font_size(tmp_path, font_size):
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    chapter = {"title": "C", "text": "x", "blocks": [_table_block([["a"]])]}
+    if font_size is not None:
+        chapter["font_size"] = font_size
+    gen.generate_full_book("T", "A", [chapter], output_path=str(out))
+    return [
+        val(f)
+        for f in load_fragments(out)
+        if str(f.ftype) == "$157" and str(f.fid).endswith("_td")
+    ]
+
+
+@pytest.mark.unit
+def test_cell_style_carries_the_chapters_font_size(tmp_path):
+    # M3: a table on a 0.75rem copyright page is set at that size too, as
+    # its paragraphs are, written the way build_fragment_157 writes it.
+    (style,) = _cell_styles_at_font_size(tmp_path, 0.75)
+    assert float(style["$16"]["$307"]) == 0.75
+    assert str(style["$16"]["$306"]) == "$505"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("font_size", [None, 1.0])
+def test_cell_style_omits_a_default_font_size(tmp_path, font_size):
+    (style,) = _cell_styles_at_font_size(tmp_path, font_size)
+    assert "$16" not in style

@@ -53,7 +53,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin")
 from kfxgen import converter  # noqa: E402
 from kfxgen.kfxlib_minimal.ion import IS  # noqa: E402
 
-from tests._kfx_introspect import by_type, load_fragments, val  # noqa: E402
+from tests._kfx_introspect import (  # noqa: E402
+    by_type,
+    iter_entries,
+    load_fragments,
+    val,
+)
 from tests.fixtures.golden.inputs import GOLDEN_INPUTS  # noqa: E402
 from tests.fixtures.oeb_shim import EpubAsOeb  # noqa: E402
 
@@ -63,16 +68,17 @@ EXPECTED_DIR = Path(__file__).parent.parent / "fixtures" / "golden" / "expected"
 from tests._helpers import NullLog as _NullLog  # noqa: E402
 
 
-def _build_fresh(name: str, builder, work_dir: Path) -> bytes:
+def _build_fresh(name: str, builder, work_dir: Path, opts=None) -> bytes:
     """Run the same pipeline regenerate.py uses. Kept in lockstep with
     `tests/fixtures/golden/regenerate.py::build_kfx` — divergence here
-    means the test no longer reproduces the regenerate path."""
+    means the test no longer reproduces the regenerate path. `opts` is for
+    the one golden built with a non-default option (`table_cells_rows`)."""
     out_dir = work_dir / name
     out_dir.mkdir(parents=True, exist_ok=True)
     epub_path = builder(out_dir)
     oeb = EpubAsOeb(epub_path)
     kfx_path = out_dir / f"{name}.kfx"
-    converter.convert_oeb_to_kfx(oeb, str(kfx_path), opts=None, log=_NullLog())
+    converter.convert_oeb_to_kfx(oeb, str(kfx_path), opts=opts, log=_NullLog())
     return kfx_path.read_bytes()
 
 
@@ -199,6 +205,29 @@ def test_golden_byte_identical(name, builder, tmp_path):
     )
 
 
+@pytest.mark.tier3_strict
+@pytest.mark.integration
+def test_native_tables_opt_out_is_byte_identical_to_5_8_8(tmp_path):
+    """With `kfxgen_disable_native_tables`, `table_cells` must come out
+    byte-for-byte as v5.8.8 wrote it (#219). `table_cells_rows.kfx` is
+    v5.8.8's own `table_cells.kfx`, copied from the v5.8.8 tag, and
+    regenerate.py never writes it: it pins the opt-out to the release,
+    not to whatever this branch last produced."""
+    import hashlib
+    from types import SimpleNamespace
+
+    from tests.fixtures.golden.inputs import make_table_cells
+
+    fresh = _build_fresh(
+        "table_cells",
+        make_table_cells,
+        tmp_path,
+        opts=SimpleNamespace(kfxgen_disable_native_tables=True),
+    )
+    pinned = (EXPECTED_DIR / "table_cells_rows.kfx").read_bytes()
+    assert hashlib.sha256(fresh).hexdigest() == hashlib.sha256(pinned).hexdigest()
+
+
 # ---------------------------------------------------------------------------
 # Per-fixture shape assertions: guard against fixture rot.
 #
@@ -214,14 +243,9 @@ def _count_image_resource_entries(frags) -> int:
     n = 0
     for f in by_type(frags, "$259"):
         v = val(f)
-        outers = v.get(IS("$146")) or v.get(IS("$181")) or []
-        for outer in outers:
-            if not hasattr(outer, "get"):
-                continue
-            nested = outer.get(IS("$146")) or [outer]
-            for e in nested:
-                if hasattr(e, "get") and e.get(IS("$175")) is not None:
-                    n += 1
+        for e in iter_entries(v.get(IS("$146")) or v.get(IS("$181")) or []):
+            if hasattr(e, "get") and e.get(IS("$175")) is not None:
+                n += 1
     return n
 
 
@@ -439,24 +463,57 @@ def test_fixture_table_cells_do_not_fuse(tmp_path):
         assert fused not in text, f"adjacent cells fused into {fused!r} (#128)"
 
 
+def _storyline_entries(frags):
+    """Every storyline entry of every `$259`, containers included."""
+    return [e for f in by_type(frags, "$259") for e in iter_entries(val(f)["$146"])]
+
+
+def _entry_texts(frags, entries):
+    """Text of every text entry among `entries`, in order."""
+    content = {
+        str(val(f)["name"]): list(val(f)["$146"]) for f in by_type(frags, "$145")
+    }
+    return [
+        str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+        for e in entries
+        if e.get("$145") is not None
+    ]
+
+
 @pytest.mark.tier3
 @pytest.mark.integration
-def test_fixture_table_rows_are_separate_paragraphs(tmp_path):
-    """table_cells: each table row reaches the file as its own paragraph (#219).
+def test_fixture_table_cells_is_a_native_table(tmp_path):
+    """table_cells: the six cells are text entries inside one `$278` (#219).
 
     The test above joins every string with a space, so it passes whether the
-    rows are one paragraph or three. This one compares the strings themselves:
-    a row merged back into its neighbour is a different list.
+    cells are separate entries or one fused run. This one compares the
+    strings themselves, in storyline order, and checks they sit inside a
+    single table rather than being loose paragraphs.
     """
     from tests.fixtures.golden.inputs import make_table_cells
 
     written = tmp_path / "fresh_table.kfx"
     written.write_bytes(_build_fresh("table_cells", make_table_cells, tmp_path))
-    strings = [
-        s for chunk in _content_fragment_strings(load_fragments(written)) for s in chunk
-    ]
+    frags = load_fragments(written)
 
-    assert strings[1:4] == ["Year Population", "1801 8,893", "1811 12,289"], strings
+    tables = [e for e in _storyline_entries(frags) if str(e["$159"]) == "$278"]
+    assert len(tables) == 1, f"expected one $278, got {len(tables)}"
+    inside = _entry_texts(frags, iter_entries(tables[0]["$146"]))
+    assert inside == ["Year", "Population", "1801", "8,893", "1811", "12,289"], inside
+
+
+@pytest.mark.tier3
+@pytest.mark.integration
+def test_fixture_table_layout_is_a_native_table(tmp_path):
+    """table_layout: thead, colspan, rowspan and a link into a cell (#219)."""
+    from tests.fixtures.golden.inputs import make_table_layout
+
+    written = tmp_path / "t.kfx"
+    written.write_bytes(_build_fresh("table_layout", make_table_layout, tmp_path))
+    frags = load_fragments(written)
+    types = [str(e["$159"]) for e in _storyline_entries(frags)]
+    assert types.count("$278") == 1
+    assert "$151" in types and "$454" in types and types.count("$279") == 3
 
 
 @pytest.mark.tier3
@@ -617,7 +674,7 @@ def test_fixture_publisher_structure_shape(tmp_path):
     book's body text (#58). Text-level damage needs asserting directly.
     """
     from kfxgen.kfxlib_minimal.ion import IS
-    from tests._kfx_introspect import by_type, load_fragments, val
+    from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
     from tests.fixtures.golden.inputs import make_publisher_structure
 
     # Build from the CURRENT code, not the committed golden — otherwise a
@@ -677,7 +734,7 @@ def test_fixture_publisher_structure_shape(tmp_path):
     targets = [
         str(sp[IS("$179")])
         for x in by_type(frags, "$259")
-        for e in (val(x).get(IS("$146")) or [])
+        for e in iter_entries(val(x).get(IS("$146")) or [])
         for sp in (e.get(IS("$142")) or [])
         if IS("$179") in sp
     ]
@@ -790,7 +847,7 @@ def test_fixture_long_chapter_shape(tmp_path):
     }
     refs = 0
     for storyline in by_type(frags, "$259"):
-        for entry in val(storyline).get(IS("$146")) or []:
+        for entry in iter_entries(val(storyline).get(IS("$146")) or []):
             ref = entry.get(IS("$145"))
             if not ref:
                 continue

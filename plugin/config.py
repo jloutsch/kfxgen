@@ -1,8 +1,8 @@
 """GUI config widget for kfxgen (Preferences -> Plugins -> Customize).
 
 Imported only in the GUI (from `config_widget()`), so Qt is imported here rather
-than in the conversion worker. The single setting is the global font-embedding
-default; the per-conversion CLI flag still overrides it.
+than in the conversion worker. The settings are the global font-embedding and
+native-table defaults; the per-conversion CLI flags can still disable them.
 """
 
 from qt.core import QCheckBox, QVBoxLayout, QWidget
@@ -24,7 +24,17 @@ class ConfigWidget(QWidget):
         )
         self.disable_fonts.setChecked(bool(prefs["disable_font_embedding"]))
         layout.addWidget(self.disable_fonts)
+
+        self.disable_tables = QCheckBox("Write tables as one paragraph per row", self)
+        self.disable_tables.setToolTip(
+            "Use this if a book's tables display badly on your Kindle. By default "
+            "kfxgen writes native Kindle tables. The per-conversion "
+            "--kfxgen-disable-native-tables option can also disable them."
+        )
+        self.disable_tables.setChecked(bool(prefs["disable_native_tables"]))
+        layout.addWidget(self.disable_tables)
         layout.addStretch(1)
 
     def save_settings(self):
         prefs["disable_font_embedding"] = self.disable_fonts.isChecked()
+        prefs["disable_native_tables"] = self.disable_tables.isChecked()

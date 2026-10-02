@@ -1,10 +1,13 @@
-"""Table rows through calibre's real Stylizer (#222).
+"""Table rows and cells through calibre's real Stylizer (#222, #219).
 
-Since #219 each `<tr>` is its own paragraph, so a row takes block CSS from its
-computed style, and `text-align`, `text-indent` and the font properties are
-inherited from the table or whatever wraps it. Every other test of that path
-runs without a Stylizer, so this converts books of table cases with the real
-`ebook-convert` and reads each row's paragraph style back out of the KFX.
+Native tables are the default, with `--kfxgen-disable-native-tables` as the
+opt-out. On the opt-out path each `<tr>` is its own paragraph, so a row takes
+block CSS from its computed style, and `text-align`, `text-indent` and the font
+properties are inherited from the table or whatever wraps it. Every other test
+of that path runs without a Stylizer, so this converts books of table cases with
+the real `ebook-convert` and reads each row's paragraph style back out of the
+KFX. The row tests below therefore convert with the opt-out flag; the `native`
+tests convert the same books without it and read the cell entries.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found. CI has no calibre, so like #205 and
@@ -45,7 +48,12 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "plugin"))
 sys.path.insert(0, str(REPO))
 
-from tests._kfx_introspect import by_type, load_fragments, val  # noqa: E402
+from tests._kfx_introspect import (  # noqa: E402
+    by_type,
+    iter_entries,
+    load_fragments,
+    val,
+)
 from tests.integration.test_calibre_list_markers import (  # noqa: E402
     CALIBRE_CUSTOMIZE,
     EBOOK_CONVERT,
@@ -173,7 +181,7 @@ def _paragraphs(kfx):
     }
     out = []
     for story in by_type(frags, "$259"):
-        for entry in val(story)["$146"]:
+        for entry in iter_entries(val(story)["$146"]):
             ref = entry.get("$145")
             if ref is not None:
                 text = str(content[str(ref["name"])][int(ref["$403"])])
@@ -211,16 +219,23 @@ def calibre(tmp_path_factory):
     return tmp, env, version.group(1) if version else "unknown"
 
 
-def _convert(calibre, name, cases, css, body_attrs=None, fonts=()):
+def _ebook_convert(calibre, epub, kfx, native):
+    """Run `ebook-convert`; with `native` False, pass the native-table opt-out."""
+    _, env, _ = calibre
+    cmd = [EBOOK_CONVERT, str(epub), str(kfx)]
+    if not native:
+        cmd.append("--kfxgen-disable-native-tables")
+    run = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    assert run.returncode == 0 and kfx.exists(), run.stdout[-2000:] + run.stderr[-2000:]
+
+
+def _convert(calibre, name, cases, css, body_attrs=None, fonts=(), native=False):
     """Convert a book of `cases` and split its paragraphs by case."""
     tmp, env, calibre_version = calibre
     epub = tmp / f"{name}.epub"
     _build_epub(epub, cases, css, body_attrs or {}, fonts)
     kfx = tmp / f"{name}.kfx"
-    run = subprocess.run(
-        [EBOOK_CONVERT, str(epub), str(kfx)], env=env, capture_output=True, text=True
-    )
-    assert run.returncode == 0 and kfx.exists(), run.stdout[-2000:] + run.stderr[-2000:]
+    _ebook_convert(calibre, epub, kfx, native)
     by_case, current = {}, None
     for text, style in _paragraphs(kfx):
         if text in {cid for _, cid, _ in cases}:
@@ -238,13 +253,40 @@ def _convert(calibre, name, cases, css, body_attrs=None, fonts=()):
 
 @pytest.fixture(scope="module")
 def converted(calibre):
+    """The row path: native tables switched off."""
     return _convert(calibre, "tables", CASES, CSS, {"c2": ' class="indent"'})
+
+
+@pytest.fixture(scope="module")
+def converted_native(calibre):
+    """The same cases with native tables on, which is the default."""
+    return _convert(
+        calibre,
+        "tables-native",
+        CASES,
+        CSS,
+        {"c2": ' class="indent"'},
+        native=True,
+    )
 
 
 @pytest.fixture(scope="module")
 def converted_fonts(calibre):
     fonts = [name for name, _, _ in _FACES]
     return _convert(calibre, "tables-fonts", FONT_CASES, FONT_CSS, fonts=fonts)
+
+
+@pytest.fixture(scope="module")
+def converted_fonts_native(calibre):
+    fonts = [name for name, _, _ in _FACES]
+    return _convert(
+        calibre,
+        "tables-fonts-native",
+        FONT_CASES,
+        FONT_CSS,
+        fonts=fonts,
+        native=True,
+    )
 
 
 #: Note tables in both layouts. Notes 1-3: each anchor *after* its row, the
@@ -321,25 +363,49 @@ def _build_notes_epub(path):
 
 def _link_landings(kfx):
     """For each link whose visible text is a bare number: (that number, the
-    text at the position its anchor names)."""
+    text at the position its anchor names).
+
+    An anchor may name a container: a native table's row is a `$279` with no
+    text of its own, and a link to a row lands on the row (#219). The reader
+    shows the row from its first text leaf, so the landing text is the text
+    leaves beneath the container joined by spaces, from the first leaf's offset:
+    "1." and "Note 1 text." read as the row "1. Note 1 text.".
+    """
     frags = load_fragments(kfx)
     content = {
         str(val(f)["name"]): list(val(f)["$146"]) for f in by_type(frags, "$145")
     }
+
+    def text_of(entry):
+        ref = entry.get("$145")
+        return str(content[str(ref["name"])][int(ref["$403"])])
+
     entries, landings = {}, []
     for story in by_type(frags, "$259"):
-        for entry in val(story)["$146"]:
-            ref = entry.get("$145")
-            if ref is not None:
-                text = str(content[str(ref["name"])][int(ref["$403"])])
-                entries[int(entry["$155"])] = (text, entry.get("$142") or [])
+        for entry in iter_entries(val(story)["$146"]):
+            entries[int(entry["$155"])] = entry
+
+    def landing_text(eid, offset):
+        entry = entries[eid]
+        if entry.get("$145") is None:
+            leaves = [
+                text_of(e)
+                for e in iter_entries(entry.get("$146"))
+                if e.get("$145") is not None
+            ]
+            return " ".join([leaves[0][offset:], *leaves[1:]])
+        return text_of(entry)[offset:]
+
     anchors = {}
     for f in by_type(frags, "$266"):
         pos = val(f).get("$183")
         if pos is not None:
             anchors[str(val(f)["$180"])] = (int(pos["$155"]), int(pos.get("$143") or 0))
-    for text, spans in entries.values():
-        for span in spans:
+    for entry in entries.values():
+        if entry.get("$145") is None:
+            continue
+        text = text_of(entry)
+        for span in entry.get("$142") or []:
             if span.get("$179") is None:
                 continue
             start = int(span["$143"])
@@ -347,21 +413,19 @@ def _link_landings(kfx):
             if not label.isdigit():
                 continue
             eid, offset = anchors[str(span["$179"])]
-            landings.append((label, entries[eid][0][offset:]))
+            landings.append((label, landing_text(eid, offset)))
     return sorted(landings)
 
 
-@pytest.fixture(scope="module")
-def note_landings(calibre):
+@pytest.fixture(scope="module", params=["native", "rows"])
+def note_landings(calibre, request):
+    """The notes book, built as native tables and as rows."""
     tmp, env, calibre_version = calibre
     epub = tmp / "notes.epub"
     _build_notes_epub(epub)
-    kfx = tmp / "notes.kfx"
-    run = subprocess.run(
-        [EBOOK_CONVERT, str(epub), str(kfx)], env=env, capture_output=True, text=True
-    )
-    assert run.returncode == 0 and kfx.exists(), run.stdout[-2000:] + run.stderr[-2000:]
-    return _link_landings(kfx), calibre_version
+    kfx = tmp / f"notes-{request.param}.kfx"
+    _ebook_convert(calibre, epub, kfx, native=request.param == "native")
+    return _link_landings(kfx), f"{calibre_version} ({request.param})"
 
 
 def _case(converted, cid):
@@ -451,6 +515,78 @@ def test_a_plain_tables_rows_use_the_books_regular_face(converted_fonts):
     assert regular is not None, f"calibre {v}: an ordinary paragraph has no font"
     for text, style in case["rows"]:
         assert str(style["$13"]) == "$350", f"calibre {v}: {text!r} is not normal"
+        assert style.get("$11") == regular, (
+            f"calibre {v}: {text!r} font {style.get('$11')!r}, "
+            f"an ordinary paragraph uses {regular!r}"
+        )
+
+
+def _native_case(converted, cid):
+    """A native-table case: every cell is its own text entry, in row order."""
+    by_case, calibre_version = converted
+    case = by_case.get(cid)
+    assert case, f"calibre {calibre_version}: case {cid} missing from the output"
+    texts = [t for t, _ in case["rows"]]
+    assert texts == [f"{cid}{x}" for x in "abcd"], (
+        f"calibre {calibre_version}, {cid}: cells are not one entry each: {texts}"
+    )
+    return case, calibre_version
+
+
+def test_native_centered_table_centers_its_cells(converted_native):
+    case, v = _native_case(converted_native, "CENTER")
+    for text, style in case["rows"]:
+        assert str(style["$34"]) == "$320", f"calibre {v}: {text!r} is not centered"
+
+
+@pytest.mark.parametrize("cid", ["DIVINDENT", "BODYINDENT"])
+def test_native_cells_do_not_take_an_indent_from_a_wrapper(converted_native, cid):
+    # Same rule as the row path: a cell is not an indented paragraph, and the
+    # resolver reads `text-indent` from an element's own rules only.
+    case, v = _native_case(converted_native, cid)
+    assert _indent(case["control"]) > 0, (
+        f"calibre {v}: control paragraph not indented, so the CSS never applied"
+    )
+    for text, style in case["rows"]:
+        assert "$36" not in style, f"calibre {v}: {text!r} inherited the indent"
+
+
+@pytest.mark.parametrize("cid", ["AUTO", "INSET"])
+def test_native_cells_do_not_take_the_tables_margins(converted_native, cid):
+    case, v = _native_case(converted_native, cid)
+    if case["control"] is not None:
+        assert case["control"].get("$48") != case["end"].get("$48"), (
+            f"calibre {v}: control paragraph has no inset, so the CSS never applied"
+        )
+    for text, style in case["rows"]:
+        for prop in ("$48", "$50"):
+            assert prop not in style, (
+                f"calibre {v}: {text!r} carries {prop} {style.get(prop)!r}"
+            )
+
+
+def test_native_bold_tables_cells_use_the_embedded_bold_face(converted_fonts_native):
+    case, v = _native_case(converted_fonts_native, "BOLDTABLE")
+    control = case["control"]
+    assert str(control["$13"]) == "$361" and control.get("$11") is not None, (
+        f"calibre {v}: the bold control paragraph did not get the bold face"
+    )
+    for text, style in case["rows"]:
+        assert str(style["$13"]) == "$361", f"calibre {v}: {text!r} is not bold"
+        assert style.get("$11") == control["$11"], (
+            f"calibre {v}: {text!r} font {style.get('$11')!r}, "
+            f"the bold paragraph uses {control['$11']!r}"
+        )
+
+
+def test_native_plain_tables_cells_use_the_books_regular_face(converted_fonts_native):
+    case, v = _native_case(converted_fonts_native, "FONTPLAIN")
+    regular = case["end"].get("$11")
+    assert regular is not None, f"calibre {v}: an ordinary paragraph has no font"
+    for text, style in case["rows"]:
+        assert str(style.get("$13", "$350")) == "$350", (
+            f"calibre {v}: {text!r} is not normal weight"
+        )
         assert style.get("$11") == regular, (
             f"calibre {v}: {text!r} font {style.get('$11')!r}, "
             f"an ordinary paragraph uses {regular!r}"

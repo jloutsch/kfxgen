@@ -75,3 +75,17 @@ def load_fragments(kfx_path):
     container = KfxContainer(symtab, datafile=_BytesDataSource(data))
     container.deserialize(ignore_drm=True)
     return list(container.get_fragments())
+
+
+def iter_entries(nodes):
+    """Every storyline entry under `nodes`, depth-first, containers first.
+
+    `$259`'s `$146` is flat for ordinary text, but a table is a `$278` whose
+    `$146` holds row groups, rows and cells (#219). A reader that looks only
+    at the top level silently loses the cell text, so tests walk with this.
+    """
+    for node in nodes or ():
+        yield node
+        children = node.get("$146") if hasattr(node, "get") else None
+        if isinstance(children, list):
+            yield from iter_entries(children)

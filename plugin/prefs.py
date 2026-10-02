@@ -13,3 +13,8 @@ prefs = JSONConfig("plugins/kfxgen")
 # @font-face fonts (the default). The per-conversion CLI option
 # `--kfxgen-disable-font-embedding` can also disable embedding; the two are OR'd.
 prefs.defaults["disable_font_embedding"] = False
+
+# Global default for "Write tables as one paragraph per row". False -> native
+# Kindle tables (the default). The per-conversion CLI option
+# `--kfxgen-disable-native-tables` can also disable them; the two are OR'd.
+prefs.defaults["disable_native_tables"] = False

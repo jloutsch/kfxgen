@@ -605,12 +605,14 @@ def make_table_cells(out_dir: Path) -> Path:
     """Adjacent table cells, which used to fuse into one value (#128), and
     table rows, which used to share one paragraph (#219).
 
-    kfxgen has no table layout — each row is one paragraph and its cells are
-    inline text within it. The only thing separating two cells was whatever
+    Before native tables each row was one paragraph and its cells were inline
+    text within it. The only thing separating two cells was whatever
     whitespace the source happened to carry between the tags, so `</td><td>`
     with nothing between it merged the values: `1801` and
     `8,893` came out as `18018,893`, a number absent from the source that
-    cannot be read back apart.
+    cannot be read back apart. The table is now a native `$278` with one text
+    entry per cell, which keeps the cells apart structurally; the text checks
+    on this fixture still apply to the `$145` strings.
 
     Deliberately writes both forms side by side: one row newline-separated,
     one adjacent. Only the adjacent row exercises the fix — the other is there
@@ -643,6 +645,38 @@ def make_table_cells(out_dir: Path) -> Path:
             _xhtml_page("Census", body).encode("utf-8"),
         )
         .build(out_dir, "table_cells")
+    )
+
+
+def make_table_layout(out_dir: Path) -> Path:
+    """A native table with a header row, a colspan, a rowspan and a link into a
+    cell (#219).
+
+    Covers what `table_cells` does not: `<thead>` (a `$151` header group versus
+    the body's `$454`), `colspan` and `rowspan` (the `$148`/`$149` cell spans and
+    the table's `yj_table` feature version), and an anchor on a cell that a
+    later paragraph links to. Tier 2 decodes this file with KFX Input and
+    checks the round-trip EPUB has the same table.
+    """
+    body = (
+        "<p>Population by census year.</p>\n"
+        "<table>\n"
+        "<thead><tr><th>Year</th><th colspan='2'>Population</th></tr></thead>\n"
+        "<tbody>\n"
+        "<tr><td rowspan='2'>1801</td><td>8,893</td><td>urban</td></tr>\n"
+        '<tr><td>3,102</td><td id="c1811">rural</td></tr>\n'
+        "</tbody>\n"
+        "</table>\n"
+        '<p>See the <a href="#c1811">1811 cell</a> for the rural count.</p>'
+    )
+    return (
+        EpubBuilder()
+        .set_metadata(title="Table Layout Golden", author="Golden Author")
+        .add_chapter(
+            "Census",
+            _xhtml_page("Census", body).encode("utf-8"),
+        )
+        .build(out_dir, "table_layout")
     )
 
 
@@ -705,6 +739,7 @@ GOLDEN_INPUTS: list[tuple[str, callable]] = [
     ("captioned_images", make_captioned_images),
     ("sub_super_marks", make_sub_super_marks),
     ("table_cells", make_table_cells),
+    ("table_layout", make_table_layout),
     ("contents_illustration", make_contents_illustration),
     ("with_cover", make_with_cover),
     ("multi_chapter", make_multi_chapter),

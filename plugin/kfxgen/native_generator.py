@@ -86,6 +86,15 @@ SUBSCRIPT_FONT_SIZE = 0.75
 BASELINE_STYLE_SUPER = "$370"
 BASELINE_STYLE_SUB = "$371"
 
+#: Storyline node types for native table containers (#219).
+_TABLE_NODE_TYPES = {
+    "table": "$278",
+    "head": "$151",
+    "body": "$454",
+    "foot": "$455",
+    "row": "$279",
+}
+
 #: Overrides retired by #123. Warned about rather than ignored: a variable that
 #: used to change output and now cannot is exactly the silent no-op this
 #: codebase keeps paying for elsewhere.
@@ -188,6 +197,146 @@ def _consume_split_title(blocks, title):
         if not target.startswith(acc):
             return 0
     return 0
+
+
+def _row_text(row):
+    """A native table row's text as the rows build wrote it: its non-empty
+    cells joined by a space."""
+    return " ".join(c["text"] for c in row["cells"] if c["text"])
+
+
+def _with_rows(block, rows):
+    """Copy of native table `block` holding `rows` instead of its own."""
+    return {
+        **block,
+        "text": "\n".join(t for t in map(_row_text, rows) if t),
+        "table": {**block["table"], "rows": rows},
+    }
+
+
+def _source_order(rows):
+    """Row indices in source order. Rows are written head, body, foot; the
+    converter records where each sat in the source, which is the order the
+    rows build wrote them in and so the order the title cut follows."""
+    return sorted(range(len(rows)), key=lambda j: rows[j].get("source_order", j))
+
+
+def _drop_table_rows(block, dropped):
+    """Copy of native table `block` without the rows at indices `dropped`.
+
+    Their own and their cells' anchor keys join the table's own keys, which
+    go on the first row written, where the dropped rows' text began. Returns
+    None when no row with text is left: the rows build would then have
+    nothing of this table to show. (#219)
+    """
+    rows = block["table"]["rows"]
+    moved = [
+        k
+        for j in sorted(dropped)
+        for k in (rows[j].get("anchor_keys") or [])
+        + [k for c in rows[j]["cells"] for k in c.get("anchor_keys") or []]
+    ]
+    kept = [r for j, r in enumerate(rows) if j not in dropped]
+    if not any(_row_text(r) for r in kept):
+        return None
+    out = _with_rows(block, kept)
+    out["table"]["anchor_keys"] = _dedupe_keys(
+        list(block["table"].get("anchor_keys") or []) + moved
+    )
+    return out
+
+
+def _cut_row_text(row, removed):
+    """Copy of `row` with the first `removed` characters of its text cut.
+
+    The cut runs cell by cell over `_row_text`'s layout. A cell it covers
+    becomes empty but stays, so later columns keep their places; a cell it
+    reaches into is trimmed, with its spans and anchor offsets rebased as the
+    paragraph path rebases a cut paragraph's spans. (#219)
+    """
+    cells = []
+    pos = 0
+    for cell in row["cells"]:
+        text = cell["text"]
+        cut = min(max(removed - pos, 0), len(text)) if text else 0
+        if text:
+            pos += len(text) + 1
+        if not cut:
+            cells.append(cell)
+            continue
+        rest = text[cut:]
+        spans = []
+        for s, length, flags in cell.get("spans") or []:
+            start = max(s - cut, 0)
+            end = min(s + length - cut, len(rest))
+            if end > start:
+                spans.append((start, end - start, flags))
+        offsets = {
+            k: min(max(v - cut, 0), len(rest))
+            for k, v in (cell.get("anchor_offsets") or {}).items()
+        }
+        cells.append({**cell, "text": rest, "spans": spans, "anchor_offsets": offsets})
+    return {**row, "cells": cells}
+
+
+def _cut_title_from_table(block, title):
+    """Cut a chapter title from a native table's first row with text.
+
+    The rows build wrote that row as the chapter's first paragraph, and the
+    title dedupe cut the title from it; this does the same to the row's
+    cells. Returns (block, matched); the block is None when nothing with
+    text is left of the table. (#219)
+    """
+    rows = block["table"]["rows"]
+    order = _source_order(rows)
+    j = next((j for j in order if _row_text(rows[j])), None)
+    if j is None:
+        return block, False
+    text = _row_text(rows[j])
+    stripped = text.lstrip()
+    if stripped[: len(title)].lower() != title.lower():
+        return block, False
+    remainder = stripped[len(title) :].lstrip()
+    row = _cut_row_text(rows[j], len(text) - len(remainder))
+    cut = _with_rows(block, rows[:j] + [row] + rows[j + 1 :])
+    if any(c["text"] for c in row["cells"]):
+        return cut, True
+    return _drop_table_rows(cut, set(order[: order.index(j) + 1])), True
+
+
+def _eat_split_title(blocks, title):
+    """Drop the leading blocks that together make up `title` (#64).
+
+    A native table counts as one block per row with text, as the rows build
+    saw it, so a title split over rows, or over a paragraph and a row, is
+    eaten as it was in 5.8.8; a table only partly eaten keeps its other rows.
+    Returns (blocks, the dropped blocks' anchor keys). (#219)
+    """
+    entries = []
+    for i, blk in enumerate(blocks):
+        if len(entries) >= _MAX_SPLIT_TITLE_BLOCKS:
+            break
+        if blk.get("type") == "table":
+            rows = blk["table"]["rows"]
+            entries.extend(
+                (i, j, _row_text(rows[j]))
+                for j in _source_order(rows)
+                if _row_text(rows[j])
+            )
+        else:
+            entries.append((i, None, blk.get("text", "")))
+    eaten = _consume_split_title([{"text": t} for _, _, t in entries], title)
+    if not eaten:
+        return blocks, []
+    last, last_row, _ = entries[eaten - 1]
+    carried = [k for blk in blocks[:last] for k in blk.get("anchor_keys") or []]
+    if last_row is not None:
+        order = _source_order(blocks[last]["table"]["rows"])
+        kept = _drop_table_rows(blocks[last], set(order[: order.index(last_row) + 1]))
+        if kept is not None:
+            return [kept] + blocks[last + 1 :], carried
+    carried.extend(blocks[last].get("anchor_keys") or [])
+    return blocks[last + 1 :], carried
 
 
 def _dedupe_keys(keys):
@@ -375,6 +524,19 @@ def _may_fall_back_by_basename(href, resolved_image_refs):
     return href.startswith("/") or ".." in href.replace("\\", "/").split("/")
 
 
+def _table_feature_version(chapters):
+    """`yj_table` version the book needs: 3 when a native table uses rowspan
+    (firmware 5.8.7+, Kindle Previewer 3.106), otherwise 1 (#219)."""
+    for chapter in chapters:
+        for block in chapter.get("blocks") or ():
+            tbl = block.get("table") if isinstance(block, dict) else None
+            if tbl and any(
+                c.get("rowspan", 1) > 1 for r in tbl["rows"] for c in r["cells"]
+            ):
+                return 3
+    return 1
+
+
 class NativeKFXGenerator:
     """
     Generates KFX files from scratch using standard symbols and deterministic
@@ -435,7 +597,7 @@ class NativeKFXGenerator:
 
         return data
 
-    def build_fragment_585(self):
+    def build_fragment_585(self, table_version=1):
         """
         Builds Fragment $585 (Content Features)
         Standard structure for reflowable books.
@@ -470,7 +632,7 @@ class NativeKFXGenerator:
                 IS("$492"),
                 "yj_table",
                 IS("$589"),
-                make_version(1),
+                make_version(table_version),
             ),
             IonStruct(
                 IS("$586"),
@@ -1099,9 +1261,12 @@ class NativeKFXGenerator:
 
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
-                is_image = isinstance(chunk, dict) and chunk.get("type") == "image"
-                if is_image:
-                    chunk_text_len = 1  # synthetic; images take one offset slot
+                kind = chunk.get("type") if isinstance(chunk, dict) else "text"
+                if kind == "close":
+                    continue  # ends a container; takes no position (#219)
+                if kind in ("image", "open"):
+                    # synthetic; an image or a container takes one offset slot
+                    chunk_text_len = 1
                 elif isinstance(chunk, dict):
                     chunk_text_len = len(chunk["text"])
                 else:
@@ -1130,12 +1295,14 @@ class NativeKFXGenerator:
         section_positions_264 = {}
         for ch_idx, sec_name in enumerate(section_names):
             start, end = chapter_chunk_ranges[ch_idx]
-            pids = [section_positions[ch_idx]] + chunk_positions[start:end]
+            pids = [section_positions[ch_idx]] + [
+                p for p in chunk_positions[start:end] if p is not None
+            ]
             section_positions_264[sec_name] = pids
 
         # All position IDs for $550 (section + every chunk in reading order)
         all_position_ids = list(section_positions)
-        all_position_ids.extend(chunk_positions)
+        all_position_ids.extend(p for p in chunk_positions if p is not None)
 
         return {
             "position_entries_265": entries_265_raw,
@@ -1429,6 +1596,59 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
+    def build_table_style_157(self, entity_name):
+        """$157 for a native table node, as Kindle Previewer writes it (#219)."""
+        self.symtab.create_local_symbol(entity_name)
+        value = IonStruct(
+            IS("$16"), IonStruct(IS("$307"), IonDecimal("1"), IS("$306"), IS("$505")),
+            IS("$65"), IonStruct(IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")),
+            IS("$42"), IonStruct(IS("$307"), IonDecimal("1"), IS("$306"), IS("$310")),
+            IS("$173"), IS(entity_name),
+            IS("$83"), 4286611584,
+        )  # fmt: skip
+        return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
+
+    def build_cell_style_157(
+        self,
+        entity_name,
+        align=None,
+        bold=False,
+        italic=False,
+        colspan=1,
+        rowspan=1,
+        font_family=None,
+        font_size=1.0,
+    ):
+        """$157 for a table cell: Previewer's padding and vertical centring,
+        plus the cell's own alignment, header weight and spans (#219), and
+        the chapter's font size, omitted at 1.0 as build_fragment_157 does."""
+        self.symtab.create_local_symbol(entity_name)
+        lh = lambda v: IonStruct(IS("$307"), IonDecimal(v), IS("$306"), IS("$310"))  # noqa: E731
+        pct = lambda v: IonStruct(IS("$307"), IonDecimal(v), IS("$306"), IS("$314"))  # noqa: E731
+        value = IonStruct(
+            IS("$633"), IS("$320"),
+            IS("$52"), lh("0.03125"), IS("$53"), pct("0.117"),
+            IS("$54"), lh("0.03125"), IS("$55"), pct("0.117"),
+            IS("$173"), IS(entity_name),
+        )  # fmt: skip
+        if align in ALIGN_MAP:
+            value[IS("$34")] = IS(ALIGN_MAP[align])
+        if bold:
+            value[IS("$13")] = IS("$361")
+        if italic:
+            value[IS("$12")] = IS("$382")
+        if colspan > 1:
+            value[IS("$148")] = colspan
+        if rowspan > 1:
+            value[IS("$149")] = rowspan
+        if font_family:
+            value[IS("$11")] = font_family
+        if font_size != 1.0:
+            value[IS("$16")] = IonStruct(
+                IS("$307"), IonDecimal(str(font_size)), IS("$306"), IS("$505")
+            )  # rem
+        return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
+
     def build_fragment_157_image(
         self, entity_name, kind="inline", width_pct=None, height_pct=None
     ):
@@ -1585,6 +1805,7 @@ class NativeKFXGenerator:
         chunk_kinds=None,
         image_specs=None,
         emphasis_spans=None,
+        container_nodes=None,
     ):
         """
         Builds Fragment $259 (Storyline / Flow Map)
@@ -1597,6 +1818,12 @@ class NativeKFXGenerator:
               { $155: pos[1], $157: story[1],         ..., $145: ... },
               ...
             ]
+
+        The one exception is a native table (#219): an `open` kind starts a
+        container ($278 table → $151/$454/$455 row group → $279 row) whose
+        $146 holds the entries up to its matching `close`, so cells nest
+        under their row. `close` entries take no position. `$790` goes on the
+        first leaf entry, never on a container.
 
         (A nested single-outer-wrapper shape was tried during the Phase-3 work
         but reverted; the flat shape is what ships and is device-verified. The
@@ -1644,10 +1871,34 @@ class NativeKFXGenerator:
             if ref:
                 self.symtab.create_local_symbol(ref[0])
 
-        children = []
+        root = []
+        stack = [root]
+        first_leaf = True
         for i, story_name in enumerate(story_names):
-            position = positions[i] if positions and i < len(positions) else 1000 + i
             kind = chunk_kinds[i] if chunk_kinds and i < len(chunk_kinds) else "text"
+            if kind == "close":
+                stack.pop()
+                continue
+            position = positions[i] if positions and i < len(positions) else 1000 + i
+            if kind == "open":
+                node = container_nodes[i]
+                entry = IonStruct(
+                    IS("$155"), position, IS("$159"), IS(_TABLE_NODE_TYPES[node])
+                )
+                if node == "table":
+                    self.symtab.create_local_symbol(story_name)
+                    entry[IS("$157")] = IS(story_name)
+                    entry[IS("$150")] = False
+                    entry[IS("$456")] = IonStruct(
+                        IS("$307"), IonDecimal("0.9"), IS("$306"), IS("$318")
+                    )
+                    entry[IS("$457")] = IonStruct(
+                        IS("$307"), IonDecimal("0.9"), IS("$306"), IS("$318")
+                    )
+                entry[IS("$146")] = []
+                stack[-1].append(entry)
+                stack.append(entry[IS("$146")])
+                continue
 
             if (
                 kind == "image"
@@ -1674,9 +1925,10 @@ class NativeKFXGenerator:
                     entry[IS("$175")] = IS(resource_name)
                 # Image entries hold no text, so they carry no content
                 # reference — their slot in content_refs is None.
-                if i == 0:
+                if first_leaf:
                     entry[IS("$790")] = 1
-                children.append(entry)
+                    first_leaf = False
+                stack[-1].append(entry)
                 continue
 
             # Text entry
@@ -1691,8 +1943,9 @@ class NativeKFXGenerator:
                 IS("$145"),
                 IonStruct(IS("$4"), IS(ref_name), IS("$403"), ref_index),
             )
-            if i == 0:
+            if first_leaf:
                 entry[IS("$790")] = 1
+                first_leaf = False
 
             if link_targets and i < len(link_targets) and link_targets[i]:
                 anchor_name = link_targets[i]
@@ -1746,16 +1999,15 @@ class NativeKFXGenerator:
                     existing.append(span)
                 entry[IS("$142")] = existing
 
-            children.append(entry)
+            stack[-1].append(entry)
 
-        # FLAT shape (pre-Phase-3) — used for the TOC-regression test.
-        # Whether to revert nesting permanently or fix the nested shape
-        # depends on the device test outcome.
+        # Flat: one entry per chunk, except a native table (#219), which
+        # nests its row groups, rows and cells under a $278 entry.
         value = IonStruct(
             IS("$176"),
             IS(entity_name),
             IS("$146"),
-            children,
+            root,
         )
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$259"), value=value)
@@ -2174,7 +2426,9 @@ class NativeKFXGenerator:
         self.font_table = font_table if font_table is not None else FontTable([])
 
         # 1. Build metadata fragments
-        self.fragments.append(self.build_fragment_585())
+        self.fragments.append(
+            self.build_fragment_585(table_version=_table_feature_version(chapters))
+        )
 
         # Detect cover image format and build resource fragments
         # $164 (metadata) and $417 (raw data) MUST have different fids, linked by $165
@@ -2917,6 +3171,86 @@ class NativeKFXGenerator:
                 pos += self.CHUNK_SIZE
             return assigned
 
+        def _emit_table_chunks(block):
+            """Marker chunks around a native table's cells (#219). `open`
+            becomes a container entry with one position; `close` ends it and
+            takes none. Cells are ordinary text chunks with a `cell` key.
+            A row with no cells is not emitted; its anchor keys move to the
+            next emitted row, or to the last one when none follows.
+
+            The table's `open` carries no anchor keys. Its own keys (its id,
+            anchors carried in from before it, the bare-filename key) go on
+            its first row, a `$279`: Amazon uses rows and cells as link
+            targets and was never seen to use a `$278`, and a container as a
+            target was a no-op on tap in 5.3.0. Only a table with no emitted
+            row keeps them, and the converter never sends one."""
+            tbl = block["table"]
+            inner = {k for r in tbl["rows"] for k in (r.get("anchor_keys") or [])} | {
+                k
+                for r in tbl["rows"]
+                for c in r["cells"]
+                for k in (c.get("anchor_keys") or [])
+            }
+            own = [k for k in (tbl.get("anchor_keys") or []) if k not in inner]
+            table_open = {"type": "open", "node": "table", "anchor_keys": []}
+            all_chunks.append(table_open)
+            group = None
+            last_row = None
+            carried = []  # anchor keys of skipped cell-less rows
+            for row in tbl["rows"]:
+                if not row["cells"]:
+                    carried.extend(row.get("anchor_keys") or [])
+                    continue
+                if row["group"] != group:
+                    if group is not None:
+                        all_chunks.append({"type": "close"})
+                    group = row["group"]
+                    all_chunks.append({"type": "open", "node": group})
+                leading = own if last_row is None else []
+                keys = _dedupe_keys(leading + carried + (row.get("anchor_keys") or []))
+                carried = []
+                last_row = {
+                    "type": "open",
+                    "node": "row",
+                    "anchor_keys": keys,
+                    "anchor_offsets": dict.fromkeys(keys, 0),
+                }
+                all_chunks.append(last_row)
+                for cell in row["cells"]:
+                    all_chunks.append(
+                        {
+                            "type": "text",
+                            "text": cell["text"] or " ",
+                            "spans": (cell.get("spans") or []) if cell["text"] else [],
+                            "block_style": cell.get("block_style"),
+                            "anchor_keys": cell.get("anchor_keys") or [],
+                            "anchor_offsets": cell.get("anchor_offsets") or {},
+                            "cell": {
+                                "header": bool(cell.get("header")),
+                                "colspan": cell.get("colspan", 1),
+                                "rowspan": cell.get("rowspan", 1),
+                            },
+                        }
+                    )
+                all_chunks.append({"type": "close"})
+            if group is not None:
+                all_chunks.append({"type": "close"})
+            # Backstop: a key on the block that no part of the table declares
+            # would otherwise be on no chunk, and a link to it is dropped.
+            declared = inner | set(tbl.get("anchor_keys") or [])
+            stray = [k for k in block.get("anchor_keys") or () if k not in declared]
+            leftover = _dedupe_keys(carried + stray)
+            if last_row is None:
+                keys = _dedupe_keys(own + leftover)
+                table_open["anchor_keys"] = keys
+                table_open["anchor_offsets"] = dict.fromkeys(keys, 0)
+            elif leftover:
+                last_row["anchor_keys"] = _dedupe_keys(
+                    last_row["anchor_keys"] + leftover
+                )
+                last_row["anchor_offsets"].update(dict.fromkeys(leftover, 0))
+            all_chunks.append({"type": "close"})
+
         for ch_idx, chapter in enumerate(chapters):
             start_idx = len(all_chunks)
             # Anchor ids belonging to blocks this chapter drops (a heading that
@@ -2973,7 +3307,26 @@ class NativeKFXGenerator:
                         if iter_blocks:
                             first = iter_blocks[0]
                             first_stripped = first["text"].lstrip()
-                            if first_stripped[: len(title)].lower() == title.lower():
+                            table_cut = None
+                            if first.get("type") == "table":
+                                # A table's text joins all its rows; the
+                                # title can only be cut from its first row's
+                                # cells, which are what get written. (#219)
+                                table_cut = _cut_title_from_table(first, title)
+                            if table_cut is not None and table_cut[1]:
+                                if table_cut[0] is None:
+                                    carried_anchor_keys.extend(
+                                        first.get("anchor_keys") or []
+                                    )
+                                    iter_blocks = iter_blocks[1:]
+                                else:
+                                    iter_blocks[0] = table_cut[0]
+                            elif table_cut is not None:
+                                iter_blocks, eaten_keys = _eat_split_title(
+                                    iter_blocks, title
+                                )
+                                carried_anchor_keys.extend(eaten_keys)
+                            elif first_stripped[: len(title)].lower() == title.lower():
                                 remainder = first_stripped[len(title) :].lstrip()
                                 removed = len(first["text"]) - len(remainder)
                                 rebased_spans = []
@@ -3013,13 +3366,12 @@ class NativeKFXGenerator:
                                 # that, so the synthesized heading landed on top
                                 # of the book's own opener and the chapter name
                                 # rendered twice. (#64)
-                                eaten = _consume_split_title(iter_blocks, title)
-                                if eaten:
-                                    for blk in iter_blocks[:eaten]:
-                                        carried_anchor_keys.extend(
-                                            blk.get("anchor_keys") or []
-                                        )
-                                    iter_blocks = iter_blocks[eaten:]
+                                # A native table among them counts one block
+                                # per row, as the rows build saw it. (#219)
+                                iter_blocks, eaten_keys = _eat_split_title(
+                                    iter_blocks, title
+                                )
+                                carried_anchor_keys.extend(eaten_keys)
                         para_iter = iter_blocks
                     else:
                         para_iter = [
@@ -3027,6 +3379,9 @@ class NativeKFXGenerator:
                         ]
 
                     for block in para_iter:
+                        if block.get("type") == "table":
+                            _emit_table_chunks(block)
+                            continue
                         preformatted = bool(block.get("preformatted"))
                         para = (
                             block["text"].rstrip()
@@ -3112,11 +3467,26 @@ class NativeKFXGenerator:
             # trailing empty chapter made chapter_start_positions index
             # chunk_positions out of range (IndexError), and a middle empty
             # chapter silently pointed its TOC entry at the next chapter.
-            if len(all_chunks) == start_idx:
+            # Container markers (#219) don't count: a table with no cells
+            # leaves only markers, and the chapter would start on a container.
+            if not any(
+                c.get("type") in ("text", "image") for c in all_chunks[start_idx:]
+            ):
                 all_chunks.append({"type": "text", "text": " "})
 
             if carried_anchor_keys:
                 first_chunk = all_chunks[start_idx]
+                if first_chunk.get("node") == "table":
+                    # Not the `$278`: its first row, as for the table's own
+                    # keys (#219). The search stops at the table's close.
+                    depth = 0
+                    for c in all_chunks[start_idx:]:
+                        depth += {"open": 1, "close": -1}.get(c["type"], 0)
+                        if depth == 0:
+                            break
+                        if c.get("node") == "row":
+                            first_chunk = c
+                            break
                 first_chunk["anchor_keys"] = _dedupe_keys(
                     (first_chunk.get("anchor_keys") or []) + carried_anchor_keys
                 )
@@ -3138,6 +3508,8 @@ class NativeKFXGenerator:
             outer_positions.append(content_pos_id)
             content_pos_id += self.CONTENT_POS_STEP
             for chunk_idx in range(start, end):
+                if all_chunks[chunk_idx].get("type") == "close":
+                    continue  # ends a container; takes no position (#219)
                 chunk_positions[chunk_idx] = content_pos_id
                 content_pos_id += self.CONTENT_POS_STEP
 
@@ -3157,8 +3529,16 @@ class NativeKFXGenerator:
         # first child of the outer wrapper. Kindle treats outer wrapper
         # positions as non-navigable (no $145 ref, no $790:1), so TOC
         # entries that target wrappers behave as no-ops on tap.
+        def _first_leaf_position(start, end):
+            # A TOC target must be a leaf with content, never a container:
+            # 5.3.0 pointed the TOC at a wrapper and taps did nothing. (#219)
+            for i in range(start, end):
+                if all_chunks[i].get("type") in ("text", "image"):
+                    return chunk_positions[i]
+            return chunk_positions[start]
+
         chapter_start_positions = [
-            chunk_positions[chapter_chunk_ranges[i][0]] for i in range(len(chapters))
+            _first_leaf_position(*chapter_chunk_ranges[i]) for i in range(len(chapters))
         ]
 
         # Build $266 anchor fragments for TOC link entries
@@ -3277,7 +3657,7 @@ class NativeKFXGenerator:
         style_cache = {}  # (kind, sorted-attrs-tuple) -> entity_name
         kind_counts = {}  # kind -> next index for that kind
 
-        def _allocate_style(kind, **attrs):
+        def _allocate_style(kind, builder=None, **attrs):
             key = (kind, tuple(sorted(attrs.items())))
             if key in style_cache:
                 return style_cache[key]
@@ -3285,7 +3665,9 @@ class NativeKFXGenerator:
             kind_counts[kind] = idx + 1
             name = f"s{idx}{kind}"
             style_cache[key] = name
-            self.fragments.append(self.build_fragment_157(entity_name=name, **attrs))
+            self.fragments.append(
+                (builder or self.build_fragment_157)(entity_name=name, **attrs)
+            )
             if kind == "_em" and name not in extra_style_names:
                 extra_style_names.append(name)
             return name
@@ -3497,8 +3879,25 @@ class NativeKFXGenerator:
             entry_kinds = []
             entry_image_specs = []
             entry_emphasis_spans = []
+            entry_nodes = []
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
+                if chunk.get("type") in ("open", "close"):
+                    node = chunk.get("node")
+                    entry_styles.append(
+                        _allocate_style("_tbl", builder=self.build_table_style_157)
+                        if node == "table"
+                        else story_names[ch_idx]
+                    )
+                    entry_link_targets.append(None)
+                    entry_link_styles.append(None)
+                    entry_link_text_lengths.append(None)
+                    entry_kinds.append(chunk["type"])
+                    entry_image_specs.append(None)
+                    entry_emphasis_spans.append(None)
+                    entry_nodes.append(node)
+                    continue
+                entry_nodes.append(None)
                 if chunk.get("type") == "image":
                     entry_styles.append(_image_style_for(chunk) or story_names[ch_idx])
                     entry_link_targets.append(None)
@@ -3553,14 +3952,48 @@ class NativeKFXGenerator:
                             attrs["bold"] = True
                         if blk_italic:
                             attrs["italic"] = True
-                    entry_styles.append(_allocate_style("", **attrs))
+                    cell = chunk.get("cell")
+                    if cell is not None:
+                        # The cell style must declare the weight and style of
+                        # the face it names, or the Kindle falls back from the
+                        # embedded face (#50). A header is bold on its own.
+                        cell_bold = bool(cell["header"]) or blk_bold
+                        cell_italic = blk_italic
+                        cell_fam = self.font_table.match(
+                            bs.get("font_family", []),
+                            bold=cell_bold,
+                            italic=cell_italic,
+                        )
+                        cattrs = {
+                            "align": bs.get("align")
+                            or ("center" if cell["header"] else None),
+                            "bold": cell_bold,
+                            "italic": cell_italic,
+                            "colspan": cell["colspan"],
+                            "rowspan": cell["rowspan"],
+                            "font_size": attrs["font_size"],
+                        }
+                        if cell_fam:
+                            cattrs["font_family"] = cell_fam
+                        entry_styles.append(
+                            _allocate_style(
+                                "_td", builder=self.build_cell_style_157, **cattrs
+                            )
+                        )
+                    else:
+                        entry_styles.append(_allocate_style("", **attrs))
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)
                 chunk_spans = chunk.get("spans", [])
                 _cbs = chunk.get("block_style") or {}
                 chunk_fam = _cbs.get("font_family", [])
-                _blk_b = bool(_cbs.get("bold")) if has_fonts else False
+                # A header cell is bold on its own, with or without embedded
+                # fonts, exactly as its cell style is; a span style names the
+                # run's whole face, so it must say bold too. (#219)
+                _blk_b = (bool(_cbs.get("bold")) if has_fonts else False) or bool(
+                    (chunk.get("cell") or {}).get("header")
+                )
                 _blk_i = bool(_cbs.get("italic")) if has_fonts else False
                 # A run may be emphasis, a link, or both. Its visual style is
                 # whatever the flags say; its $179 is the resolved anchor, or
@@ -3597,6 +4030,7 @@ class NativeKFXGenerator:
                 chunk_kinds=entry_kinds,
                 image_specs=entry_image_specs,
                 emphasis_spans=entry_emphasis_spans,
+                container_nodes=entry_nodes,
             )
             storyline_names.append(sl_name)
             self.fragments.append(frag_259)
