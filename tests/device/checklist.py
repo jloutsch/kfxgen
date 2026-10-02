@@ -226,6 +226,27 @@ CHECKS: tuple[Check, ...] = (
         ),
         tags=("cover", "$164"),
     ),
+    Check(
+        id="native_tables",
+        title="Tables lay out in rows and columns without breaking navigation",
+        issues=("#219", "#251"),
+        procedure=(
+            "Open a book with tables. The TOC button must be present and a "
+            "TOC entry must land on a chapter that opens with a table. A "
+            "table must show rows and columns, with spanned cells spanning; "
+            "page forward and back through a long one. Tap a link into a "
+            "table row and a note link from a cell: each must land on its "
+            "own row or note. A table wider than 8 columns must show as one "
+            "paragraph per row with every value readable."
+        ),
+        fails_like=(
+            "The TOC button disappears: nesting the storyline in 5.3.0 did "
+            "that, and structural tests could not see it. Or a wide table is "
+            "squeezed until only its first column can be read, as 24 "
+            "columns were on the Voyage 5.13.6 and the Oasis 5.18.2 (#251)."
+        ),
+        tags=("$259", "tables"),
+    ),
 )
 
 
