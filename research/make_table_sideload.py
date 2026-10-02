@@ -51,7 +51,9 @@ other on the device. Twelve chapters, each a different table shape:
        which appears only in one cell (the search check).
    11  2,000 rows (the largest real native tables run to 1,943 rows): page
        turns, progress, and how long the chapter takes to open
-   12  24 columns (the widest real one is 27)
+   12  24 columns (the widest real one is 27). Since the gate, a table wider
+       than 8 columns keeps rows, so on the Native file this chapter matches
+       the Rows file.
 
 Decision table, per device (Voyage 5.13.6, Oasis 5.18.2, Paperwhite 5.19.2;
 read the firmware off each device):
@@ -110,7 +112,16 @@ note 7; a search for "marrowquill", after indexing, finds the chapter 10 cell.
 Output is gitignored (`*.kfx`, `*.epub`, `*.zip`, and the calibre config
 directory). Do not commit it. All text in the book is invented.
 
-Result: not yet run on a device.
+Result (8db4e5d, run by the maintainer on 2026-10-01, PR #251):
+    Paperwhite 5.19.2: every check passes, including chapter 12.
+    Voyage 5.13.6: every check passes except chapter 12, where columns 2-24
+        are drawn with almost no width.
+    Oasis 5.18.2.1.1 (short check: TOC, links, chapter 2's spans, chapter 4):
+        those pass; chapter 12 fails, with headers wrapping one character per
+        line and later columns cut off at the page edge.
+    Chapter 4 (8 columns) fits on all three; TOC and navigation pass on all
+    three. Per the decision table, tables over 8 columns now keep rows
+    (`_MAX_NATIVE_COLUMNS`); the table viewer is #254.
 """
 
 import os
@@ -575,7 +586,8 @@ def main():
         " 12. Ch 11: time how long the TOC jump takes to open the chapter. Page\n"
         "     through the first 50 rows and back; jump to the end of the chapter\n"
         "     and page back 50 rows. Progress moves as you go.\n"
-        " 13. Ch 12: is the 24-column table readable? Fits, wraps, or pan/zoom?\n"
+        " 13. Ch 12: on the Native file the 24-column table is now rows,\n"
+        "     the same as the Rows file. Do all 24 values show?\n"
         f" 14. Once the book is indexed, search for '{SEARCH_WORD}'. It is only\n"
         "     in one ch 10 cell. Does the result open that page?\n"
     )

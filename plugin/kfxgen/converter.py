@@ -88,6 +88,10 @@ _NON_TEXT_TAGS = {
 #: `NativeKFXGenerator.CHUNK_SIZE`. Longer text is cut into two storyline
 #: entries, which inside a row would be two cells (#226).
 _MAX_NATIVE_CELL_CHARS = 2000
+#: The widest table that fit on all three gate devices (#251). 24 columns were
+#: unreadable on the Voyage (5.13.6) and the Oasis (5.18.2); the table viewer
+#: that would let wider tables stay native is #254.
+_MAX_NATIVE_COLUMNS = 8
 
 _security_log = logging.getLogger(__name__ + ".security")
 
@@ -671,7 +675,8 @@ def _table_is_native(table):
     or any other element directly in the table or a row group, such as a
     `<p>`, or in a row other than a cell or empty anchor (the row path keeps
     it; native would lose it). Likewise a hidden caption, which native would
-    show, or a second caption, which native would drop.
+    show, or a second caption, which native would drop. And a table wider
+    than `_MAX_NATIVE_COLUMNS`, which older Kindles squeeze unreadably.
     """
     rows = 0
     cells = 0
@@ -732,7 +737,36 @@ def _table_is_native(table):
             )
             if cell_length > _MAX_NATIVE_CELL_CHARS:
                 return False
-    return rows > 0 and cells > 0
+    return rows > 0 and cells > 0 and _table_width(table) <= _MAX_NATIVE_COLUMNS
+
+
+def _table_width(table):
+    """Columns the widest row covers: its colspans plus the cells rowspan
+    carries down from earlier rows of the same row group. Stops counting once
+    past `_MAX_NATIVE_COLUMNS`."""
+    groups = [table] + [c for c in table if _local_tag(c.tag) in _ROW_GROUPS]
+    width = 0
+    for group in groups:
+        carry = []  # rows each column is still held for, from rows above
+        for tr in group:
+            if _local_tag(tr.tag) != "tr":
+                continue
+            row_cells = [c for c in tr if _local_tag(c.tag) in _CELL_TAGS]
+            if not row_cells:
+                continue  # never written, so it ends no rowspan
+            col = 0
+            for cell in row_cells:
+                while col < len(carry) and carry[col]:
+                    col += 1
+                end = col + _span_attr(cell, "colspan")
+                if end > _MAX_NATIVE_COLUMNS:
+                    return end
+                carry.extend([0] * (end - len(carry)))
+                carry[col:end] = [_span_attr(cell, "rowspan")] * (end - col)
+                col = end
+            width = max(width, len(carry))
+            carry = [max(n - 1, 0) for n in carry]
+    return width
 
 
 _ROW_GROUPS = {"thead": "head", "tbody": "body", "tfoot": "foot"}

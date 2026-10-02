@@ -103,6 +103,7 @@ $278 {$155 eid, $157 tableStyle, $150 false, $456 {0.9 $318}, $457 {0.9 $318}, $
 - an image (`img`, `svg`, `image`) or other embedded object anywhere in it;
 - a cell with more than one block child;
 - a cell with more than 2,000 characters (the generator's `CHUNK_SIZE`, #226);
+- a table wider than 8 columns (`_MAX_NATIVE_COLUMNS`): the widest row, counting each cell's `colspan` and the cells a `rowspan` carries down from earlier rows of the same row group. The device gate (#251) found 8 columns fit on all three devices, while 24 were unreadable on the Voyage 5.13.6 and the Oasis 5.18.2 (the Paperwhite 5.19.2 fitted them). This affects 5 of the Gutenberg 90's 601 eligible tables and 72 of the library sample's 4,766. The table viewer that would keep wider tables native is #254;
 - a cell outside a row, or a table with no rows or no cells (it needs at least one cell);
 - a hidden or contents-listing row, row group or cell (`_is_non_rendered`, `_is_nav_listing`): the row path drops it, and native would show it;
 - a `<tr>` whose parent is not `table`, `thead`, `tbody` or `tfoot`;
@@ -203,7 +204,7 @@ The whole branch stays unmerged until a sideloaded A/B pair passes on all three 
 - **A `<tfoot>` before `<tbody>`** (HTML4 allowed it). Row groups are written head, then body, then foot, whatever the source order, as a browser draws them; rows of one kind keep their order. Anchors are placed in source order first and move with their rows. Neither corpus has this shape. Two effects follow: for this shape the native row order differs from the rows build's, and a TOC entry pointing at the footer's first row is past the table's start, so that table falls back to rows. The chapter-title cut still follows source order, so a title row in a leading `<tfoot>` is cut as 5.8.8 cut it.
 - **A row with fewer cells than its neighbours.** Emit what's there; the Kindle lays it out.
 - **A table inside a list item** that carries a list marker. The marker waits for the next text block (`_take_marker` only touches text blocks).
-- **Very wide tables.** Without the table viewer, behaviour is unknown, and the device gate includes one.
+- **Very wide tables.** Over 8 columns, a table keeps rows (see Eligibility). Without the table viewer (#254), the Voyage and the Oasis squeeze 24 columns until they can't be read.
 
 ## Testing
 

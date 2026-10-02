@@ -2402,6 +2402,58 @@ def test_a_cell_holding_exactly_one_block_stays_native():
     )
 
 
+def _row(n, cell="<td>x</td>"):
+    return "<tr>" + cell * n + "</tr>"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html, native",
+    [
+        (f"<table>{_row(8)}</table>", True),
+        (f"<table>{_row(9)}</table>", False),
+        # One wide row is enough.
+        (f"<table>{_row(3)}{_row(9)}{_row(3)}</table>", False),
+        # colspan counts: 7 cells, one spanning 2, is 8 columns; 3 is 9.
+        (f"<table>{_row(6)[:-5]}<td colspan='2'>x</td></tr></table>", True),
+        (f"<table>{_row(6)[:-5]}<td colspan='3'>x</td></tr></table>", False),
+        (f"<table>{_row(1, '<th colspan="9">H</th>')}{_row(3)}</table>", False),
+        # A cell carried down by rowspan takes a column in the next row.
+        (
+            f"<table><tr><td rowspan='2'>a</td>{'<td>x</td>' * 7}</tr>"
+            f"{_row(8)}</table>",
+            False,
+        ),
+        (
+            f"<table><tr><td rowspan='2'>a</td>{'<td>x</td>' * 7}</tr>"
+            f"{_row(7)}</table>",
+            True,
+        ),
+        # rowspan ends with its row group.
+        (
+            f"<table><thead><tr><td rowspan='5'>a</td>{'<td>x</td>' * 7}</tr>"
+            f"</thead><tbody>{_row(8)}</tbody></table>",
+            True,
+        ),
+    ],
+    ids=[
+        "8-columns",
+        "9-columns",
+        "one-wide-row",
+        "colspan-to-8",
+        "colspan-to-9",
+        "header-colspan-9",
+        "rowspan-carry-to-9",
+        "rowspan-carry-to-8",
+        "rowspan-ends-at-group",
+    ],
+)
+def test_a_table_wider_than_8_columns_falls_back(html, native):
+    # Device gate on #251: 8 columns fit on the Voyage, Oasis and Paperwhite;
+    # 24 were unreadable on the Voyage (5.13.6) and the Oasis (5.18.2).
+    assert _conv._table_is_native(_first_table(html)) is native
+
+
 def _block(html, **kw):
     captions, table, trailing = _conv._table_block(_first_table(html), **kw)
     return captions, table, trailing
