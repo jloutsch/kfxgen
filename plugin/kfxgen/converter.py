@@ -88,10 +88,12 @@ _NON_TEXT_TAGS = {
 #: `NativeKFXGenerator.CHUNK_SIZE`. Longer text is cut into two storyline
 #: entries, which inside a row would be two cells (#226).
 _MAX_NATIVE_CELL_CHARS = 2000
-#: The widest table that fit on all three gate devices (#251). 24 columns were
-#: unreadable on the Voyage (5.13.6) and the Oasis (5.18.2); the table viewer
-#: that would let wider tables stay native is #254.
-_MAX_NATIVE_COLUMNS = 8
+#: The widest real table the Voyage (5.13.6), the narrowest test device,
+#: reads correctly (#254): pg24855's 10-column Table XIII keeps every word
+#: whole, while its 13-column Table IX splits a header word mid-word. The
+#: Voyage and the Oasis were unreadable at 24 (#251). The table viewer that
+#: would let wider tables stay native is #254.
+_MAX_NATIVE_COLUMNS = 10
 
 _security_log = logging.getLogger(__name__ + ".security")
 

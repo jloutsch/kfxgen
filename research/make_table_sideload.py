@@ -52,8 +52,8 @@ other on the device. Twelve chapters, each a different table shape:
    11  2,000 rows (the largest real native tables run to 1,943 rows): page
        turns, progress, and how long the chapter takes to open
    12  24 columns (the widest real one is 27). Since the gate, a table wider
-       than 8 columns keeps rows, so on the Native file this chapter matches
-       the Rows file.
+       than the column limit keeps rows (8 after the gate, 10 since #254), so
+       on the Native file this chapter matches the Rows file.
 
 Decision table, per device (Voyage 5.13.6, Oasis 5.18.2, Paperwhite 5.19.2;
 read the firmware off each device):
@@ -122,6 +122,13 @@ Result (8db4e5d, run by the maintainer on 2026-10-01, PR #251):
     Chapter 4 (8 columns) fits on all three; TOC and navigation pass on all
     three. Per the decision table, tables over 8 columns now keep rows
     (`_MAX_NATIVE_COLUMNS`); the table viewer is #254.
+
+Width test for #254 (main 3feb5b4 with the limit lifted, 2026-10-01): tables
+of 8-13 and 17 columns, plus pg24855 with its 9-17 column tables native. The
+Voyage 5.13.6 displays the synthetic 13 and fails at 17, but pg24855's real
+13-column table splits a header word ("L" / "oading.") and its 10-column
+table reads correctly. The Oasis 5.18.2.1.1 shows the synthetic 13 and 17.
+The limit is now 10.
 """
 
 import os

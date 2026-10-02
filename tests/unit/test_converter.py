@@ -2410,47 +2410,48 @@ def _row(n, cell="<td>x</td>"):
 @pytest.mark.parametrize(
     "html, native",
     [
-        (f"<table>{_row(8)}</table>", True),
-        (f"<table>{_row(9)}</table>", False),
+        (f"<table>{_row(10)}</table>", True),
+        (f"<table>{_row(11)}</table>", False),
         # One wide row is enough.
-        (f"<table>{_row(3)}{_row(9)}{_row(3)}</table>", False),
-        # colspan counts: 7 cells, one spanning 2, is 8 columns; 3 is 9.
-        (f"<table>{_row(6)[:-5]}<td colspan='2'>x</td></tr></table>", True),
-        (f"<table>{_row(6)[:-5]}<td colspan='3'>x</td></tr></table>", False),
-        (f"<table>{_row(1, '<th colspan="9">H</th>')}{_row(3)}</table>", False),
+        (f"<table>{_row(3)}{_row(11)}{_row(3)}</table>", False),
+        # colspan counts: 9 cells, one spanning 2, is 10 columns; 3 is 11.
+        (f"<table>{_row(8)[:-5]}<td colspan='2'>x</td></tr></table>", True),
+        (f"<table>{_row(8)[:-5]}<td colspan='3'>x</td></tr></table>", False),
+        (f"<table>{_row(1, '<th colspan="11">H</th>')}{_row(3)}</table>", False),
         # A cell carried down by rowspan takes a column in the next row.
         (
-            f"<table><tr><td rowspan='2'>a</td>{'<td>x</td>' * 7}</tr>"
-            f"{_row(8)}</table>",
+            f"<table><tr><td rowspan='2'>a</td>{'<td>x</td>' * 9}</tr>"
+            f"{_row(10)}</table>",
             False,
         ),
         (
-            f"<table><tr><td rowspan='2'>a</td>{'<td>x</td>' * 7}</tr>"
-            f"{_row(7)}</table>",
+            f"<table><tr><td rowspan='2'>a</td>{'<td>x</td>' * 9}</tr>"
+            f"{_row(9)}</table>",
             True,
         ),
         # rowspan ends with its row group.
         (
-            f"<table><thead><tr><td rowspan='5'>a</td>{'<td>x</td>' * 7}</tr>"
-            f"</thead><tbody>{_row(8)}</tbody></table>",
+            f"<table><thead><tr><td rowspan='5'>a</td>{'<td>x</td>' * 9}</tr>"
+            f"</thead><tbody>{_row(10)}</tbody></table>",
             True,
         ),
     ],
     ids=[
-        "8-columns",
-        "9-columns",
+        "10-columns",
+        "11-columns",
         "one-wide-row",
-        "colspan-to-8",
-        "colspan-to-9",
-        "header-colspan-9",
-        "rowspan-carry-to-9",
-        "rowspan-carry-to-8",
+        "colspan-to-10",
+        "colspan-to-11",
+        "header-colspan-11",
+        "rowspan-carry-to-11",
+        "rowspan-carry-to-10",
         "rowspan-ends-at-group",
     ],
 )
-def test_a_table_wider_than_8_columns_falls_back(html, native):
-    # Device gate on #251: 8 columns fit on the Voyage, Oasis and Paperwhite;
-    # 24 were unreadable on the Voyage (5.13.6) and the Oasis (5.18.2).
+def test_a_table_wider_than_10_columns_falls_back(html, native):
+    # #254 width test on the Voyage (5.13.6), the narrowest device: a real
+    # 10-column table (pg24855 Table XIII) reads correctly; a 13-column one
+    # splits a header word. 24 were unreadable on the Voyage and Oasis (#251).
     assert _conv._table_is_native(_first_table(html)) is native
 
 
