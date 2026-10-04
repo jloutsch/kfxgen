@@ -47,8 +47,10 @@ endnotes, `doc-endnotes` lists, `<p>` and `<div>` entries, and calibre's
 notes tables. Each gives one paragraph per note, and every note link lands
 on its own note.
 
-**Logging.** A book with Kindle tables logs one line with their count. The
-5.8.8 warning now counts only tables written as rows.
+**Logging (#259).** A book with Kindle tables logs one line with their
+count. The 5.8.8 warning now counts only tables written as rows, and says
+why: native tables are turned off, or the tables could not be laid out as
+Kindle tables. 5.8.8's "KFX output has no table layout yet" is gone.
 
 **Known limits, all tracked:**
 - **Wide tables** (#254). Over 8 columns, a table is still rows. 8 is the
