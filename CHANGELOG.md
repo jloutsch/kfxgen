@@ -1,5 +1,106 @@
 # Changelog
 
+## 5.8.9 — Tables with columns
+
+**New (#219, #251): simple tables are real Kindle tables.** In 5.8.8 each
+table row was its own paragraph, so columns didn't line up. A table is now
+written as a Kindle table with rows and columns, in the structure Kindle
+Previewer 3.106 writes. Supported:
+- header cells, `colspan` and `rowspan`;
+- each cell's own text alignment;
+- links into rows and cells;
+- calibre's MOBI→EPUB notes tables, with each note link landing on its own
+  note (#223);
+- embedded fonts, with bold and italic cells in the matching face (#50);
+- a caption, written as paragraphs before the table, as in 5.8.8.
+
+5.3.0's nested structure removed the Kindle's TOC button. This one doesn't:
+the TOC button and TOC jumps work on all three test Kindles (below).
+
+**Tables that still use 5.8.8's rows.** These fall back to one paragraph
+per row:
+- **more than 8 columns.** The Voyage and the Oasis squeeze a 24-column
+  table until it can't be read (#254);
+- an image or a nested table in a cell;
+- a cell holding more than one paragraph, or over 2,000 characters;
+- hidden or contents-listing rows and cells, and other unusual markup.
+
+In the Gutenberg 90, 510 tables are written as Kindle tables and 157 fall
+back. The fallbacks are 131 cells holding more than one paragraph, 28 images
+in cells, and none of the other cases.
+
+**Off switch.** Check **Write tables as one paragraph per row** under
+Preferences → Plugins → kfxgen → Customize, or use
+`--kfxgen-disable-native-tables` per conversion. Tables are then written as
+in 5.8.8, except for the cell-alignment fix below.
+
+**Fixed (#224, #255): a table written as rows lost its cells' alignment.**
+In 5.8.8 a row took its table's alignment. When every cell in a row has the
+same alignment, the row now takes that. For example, pg22210's picture
+captions are centred under their pictures again, as in 5.8.7. In the
+Gutenberg 90 this changes 275 rows in 7 books, and nothing else.
+
+**Fixed (#223): numbered notes ran together on the notes page.** The table
+layout was fixed in 5.8.8. For this release, every layout the issue lists
+was checked through real calibre 9.14.0: Markdown footnote lists, `aside`
+endnotes, `doc-endnotes` lists, `<p>` and `<div>` entries, and calibre's
+notes tables. Each gives one paragraph per note, and every note link lands
+on its own note.
+
+**Logging.** A book with Kindle tables logs one line with their count. The
+5.8.8 warning now counts only tables written as rows.
+
+**Known limits, all tracked:**
+- **Wide tables** (#254). Over 8 columns, a table is still rows. 8 is the
+  widest table checked on all three devices, with short words in every
+  column. A real 8-column table with one column of long words has not been
+  checked, and the Voyage squeezed such a column until names split in real
+  10- and 13-column tables.
+- **Not written:** borders, padding and widths from CSS, images in cells,
+  nested tables, and cells holding several paragraphs (#219).
+- **A list item whose only content is a table** loses its list number.
+- **Notes become chapters in a book with no table of contents** (#225). When
+  a book has no NCX, calibre adds the note links to the table of contents
+  it generates, and notes laid out as a table or as plain `<p>`/`<div>`
+  entries each become a chapter titled with the note number. Native tables
+  don't change this. Books with a table of contents are not affected.
+- **Progress** (#227). The percentage follows the number of paragraphs, so a
+  long table counts for a lot. The cause predates this release.
+
+**Checks:**
+- **Tests:** default suite, `tier3_strict` (every golden file without a
+  table is byte-identical; `table_cells` changes and `table_layout` is new),
+  tier 2 through KFX Input, and the calibre-gated table tests on calibre
+  9.14.0, which cover both native tables and rows.
+- **Gutenberg 90 against 5.8.8, through real calibre 9.14.0:** text,
+  chapter titles and chapter lengths are identical in all 90 books, and all
+  513,839 paragraphs outside tables keep their text and style. All 74,578
+  links resolve, and none targets a table container. KFX Input decodes the
+  10 books with the most tables with the same table, row and cell counts as
+  their EPUBs. These numbers were measured for #251 at 23d145a and not
+  rerun after its review fixes.
+- **#255 against `main`, through real calibre 9.14.0:** text, entries,
+  sections, TOC, links and anchors are identical in all 90 books; only the
+  275 rows above change.
+
+### Device verification
+
+The table checks used an A/B pair with distinct titles, "Table Gate Native"
+and "Table Gate Rows", built by `research/make_table_sideload.py` through
+real calibre. The #255 check used pg22210. Firmware is the last version
+recorded for each device.
+
+| Device | Firmware | Check | Result |
+|---|---|---|---|
+| Paperwhite 11th gen (2021) | 5.19.2 | TOC button and jumps; rows, columns and spans; 60-row, 8-column and 24-column tables; 10 note links; links to cells and tables; fonts; formatted cells; search in a cell; a 2,000-row table; progress | pass |
+| Voyage 7th gen (2014) | 5.13.6 | the same checks | pass, except the 24-column table: columns 2–24 drawn with almost no width |
+| Oasis 10th gen (2019) | 5.18.2.1.1 | TOC, links, spans, the 8-column table | pass; the 24-column table failed as on the Voyage |
+| Oasis 10th gen (2019) | 5.18.2.1.1 | the 24-column table after the 8-column limit | pass: written as rows, every value readable |
+| Oasis 10th gen (2019) | 5.18.2.1.1 | #255: pg22210's picture captions and stamp table | pass: centred under the pictures |
+
+Not checked on the Oasis: fonts, search, the 2,000-row table and progress.
+All four passed on the Paperwhite and the Voyage.
+
 ## 5.8.8 — Tables read row by row
 
 **Fixed (#219, #221): a table came out as one run-on paragraph.** Every row
