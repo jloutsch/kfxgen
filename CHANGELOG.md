@@ -25,9 +25,11 @@ per row:
 - a cell holding more than one paragraph, or over 2,000 characters;
 - hidden or contents-listing rows and cells, and other unusual markup.
 
-In the Gutenberg 90, 510 tables are written as Kindle tables and 157 fall
-back. The fallbacks are 131 cells holding more than one paragraph, 28 images
-in cells, and none of the other cases.
+In the Gutenberg 90, 505 tables are written as Kindle tables and 162 fall
+back: 130 with a cell holding more than one paragraph, 27 with an image in a
+cell, and 5 over 8 columns. None falls back for any other reason. (Counted
+on the release code through the test shim; #251's 510 and 157 were from
+before the 8-column limit.)
 
 **Off switch.** Check **Write tables as one paragraph per row** under
 Preferences → Plugins → kfxgen → Customize, or use
@@ -38,7 +40,11 @@ in 5.8.8, except for the cell-alignment fix below.
 In 5.8.8 a row took its table's alignment. When every cell in a row has the
 same alignment, the row now takes that. For example, pg22210's picture
 captions are centred under their pictures again, as in 5.8.7. In the
-Gutenberg 90 this changes 275 rows in 7 books, and nothing else.
+Gutenberg 90 with native tables on, this changes 275 rows in 7 books, and
+nothing else. With the off switch every table is rows, so it reaches far
+more: against 5.8.8 through real calibre 9.14.0, alignment differs on 3,472
+KFX entries in 18 books, and nothing else differs (measured in the #258
+review).
 
 **Fixed (#223): numbered notes ran together on the notes page.** The table
 layout was fixed in 5.8.8. For this release, every layout the issue lists
@@ -68,6 +74,10 @@ Kindle tables. 5.8.8's "KFX output has no table layout yet" is gone.
   don't change this. Books with a table of contents are not affected.
 - **Progress** (#227). The percentage follows the number of paragraphs, so a
   long table counts for a lot. The cause predates this release.
+- **Hidden text and HTML comments are printed** (#256, #252). Both predate
+  this release, and both reach tables: a table with a hidden cell falls back
+  to rows, and the row prints that cell's text; a comment inside a cell is
+  written into the cell.
 
 **Checks:**
 - **Tests:** default suite, `tier3_strict` (every golden file without a
