@@ -2034,11 +2034,10 @@ def test_cell_does_not_fuse_onto_following_text():
 
 # --- one block per table row (#219) -----------------------------------------
 #
-# KFX output has no table layout: Amazon writes a table as nested storyline
-# containers, and kfxgen's storyline is flat on purpose (nesting it in 5.3.0
-# removed the device TOC button). Short of that, each row becomes its own
-# paragraph, so a reader can still tell which values belong together. Before
-# this, a whole table was one paragraph: "Year A B 1 100 200 2 110 220".
+# A table that is not laid out natively (#251) falls back to rows: each row
+# becomes its own paragraph, so a reader can still tell which values belong
+# together. Before #221, a whole table was one paragraph:
+# "Year A B 1 100 200 2 110 220".
 
 _ISSUE_219_TABLE = (
     "<table>"
@@ -2203,6 +2202,38 @@ def test_no_table_warning_without_tables():
     log.warn = MagicMock()
     extract_chapters_from_oeb(_table_book("<p>One.</p>"), log)
     assert not [c for c in log.warn.call_args_list if "table" in str(c).lower()]
+
+
+_WIDE_TABLE = (
+    "<table><tr>" + "".join(f"<td>c{i}</td>" for i in range(9)) + "</tr></table>"
+)
+
+
+@pytest.mark.unit
+def test_a_table_that_falls_back_is_warned_as_a_fallback():
+    # Since #251 most tables are laid out natively, so the warning names only
+    # the ones that fell back; "KFX output has no table layout" was 5.8.8's.
+    log = _silent_log()
+    log.warn = MagicMock()
+    oeb = _table_book(f"<p>One.</p>{_WIDE_TABLE}{_ISSUE_219_TABLE}")
+    extract_chapters_from_oeb(oeb, log, native_tables=True)
+    warnings = _table_warnings(log)
+    assert len(warnings) == 1, warnings
+    assert "1 table in 1 file" in warnings[0]
+    assert "could not be laid out as a Kindle table" in warnings[0]
+    assert "no table layout" not in warnings[0]
+
+
+@pytest.mark.unit
+def test_with_native_tables_off_the_warning_says_so():
+    log = _silent_log()
+    log.warn = MagicMock()
+    oeb = _table_book(f"<p>One.</p>{_ISSUE_219_TABLE}")
+    extract_chapters_from_oeb(oeb, log, native_tables=False)
+    warnings = _table_warnings(log)
+    assert len(warnings) == 1, warnings
+    assert "native tables are turned off" in warnings[0]
+    assert "no table layout" not in warnings[0]
 
 
 # --- note anchors between table rows (#221, #223) ---------------------------
