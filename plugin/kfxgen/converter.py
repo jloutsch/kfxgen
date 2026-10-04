@@ -39,8 +39,8 @@ _BOLD_TAGS = {"strong", "b"}
 _SUPER_TAGS = {"sup"}
 _SUB_TAGS = {"sub"}
 
-# Table cells run together without this. kfxgen has no table layout — each
-# row is one paragraph (#219) and its cells are inline text within it — so the
+# Table cells run together without this. A table that is not laid out natively
+# (#219, #251) has each row as one paragraph, its cells inline text within it, so the
 # only thing separating two cells was whatever whitespace happened to sit
 # between the tags in the source. Where an author wrote
 # `</td><td>` with nothing between, adjacent values fused: `1801` and `8,893`
@@ -1408,11 +1408,10 @@ def extract_blocks_from_html(
         "section",
         "article",
         "figure",
-        # KFX output has no table layout — Amazon nests a table's rows and
-        # cells inside the storyline, and ours is flat on purpose (nesting it
-        # in 5.3.0 removed the device TOC button). Short of that, each row is
-        # its own paragraph, so values that belong together stay together.
-        # The row is the leaf; the rest are containers around it. (#219)
+        # A table that is not laid out natively (#251) falls back to rows:
+        # each row is its own paragraph, so values that belong together stay
+        # together. The row is the leaf; the rest are containers around it.
+        # (#219)
         "table",
         "caption",
         "thead",
@@ -2355,7 +2354,7 @@ def extract_chapters_from_oeb(
         if chapters:
             log.info(f"Assembled {len(chapters)} chapters from TOC coordinates")
             _replace_title_page(chapters, metadata, log)
-            _warn_flattened_tables(chapters, table_blocks, log)
+            _warn_flattened_tables(chapters, table_blocks, log, native_tables)
             return chapters
         log.info("TOC produced no chapters; using spine items as chapters")
 
@@ -2371,12 +2370,13 @@ def extract_chapters_from_oeb(
 
     log.info(f"Using {len(chapters)} spine items as chapters (no TOC mapping)")
     _replace_title_page(chapters, metadata, log)
-    _warn_flattened_tables(chapters, table_blocks, log)
+    _warn_flattened_tables(chapters, table_blocks, log, native_tables)
     return chapters
 
 
-def _warn_flattened_tables(chapters, table_blocks, log):
-    """Say once per book how many tables were written as rows of text (#219).
+def _warn_flattened_tables(chapters, table_blocks, log, native_tables):
+    """Say once per book how many tables were written as rows of text (#219),
+    and why: native tables were turned off, or these tables fell back.
 
     Counted against the final chapters, not at extraction: a contents page, a
     title page or a cover-only page is dropped after its blocks were extracted,
@@ -2391,19 +2391,28 @@ def _warn_flattened_tables(chapters, table_blocks, log):
         1 for ch in chapters for b in ch.get("blocks") or () if b.get("type") == "table"
     )
     if native:
-        log.info(
-            f"  {native} table{'s' if native != 1 else ''} written as native "
-            "Kindle tables (#219)"
-        )
+        s = "s" if native != 1 else ""
+        log.info(f"  {native} table{s} written as native Kindle table{s} (#219)")
     if not written:
         return
     # Said once per book, not per table: a book with tables usually has
-    # dozens, and the limitation is the same for all of them.
+    # dozens.
     n, f = len(written), len(set(written))
+    if not native_tables:
+        why = "native tables are turned off"
+    elif n == 1:
+        why = (
+            "it could not be laid out as a Kindle table (for example over 8 columns, or an "
+            "image, a nested table or several paragraphs in a cell)"
+        )
+    else:
+        why = (
+            "they could not be laid out as Kindle tables (for example over 8 columns, or an "
+            "image, a nested table or several paragraphs in a cell)"
+        )
     log.warn(
         f"  {n} table{'s' if n != 1 else ''} in {f} file{'s' if f != 1 else ''} "
-        "written as one paragraph per row: KFX output has no table layout yet, "
-        "so columns do not line up (#219)"
+        f"written as one paragraph per row, so columns do not line up: {why} (#219)"
     )
 
 
