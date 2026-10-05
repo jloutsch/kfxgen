@@ -34,7 +34,7 @@ from lxml import etree
 from kfxgen import converter as conv
 from kfxgen._img_tokens import IMG_TOKEN_RE
 from kfxgen.kfxlib_minimal.ion import IS
-from tests._kfx_introspect import by_type, load_fragments, val
+from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
 from tests.fixtures.oeb_shim import EpubAsOeb
 
 CORPUS_ENV = "KFXGEN_CORPUS_DIR"
@@ -320,6 +320,18 @@ def _raw_img_tokens_in_file(kfx_path):
     return len(re.findall(pattern, raw))
 
 
+def _shown_images(storylines):
+    """Entries that tell the reader to draw a picture (`$175`), at any depth
+    in the given storylines' `$146` lists: a picture in a table cell (#262)
+    sits under the table, a row group and a row."""
+    return sum(
+        1
+        for entries in storylines
+        for entry in iter_entries(entries)
+        if hasattr(entry, "get") and entry.get("$175") is not None
+    )
+
+
 def _metrics(kfx_path):
     frags = load_fragments(kfx_path)
     texts = [
@@ -337,9 +349,11 @@ def _metrics(kfx_path):
             unnamed += 1
         else:
             anchors.add(str(name))
+    # Every entry at every depth: since #251 a link can sit in a table cell,
+    # nested under the table, a row group and a row.
     targets = []
     for f in by_type(frags, "$259"):
-        for entry in val(f).get(IS("$146")) or []:
+        for entry in iter_entries(val(f).get(IS("$146")) or []):
             for span in entry.get(IS("$142")) or []:
                 if IS("$179") in span:
                     targets.append(str(span[IS("$179")]))
@@ -352,16 +366,9 @@ def _metrics(kfx_path):
     # has $146 children read as zero — the nested $259 shape native_generator
     # explicitly contemplates (`:1607`). $181 was also in the descent and never
     # occurs inside a $259; it is dropped rather than left as decoration.
-    shown = 0
-    for f in by_type(frags, "$259"):
-        for outer in val(f).get(IS("$146")) or []:
-            if not hasattr(outer, "get"):
-                continue
-            if outer.get(IS("$175")) is not None:
-                shown += 1
-            for entry in outer.get(IS("$146")) or []:
-                if hasattr(entry, "get") and entry.get(IS("$175")) is not None:
-                    shown += 1
+    shown = _shown_images(
+        [val(f).get(IS("$146")) or [] for f in by_type(frags, "$259")]
+    )
 
     return {
         "chars": sum(len(t) for t in texts),
@@ -484,6 +491,53 @@ def test_corpus_book_invariants(epub, tmp_path):
             f"{m['image_resources']} image resources emitted but zero $175 refs "
             "— every image is in the file and none of them is on screen"
         )
+
+
+@pytest.mark.tier1
+@pytest.mark.integration
+def test_metrics_count_links_inside_table_cells(tmp_path):
+    # The 2026-10-05 sweep failed pg1342: "101 anchors emitted but zero link
+    # spans". Gutenberg's current edition holds all 101 links in two tables,
+    # which are native tables since #251, and the count only read top-level
+    # storyline entries. All 101 were there and resolved.
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.golden.inputs import _xhtml_page
+
+    body = (
+        '<table><tr><td><a href="#end">to the end</a></td><td>x</td></tr></table>'
+        '<p id="end">The end.</p>'
+    )
+    epub = (
+        EpubBuilder()
+        .set_metadata(title="Cell Link", author="Test Author")
+        .add_chapter("One", _xhtml_page("One", body).encode("utf-8"))
+        .build(tmp_path, "cell_link")
+    )
+    kfx = tmp_path / "cell_link.kfx"
+    conv.convert_oeb_to_kfx(
+        EpubAsOeb(str(epub)), str(kfx), opts=None, log=_silent_log()
+    )
+    m = _metrics(kfx)
+    assert m["links"] == 1
+    assert m["dangling"] == 0
+
+
+@pytest.mark.tier1
+@pytest.mark.integration
+def test_shown_images_counts_a_picture_inside_a_table_cell():
+    # #270 review: the picture count looked two levels deep. A picture in a
+    # table cell (#262) sits under the table, a row group and a row, and
+    # would read as never shown, as links did on pg1342.
+    storylines = [
+        [
+            {"$175": "top"},
+            {
+                "$159": "$278",
+                "$146": [{"$146": [{"$146": [{"$159": "$271", "$175": "in-cell"}]}]}],
+            },
+        ]
+    ]
+    assert _shown_images(storylines) == 2
 
 
 @pytest.mark.tier1
