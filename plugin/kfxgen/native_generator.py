@@ -237,7 +237,12 @@ def _drop_table_rows(block, dropped):
         k
         for j in sorted(dropped)
         for k in (rows[j].get("anchor_keys") or [])
-        + [k for c in rows[j]["cells"] for k in c.get("anchor_keys") or []]
+        + [
+            k
+            for c in rows[j]["cells"]
+            for part in [c, *(c.get("paragraphs") or ())]
+            for k in part.get("anchor_keys") or []
+        ]
     ]
     kept = [r for j, r in enumerate(rows) if j not in dropped]
     if not any(_row_text(r) for r in kept):
@@ -249,13 +254,68 @@ def _drop_table_rows(block, dropped):
     return out
 
 
+def _trim_text(part, cut):
+    """Copy of a cell or paragraph with its first `cut` characters removed,
+    its spans and anchor offsets rebased as the paragraph path rebases a cut
+    paragraph's spans. (#219)"""
+    rest = part["text"][cut:]
+    spans = []
+    for s, length, flags in part.get("spans") or []:
+        start = max(s - cut, 0)
+        end = min(s + length - cut, len(rest))
+        if end > start:
+            spans.append((start, end - start, flags))
+    offsets = {
+        k: min(max(v - cut, 0), len(rest))
+        for k, v in (part.get("anchor_offsets") or {}).items()
+    }
+    return {**part, "text": rest, "spans": spans, "anchor_offsets": offsets}
+
+
+def _cut_paragraphs(cell, cut):
+    """Copy of a cell holding paragraphs with the first `cut` characters of its
+    text cut, its text being the paragraphs joined by spaces (#261).
+
+    A paragraph the cut covers is dropped and its anchor keys move to the
+    next paragraph kept, at its start; the one it reaches into is trimmed.
+    With nothing left, the cell is empty and keeps the keys itself."""
+    kept, moved = [], []
+    pos = 0
+    for para in cell["paragraphs"]:
+        pcut = min(max(cut - pos, 0), len(para["text"]))
+        pos += len(para["text"]) + 1
+        if pcut == len(para["text"]):
+            moved.extend(para.get("anchor_keys") or [])
+            continue
+        para = _trim_text(para, pcut) if pcut else para
+        if moved:
+            para = {
+                **para,
+                "anchor_keys": _dedupe_keys(moved + (para.get("anchor_keys") or [])),
+                "anchor_offsets": {
+                    **dict.fromkeys(moved, 0),
+                    **(para.get("anchor_offsets") or {}),
+                },
+            }
+            moved = []
+        kept.append(para)
+    out = {**cell, "paragraphs": kept, "text": " ".join(p["text"] for p in kept)}
+    if moved:
+        out["anchor_keys"] = _dedupe_keys((cell.get("anchor_keys") or []) + moved)
+        out["anchor_offsets"] = {
+            **(cell.get("anchor_offsets") or {}),
+            **dict.fromkeys(moved, 0),
+        }
+    return out
+
+
 def _cut_row_text(row, removed):
     """Copy of `row` with the first `removed` characters of its text cut.
 
     The cut runs cell by cell over `_row_text`'s layout. A cell it covers
     becomes empty but stays, so later columns keep their places; a cell it
-    reaches into is trimmed, with its spans and anchor offsets rebased as the
-    paragraph path rebases a cut paragraph's spans. (#219)
+    reaches into is trimmed (`_trim_text`), or, when it holds paragraphs,
+    cut paragraph by paragraph (`_cut_paragraphs`). (#219, #261)
     """
     cells = []
     pos = 0
@@ -266,19 +326,10 @@ def _cut_row_text(row, removed):
             pos += len(text) + 1
         if not cut:
             cells.append(cell)
-            continue
-        rest = text[cut:]
-        spans = []
-        for s, length, flags in cell.get("spans") or []:
-            start = max(s - cut, 0)
-            end = min(s + length - cut, len(rest))
-            if end > start:
-                spans.append((start, end - start, flags))
-        offsets = {
-            k: min(max(v - cut, 0), len(rest))
-            for k, v in (cell.get("anchor_offsets") or {}).items()
-        }
-        cells.append({**cell, "text": rest, "spans": spans, "anchor_offsets": offsets})
+        elif cell.get("paragraphs"):
+            cells.append(_cut_paragraphs(cell, cut))
+        else:
+            cells.append(_trim_text(cell, cut))
     return {**row, "cells": cells}
 
 

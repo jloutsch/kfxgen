@@ -4706,6 +4706,43 @@ def test_a_chapter_title_in_a_leading_table_is_shown_once(title, body, rows):
     assert _words(native) == _words(rows_build)
 
 
+_POEM = "<h5>Mein.</h5><p>Du bist mein,</p><p>ich bin dein.</p>"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "title, texts",
+    [
+        ("Mein.", ["Mein.", "Du bist mein,", "ich bin dein.", "x"]),
+        ("Mein. Du", ["Mein. Du", "bist mein,", "ich bin dein.", "x"]),
+        ("Elsewhere", ["Elsewhere", "Mein.", "Du bist mein,", "ich bin dein.", "x"]),
+    ],
+    ids=["whole-paragraph", "into-a-paragraph", "no-cut"],
+)
+def test_the_title_cut_reaches_into_a_paragraph_cell(title, texts):
+    # #261: a cell holding blocks is written as paragraphs; the title the
+    # heading already shows is cut from them as the rows build cuts it.
+    # Not compared with the rows build: it joins a cell's blocks with no
+    # space when the source has none between the tags ("Mein.Du").
+    body = f"<table><tr><td>{_POEM}</td><td>x</td></tr></table>"
+    native, _ = _chapter_texts(title, body, native=True)
+    assert native == texts
+
+
+@pytest.mark.unit
+def test_a_title_cell_of_paragraphs_drops_its_row_and_keeps_its_ids():
+    texts, chunks = _chapter_texts(
+        "CHAPTER I",
+        '<table><tr><td><p id="p1">CHAPTER</p><p>I</p></td></tr>'
+        '<tr id="r2"><td>a</td></tr></table>',
+        native=True,
+    )
+    assert texts == ["CHAPTER I", "a"]
+    row_keys = [c["anchor_keys"] for c in chunks if c.get("node") == "row"]
+    assert len(row_keys) == 1
+    assert {"ch0.xhtml#p1", "ch0.xhtml#r2"} <= set(row_keys[0])
+
+
 @pytest.mark.unit
 def test_a_dropped_title_row_moves_its_ids_to_the_next_row():
     _, chunks = _chapter_texts(
