@@ -1,5 +1,82 @@
 # Changelog
 
+## 5.8.11 — Poems and notes inside tables
+
+**Fixed (#261, #267): a table cell holding several paragraphs ran them
+together.** A table whose cell held more than one block (paragraphs, a
+heading, a list) was written as one paragraph per row, and that row path
+joined the whole cell into one paragraph. In pg21053, whose tables box
+poems, each poem read as one run-on paragraph, heading and line numbers
+included: "1 Mein. Du bist mein, ich bin dein: Des sollst du gewiss sein.
+Du bist beschlossen In meinem Herzen. 5 Verlore…". Such a table is now a
+Kindle table, and each block in a cell is its own paragraph: every verse
+line, heading and line number on its own line, and list items with their
+markers.
+
+This is the structure Kindle Previewer 4.0.1 writes for pg21053: a cell
+holding blocks is a container (`$269`) of one text entry per block.
+
+**Also changed:**
+- **Pictures in cells:** a table whose cell holds a picture still keeps one
+  paragraph per row (#262). That now includes a picture drawn as a CSS
+  background, which inside a paragraph cell would otherwise have been
+  written as raw placeholder text.
+- **Long cells:** the 2,000-character limit now applies to each paragraph
+  in a cell, not to the whole cell. In pg21053 this also removes 28 of 34
+  places where a long paragraph was cut mid-word (#226).
+- **Lists in cells** now show their markers ("1.", "•"), which the row path
+  dropped.
+- **The table warning** no longer gives "several paragraphs in a cell" as a
+  reason.
+
+**Tests:** the weekly corpus sweep counts links and pictures at every depth
+(#270). Since #251 it had counted only the storyline's top level, so in
+today's Gutenberg edition of pg1342 it saw none of the 101 links, all held
+in two tables. On 5.8.10 all 101 links were there and resolved.
+
+**Known limits, all tracked under #219:**
+- **Still written as rows:** images in cells (#262), nested tables (#263),
+  tables over 24 columns, and a cell paragraph over 2,000 characters.
+- **The row path** still joins a cell's blocks with no space when the
+  source has none between the tags ("Mein.Du"). pg21053 has spaces there.
+- **CSS borders, padding and widths** (#264); **vertical alignment** in
+  cells is always centred (#269); **a list item holding only a table**
+  loses its number (#265).
+- From earlier releases, unchanged: notes become chapters in a book with no
+  table of contents (#225); progress follows the paragraph count (#227);
+  hidden text and HTML comments are printed (#256, #252).
+
+**Checks:**
+- **Tests:** default suite 1,340 passed; `tier3_strict` 16 (a new
+  `table_paragraph_cells` golden; every other golden byte-identical); tier 2
+  79, including a round trip through KFX Input that gives back each cell
+  holding its paragraphs; calibre-gated tests 43, including the CSS
+  background picture through real calibre.
+- **Gutenberg 90 against 5.8.10, through the test shim and through real
+  calibre 9.14.0:**
+  - 88 of 90 books byte-identical;
+  - tables 510 Kindle tables / 157 rows → 640 / 27 (129 tables in pg21053,
+    1 in pg22120);
+  - text in reading order identical in all 90 books.
+- **Library sample, 369 books** (measured in the #267 review, through the
+  shim): 584 more Kindle tables; 518,751 links in both builds, none
+  unresolved; reading-order text identical in 349 books, and in the other
+  20 the only additions are list markers.
+
+### Device verification
+
+"Table Gate Native" from `research/make_table_sideload.py`. Firmware is the
+last version recorded for each device, not re-read.
+
+| Device | Firmware | Check | Result |
+|---|---|---|---|
+| Voyage 7th gen (2014) | 5.13.6 | a 60-line poem in a one-column table; a list in a cell; links from chapter 1 to line 50 of the poem and to a note in a notes cell | pass: every line on its own line, all 11 line numbers present, nothing lost paging; 1., 2., 3.; both links land |
+| Paperwhite 11th gen (2021) | 5.19.2 | the poem table and the list in a cell | pass |
+| Oasis 10th gen (2019) | 5.18.2.1.1 | — | not run |
+
+The poem table opens in the Kindle's zoomable table view, as every Kindle
+table has since 5.8.10, and pages normally.
+
 ## 5.8.10 — Tables read on every Kindle
 
 **Fixed (#254, #260): the Voyage and the Oasis squeezed tables until words
