@@ -5120,7 +5120,12 @@ def test_most_rows_referenced_is_enough():
     "html, targets",
     [
         # pg6133's contents: roman numerals linking out, nothing linking in.
-        (f"<table>{_note_rows(['I.', 'II.', 'III.'])}</table>", set()),
+        # The book links elsewhere: with no links at all the check stops
+        # before the incoming-links test this case is about (#273 review).
+        (
+            f"<table>{_note_rows(['I.', 'II.', 'III.'])}</table>",
+            {"notes.xhtml#elsewhere"},
+        ),
         # Three columns.
         (
             "<table>"
@@ -5151,6 +5156,52 @@ def test_most_rows_referenced_is_enough():
 )
 def test_tables_that_are_not_notes_stay_native(html, targets):
     assert not _is_notes(html, targets)
+
+
+@pytest.mark.unit
+def test_the_row_layout_is_read_once_per_row_group(monkeypatch):
+    # #273 review: reading it for every row made a 5,000-row table take about
+    # 9 seconds, the work growing with rows times rows.
+    calls = []
+    real = _conv._anchors_follow_rows
+    monkeypatch.setattr(
+        _conv, "_anchors_follow_rows", lambda e: calls.append(e) or real(e)
+    )
+    markers = [f"{n}." for n in range(1, 301)]
+    html = f"<table><tbody>{_note_rows(markers)}</tbody></table>"
+    assert _is_notes(html, _targets(*range(1, 301)))
+    assert len(calls) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "markers, notes",
+    [
+        (["xiv", "XV", "mcm"], True),
+        (["mild", "civil", "dim"], False),
+        (["mix", "lid", "vi"], False),
+    ],
+    ids=["numerals", "words", "words-and-numeral"],
+)
+def test_only_real_roman_numerals_count_as_markers(markers, notes):
+    # #273 review: [ivxlcdm]+ also matched words such as "mild" and "civil".
+    html = f"<table>{_note_rows(markers)}</table>"
+    assert _is_notes(html, _targets(1, 2, 3)) is notes
+
+
+@pytest.mark.unit
+def test_an_id_matches_its_percent_encoded_link():
+    # #273 review: a link to id "n:1" is written "#n%3A1"; it names that row.
+    refs = "".join(f'<p>Claim<a href="#n%3A{n}">{n}</a>.</p>' for n in (1, 2, 3))
+    rows = "".join(
+        f'<tr><td>{n}.</td><td>Note {n}.</td></tr><a id="n:{n}"></a>' for n in (1, 2, 3)
+    )
+    oeb = _table_book(f"{refs}<table>{rows}</table>")
+    targets = _conv._book_link_targets(oeb)
+    table = next(
+        e for e in oeb.spine[0].data.iter() if _conv._local_tag(e.tag) == "table"
+    )
+    assert _conv._is_notes_table(table, "ch0.xhtml", targets)
 
 
 @pytest.mark.unit

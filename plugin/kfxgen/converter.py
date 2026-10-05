@@ -665,7 +665,11 @@ def _anchors_follow_rows(elem):
 #: A note marker in a notes table's first column: a number, a roman numeral
 #: or a symbol, optionally bracketed and followed by a full stop or colon (#268).
 _NOTE_MARKER_RE = re.compile(
-    r"^[\[(]?(\d{1,4}|[ivxlcdm]{1,8}|[*\u2020\u2021\u00a7\u00b6#]+)[\])]?[.:]?$",
+    r"^[\[(]?(\d{1,4}"
+    # A well-formed roman numeral only, so words such as "mild" and "civil"
+    # are not taken for one (#273 review).
+    r"|(?=[mdclxvi])m{0,4}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})"
+    r"|[*\u2020\u2021\u00a7\u00b6#]+)[\])]?[.:]?$",
     re.IGNORECASE,
 )
 #: Share of a notes table's rows that the book must link to (#268). One
@@ -673,12 +677,12 @@ _NOTE_MARKER_RE = re.compile(
 _NOTES_TABLE_LINKED_SHARE = 0.8
 
 
-def _row_anchor_ids(row):
+def _row_anchor_ids(row, follow):
     """Ids that name a table row: on it or inside it, plus the empty anchors
-    beside it on the side its row group puts them (after the row in calibre's
-    notes layout, otherwise before), so each anchor names one row."""
+    beside it on the side its row group puts them (after the row when
+    `follow`, as in calibre's notes layout, otherwise before), so each anchor
+    names one row."""
     ids = set(_subtree_anchor_ids(row))
-    follow = _anchors_follow_rows(row.getparent())
     sib = row.getnext() if follow else row.getprevious()
     while sib is not None and _is_empty_anchor(sib):
         ids.update(_own_anchor_ids(sib))
@@ -710,7 +714,6 @@ def _is_notes_table(table, base_href, link_targets):
     ]
     if len(rows) < 3:
         return False
-    linked = 0
     for row in rows:
         cells = [c for c in row if _local_tag(c.tag) in _CELL_TAGS]
         if len(cells) != 2:
@@ -718,7 +721,18 @@ def _is_notes_table(table, base_href, link_targets):
         marker = " ".join("".join(cells[0].itertext()).split())
         if not _NOTE_MARKER_RE.match(marker):
             return False
-        if any(f"{doc}#{aid}" in link_targets for aid in _row_anchor_ids(row)):
+    # The anchor layout is read once per row group: reading it for every row
+    # made the check grow with rows times rows (#273 review).
+    follows = {}
+    linked = 0
+    for row in rows:
+        group = row.getparent()
+        if group not in follows:
+            follows[group] = _anchors_follow_rows(group)
+        if any(
+            f"{doc}#{aid}" in link_targets
+            for aid in _row_anchor_ids(row, follows[group])
+        ):
             linked += 1
     return linked >= _NOTES_TABLE_LINKED_SHARE * len(rows)
 
@@ -739,6 +753,8 @@ def _book_link_targets(oeb_book):
                 target = _resolve_link_target(a.get("href"), base)
                 if target:
                     targets.add(target)
+                    # An id such as "n:1" is linked as "#n%3A1" (#273 review).
+                    targets.add(unquote(target))
     return targets
 
 
