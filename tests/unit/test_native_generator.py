@@ -3119,6 +3119,8 @@ def test_table_nests_like_amazons_minimal_table(tmp_path):
         "$150",
         "$456",
         "$457",
+        "$629",
+        "$630",
         "$146",
     ]
     (body,) = table["$146"]
@@ -3136,6 +3138,85 @@ def test_table_nests_like_amazons_minimal_table(tmp_path):
     assert str(cell_style["$633"]) == "$320"
     table_style = styles[str(table["$157"])]
     assert table_style["$83"] == 4286611584
+
+
+@pytest.mark.unit
+def test_every_table_carries_amazons_table_viewer_properties(tmp_path):
+    # Kindle Previewer 3.106 and 4.0.1 write these on every table without CSS
+    # widths. Without them the Voyage (5.13.6) and the Oasis (5.18.2.1.1)
+    # squeeze columns until words break a character per line, even at 8
+    # columns; with them, tables up to 24 columns read correctly (#254).
+    top, _ = _storyline(
+        tmp_path,
+        [
+            _table_block([["a1", "b1"]]),
+            {"text": "Between.", "spans": []},
+            _table_block([["c1"]]),
+        ],
+    )
+    tables = [e for e in top if str(e["$159"]) == "$278"]
+    assert len(tables) == 2
+    for table in tables:
+        assert [str(s) for s in table["$629"]] == ["$581", "$326"]
+        assert str(table["$630"]) == "$632"
+
+
+def _content_features(tmp_path, blocks):
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    gen.generate_full_book(
+        "T", "A", [{"title": "C", "text": "x", "blocks": blocks}], output_path=str(out)
+    )
+    f585 = next(val(f) for f in load_fragments(out) if str(f.ftype) == "$585")
+    return {str(e["$492"]): e["$589"]["version"]["$587"] for e in f585["$590"]}
+
+
+@pytest.mark.unit
+def test_a_book_with_a_table_declares_the_table_viewer(tmp_path):
+    features = _content_features(tmp_path, [_table_block([["a"]])])
+    assert features.get("yj_table_viewer") == 1
+
+
+@pytest.mark.unit
+def test_a_book_without_a_table_does_not_declare_the_table_viewer(tmp_path):
+    # Keeps books without tables byte-identical to 5.8.9.
+    features = _content_features(tmp_path, [{"text": "Only text.", "spans": []}])
+    assert "yj_table_viewer" not in features
+
+
+@pytest.mark.unit
+def test_a_book_whose_only_table_is_cut_as_its_title_does_not_declare_it(tmp_path):
+    # A table holding only the chapter title is cut by the title dedupe, so no
+    # $278 is written; declaring the viewer then names a feature the book
+    # doesn't use (#260 review: two library books do this).
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    gen.generate_full_book(
+        "T",
+        "A",
+        [
+            {
+                "title": "Chapter One",
+                "text": "Chapter One\nBody.",
+                "blocks": [
+                    _table_block([["Chapter One"]]),
+                    {"text": "Body.", "spans": []},
+                ],
+            }
+        ],
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    tables = [
+        e
+        for f in frags
+        if str(f.ftype) == "$259"
+        for e in iter_entries(val(f)["$146"])
+        if str(e["$159"]) == "$278"
+    ]
+    assert tables == []
+    f585 = next(val(f) for f in frags if str(f.ftype) == "$585")
+    assert "yj_table_viewer" not in [str(e["$492"]) for e in f585["$590"]]
 
 
 @pytest.mark.unit

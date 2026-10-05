@@ -88,10 +88,11 @@ _NON_TEXT_TAGS = {
 #: `NativeKFXGenerator.CHUNK_SIZE`. Longer text is cut into two storyline
 #: entries, which inside a row would be two cells (#226).
 _MAX_NATIVE_CELL_CHARS = 2000
-#: The widest table that fit on all three gate devices (#251). 24 columns were
-#: unreadable on the Voyage (5.13.6) and the Oasis (5.18.2); the table viewer
-#: that would let wider tables stay native is #254.
-_MAX_NATIVE_COLUMNS = 8
+#: The widest table checked on a device (#254). With the table-viewer
+#: properties the Voyage (5.13.6) and the Oasis (5.18.2.1.1) read every table
+#: up to 24 columns; without them both squeezed even 8. Wider tables are
+#: untested, and their text would be too small to read.
+_MAX_NATIVE_COLUMNS = 24
 
 _security_log = logging.getLogger(__name__ + ".security")
 
@@ -676,7 +677,7 @@ def _table_is_native(table):
     `<p>`, or in a row other than a cell or empty anchor (the row path keeps
     it; native would lose it). Likewise a hidden caption, which native would
     show, or a second caption, which native would drop. And a table wider
-    than `_MAX_NATIVE_COLUMNS`, which older Kindles squeeze unreadably.
+    than `_MAX_NATIVE_COLUMNS`, whose text would be too small to read.
     """
     rows = 0
     cells = 0
@@ -2402,12 +2403,12 @@ def _warn_flattened_tables(chapters, table_blocks, log, native_tables):
         why = "native tables are turned off"
     elif n == 1:
         why = (
-            "it could not be laid out as a Kindle table (for example over 8 columns, or an "
+            "it could not be laid out as a Kindle table (for example over 24 columns, or an "
             "image, a nested table or several paragraphs in a cell)"
         )
     else:
         why = (
-            "they could not be laid out as Kindle tables (for example over 8 columns, or an "
+            "they could not be laid out as Kindle tables (for example over 24 columns, or an "
             "image, a nested table or several paragraphs in a cell)"
         )
     log.warn(

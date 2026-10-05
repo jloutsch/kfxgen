@@ -23,7 +23,7 @@ a pair built through it carries no CSS-derived alignment or fonts and is not
 fit for the device gate.
 
 The titles differ so the two files get different ASINs and neither replaces the
-other on the device. Twelve chapters, each a different table shape:
+other on the device. Fourteen chapters, each a different table shape:
 
     1  plain 3x4 table of numbers; also holds the 10 note links, a link into
        a cell of chapter 6, and the links to chapters 7 and 8
@@ -51,9 +51,12 @@ other on the device. Twelve chapters, each a different table shape:
        which appears only in one cell (the search check).
    11  2,000 rows (the largest real native tables run to 1,943 rows): page
        turns, progress, and how long the chapter takes to open
-   12  24 columns (the widest real one is 27). Since the gate, a table wider
-       than 8 columns keeps rows, so on the Native file this chapter matches
-       the Rows file.
+   12  24 columns (the widest real one is 27), the widest table written
+       natively (#254)
+   13  8 columns, the first of long words ("Superintendence"): without the
+       table-viewer properties the Voyage broke these a character per line
+       (#254)
+   14  25 columns, one past the limit: rows on both files
 
 Decision table, per device (Voyage 5.13.6, Oasis 5.18.2, Paperwhite 5.19.2;
 read the firmware off each device):
@@ -92,7 +95,7 @@ read the firmware off each device):
         -> the opt-out is not byte-faithful to 5.8.8. Investigate before
            anything else.
 
-Per device, record for both files: TOC button present; each of the 12 TOC
+Per device, record for both files: TOC button present; each of the 14 TOC
 entries opens at its chapter start (chapter 6 opens at the top of its table,
 with the chapter title above it); tables show rows and columns
 with the header row distinct and colspan/rowspan cells spanning; wide tables
@@ -120,8 +123,14 @@ Result (8db4e5d, run by the maintainer on 2026-10-01, PR #251):
         those pass; chapter 12 fails, with headers wrapping one character per
         line and later columns cut off at the page edge.
     Chapter 4 (8 columns) fits on all three; TOC and navigation pass on all
-    three. Per the decision table, tables over 8 columns now keep rows
+    three. Per the decision table, tables over 8 columns then kept rows
     (`_MAX_NATIVE_COLUMNS`); the table viewer is #254.
+
+Since #254 every native table carries Amazon's table-viewer properties
+(`$629`/`$630`, `yj_table_viewer`), and the limit is 24 columns. A spike pair
+showed the Voyage 5.13.6 and the Oasis 5.18.2.1.1 reading 8- to 24-column
+tables with them, and squeezing every one without them. Chapters 12 to 14
+check that on the rebuilt pair.
 """
 
 import os
@@ -149,6 +158,7 @@ NOTES = 10
 LONG_TABLE_ROWS = 60
 HUGE_TABLE_ROWS = 2000
 VERY_WIDE_COLUMNS = 24
+TOO_WIDE_COLUMNS = 25
 
 #: The cell the chapter 6 TOC entry points at, and the cell chapter 1 links to.
 TOC_CELL_ID = "toc-cell"
@@ -193,6 +203,8 @@ _TITLES = [
     "10. Formatted cells",
     "11. Two thousand rows",
     "12. Twenty-four columns",
+    "13. Long words, eight columns",
+    "14. Twenty-five columns",
 ]
 
 _WIDE_CELLS = [
@@ -298,12 +310,32 @@ def _wide():
     return _table(rows, head=_tr(_WIDE_CELLS, tag="th"))
 
 
-def _very_wide():
-    head = _tr([f"C{c}" for c in range(1, VERY_WIDE_COLUMNS + 1)], tag="th")
-    rows = [
-        _tr([f"{r}.{c}" for c in range(1, VERY_WIDE_COLUMNS + 1)]) for r in range(1, 7)
-    ]
+def _very_wide(columns=VERY_WIDE_COLUMNS):
+    head = _tr([f"C{c}" for c in range(1, columns + 1)], tag="th")
+    rows = [_tr([f"{r}.{c}" for c in range(1, columns + 1)]) for r in range(1, 7)]
     return _table(rows, head=head)
+
+
+_LONG_WORDS = [
+    "Superintendence",
+    "Transportation",
+    "Reconstruction",
+    "Administration",
+    "Waterproofing",
+    "Embankments",
+    "Undercrossings",
+    "Miscellaneous",
+]
+
+
+def _long_words():
+    rows = [
+        _tr([word] + [(r + 1) * (c + 3) for c in range(7)])
+        for r, word in enumerate(_LONG_WORDS)
+    ]
+    return _table(
+        rows, head=_tr(["Item"] + [f"Year {c}" for c in range(1, 8)], tag="th")
+    )
 
 
 def _notes():
@@ -423,6 +455,8 @@ def build_source(out_dir, title):
         _chapter(10, _formatted_cells(), table_after=2, body_class=""),
         _chapter(11, _long(HUGE_TABLE_ROWS), table_after=2),
         _chapter(12, _very_wide(), table_after=2),
+        _chapter(13, _long_words(), table_after=2),
+        _chapter(14, _very_wide(TOO_WIDE_COLUMNS), table_after=2),
     ]
     builder = _Builder().set_metadata(title=title, author=AUTHOR)
     for name, body in zip(_TITLES, bodies):
@@ -558,7 +592,7 @@ def main():
         "on each device, for both books (see the docstring for the decision table)\n"
         "---------------------------------------------------------------------\n"
         "  1. Read the firmware off the device and write it down.\n"
-        "  2. Open the TOC. Is the button present? Tap each of the 12 entries.\n"
+        "  2. Open the TOC. Is the button present? Tap each of the 14 entries.\n"
         "  3. Ch 1 to 4: tables show rows and columns; ch 2 header row is\n"
         "     distinct and the Year cell spans two header rows, 'Harbour traffic'\n"
         "     spans 3 columns, 1902 spans two rows.\n"
@@ -586,9 +620,14 @@ def main():
         " 12. Ch 11: time how long the TOC jump takes to open the chapter. Page\n"
         "     through the first 50 rows and back; jump to the end of the chapter\n"
         "     and page back 50 rows. Progress moves as you go.\n"
-        " 13. Ch 12: on the Native file the 24-column table is now rows,\n"
-        "     the same as the Rows file. Do all 24 values show?\n"
-        f" 14. Once the book is indexed, search for '{SEARCH_WORD}'. It is only\n"
+        " 13. Ch 12: on the Native file the 24-column table is a table: all 24\n"
+        "     columns readable, no word broken a character per line, nothing\n"
+        "     cut off (#254). On the Rows file it is one paragraph per row.\n"
+        " 14. Ch 13: on the Native file 'Superintendence' and the other long\n"
+        "     words read whole, each on one line, and all 8 columns show.\n"
+        " 15. Ch 14: the 25-column table is one paragraph per row on both\n"
+        "     files, every value readable.\n"
+        f" 16. Once the book is indexed, search for '{SEARCH_WORD}'. It is only\n"
         "     in one ch 10 cell. Does the result open that page?\n"
     )
     return 0
