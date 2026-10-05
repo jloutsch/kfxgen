@@ -3140,6 +3140,102 @@ def test_table_nests_like_amazons_minimal_table(tmp_path):
     assert table_style["$83"] == 4286611584
 
 
+def _paragraph_cell(texts, header=False, keys=None):
+    """A converter-shaped cell holding several blocks (#261)."""
+    keys = keys or {}
+    return {
+        "text": " ".join(texts),
+        "spans": [],
+        "anchor_ids": [],
+        "anchor_keys": [],
+        "anchor_offsets": {},
+        "block_style": None,
+        "header": header,
+        "colspan": 1,
+        "rowspan": 1,
+        "paragraphs": [
+            {
+                "text": t,
+                "spans": [],
+                "block_style": None,
+                "anchor_ids": [],
+                "anchor_keys": [keys[t]] if t in keys else [],
+                "anchor_offsets": {keys[t]: 0} if t in keys else {},
+            }
+            for t in texts
+        ],
+    }
+
+
+def _first_cells(top):
+    table = next(e for e in top if str(e["$159"]) == "$278")
+    (body,) = table["$146"]
+    return body["$146"][0]["$146"]
+
+
+@pytest.mark.unit
+def test_a_paragraph_cell_is_a_container_of_text_entries(tmp_path):
+    # Kindle Previewer 4.0.1 on pg21053: a cell holding blocks is a $269
+    # container with one $269 text entry per block (#261).
+    block = _table_block([["a1", "b1"]])
+    block["table"]["rows"][0]["cells"][0] = _paragraph_cell(["line one", "line two"])
+    top, styles = _storyline(tmp_path, [block])
+    cell, plain = _first_cells(top)
+    assert str(cell["$159"]) == "$269" and "$145" not in cell
+    assert [str(k) for k in cell] == ["$155", "$159", "$157", "$146"]
+    assert [str(c["$159"]) for c in cell["$146"]] == ["$269", "$269"]
+    assert all("$145" in c for c in cell["$146"])
+    assert len({cell["$155"]} | {c["$155"] for c in cell["$146"]}) == 3
+    assert str(plain["$159"]) == "$269" and "$145" in plain
+    assert str(styles[str(cell["$157"])]["$633"]) == "$320"
+
+
+@pytest.mark.unit
+def test_a_header_paragraph_cell_is_bold(tmp_path):
+    block = _table_block([["H"], ["a"]])
+    block["table"]["rows"][0]["cells"][0] = _paragraph_cell(
+        ["Head", "two"], header=True
+    )
+    top, styles = _storyline(tmp_path, [block])
+    cell = _first_cells(top)[0]
+    assert str(styles[str(cell["$157"])]["$13"]) == "$361"
+    for child in cell["$146"]:
+        assert str(styles[str(child["$157"])]["$13"]) == "$361"
+
+
+@pytest.mark.unit
+def test_a_link_into_a_paragraph_cell_lands_on_its_paragraph(tmp_path):
+    from kfxgen.inline_style import make_link_flag
+
+    block = _table_block([["a", "b"]])
+    block["table"]["rows"][0]["cells"][0] = _paragraph_cell(
+        ["first", "second"], keys={"second": "ch.xhtml#two"}
+    )
+    link = {
+        "text": "see two",
+        "spans": [(4, 3, frozenset({make_link_flag("ch.xhtml#two")}))],
+    }
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    gen.generate_full_book(
+        "T",
+        "A",
+        [{"title": "C", "text": "x", "blocks": [link, block]}],
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    story = [f for f in frags if str(f.ftype) == "$259"][-1]
+    by_eid = {e["$155"]: e for e in iter_entries(val(story)["$146"])}
+    (target,) = [by_eid[t["$155"]] for t in _anchor_targets(frags).values()]
+    content = {
+        str(val(f)["name"]): list(val(f)["$146"])
+        for f in frags
+        if str(f.ftype) == "$145"
+    }
+    ref = target["$145"]
+    assert str(content[str(ref["name"])][int(ref["$403"])]) == "second"
+
+
 @pytest.mark.unit
 def test_every_table_carries_amazons_table_viewer_properties(tmp_path):
     # Kindle Previewer 3.106 and 4.0.1 write these on every table without CSS

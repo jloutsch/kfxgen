@@ -52,8 +52,8 @@ _CELL_TAGS = {"td", "th"}
 # Native table layout (#219). A table the first version can't express
 # correctly keeps 5.8.8's one paragraph per row instead.
 
-#: Block-level tags a cell may hold at most one of. Two or more would need a
-#: cell holding several paragraphs, which v1 doesn't write.
+#: Block-level tags in a cell. A cell holding two or more is a container of
+#: paragraphs, one per block, as Kindle Previewer writes it (#261).
 _CELL_BLOCK_TAGS = {
     "p",
     "div",
@@ -666,8 +666,9 @@ def _table_is_native(table):
     """True when `table` can be written as a real KFX table (#219).
 
     Anything else keeps rows as paragraphs: a nested table, an image or other
-    object, a cell holding more than one block, a cell longer than the
-    generator's chunk size, a cell outside a row, or no rows or cells at all.
+    object, a cell or a paragraph in a cell longer than the generator's chunk
+    size, a cell outside a row, or no rows or cells at all. A cell holding
+    several blocks is written as paragraphs (#261).
 
     Also anything the row path handles and the native walk would not: a
     hidden or contents-listing row, row group or cell (the row path drops it;
@@ -726,19 +727,51 @@ def _table_is_native(table):
             if _local_tag(e.getparent().tag) != "tr":
                 return False
             cells += 1
-            blocks = [
-                d
-                for d in e.iter()
-                if d is not e and _local_tag(d.tag) in _CELL_BLOCK_TAGS
-            ]
-            if len(blocks) > 1:
-                return False
-            cell_length = len("".join(e.itertext())) + sum(
-                1 for d in e.iter() if _local_tag(d.tag) == "br"
-            )
-            if cell_length > _MAX_NATIVE_CELL_CHARS:
+            if _longest_cell_run(e) > _MAX_NATIVE_CELL_CHARS:
                 return False
     return rows > 0 and cells > 0 and _table_width(table) <= _MAX_NATIVE_COLUMNS
+
+
+def _text_length(elem):
+    """Characters `elem` writes: its text, plus one per <br>, which the
+    converter turns into a newline."""
+    return len("".join(elem.itertext())) + sum(
+        1 for d in elem.iter() if _local_tag(d.tag) == "br"
+    )
+
+
+def _cell_paragraph_count(cell):
+    """Block elements in a cell. Two or more make it a container of
+    paragraphs (#261); fewer keep it one text entry."""
+    return sum(
+        1
+        for d in cell.iter()
+        if d is not cell and _local_tag(d.tag) in _CELL_BLOCK_TAGS
+    )
+
+
+def _longest_cell_run(cell):
+    """The longest text entry a cell would be written as.
+
+    A cell of plain text, or one block, is one entry. A cell of several blocks
+    is one entry per block with no block inside it, plus its loose text; that
+    is counted as one run, which can only overstate. The generator cuts an
+    entry at 2,000 characters, which inside a table would split a cell or a
+    paragraph in two (#226, #261)."""
+    if _cell_paragraph_count(cell) < 2:
+        return _text_length(cell)
+    leaves = [
+        d
+        for d in cell.iter()
+        if d is not cell
+        and _local_tag(d.tag) in _CELL_BLOCK_TAGS
+        and not any(
+            _local_tag(x.tag) in _CELL_BLOCK_TAGS for x in d.iter() if x is not d
+        )
+    ]
+    leaf_lengths = [_text_length(d) for d in leaves]
+    loose = _text_length(cell) - sum(leaf_lengths)
+    return max(leaf_lengths + [loose])
 
 
 def _table_width(table):
@@ -824,7 +857,50 @@ def _table_cell(cell, style_resolver, base_href):
     }
 
 
-def _table_block(table, style_resolver=None, base_href=None):
+def _paragraph_cell(cell, style_resolver, walk_cell):
+    """A cell holding several blocks, as a container of paragraphs (#261).
+
+    `walk_cell` walks the cell as the body is walked, so its headings, list
+    items, loose text and anchors become the same blocks they would outside
+    a table. Returns None when that leaves no text."""
+    paragraphs = [p for p in walk_cell(cell) if p.get("text")]
+    if not paragraphs:
+        return None
+    css = style_resolver(cell) if style_resolver is not None else None
+    return {
+        "text": " ".join(p["text"] for p in paragraphs),
+        "spans": [],
+        "anchor_ids": [],
+        "anchor_offsets": {},
+        "block_style": compute_block_style(css) if css is not None else None,
+        "header": _local_tag(cell.tag) == "th",
+        "colspan": _span_attr(cell, "colspan"),
+        "rowspan": _span_attr(cell, "rowspan"),
+        "paragraphs": paragraphs,
+    }
+
+
+def _has_picture_paragraph(table_block):
+    """True when a paragraph cell holds a picture: an empty element drawn with
+    a background image (#168) walks to an image block. Pictures in cells are
+    #262; until then the table keeps rows, so the image token is never written
+    as text (#267 review)."""
+    return any(
+        _IMG_TOKEN_RE.search(p["text"])
+        for r in table_block["table"]["rows"]
+        for c in r["cells"]
+        for p in c.get("paragraphs") or ()
+    )
+
+
+def _cell_ids(cell):
+    """Every anchor id a cell holds: its own and its paragraphs'."""
+    return list(cell["anchor_ids"]) + [
+        a for p in cell.get("paragraphs") or () for a in p["anchor_ids"]
+    ]
+
+
+def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
     """A native table as one block, plus its captions and any anchors left over.
 
     Returns (caption_elements, table_block, trailing_ids). The caller walks
@@ -834,8 +910,18 @@ def _table_block(table, style_resolver=None, base_href=None):
     calibre's notes layout an anchor after a row belongs to that row,
     otherwise to the next row; anchors with no row left to take them carry
     past the table. (#219)
+
+    With `walk_cell`, a cell holding two or more blocks becomes a container
+    of paragraphs (`_paragraph_cell`). (#261)
     """
     rows, carry, captions = [], [], []
+
+    def build_cell(cell):
+        if walk_cell is not None and _cell_paragraph_count(cell) >= 2:
+            built = _paragraph_cell(cell, style_resolver, walk_cell)
+            if built is not None:
+                return built
+        return _table_cell(cell, style_resolver, base_href)
 
     def clamp_rowspans(group_rows):
         """A rowspan ends at its row group's last row, as HTML ends it.
@@ -872,9 +958,7 @@ def _table_block(table, style_resolver=None, base_href=None):
                         for a in _own_anchor_ids(c)
                     ],
                     "cells": [
-                        _table_cell(c, style_resolver, base_href)
-                        for c in child
-                        if _local_tag(c.tag) in _CELL_TAGS
+                        build_cell(c) for c in child if _local_tag(c.tag) in _CELL_TAGS
                     ],
                 }
                 carry = []
@@ -902,7 +986,7 @@ def _table_block(table, style_resolver=None, base_href=None):
     every = _dedupe_keep_order(
         own
         + [a for r in rows for a in r["anchor_ids"]]
-        + [a for r in rows for c in r["cells"] for a in c["anchor_ids"]]
+        + [a for r in rows for c in r["cells"] for a in _cell_ids(c)]
     )
     block = {
         "type": "table",
@@ -931,7 +1015,10 @@ def _table_start_ids(table_block):
     for row in tbl["rows"]:
         start.update(row["anchor_ids"])
         if row["cells"]:
-            start.update(row["cells"][0]["anchor_ids"])
+            first = row["cells"][0]
+            start.update(first["anchor_ids"])
+            if first.get("paragraphs"):
+                start.update(first["paragraphs"][0]["anchor_ids"])
             break
     return start
 
@@ -1116,9 +1203,9 @@ def _attach_anchor_keys(blocks, base_href):
         )
         tbl = block.get("table")
         if tbl:
-            for part in (
-                [tbl] + tbl["rows"] + [c for r in tbl["rows"] for c in r["cells"]]
-            ):
+            cells = [c for r in tbl["rows"] for c in r["cells"]]
+            paragraphs = [p for c in cells for p in c.get("paragraphs") or ()]
+            for part in [tbl] + tbl["rows"] + cells + paragraphs:
                 by_part = part.get("anchor_offsets") or {}
                 ids = part.get("anchor_ids", ())
                 part["anchor_keys"] = (
@@ -1502,6 +1589,34 @@ def extract_blocks_from_html(
         for child in elem:
             _discard_listing(child)
 
+    def _walk_cell(cell):
+        """A table cell's blocks, walked as the body is (#261). The walker's
+        pending ids and list markers are set aside first and put back after,
+        so nothing carries into the cell or out of it. Ids left pending at
+        the cell's end go on its last block."""
+        saved_ids, saved_markers = pending_ids[:], pending_markers[:]
+        pending_ids.clear()
+        pending_markers.clear()
+        start = len(blocks)
+        listings = len(nav_listing_at) if nav_listing_at is not None else 0
+        _walk_element(cell)
+        out = blocks[start:]
+        del blocks[start:]
+        if nav_listing_at is not None:
+            # A contents listing in a cell was recorded at an index inside
+            # the cell, whose blocks are taken out; it belongs to the table,
+            # which goes where the cell's blocks began.
+            nav_listing_at[listings:] = [start] * (len(nav_listing_at) - listings)
+        if pending_ids and out:
+            last = out[-1]
+            for aid in pending_ids:
+                if aid not in last["anchor_ids"]:
+                    last["anchor_ids"].append(aid)
+                    last["anchor_offsets"][aid] = 0
+        pending_ids[:] = saved_ids
+        pending_markers[:] = saved_markers
+        return out
+
     def _walk(elem):
         if _local_tag(elem.tag) != "li" or _is_non_rendered(elem):
             start = len(blocks)
@@ -1558,9 +1673,17 @@ def extract_blocks_from_html(
             native_tables and _local_tag(elem.tag) == "table" and _table_is_native(elem)
         )
         if native:
-            captions, table, trailing = _table_block(elem, style_resolver, base_href)
+            listings = len(nav_listing_at) if nav_listing_at is not None else 0
+            captions, table, trailing = _table_block(
+                elem, style_resolver, base_href, walk_cell=_walk_cell
+            )
             past_start = set(table["anchor_ids"]) - _table_start_ids(table)
-            native = not (toc_targets and past_start & set(toc_targets))
+            native = not (toc_targets and past_start & set(toc_targets)) and not (
+                _has_picture_paragraph(table)
+            )
+            if not native and nav_listing_at is not None:
+                # The rows walk below records any listing again.
+                del nav_listing_at[listings:]
         if native:
             # The caption is walked like any block, as the rows build walks
             # it: each block in it is its own paragraph, with its style and
@@ -2404,12 +2527,12 @@ def _warn_flattened_tables(chapters, table_blocks, log, native_tables):
     elif n == 1:
         why = (
             "it could not be laid out as a Kindle table (for example over 24 columns, or an "
-            "image, a nested table or several paragraphs in a cell)"
+            "image or a nested table in a cell)"
         )
     else:
         why = (
             "they could not be laid out as Kindle tables (for example over 24 columns, or an "
-            "image, a nested table or several paragraphs in a cell)"
+            "image or a nested table in a cell)"
         )
     log.warn(
         f"  {n} table{'s' if n != 1 else ''} in {f} file{'s' if f != 1 else ''} "

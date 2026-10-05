@@ -23,7 +23,7 @@ a pair built through it carries no CSS-derived alignment or fonts and is not
 fit for the device gate.
 
 The titles differ so the two files get different ASINs and neither replaces the
-other on the device. Fourteen chapters, each a different table shape:
+other on the device. Seventeen chapters, each a different table shape:
 
     1  plain 3x4 table of numbers; also holds the 10 note links, a link into
        a cell of chapter 6, and the links to chapters 7 and 8
@@ -57,6 +57,14 @@ other on the device. Fourteen chapters, each a different table shape:
        table-viewer properties the Voyage broke these a character per line
        (#254)
    14  25 columns, one past the limit: rows on both files
+   15  a one-column table holding a poem of 60 lines over several pages: a
+       heading, one <p> per line, and a line number loose between them
+       every 5 lines (pg21053's shape). Native writes the cell as a
+       container of paragraphs; 5.8.10 wrote rows, and the poem as one
+       paragraph (#261)
+   16  a text beside its notes, two cells of several paragraphs, with a
+       note link inside the text cell to a note in the notes cell
+   17  a cell holding a numbered list
 
 Decision table, per device (Voyage 5.13.6, Oasis 5.18.2, Paperwhite 5.19.2;
 read the firmware off each device):
@@ -95,7 +103,7 @@ read the firmware off each device):
         -> the opt-out is not byte-faithful to 5.8.8. Investigate before
            anything else.
 
-Per device, record for both files: TOC button present; each of the 14 TOC
+Per device, record for both files: TOC button present; each of the 17 TOC
 entries opens at its chapter start (chapter 6 opens at the top of its table,
 with the chapter title above it); tables show rows and columns
 with the header row distinct and colspan/rowspan cells spanning; wide tables
@@ -205,6 +213,9 @@ _TITLES = [
     "12. Twenty-four columns",
     "13. Long words, eight columns",
     "14. Twenty-five columns",
+    "15. A poem in a table",
+    "16. A text beside its notes",
+    "17. A list in a cell",
 ]
 
 _WIDE_CELLS = [
@@ -328,6 +339,72 @@ _LONG_WORDS = [
 ]
 
 
+#: The poem line chapter 1 links to, deep in chapter 15's long cell (#261).
+POEM_LINE = 50
+POEM_LINE_ID = "poem-line-50"
+#: The note in chapter 16's notes cell that chapter 1 links to (#261).
+CELL_NOTE_ID = "gate-note-2"
+
+_POEM_WORDS = [
+    "lamp",
+    "tide",
+    "bell",
+    "wall",
+    "rope",
+    "gull",
+    "salt",
+    "mast",
+    "oar",
+    "fog",
+    "stone",
+    "keel",
+    "net",
+    "drift",
+    "pier",
+    "wake",
+]
+
+
+def _poem_table(lines=60):
+    """A poem boxed in a one-column table, as pg21053 prints its poems (#261):
+    a heading, one <p> per line, a line number loose every 5 lines."""
+    parts = ["<h5>The Keeper's Count</h5>"]
+    for n in range(1, lines + 1):
+        a = _POEM_WORDS[n % len(_POEM_WORDS)]
+        b = _POEM_WORDS[(n * 7) % len(_POEM_WORDS)]
+        pid = f' id="{POEM_LINE_ID}"' if n == POEM_LINE else ""
+        parts.append(f"<p{pid}>Line {n}: the {a} beside the {b},</p>")
+        if n % 5 == 0 and n < lines:
+            parts.append(f"<span>{n}</span>")
+    return "<table><tr><td>" + "\n".join(parts) + "</td></tr></table>"
+
+
+def _text_and_notes():
+    """A text beside its notes, each cell several paragraphs, with a note link
+    inside the text cell to a note in the notes cell (#261)."""
+    text = (
+        "<td><p>The keeper rose before the light<sup>"
+        f'<a href="#{CELL_NOTE_ID}">2</a></sup> and walked the wall.</p>'
+        "<p>He counted lamps from north to south.</p>"
+        "<p>At dusk he counted them again.</p></td>"
+    )
+    notes = (
+        "<td><p>1. Wall: the harbour wall.</p>"
+        f'<p id="{CELL_NOTE_ID}">2. Light: the first light, about five.</p>'
+        "<p>3. Dusk: about eight.</p></td>"
+    )
+    return f"<table><tr>{text}{notes}</tr></table>"
+
+
+def _list_in_a_cell():
+    """A cell holding a numbered list beside a plain cell (#261)."""
+    return (
+        "<table><tr><td><p>Duties:</p><ol><li>Trim the wicks.</li>"
+        "<li>Fill the oil.</li><li>Ring the bell at dusk.</li></ol></td>"
+        "<td>Every day</td></tr></table>"
+    )
+
+
 def _long_words():
     rows = [
         _tr([word] + [(r + 1) * (c + 3) for c in range(7)])
@@ -401,7 +478,16 @@ def _chapter_one():
         f' <a href="chapter_7.xhtml#{TABLE_ID}">the table</a>, and'
         f' <a href="{TABLE_FIRST_FILE}">the file that opens with a table</a>.</p>'
     )
-    return _chapter(1, _plain(), after="\n".join([links, cell_link, table_links]))
+    paragraph_links = (
+        f'<p>Inside cells of paragraphs: <a href="chapter_15.xhtml#{POEM_LINE_ID}">'
+        f'line {POEM_LINE} of the poem</a>, and <a href="chapter_16.xhtml#{CELL_NOTE_ID}">'
+        "note 2 of the chapter 16 notes</a>.</p>"
+    )
+    return _chapter(
+        1,
+        _plain(),
+        after="\n".join([links, cell_link, table_links, paragraph_links]),
+    )
 
 
 def _target_table(label, table_id=""):
@@ -457,6 +543,9 @@ def build_source(out_dir, title):
         _chapter(12, _very_wide(), table_after=2),
         _chapter(13, _long_words(), table_after=2),
         _chapter(14, _very_wide(TOO_WIDE_COLUMNS), table_after=2),
+        _chapter(15, _poem_table(), table_after=2),
+        _chapter(16, _text_and_notes(), table_after=2),
+        _chapter(17, _list_in_a_cell(), table_after=2),
     ]
     builder = _Builder().set_metadata(title=title, author=AUTHOR)
     for name, body in zip(_TITLES, bodies):
@@ -592,7 +681,7 @@ def main():
         "on each device, for both books (see the docstring for the decision table)\n"
         "---------------------------------------------------------------------\n"
         "  1. Read the firmware off the device and write it down.\n"
-        "  2. Open the TOC. Is the button present? Tap each of the 14 entries.\n"
+        "  2. Open the TOC. Is the button present? Tap each of the 17 entries.\n"
         "  3. Ch 1 to 4: tables show rows and columns; ch 2 header row is\n"
         "     distinct and the Year cell spans two header rows, 'Harbour traffic'\n"
         "     spans 3 columns, 1902 spans two rows.\n"
@@ -629,6 +718,20 @@ def main():
         "     files, every value readable.\n"
         f" 16. Once the book is indexed, search for '{SEARCH_WORD}'. It is only\n"
         "     in one ch 10 cell. Does the result open that page?\n"
+        " 17. Ch 15: on the Native file the heading and each of the 60 lines\n"
+        "     is its own line, with all 11 numbers 5, 10, 15, ... 55 on lines of\n"
+        "     their own (check 15, 30 and 45 too). Page forward to line 60 and back to the heading: no line\n"
+        "     lost, repeated or cut off at a page edge. (On the Rows file the\n"
+        "     whole poem is one paragraph: 5.8.10's behaviour, #261.)\n"
+        " 18. Ch 16: two columns, each paragraph on its own line. Tap the\n"
+        "     raised 2 in the left cell: it should land on note 2 in the right\n"
+        "     cell, not open a table view.\n"
+        " 19. Ch 17: the list shows 1., 2., 3., one item per line, beside\n"
+        "     'Every day'.\n"
+        " 20. Ch 1: tap 'line 50 of the poem': it should open the page with\n"
+        "     'Line 50' in ch 15. Tap 'note 2 of the chapter 16 notes': it should\n"
+        "     open the page with note 2 in ch 16. Either doing nothing is a\n"
+        "     navigation failure.\n"
     )
     return 0
 

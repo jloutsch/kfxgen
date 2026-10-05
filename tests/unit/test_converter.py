@@ -2455,7 +2455,6 @@ def test_thead_tbody_tfoot_colspan_rowspan_go_native():
         "<table><tr><td><table><tr><td>x</td></tr></table></td></tr></table>",
         '<table><tr><td><img src="a.png"/></td></tr></table>',
         "<table><tr><td><svg/></td></tr></table>",
-        "<table><tr><td><p>one</p><p>two</p></td></tr></table>",
         "<table><caption>only a caption</caption></table>",
         "<table><td>cell with no row</td></table>",
         "<table><tr></tr></table>",
@@ -2464,7 +2463,6 @@ def test_thead_tbody_tfoot_colspan_rowspan_go_native():
         "nested",
         "img",
         "svg",
-        "two-paragraph-cell",
         "no-rows",
         "cell-outside-row",
         "no-cells",
@@ -2510,6 +2508,178 @@ def test_a_cell_with_line_breaks_counts_them_in_length():
     assert not _conv._table_is_native(
         _first_table(f"<table><tr><td>{text}{br_tags}</td></tr></table>")
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "cell, native",
+    [
+        ("<td><p>a</p><p>b</p></td>", True),
+        ("<td><h5>1</h5><p>a</p><span>5</span><p>b</p></td>", True),
+        ("<td><div><p>a</p></div></td>", True),
+        ("<td><ul><li>a</li><li>b</li></ul></td>", True),
+        (f"<td><p>{'x' * 2001}</p><p>b</p></td>", False),
+        (f"<td><p>a</p>{'x' * 2001}</td>", False),
+        (f"<td><p>{'x' * 1500}</p><p>{'y' * 1500}</p></td>", True),
+    ],
+    ids=[
+        "two-p",
+        "heading-loose",
+        "wrapped-p",
+        "list",
+        "long-p",
+        "long-loose",
+        "long-cell-short-p",
+    ],
+)
+def test_a_cell_holding_several_blocks_stays_native(cell, native):
+    # #261: 131 Gutenberg tables fell back for this alone, and the rows build
+    # ran each poem in them into one paragraph. The generator's 2,000-character
+    # cut applies to each paragraph of such a cell, not to the whole cell.
+    html = f"<table><tr>{cell}<td>z</td></tr></table>"
+    assert _conv._table_is_native(_first_table(html)) is native
+
+
+def _native_table(body):
+    blocks = extract_blocks_from_html(_doc(body), native_tables=True)
+    (table,) = [b for b in blocks if b.get("type") == "table"]
+    return table, blocks
+
+
+def _cell(table, r, c):
+    return table["table"]["rows"][r]["cells"][c]
+
+
+@pytest.mark.unit
+def test_a_multi_block_cell_keeps_each_block_as_a_paragraph():
+    # pg21053's poem tables: a heading, verse lines, line numbers between
+    # them. The rows build ran all of it into one paragraph (#261).
+    table, _ = _native_table(
+        "<table><tr><td><h5>1</h5><h5>Mein.</h5><p>Du bist mein,</p>"
+        "<span>5</span><p>ich bin dein.</p></td></tr></table>"
+    )
+    cell = _cell(table, 0, 0)
+    assert [p["text"] for p in cell["paragraphs"]] == [
+        "1",
+        "Mein.",
+        "Du bist mein,",
+        "5",
+        "ich bin dein.",
+    ]
+    assert cell["text"] == "1 Mein. Du bist mein, 5 ich bin dein."
+    assert table["text"] == "1 Mein. Du bist mein, 5 ich bin dein."
+
+
+@pytest.mark.unit
+def test_a_one_block_cell_is_unchanged():
+    table, _ = _native_table("<table><tr><td><p>only</p></td></tr></table>")
+    assert "paragraphs" not in _cell(table, 0, 0)
+    assert _cell(table, 0, 0)["text"] == "only"
+
+
+@pytest.mark.unit
+def test_loose_text_around_blocks_in_a_cell_is_kept_in_order():
+    table, _ = _native_table(
+        "<table><tr><td>Lead <p>x</p> tail<p>y</p></td></tr></table>"
+    )
+    assert [p["text"] for p in _cell(table, 0, 0)["paragraphs"]] == [
+        "Lead",
+        "x",
+        "tail",
+        "y",
+    ]
+
+
+@pytest.mark.unit
+def test_a_list_in_a_cell_keeps_its_markers_and_does_not_leak():
+    table, blocks = _native_table(
+        "<table><tr><td><ol><li>a</li><li>b</li></ol></td><td>c</td></tr></table>"
+        "<p>after</p>"
+    )
+    assert [p["text"] for p in _cell(table, 0, 0)["paragraphs"]] == ["1. a", "2. b"]
+    assert _cell(table, 0, 1)["text"] == "c"
+    assert blocks[-1]["text"] == "after"
+
+
+@pytest.mark.unit
+def test_ids_in_a_paragraph_cell_land_on_their_paragraph():
+    table, _ = _native_table(
+        '<table><tr><td id="cell"><p>a</p><p id="two">b</p></td></tr></table>'
+    )
+    paras = _cell(table, 0, 0)["paragraphs"]
+    assert "cell" in paras[0]["anchor_ids"]
+    assert "two" in paras[1]["anchor_ids"]
+    assert {"cell", "two"} <= set(table["anchor_ids"])
+    assert "cell" in _conv._table_start_ids(table)
+
+
+@pytest.mark.unit
+def test_a_background_picture_in_a_paragraph_cell_sends_the_table_to_rows():
+    # #267 review: the body walker draws an empty no-repeat background as a
+    # picture (#168). In a cell it came back as a "paragraph" holding the raw
+    # image token, written as text. Pictures in cells are #262; until then the
+    # table keeps rows, as for an <img>.
+    def resolver(elem):
+        if elem.get("class") == "pic":
+            return {
+                "background-image": "url(img.png)",
+                "background-repeat": "no-repeat",
+            }
+        return {}
+
+    blocks = extract_blocks_from_html(
+        _doc(
+            '<table><tr><td><div class="pic"></div><p>Caption.</p></td>'
+            "<td>side</td></tr></table>"
+        ),
+        style_resolver=resolver,
+        native_tables=True,
+    )
+    assert not any(b.get("type") == "table" for b in blocks)
+    assert not any("\x00" in b["text"] and "Caption" in b["text"] for b in blocks)
+
+
+@pytest.mark.unit
+def test_an_anchor_pending_before_a_table_stays_out_of_its_cells():
+    table, _ = _native_table(
+        '<a id="pre"></a><table><tr><td><p>a</p><p>b</p></td></tr></table>'
+    )
+    assert "pre" not in _cell(table, 0, 0)["paragraphs"][0]["anchor_ids"]
+    assert "pre" in table["table"]["anchor_ids"]
+
+
+@pytest.mark.unit
+def test_a_list_marker_pending_around_a_table_stays_out_of_its_cells():
+    blocks = extract_blocks_from_html(
+        _doc("<ol><li><table><tr><td><p>a</p><p>b</p></td></tr></table></li></ol>"),
+        native_tables=True,
+    )
+    (table,) = [b for b in blocks if b.get("type") == "table"]
+    assert [p["text"] for p in _cell(table, 0, 0)["paragraphs"]] == ["a", "b"]
+
+
+@pytest.mark.unit
+def test_a_contents_listing_in_a_cell_is_recorded_at_the_table():
+    at = []
+    blocks = extract_blocks_from_html(
+        _doc(
+            "<p>Intro</p><table><tr><td><p>a</p>"
+            '<div class="toc"><p>Chapter 1</p></div></td></tr></table><p>After</p>'
+        ),
+        native_tables=True,
+        nav_listing_at=at,
+    )
+    table_index = next(i for i, b in enumerate(blocks) if b.get("type") == "table")
+    assert at == [table_index]
+
+
+@pytest.mark.unit
+def test_paragraphs_in_a_cell_get_anchor_keys():
+    table, blocks = _native_table(
+        '<table><tr><td><p>a</p><p id="two">b</p></td></tr></table>'
+    )
+    _conv._attach_anchor_keys(blocks, "ch.xhtml")
+    assert _cell(table, 0, 0)["paragraphs"][1]["anchor_keys"] == ["ch.xhtml#two"]
 
 
 @pytest.mark.unit
@@ -4594,6 +4764,43 @@ def test_a_chapter_title_in_a_leading_table_is_shown_once(title, body, rows):
     assert native[0] == title
     assert _cell_rows(chunks) == rows
     assert _words(native) == _words(rows_build)
+
+
+_POEM = "<h5>Mein.</h5><p>Du bist mein,</p><p>ich bin dein.</p>"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "title, texts",
+    [
+        ("Mein.", ["Mein.", "Du bist mein,", "ich bin dein.", "x"]),
+        ("Mein. Du", ["Mein. Du", "bist mein,", "ich bin dein.", "x"]),
+        ("Elsewhere", ["Elsewhere", "Mein.", "Du bist mein,", "ich bin dein.", "x"]),
+    ],
+    ids=["whole-paragraph", "into-a-paragraph", "no-cut"],
+)
+def test_the_title_cut_reaches_into_a_paragraph_cell(title, texts):
+    # #261: a cell holding blocks is written as paragraphs; the title the
+    # heading already shows is cut from them as the rows build cuts it.
+    # Not compared with the rows build: it joins a cell's blocks with no
+    # space when the source has none between the tags ("Mein.Du").
+    body = f"<table><tr><td>{_POEM}</td><td>x</td></tr></table>"
+    native, _ = _chapter_texts(title, body, native=True)
+    assert native == texts
+
+
+@pytest.mark.unit
+def test_a_title_cell_of_paragraphs_drops_its_row_and_keeps_its_ids():
+    texts, chunks = _chapter_texts(
+        "CHAPTER I",
+        '<table><tr><td><p id="p1">CHAPTER</p><p>I</p></td></tr>'
+        '<tr id="r2"><td>a</td></tr></table>',
+        native=True,
+    )
+    assert texts == ["CHAPTER I", "a"]
+    row_keys = [c["anchor_keys"] for c in chunks if c.get("node") == "row"]
+    assert len(row_keys) == 1
+    assert {"ch0.xhtml#p1", "ch0.xhtml#r2"} <= set(row_keys[0])
 
 
 @pytest.mark.unit

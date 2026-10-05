@@ -417,6 +417,76 @@ def test_upstream_decodes_table_layout_to_an_epub_table(upstream_kfxlib, built_k
     )
 
 
+@pytest.mark.tier2
+@pytest.mark.integration
+@pytest.mark.filterwarnings("ignore:datetime.datetime.utcnow:DeprecationWarning")
+def test_upstream_decodes_paragraph_cells_to_cells_holding_paragraphs(
+    upstream_kfxlib, built_kfx
+):
+    """KFX Input reads a `$269` cell container back as a cell holding each of
+    its paragraphs (#261), and the link into one of them lands in that cell.
+    """
+    import xml.etree.ElementTree as ET
+    from io import BytesIO
+
+    from kfxlib.message_logging import set_logger
+
+    from tests.fixtures.golden.inputs import make_table_paragraph_cells
+
+    messages: list[tuple[str, str]] = []
+    set_logger(_LevelCollector(messages))
+    try:
+        with decimal.localcontext():
+            book = upstream_kfxlib(
+                str(built_kfx("table_paragraph_cells", make_table_paragraph_cells))
+            )
+            book.decode_book()
+            epub = book.convert_to_epub()
+    finally:
+        set_logger(None)
+
+    unexpected = [
+        (level, m)
+        for level, m in messages
+        if level in ("warning", "error")
+        and not any(known in m for known in _BASELINE_WARNINGS)
+    ]
+    assert not unexpected, f"upstream logged on table_paragraph_cells: {unexpected}"
+
+    xhtml = "{http://www.w3.org/1999/xhtml}"
+    tables, links, ids = [], [], {}
+    with zipfile.ZipFile(BytesIO(epub)) as zf:
+        for name in zf.namelist():
+            if not name.endswith(".xhtml") or name.endswith("nav.xhtml"):
+                continue
+            root = ET.fromstring(zf.read(name))
+            tables += list(root.iter(f"{xhtml}table"))
+            links += [a.get("href") for a in root.iter(f"{xhtml}a")]
+            ids.update({el.get("id"): el for el in root.iter() if el.get("id")})
+
+    assert len(tables) == 2, f"expected two <table>s, got {len(tables)}"
+    cells = [c for t in tables for c in t.iter() if c.tag == f"{xhtml}td"]
+    assert len(cells) == 3
+
+    def paragraphs(cell):
+        return [
+            "".join(child.itertext()).strip() for child in cell if len(child.tag) > 0
+        ]
+
+    assert paragraphs(cells[0]) == [
+        "Harbour Song",
+        "The lamps are lit along the wall,",
+        "the tide comes slowly in,",
+        "5",
+        "and every bell is answered.",
+    ]
+    assert paragraphs(cells[1]) == ["The keeper counted lamps.", "He finished at dusk."]
+    assert paragraphs(cells[2]) == ["1. Lamps: oil lamps.", "2. Dusk: about eight."]
+
+    (target,) = [h.split("#", 1)[1] for h in links if h and "#" in h]
+    assert ids[target] in list(cells[1].iter()), "the link does not land in its cell"
+
+
 def _read_vendored(member: str) -> str:
     """Read one source file out of the vendored plugin zip.
 

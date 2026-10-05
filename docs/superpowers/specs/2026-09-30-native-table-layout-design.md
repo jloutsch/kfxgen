@@ -37,7 +37,7 @@ A simple HTML table becomes a real KFX table, rows and columns laid out by the K
 - the Kindle table viewer (`yj_table_viewer`, `$629`/`$630`). *Added by #254: every native table now carries `$629: [$581, $326]` and `$630: $632`, and a book with one declares `yj_table_viewer` version 1;*
 - images inside cells;
 - nested tables;
-- cells holding more than one block;
+- cells holding more than one block. *Added by #261: such a cell is a `$269` container of `$269` paragraphs;*
 - native captions (`$615 $453`, which needs `yj_table` 7).
 
 ## Design
@@ -101,7 +101,7 @@ $278 {$155 eid, $157 tableStyle, $150 false, $456 {0.9 $318}, $457 {0.9 $318}, $
 **Eligibility** (`_table_is_native`). Any of these keeps the table on rows as paragraphs:
 - a nested `<table>`;
 - an image (`img`, `svg`, `image`) or other embedded object anywhere in it;
-- a cell with more than one block child;
+- a cell with more than one block child. *Changed by #261: such a cell is written as paragraphs; only a paragraph over 2,000 characters still falls back;*
 - a cell with more than 2,000 characters (the generator's `CHUNK_SIZE`, #226);
 - a table wider than 8 columns (`_MAX_NATIVE_COLUMNS`): the widest row, counting each cell's `colspan` and the cells a `rowspan` carries down from earlier rows of the same row group. The device gate (#251) found 8 columns fit on all three devices, while 24 were unreadable on the Voyage 5.13.6 and the Oasis 5.18.2 (the Paperwhite 5.19.2 fitted them). This affects 5 of the Gutenberg 90's 601 eligible tables and 72 of the library sample's 4,766. The table viewer that would keep wider tables native is #254. *Changed by #254: with the viewer properties the limit is 24 columns. The Voyage 5.13.6 and the Oasis 5.18.2.1.1 read every table from 8 to 24 columns with them, and squeezed every one without them;*
 - a cell outside a row, or a table with no rows or no cells (it needs at least one cell);
