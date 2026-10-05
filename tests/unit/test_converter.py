@@ -2540,6 +2540,88 @@ def test_a_cell_holding_several_blocks_stays_native(cell, native):
     assert _conv._table_is_native(_first_table(html)) is native
 
 
+def _native_table(body):
+    blocks = extract_blocks_from_html(_doc(body), native_tables=True)
+    (table,) = [b for b in blocks if b.get("type") == "table"]
+    return table, blocks
+
+
+def _cell(table, r, c):
+    return table["table"]["rows"][r]["cells"][c]
+
+
+@pytest.mark.unit
+def test_a_multi_block_cell_keeps_each_block_as_a_paragraph():
+    # pg21053's poem tables: a heading, verse lines, line numbers between
+    # them. The rows build ran all of it into one paragraph (#261).
+    table, _ = _native_table(
+        "<table><tr><td><h5>1</h5><h5>Mein.</h5><p>Du bist mein,</p>"
+        "<span>5</span><p>ich bin dein.</p></td></tr></table>"
+    )
+    cell = _cell(table, 0, 0)
+    assert [p["text"] for p in cell["paragraphs"]] == [
+        "1",
+        "Mein.",
+        "Du bist mein,",
+        "5",
+        "ich bin dein.",
+    ]
+    assert cell["text"] == "1 Mein. Du bist mein, 5 ich bin dein."
+    assert table["text"] == "1 Mein. Du bist mein, 5 ich bin dein."
+
+
+@pytest.mark.unit
+def test_a_one_block_cell_is_unchanged():
+    table, _ = _native_table("<table><tr><td><p>only</p></td></tr></table>")
+    assert "paragraphs" not in _cell(table, 0, 0)
+    assert _cell(table, 0, 0)["text"] == "only"
+
+
+@pytest.mark.unit
+def test_loose_text_around_blocks_in_a_cell_is_kept_in_order():
+    table, _ = _native_table(
+        "<table><tr><td>Lead <p>x</p> tail<p>y</p></td></tr></table>"
+    )
+    assert [p["text"] for p in _cell(table, 0, 0)["paragraphs"]] == [
+        "Lead",
+        "x",
+        "tail",
+        "y",
+    ]
+
+
+@pytest.mark.unit
+def test_a_list_in_a_cell_keeps_its_markers_and_does_not_leak():
+    table, blocks = _native_table(
+        "<table><tr><td><ol><li>a</li><li>b</li></ol></td><td>c</td></tr></table>"
+        "<p>after</p>"
+    )
+    assert [p["text"] for p in _cell(table, 0, 0)["paragraphs"]] == ["1. a", "2. b"]
+    assert _cell(table, 0, 1)["text"] == "c"
+    assert blocks[-1]["text"] == "after"
+
+
+@pytest.mark.unit
+def test_ids_in_a_paragraph_cell_land_on_their_paragraph():
+    table, _ = _native_table(
+        '<table><tr><td id="cell"><p>a</p><p id="two">b</p></td></tr></table>'
+    )
+    paras = _cell(table, 0, 0)["paragraphs"]
+    assert "cell" in paras[0]["anchor_ids"]
+    assert "two" in paras[1]["anchor_ids"]
+    assert {"cell", "two"} <= set(table["anchor_ids"])
+    assert "cell" in _conv._table_start_ids(table)
+
+
+@pytest.mark.unit
+def test_paragraphs_in_a_cell_get_anchor_keys():
+    table, blocks = _native_table(
+        '<table><tr><td><p>a</p><p id="two">b</p></td></tr></table>'
+    )
+    _conv._attach_anchor_keys(blocks, "ch.xhtml")
+    assert _cell(table, 0, 0)["paragraphs"][1]["anchor_keys"] == ["ch.xhtml#two"]
+
+
 @pytest.mark.unit
 def test_a_cell_holding_exactly_one_block_stays_native():
     # A cell with one block-level child is fine; only two or more trigger
