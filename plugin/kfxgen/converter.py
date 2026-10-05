@@ -662,6 +662,102 @@ def _anchors_follow_rows(elem):
     return kinds[:1] == "R" and kinds.endswith("A") and "A" in kinds.rstrip("A")
 
 
+#: A note marker in a notes table's first column: a number, a roman numeral
+#: or a symbol, optionally bracketed and followed by a full stop or colon (#268).
+_NOTE_MARKER_RE = re.compile(
+    r"^[\[(]?(\d{1,4}"
+    # A well-formed roman numeral only, so words such as "mild" and "civil"
+    # are not taken for one (#273 review).
+    r"|(?=[mdclxvi])m{0,4}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})"
+    r"|[*\u2020\u2021\u00a7\u00b6#]+)[\])]?[.:]?$",
+    re.IGNORECASE,
+)
+#: Share of a notes table's rows that the book must link to (#268). One
+#: library notes table has a note nothing links to, so not all of them.
+_NOTES_TABLE_LINKED_SHARE = 0.8
+
+
+def _row_anchor_ids(row, follow):
+    """Ids that name a table row: on it or inside it, plus the empty anchors
+    beside it on the side its row group puts them (after the row when
+    `follow`, as in calibre's notes layout, otherwise before), so each anchor
+    names one row."""
+    ids = set(_subtree_anchor_ids(row))
+    sib = row.getnext() if follow else row.getprevious()
+    while sib is not None and _is_empty_anchor(sib):
+        ids.update(_own_anchor_ids(sib))
+        sib = sib.getnext() if follow else sib.getprevious()
+    return ids
+
+
+def _is_notes_table(table, base_href, link_targets):
+    """True when `table` is a notes section laid out as a table, written as one
+    paragraph per note rather than as a Kindle table (#268).
+
+    The shape is two cells a row, at least three rows, and a note marker
+    alone in every first cell. What tells notes from a contents table or a
+    numbered list of the same shape is that the book links into them: at
+    least `_NOTES_TABLE_LINKED_SHARE` of the rows are link targets from
+    somewhere in the book. A contents table's links point out (pg6133), and
+    nothing links into a data table. `link_targets` is the set of
+    "<file>#<id>" keys every in-book link resolves to."""
+    if not link_targets or not base_href:
+        return False
+    doc = _resolve_doc_path(base_href, "")
+    rows = [
+        tr
+        for tr in table.iter()
+        if _local_tag(tr.tag) == "tr"
+        and next((a for a in tr.iterancestors() if _local_tag(a.tag) == "table"), None)
+        is table
+        and any(_local_tag(c.tag) in _CELL_TAGS for c in tr)
+    ]
+    if len(rows) < 3:
+        return False
+    for row in rows:
+        cells = [c for c in row if _local_tag(c.tag) in _CELL_TAGS]
+        if len(cells) != 2:
+            return False
+        marker = " ".join("".join(cells[0].itertext()).split())
+        if not _NOTE_MARKER_RE.match(marker):
+            return False
+    # The anchor layout is read once per row group: reading it for every row
+    # made the check grow with rows times rows (#273 review).
+    follows = {}
+    linked = 0
+    for row in rows:
+        group = row.getparent()
+        if group not in follows:
+            follows[group] = _anchors_follow_rows(group)
+        if any(
+            f"{doc}#{aid}" in link_targets
+            for aid in _row_anchor_ids(row, follows[group])
+        ):
+            linked += 1
+    return linked >= _NOTES_TABLE_LINKED_SHARE * len(rows)
+
+
+def _book_link_targets(oeb_book):
+    """Every "<file>#<id>" key an in-book link in the spine resolves to (#268)."""
+    targets = set()
+    for item in oeb_book.spine:
+        try:
+            data = item.data
+        except Exception:
+            continue
+        if data is None or not hasattr(data, "iter"):
+            continue
+        base = getattr(item, "href", "") or ""
+        for a in data.iter():
+            if isinstance(a.tag, str) and _local_tag(a.tag) == "a" and a.get("href"):
+                target = _resolve_link_target(a.get("href"), base)
+                if target:
+                    targets.add(target)
+                    # An id such as "n:1" is linked as "#n%3A1" (#273 review).
+                    targets.add(unquote(target))
+    return targets
+
+
 def _table_is_native(table):
     """True when `table` can be written as a real KFX table (#219).
 
@@ -1431,6 +1527,8 @@ def extract_blocks_from_html(
     tables_seen=None,
     native_tables=False,
     toc_targets=None,
+    link_targets=None,
+    notes_seen=None,
 ):
     """Like extract_text_from_html but returns structured blocks:
     [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None,
@@ -1511,6 +1609,7 @@ def extract_blocks_from_html(
         block_tags.add(ns + tag)
 
     blocks = []
+    notes_tables = set()  # ids of tables written as notes paragraphs (#268)
     pending_ids = []  # anchors awaiting the next leaf block (containers, standalone <a>)
     # List markers awaiting the next text block: an item's number belongs on
     # the first text it holds, which may sit in a nested <p> (#201). An entry
@@ -1622,12 +1721,17 @@ def extract_blocks_from_html(
             start = len(blocks)
             _walk_element(elem)
             if (
-                tables_seen is not None
-                and _local_tag(elem.tag) == "table"
+                _local_tag(elem.tag) == "table"
                 and len(blocks) > start
                 and not any(b.get("type") == "table" for b in blocks[start:])
             ):
-                tables_seen.append(blocks[start])
+                # Notes written as paragraphs on purpose are counted apart
+                # from tables that could not be laid out (#268).
+                if id(elem) in notes_tables:
+                    if notes_seen is not None:
+                        notes_seen.append(blocks[start])
+                elif tables_seen is not None:
+                    tables_seen.append(blocks[start])
             return
         parent = elem.getparent()
         if parent not in list_ordinals:
@@ -1672,6 +1776,12 @@ def extract_blocks_from_html(
         native = (
             native_tables and _local_tag(elem.tag) == "table" and _table_is_native(elem)
         )
+        if native and _is_notes_table(elem, base_href, link_targets):
+            # A notes section reads better as paragraphs, one per note (#268).
+            # Decided before the paragraph-cell path, so notes running to
+            # several paragraphs still become paragraphs (#267 review).
+            notes_tables.add(id(elem))
+            native = False
         if native:
             listings = len(nav_listing_at) if nav_listing_at is not None else 0
             captions, table, trailing = _table_block(
@@ -2386,6 +2496,10 @@ def extract_chapters_from_oeb(
     spine_map = {}
     spine_items_ordered = []
     table_blocks = []  # (href, first block) per table, for the #219 warning
+    notes_blocks = []  # (href, first block) per notes table (#268)
+    # Every in-book link target, before any chapter is walked: whether a
+    # table is a notes section depends on links from other files (#268).
+    link_targets = _book_link_targets(oeb_book) if native_tables else None
 
     toc_entries = _extract_toc_with_hrefs(oeb_book, log)
     # Fragment ids the TOC names, per file, matched the way chapter assembly
@@ -2420,6 +2534,7 @@ def extract_chapters_from_oeb(
             resolver = _build_style_resolver(oeb_book, item, log)
             nav_listing_at = []
             tables_seen = []
+            notes_seen = []
             note_ids = _note_target_ids(item.data)
             blocks = extract_blocks_from_html(
                 item.data,
@@ -2428,6 +2543,8 @@ def extract_chapters_from_oeb(
                 nav_listing_at=nav_listing_at,
                 tables_seen=tables_seen,
                 native_tables=native_tables,
+                link_targets=link_targets,
+                notes_seen=notes_seen,
                 # Assembly skips entries naming a footnote; so does this.
                 toc_targets=toc_targets.get(
                     _normalize_href(getattr(item, "href", "") or ""), set()
@@ -2459,6 +2576,7 @@ def extract_chapters_from_oeb(
             }
         )
         table_blocks.extend((href, b) for b in tables_seen)
+        notes_blocks.extend((href, b) for b in notes_seen)
         log.info(f"  Spine item {i + 1}: {len(text)} chars ({norm_href})")
 
     if not spine_items_ordered:
@@ -2478,7 +2596,9 @@ def extract_chapters_from_oeb(
         if chapters:
             log.info(f"Assembled {len(chapters)} chapters from TOC coordinates")
             _replace_title_page(chapters, metadata, log)
-            _warn_flattened_tables(chapters, table_blocks, log, native_tables)
+            _warn_flattened_tables(
+                chapters, table_blocks, log, native_tables, notes_blocks
+            )
             return chapters
         log.info("TOC produced no chapters; using spine items as chapters")
 
@@ -2494,11 +2614,11 @@ def extract_chapters_from_oeb(
 
     log.info(f"Using {len(chapters)} spine items as chapters (no TOC mapping)")
     _replace_title_page(chapters, metadata, log)
-    _warn_flattened_tables(chapters, table_blocks, log, native_tables)
+    _warn_flattened_tables(chapters, table_blocks, log, native_tables, notes_blocks)
     return chapters
 
 
-def _warn_flattened_tables(chapters, table_blocks, log, native_tables):
+def _warn_flattened_tables(chapters, table_blocks, log, native_tables, notes_blocks=()):
     """Say once per book how many tables were written as rows of text (#219),
     and why: native tables were turned off, or these tables fell back.
 
@@ -2511,6 +2631,12 @@ def _warn_flattened_tables(chapters, table_blocks, log, native_tables):
     """
     kept = {id(b) for ch in chapters for b in ch.get("blocks") or ()}
     written = [href for href, block in table_blocks if id(block) in kept]
+    notes = sum(1 for _, block in notes_blocks if id(block) in kept)
+    if notes:
+        log.info(
+            f"  {notes} notes table{'s' if notes != 1 else ''} written as one "
+            "paragraph per note (#268)"
+        )
     native = sum(
         1 for ch in chapters for b in ch.get("blocks") or () if b.get("type") == "table"
     )

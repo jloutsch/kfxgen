@@ -705,3 +705,26 @@ def test_a_background_picture_in_a_cell_is_never_written_as_text(calibre):
     texts = [text for text, _ in _paragraphs(kfx)]
     assert not any("\x00" in t or "IMG" in t for t in texts), (calibre_version, texts)
     assert any("Caption under the picture." in t for t in texts), texts
+
+
+def test_notes_tables_are_written_as_paragraphs_through_calibre(calibre):
+    # #268: the notes book's two tables (marker | note, every row a link
+    # target from the chapter) are a notes section, written as one paragraph
+    # per note even with native tables on. Checked here through the real
+    # pipeline because the decision needs every file's links at once.
+    tmp, _, calibre_version = calibre
+    epub = tmp / "notes-268.epub"
+    _build_notes_epub(epub)
+    kfx = tmp / "notes-268.kfx"
+    _ebook_convert(calibre, epub, kfx, native=True)
+    frags = load_fragments(kfx)
+    tables = [
+        e
+        for f in by_type(frags, "$259")
+        for e in iter_entries(val(f)["$146"])
+        if str(e.get("$159")) == "$278"
+    ]
+    texts = [text for text, _ in _paragraphs(kfx)]
+    assert tables == [], calibre_version
+    for n in range(1, 7):
+        assert f"{n}. Note {n} text." in texts, (calibre_version, texts)
