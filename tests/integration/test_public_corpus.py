@@ -320,6 +320,18 @@ def _raw_img_tokens_in_file(kfx_path):
     return len(re.findall(pattern, raw))
 
 
+def _shown_images(storylines):
+    """Entries that tell the reader to draw a picture (`$175`), at any depth
+    in the given storylines' `$146` lists: a picture in a table cell (#262)
+    sits under the table, a row group and a row."""
+    return sum(
+        1
+        for entries in storylines
+        for entry in iter_entries(entries)
+        if hasattr(entry, "get") and entry.get("$175") is not None
+    )
+
+
 def _metrics(kfx_path):
     frags = load_fragments(kfx_path)
     texts = [
@@ -354,16 +366,9 @@ def _metrics(kfx_path):
     # has $146 children read as zero — the nested $259 shape native_generator
     # explicitly contemplates (`:1607`). $181 was also in the descent and never
     # occurs inside a $259; it is dropped rather than left as decoration.
-    shown = 0
-    for f in by_type(frags, "$259"):
-        for outer in val(f).get(IS("$146")) or []:
-            if not hasattr(outer, "get"):
-                continue
-            if outer.get(IS("$175")) is not None:
-                shown += 1
-            for entry in outer.get(IS("$146")) or []:
-                if hasattr(entry, "get") and entry.get(IS("$175")) is not None:
-                    shown += 1
+    shown = _shown_images(
+        [val(f).get(IS("$146")) or [] for f in by_type(frags, "$259")]
+    )
 
     return {
         "chars": sum(len(t) for t in texts),
@@ -515,6 +520,24 @@ def test_metrics_count_links_inside_table_cells(tmp_path):
     m = _metrics(kfx)
     assert m["links"] == 1
     assert m["dangling"] == 0
+
+
+@pytest.mark.tier1
+@pytest.mark.integration
+def test_shown_images_counts_a_picture_inside_a_table_cell():
+    # #270 review: the picture count looked two levels deep. A picture in a
+    # table cell (#262) sits under the table, a row group and a row, and
+    # would read as never shown, as links did on pg1342.
+    storylines = [
+        [
+            {"$175": "top"},
+            {
+                "$159": "$278",
+                "$146": [{"$146": [{"$146": [{"$159": "$271", "$175": "in-cell"}]}]}],
+            },
+        ]
+    ]
+    assert _shown_images(storylines) == 2
 
 
 @pytest.mark.tier1
