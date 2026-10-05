@@ -93,6 +93,9 @@ _TABLE_NODE_TYPES = {
     "body": "$454",
     "foot": "$455",
     "row": "$279",
+    # A cell holding several blocks: a $269 container of $269 text entries,
+    # as Kindle Previewer writes it (#261).
+    "cell": "$269",
 }
 
 #: Overrides retired by #123. Warned about rather than ignored: a variable that
@@ -1925,6 +1928,9 @@ class NativeKFXGenerator:
                     entry[IS("$629")] = [IS("$581"), IS("$326")]
                     entry[IS("$630")] = IS("$632")
                     self._wrote_native_table = True
+                elif node == "cell":
+                    self.symtab.create_local_symbol(story_name)
+                    entry[IS("$157")] = IS(story_name)
                 entry[IS("$146")] = []
                 stack[-1].append(entry)
                 stack.append(entry[IS("$146")])
@@ -3223,7 +3229,8 @@ class NativeKFXGenerator:
                 k
                 for r in tbl["rows"]
                 for c in r["cells"]
-                for k in (c.get("anchor_keys") or [])
+                for part in [c, *(c.get("paragraphs") or ())]
+                for k in (part.get("anchor_keys") or [])
             }
             own = [k for k in (tbl.get("anchor_keys") or []) if k not in inner]
             table_open = {"type": "open", "node": "table", "anchor_keys": []}
@@ -3251,6 +3258,37 @@ class NativeKFXGenerator:
                 }
                 all_chunks.append(last_row)
                 for cell in row["cells"]:
+                    cell_info = {
+                        "header": bool(cell.get("header")),
+                        "colspan": cell.get("colspan", 1),
+                        "rowspan": cell.get("rowspan", 1),
+                    }
+                    if cell.get("paragraphs"):
+                        # A cell holding several blocks (#261): a container,
+                        # styled as a cell, around one text entry per block.
+                        all_chunks.append(
+                            {
+                                "type": "open",
+                                "node": "cell",
+                                "anchor_keys": [],
+                                "block_style": cell.get("block_style"),
+                                "cell": cell_info,
+                            }
+                        )
+                        for para in cell["paragraphs"]:
+                            all_chunks.append(
+                                {
+                                    "type": "text",
+                                    "text": para["text"],
+                                    "spans": para.get("spans") or [],
+                                    "block_style": para.get("block_style"),
+                                    "anchor_keys": para.get("anchor_keys") or [],
+                                    "anchor_offsets": para.get("anchor_offsets") or {},
+                                    "in_header_cell": cell_info["header"],
+                                }
+                            )
+                        all_chunks.append({"type": "close"})
+                        continue
                     all_chunks.append(
                         {
                             "type": "text",
@@ -3899,6 +3937,29 @@ class NativeKFXGenerator:
                 attrs["font_size"], attrs["baseline_style"] = subscript_metrics()
             return _allocate_style("_em", **attrs)
 
+        def _cell_style(cell, bs, font_size):
+            """A table cell's $157: a text cell's, or a cell container's (#261).
+            It must declare the weight and style of the face it names, or the
+            Kindle falls back from the embedded face (#50). A header is bold
+            on its own."""
+            blk_bold = bool(bs.get("bold")) if has_fonts else False
+            blk_italic = bool(bs.get("italic")) if has_fonts else False
+            cell_bold = bool(cell["header"]) or blk_bold
+            cell_fam = self.font_table.match(
+                bs.get("font_family", []), bold=cell_bold, italic=blk_italic
+            )
+            cattrs = {
+                "align": bs.get("align") or ("center" if cell["header"] else None),
+                "bold": cell_bold,
+                "italic": blk_italic,
+                "colspan": cell["colspan"],
+                "rowspan": cell["rowspan"],
+                "font_size": font_size,
+            }
+            if cell_fam:
+                cattrs["font_family"] = cell_fam
+            return _allocate_style("_td", builder=self.build_cell_style_157, **cattrs)
+
         # Build multi-entry $259 storylines (one entry per chunk per chapter)
         storyline_names = []
         for ch_idx in range(len(chapters)):
@@ -3918,11 +3979,20 @@ class NativeKFXGenerator:
                 chunk = all_chunks[chunk_idx]
                 if chunk.get("type") in ("open", "close"):
                     node = chunk.get("node")
-                    entry_styles.append(
-                        _allocate_style("_tbl", builder=self.build_table_style_157)
-                        if node == "table"
-                        else story_names[ch_idx]
-                    )
+                    if node == "table":
+                        entry_styles.append(
+                            _allocate_style("_tbl", builder=self.build_table_style_157)
+                        )
+                    elif node == "cell":
+                        entry_styles.append(
+                            _cell_style(
+                                chunk["cell"],
+                                chunk.get("block_style") or {},
+                                chapters[ch_idx].get("font_size", 1.0),
+                            )
+                        )
+                    else:
+                        entry_styles.append(story_names[ch_idx])
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)
@@ -3977,6 +4047,11 @@ class NativeKFXGenerator:
                     # (#50) — the real face when present, synthesized otherwise.
                     blk_bold = bool(bs.get("bold")) if has_fonts else False
                     blk_italic = bool(bs.get("italic")) if has_fonts else False
+                    if chunk.get("in_header_cell"):
+                        # A paragraph in a header cell is bold, as a header
+                        # cell's own text is (#261).
+                        blk_bold = True
+                        attrs["bold"] = True
                     fam = self.font_table.match(
                         bs.get("font_family", []), bold=blk_bold, italic=blk_italic
                     )
@@ -3988,32 +4063,7 @@ class NativeKFXGenerator:
                             attrs["italic"] = True
                     cell = chunk.get("cell")
                     if cell is not None:
-                        # The cell style must declare the weight and style of
-                        # the face it names, or the Kindle falls back from the
-                        # embedded face (#50). A header is bold on its own.
-                        cell_bold = bool(cell["header"]) or blk_bold
-                        cell_italic = blk_italic
-                        cell_fam = self.font_table.match(
-                            bs.get("font_family", []),
-                            bold=cell_bold,
-                            italic=cell_italic,
-                        )
-                        cattrs = {
-                            "align": bs.get("align")
-                            or ("center" if cell["header"] else None),
-                            "bold": cell_bold,
-                            "italic": cell_italic,
-                            "colspan": cell["colspan"],
-                            "rowspan": cell["rowspan"],
-                            "font_size": attrs["font_size"],
-                        }
-                        if cell_fam:
-                            cattrs["font_family"] = cell_fam
-                        entry_styles.append(
-                            _allocate_style(
-                                "_td", builder=self.build_cell_style_157, **cattrs
-                            )
-                        )
+                        entry_styles.append(_cell_style(cell, bs, attrs["font_size"]))
                     else:
                         entry_styles.append(_allocate_style("", **attrs))
                     entry_link_targets.append(None)
@@ -4025,8 +4075,10 @@ class NativeKFXGenerator:
                 # A header cell is bold on its own, with or without embedded
                 # fonts, exactly as its cell style is; a span style names the
                 # run's whole face, so it must say bold too. (#219)
-                _blk_b = (bool(_cbs.get("bold")) if has_fonts else False) or bool(
-                    (chunk.get("cell") or {}).get("header")
+                _blk_b = (
+                    (bool(_cbs.get("bold")) if has_fonts else False)
+                    or bool((chunk.get("cell") or {}).get("header"))
+                    or bool(chunk.get("in_header_cell"))
                 )
                 _blk_i = bool(_cbs.get("italic")) if has_fonts else False
                 # A run may be emphasis, a link, or both. Its visual style is
