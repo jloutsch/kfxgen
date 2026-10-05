@@ -537,15 +537,6 @@ def _table_feature_version(chapters):
     return 1
 
 
-def _has_native_table(chapters):
-    """True when any chapter holds a native table block (#219, #254)."""
-    return any(
-        isinstance(block, dict) and block.get("table")
-        for chapter in chapters
-        for block in chapter.get("blocks") or ()
-    )
-
-
 class NativeKFXGenerator:
     """
     Generates KFX files from scratch using standard symbols and deterministic
@@ -606,15 +597,15 @@ class NativeKFXGenerator:
 
         return data
 
-    def build_fragment_585(self, table_version=1, table_viewer=False):
+    def build_fragment_585(self, table_version=1):
         """
         Builds Fragment $585 (Content Features)
         Standard structure for reflowable books.
 
         Includes capabilities matching known-good KFX files:
         - yj_table: table support
-        - yj_table_viewer: only with `table_viewer`, for a book with a native
-          table (#254)
+        - yj_table_viewer: added by `_declare_table_viewer` once a native
+          table has been written (#254)
         - reflow-section-size: multi-section content support
         - reflow-style: basic reflowable styling
         - CanonicalFormat: standard format marker
@@ -645,20 +636,6 @@ class NativeKFXGenerator:
                 IS("$589"),
                 make_version(table_version),
             ),
-        ]
-        if table_viewer:
-            self.symtab.create_local_symbol("yj_table_viewer")
-            features_list.append(
-                IonStruct(
-                    IS("$586"),
-                    "com.amazon.yjconversion",
-                    IS("$492"),
-                    "yj_table_viewer",
-                    IS("$589"),
-                    make_version(1),
-                )
-            )
-        features_list += [
             IonStruct(
                 IS("$586"),
                 "com.amazon.yjconversion",
@@ -703,6 +680,28 @@ class NativeKFXGenerator:
 
         value = IonStruct(IS("$590"), features_list)
         return YJFragment(fid=IS("$348"), ftype=IS("$585"), value=value)
+
+    def _declare_table_viewer(self):
+        """Add `yj_table_viewer` 1 after `yj_table` in the built $585 (#254).
+
+        Called once the storylines are built, and only when one wrote a $278:
+        a table can be cut whole as a chapter title, so the chapters' blocks
+        don't say whether the book has one. The symbol is created here, last,
+        so every other symbol keeps its number.
+        """
+        self.symtab.create_local_symbol("yj_table_viewer")
+        frag = next(f for f in self.fragments if f.ftype == IS("$585"))
+        frag.value[IS("$590")].insert(
+            1,
+            IonStruct(
+                IS("$586"),
+                "com.amazon.yjconversion",
+                IS("$492"),
+                "yj_table_viewer",
+                IS("$589"),
+                IonStruct(IS("version"), IonStruct(IS("$587"), 1, IS("$588"), 0)),
+            ),
+        )
 
     def build_fragment_164(
         self,
@@ -1925,6 +1924,7 @@ class NativeKFXGenerator:
                     # columns until words break a character per line (#254).
                     entry[IS("$629")] = [IS("$581"), IS("$326")]
                     entry[IS("$630")] = IS("$632")
+                    self._wrote_native_table = True
                 entry[IS("$146")] = []
                 stack[-1].append(entry)
                 stack.append(entry[IS("$146")])
@@ -2450,6 +2450,7 @@ class NativeKFXGenerator:
         self.entity_ids = {}
         self.next_entity_id = 349
         self.field_403_counter = 10
+        self._wrote_native_table = False
 
         from .font_table import FontTable  # noqa: PLC0415
 
@@ -2457,10 +2458,7 @@ class NativeKFXGenerator:
 
         # 1. Build metadata fragments
         self.fragments.append(
-            self.build_fragment_585(
-                table_version=_table_feature_version(chapters),
-                table_viewer=_has_native_table(chapters),
-            )
+            self.build_fragment_585(table_version=_table_feature_version(chapters))
         )
 
         # Detect cover image format and build resource fragments
@@ -2888,6 +2886,9 @@ class NativeKFXGenerator:
             ]
         )
         self.fragments.append(self.build_fragment_270(container_id, entity_map))
+
+        if self._wrote_native_table:
+            self._declare_table_viewer()
 
         # 16. Build $ion_symbol_table fragment (REQUIRED for Kindle)
         # Must be added last so all symbols used by other fragments are registered
