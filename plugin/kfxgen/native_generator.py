@@ -537,6 +537,15 @@ def _table_feature_version(chapters):
     return 1
 
 
+def _has_native_table(chapters):
+    """True when any chapter holds a native table block (#219, #254)."""
+    return any(
+        isinstance(block, dict) and block.get("table")
+        for chapter in chapters
+        for block in chapter.get("blocks") or ()
+    )
+
+
 class NativeKFXGenerator:
     """
     Generates KFX files from scratch using standard symbols and deterministic
@@ -597,13 +606,15 @@ class NativeKFXGenerator:
 
         return data
 
-    def build_fragment_585(self, table_version=1):
+    def build_fragment_585(self, table_version=1, table_viewer=False):
         """
         Builds Fragment $585 (Content Features)
         Standard structure for reflowable books.
 
         Includes capabilities matching known-good KFX files:
         - yj_table: table support
+        - yj_table_viewer: only with `table_viewer`, for a book with a native
+          table (#254)
         - reflow-section-size: multi-section content support
         - reflow-style: basic reflowable styling
         - CanonicalFormat: standard format marker
@@ -634,6 +645,20 @@ class NativeKFXGenerator:
                 IS("$589"),
                 make_version(table_version),
             ),
+        ]
+        if table_viewer:
+            self.symtab.create_local_symbol("yj_table_viewer")
+            features_list.append(
+                IonStruct(
+                    IS("$586"),
+                    "com.amazon.yjconversion",
+                    IS("$492"),
+                    "yj_table_viewer",
+                    IS("$589"),
+                    make_version(1),
+                )
+            )
+        features_list += [
             IonStruct(
                 IS("$586"),
                 "com.amazon.yjconversion",
@@ -1895,6 +1920,11 @@ class NativeKFXGenerator:
                     entry[IS("$457")] = IonStruct(
                         IS("$307"), IonDecimal("0.9"), IS("$306"), IS("$318")
                     )
+                    # Table viewer, as Kindle Previewer writes it on every
+                    # table. Without it the Voyage and the Oasis squeeze
+                    # columns until words break a character per line (#254).
+                    entry[IS("$629")] = [IS("$581"), IS("$326")]
+                    entry[IS("$630")] = IS("$632")
                 entry[IS("$146")] = []
                 stack[-1].append(entry)
                 stack.append(entry[IS("$146")])
@@ -2427,7 +2457,10 @@ class NativeKFXGenerator:
 
         # 1. Build metadata fragments
         self.fragments.append(
-            self.build_fragment_585(table_version=_table_feature_version(chapters))
+            self.build_fragment_585(
+                table_version=_table_feature_version(chapters),
+                table_viewer=_has_native_table(chapters),
+            )
         )
 
         # Detect cover image format and build resource fragments

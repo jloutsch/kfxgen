@@ -2205,7 +2205,7 @@ def test_no_table_warning_without_tables():
 
 
 _WIDE_TABLE = (
-    "<table><tr>" + "".join(f"<td>c{i}</td>" for i in range(9)) + "</tr></table>"
+    "<table><tr>" + "".join(f"<td>c{i}</td>" for i in range(25)) + "</tr></table>"
 )
 
 
@@ -2529,47 +2529,49 @@ def _row(n, cell="<td>x</td>"):
 @pytest.mark.parametrize(
     "html, native",
     [
-        (f"<table>{_row(8)}</table>", True),
-        (f"<table>{_row(9)}</table>", False),
+        (f"<table>{_row(24)}</table>", True),
+        (f"<table>{_row(25)}</table>", False),
         # One wide row is enough.
-        (f"<table>{_row(3)}{_row(9)}{_row(3)}</table>", False),
-        # colspan counts: 7 cells, one spanning 2, is 8 columns; 3 is 9.
-        (f"<table>{_row(6)[:-5]}<td colspan='2'>x</td></tr></table>", True),
-        (f"<table>{_row(6)[:-5]}<td colspan='3'>x</td></tr></table>", False),
-        (f"<table>{_row(1, '<th colspan="9">H</th>')}{_row(3)}</table>", False),
+        (f"<table>{_row(3)}{_row(25)}{_row(3)}</table>", False),
+        # colspan counts: 23 cells, one spanning 2, is 24 columns; 3 is 25.
+        (f"<table>{_row(22)[:-5]}<td colspan='2'>x</td></tr></table>", True),
+        (f"<table>{_row(22)[:-5]}<td colspan='3'>x</td></tr></table>", False),
+        (f"<table>{_row(1, '<th colspan="25">H</th>')}{_row(3)}</table>", False),
         # A cell carried down by rowspan takes a column in the next row.
         (
-            f"<table><tr><td rowspan='2'>a</td>{'<td>x</td>' * 7}</tr>"
-            f"{_row(8)}</table>",
+            f"<table><tr><td rowspan='2'>a</td>{'<td>x</td>' * 23}</tr>"
+            f"{_row(24)}</table>",
             False,
         ),
         (
-            f"<table><tr><td rowspan='2'>a</td>{'<td>x</td>' * 7}</tr>"
-            f"{_row(7)}</table>",
+            f"<table><tr><td rowspan='2'>a</td>{'<td>x</td>' * 23}</tr>"
+            f"{_row(23)}</table>",
             True,
         ),
         # rowspan ends with its row group.
         (
-            f"<table><thead><tr><td rowspan='5'>a</td>{'<td>x</td>' * 7}</tr>"
-            f"</thead><tbody>{_row(8)}</tbody></table>",
+            f"<table><thead><tr><td rowspan='5'>a</td>{'<td>x</td>' * 23}</tr>"
+            f"</thead><tbody>{_row(24)}</tbody></table>",
             True,
         ),
     ],
     ids=[
-        "8-columns",
-        "9-columns",
+        "24-columns",
+        "25-columns",
         "one-wide-row",
-        "colspan-to-8",
-        "colspan-to-9",
-        "header-colspan-9",
-        "rowspan-carry-to-9",
-        "rowspan-carry-to-8",
+        "colspan-to-24",
+        "colspan-to-25",
+        "header-colspan-25",
+        "rowspan-carry-to-25",
+        "rowspan-carry-to-24",
         "rowspan-ends-at-group",
     ],
 )
-def test_a_table_wider_than_8_columns_falls_back(html, native):
-    # Device gate on #251: 8 columns fit on the Voyage, Oasis and Paperwhite;
-    # 24 were unreadable on the Voyage (5.13.6) and the Oasis (5.18.2).
+def test_a_table_wider_than_24_columns_falls_back(html, native):
+    # #251's gate found 24 columns unreadable on the Voyage (5.13.6) and the
+    # Oasis (5.18.2) without the table-viewer properties. With them (#254),
+    # both read every table up to 24 columns; wider ones are untested and
+    # their text would be too small to read, so they keep rows.
     assert _conv._table_is_native(_first_table(html)) is native
 
 
