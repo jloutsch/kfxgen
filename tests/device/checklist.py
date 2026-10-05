@@ -229,7 +229,7 @@ CHECKS: tuple[Check, ...] = (
     Check(
         id="native_tables",
         title="Tables lay out in rows and columns without breaking navigation",
-        issues=("#219", "#251", "#254"),
+        issues=("#219", "#251", "#254", "#261"),
         procedure=(
             "Open a book with tables. The TOC button must be present and a "
             "TOC entry must land on a chapter that opens with a table. A "
@@ -239,7 +239,9 @@ CHECKS: tuple[Check, ...] = (
             "own row or note. A 24-column table and an 8-column table with a "
             "column of long words must show every column, with no word "
             "broken a character per line. A table wider than 24 columns must "
-            "show as one paragraph per row with every value readable."
+            "show as one paragraph per row with every value readable. A "
+            "one-column table holding a poem of many lines must show each line "
+            "as its own line and page through it both ways with none lost."
         ),
         fails_like=(
             "The TOC button disappears: nesting the storyline in 5.3.0 did "

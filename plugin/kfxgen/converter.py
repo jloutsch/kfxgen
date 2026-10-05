@@ -2502,12 +2502,12 @@ def _warn_flattened_tables(chapters, table_blocks, log, native_tables):
     elif n == 1:
         why = (
             "it could not be laid out as a Kindle table (for example over 24 columns, or an "
-            "image, a nested table or several paragraphs in a cell)"
+            "image or a nested table in a cell)"
         )
     else:
         why = (
             "they could not be laid out as Kindle tables (for example over 24 columns, or an "
-            "image, a nested table or several paragraphs in a cell)"
+            "image or a nested table in a cell)"
         )
     log.warn(
         f"  {n} table{'s' if n != 1 else ''} in {f} file{'s' if f != 1 else ''} "
