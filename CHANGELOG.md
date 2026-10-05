@@ -42,6 +42,8 @@ in two tables. On 5.8.10 all 101 links were there and resolved.
 - **CSS borders, padding and widths** (#264); **vertical alignment** in
   cells is always centred (#269); **a list item holding only a table**
   loses its number (#265).
+- **Notes laid out as a two-column table** (number | note, as in calibre's
+  MOBI→EPUB books) are a Kindle table, not paragraphs (#268).
 - From earlier releases, unchanged: notes become chapters in a book with no
   table of contents (#225); progress follows the paragraph count (#227);
   hidden text and HTML comments are printed (#256, #252).
