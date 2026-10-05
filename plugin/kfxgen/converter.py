@@ -880,6 +880,19 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
     }
 
 
+def _has_picture_paragraph(table_block):
+    """True when a paragraph cell holds a picture: an empty element drawn with
+    a background image (#168) walks to an image block. Pictures in cells are
+    #262; until then the table keeps rows, so the image token is never written
+    as text (#267 review)."""
+    return any(
+        _IMG_TOKEN_RE.search(p["text"])
+        for r in table_block["table"]["rows"]
+        for c in r["cells"]
+        for p in c.get("paragraphs") or ()
+    )
+
+
 def _cell_ids(cell):
     """Every anchor id a cell holds: its own and its paragraphs'."""
     return list(cell["anchor_ids"]) + [
@@ -1585,9 +1598,15 @@ def extract_blocks_from_html(
         pending_ids.clear()
         pending_markers.clear()
         start = len(blocks)
+        listings = len(nav_listing_at) if nav_listing_at is not None else 0
         _walk_element(cell)
         out = blocks[start:]
         del blocks[start:]
+        if nav_listing_at is not None:
+            # A contents listing in a cell was recorded at an index inside
+            # the cell, whose blocks are taken out; it belongs to the table,
+            # which goes where the cell's blocks began.
+            nav_listing_at[listings:] = [start] * (len(nav_listing_at) - listings)
         if pending_ids and out:
             last = out[-1]
             for aid in pending_ids:
@@ -1654,11 +1673,17 @@ def extract_blocks_from_html(
             native_tables and _local_tag(elem.tag) == "table" and _table_is_native(elem)
         )
         if native:
+            listings = len(nav_listing_at) if nav_listing_at is not None else 0
             captions, table, trailing = _table_block(
                 elem, style_resolver, base_href, walk_cell=_walk_cell
             )
             past_start = set(table["anchor_ids"]) - _table_start_ids(table)
-            native = not (toc_targets and past_start & set(toc_targets))
+            native = not (toc_targets and past_start & set(toc_targets)) and not (
+                _has_picture_paragraph(table)
+            )
+            if not native and nav_listing_at is not None:
+                # The rows walk below records any listing again.
+                del nav_listing_at[listings:]
         if native:
             # The caption is walked like any block, as the rows build walks
             # it: each block in it is its own paragraph, with its style and

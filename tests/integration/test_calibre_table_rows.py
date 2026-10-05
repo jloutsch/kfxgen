@@ -55,6 +55,7 @@ from tests._kfx_introspect import (  # noqa: E402
     val,
 )
 from tests.integration.test_calibre_list_markers import (  # noqa: E402
+    _PNG,
     CALIBRE_CUSTOMIZE,
     EBOOK_CONVERT,
     _build_plugin,
@@ -646,3 +647,61 @@ def test_each_note_link_lands_on_its_own_note(note_landings):
         assert target.startswith(f"{label}. Note {label} text."), (
             f"calibre {v}: note link {label} lands on {target[:40]!r}"
         )
+
+
+def _build_background_cell_epub(path):
+    """A paragraph cell whose first block is an empty div drawn with a
+    no-repeat background picture (#168), as the #267 review found it."""
+    body = (
+        "<h1>Chapter</h1><p>Before.</p>"
+        '<table><tr><td><div class="pic"></div><p>Caption under the picture.</p>'
+        "</td><td>side</td></tr></table><p>After.</p>"
+    )
+    css = (
+        ".pic { background-image: url(p.png); background-repeat: no-repeat; "
+        "width: 40px; height: 40px }"
+    )
+    page = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter</title>'
+        '<link rel="stylesheet" type="text/css" href="s.css"/></head>'
+        f"<body>{body}</body></html>"
+    )
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        z.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0" '
+            'xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles>'
+            '<rootfile full-path="content.opf" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>',
+        )
+        z.writestr(
+            "content.opf",
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" '
+            'version="2.0" unique-identifier="i"><metadata '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="i">bg'
+            "</dc:identifier><dc:title>Background cell</dc:title><dc:language>en"
+            "</dc:language></metadata><manifest>"
+            '<item id="c" href="c.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="s" href="s.css" media-type="text/css"/>'
+            '<item id="p" href="p.png" media-type="image/png"/>'
+            '</manifest><spine><itemref idref="c"/></spine></package>',
+        )
+        z.writestr("c.xhtml", page)
+        z.writestr("s.css", css)
+        z.writestr("p.png", _PNG)
+
+
+def test_a_background_picture_in_a_cell_is_never_written_as_text(calibre):
+    # #267 review: through the real Stylizer, the picture walked to an image
+    # token that a paragraph cell wrote as text. The table now keeps rows, as
+    # for any picture in a cell (#262).
+    tmp, _, calibre_version = calibre
+    epub = tmp / "background-cell.epub"
+    _build_background_cell_epub(epub)
+    kfx = tmp / "background-cell.kfx"
+    _ebook_convert(calibre, epub, kfx, native=True)
+    texts = [text for text, _ in _paragraphs(kfx)]
+    assert not any("\x00" in t or "IMG" in t for t in texts), (calibre_version, texts)
+    assert any("Caption under the picture." in t for t in texts), texts

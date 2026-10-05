@@ -2614,6 +2614,66 @@ def test_ids_in_a_paragraph_cell_land_on_their_paragraph():
 
 
 @pytest.mark.unit
+def test_a_background_picture_in_a_paragraph_cell_sends_the_table_to_rows():
+    # #267 review: the body walker draws an empty no-repeat background as a
+    # picture (#168). In a cell it came back as a "paragraph" holding the raw
+    # image token, written as text. Pictures in cells are #262; until then the
+    # table keeps rows, as for an <img>.
+    def resolver(elem):
+        if elem.get("class") == "pic":
+            return {
+                "background-image": "url(img.png)",
+                "background-repeat": "no-repeat",
+            }
+        return {}
+
+    blocks = extract_blocks_from_html(
+        _doc(
+            '<table><tr><td><div class="pic"></div><p>Caption.</p></td>'
+            "<td>side</td></tr></table>"
+        ),
+        style_resolver=resolver,
+        native_tables=True,
+    )
+    assert not any(b.get("type") == "table" for b in blocks)
+    assert not any("\x00" in b["text"] and "Caption" in b["text"] for b in blocks)
+
+
+@pytest.mark.unit
+def test_an_anchor_pending_before_a_table_stays_out_of_its_cells():
+    table, _ = _native_table(
+        '<a id="pre"></a><table><tr><td><p>a</p><p>b</p></td></tr></table>'
+    )
+    assert "pre" not in _cell(table, 0, 0)["paragraphs"][0]["anchor_ids"]
+    assert "pre" in table["table"]["anchor_ids"]
+
+
+@pytest.mark.unit
+def test_a_list_marker_pending_around_a_table_stays_out_of_its_cells():
+    blocks = extract_blocks_from_html(
+        _doc("<ol><li><table><tr><td><p>a</p><p>b</p></td></tr></table></li></ol>"),
+        native_tables=True,
+    )
+    (table,) = [b for b in blocks if b.get("type") == "table"]
+    assert [p["text"] for p in _cell(table, 0, 0)["paragraphs"]] == ["a", "b"]
+
+
+@pytest.mark.unit
+def test_a_contents_listing_in_a_cell_is_recorded_at_the_table():
+    at = []
+    blocks = extract_blocks_from_html(
+        _doc(
+            "<p>Intro</p><table><tr><td><p>a</p>"
+            '<div class="toc"><p>Chapter 1</p></div></td></tr></table><p>After</p>'
+        ),
+        native_tables=True,
+        nav_listing_at=at,
+    )
+    table_index = next(i for i, b in enumerate(blocks) if b.get("type") == "table")
+    assert at == [table_index]
+
+
+@pytest.mark.unit
 def test_paragraphs_in_a_cell_get_anchor_keys():
     table, blocks = _native_table(
         '<table><tr><td><p>a</p><p id="two">b</p></td></tr></table>'
