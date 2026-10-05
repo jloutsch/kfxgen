@@ -5052,3 +5052,171 @@ def test_rowspan_clamp_counts_only_rows_the_generator_writes(middle):
         "</tbody></table>"
     )
     assert table["table"]["rows"][0]["cells"][0]["rowspan"] == 2
+
+
+# --- notes laid out as a table are written as paragraphs (#268) -------------
+#
+# A notes section laid out as a two-column table (marker | note) reads better
+# as paragraphs, one per note: in a Kindle table the marker sits beside the
+# middle of a long note (maintainer's Paperwhite comparison on the #223 book).
+# What marks such a table is that the text links into it: at least 80% of its
+# rows are link targets from elsewhere in the book. A contents table looks the
+# same but its links point out (pg6133), and nothing links into a data table.
+
+
+def _note_rows(markers, anchor_after=True, backlink=True):
+    rows = []
+    for n, m in enumerate(markers, 1):
+        first = f'<a href="ch.xhtml#r{n}">{m}</a>' if backlink else m
+        row = f"<tr><td>{first}</td><td>Note {n} text.</td></tr>"
+        anchor = f'<a id="n{n}"></a>'
+        rows.append(row + anchor if anchor_after else anchor + row)
+    return "".join(rows)
+
+
+def _targets(*ns, file="notes.xhtml"):
+    return {f"{file}#n{n}" for n in ns}
+
+
+def _is_notes(html, targets):
+    return _conv._is_notes_table(_first_table(html), "notes.xhtml", targets)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "markers",
+    [["1.", "2.", "3."], ["i", "ii", "iii"], ["*", "†", "‡"], ["[1]", "[2]", "[3]"]],
+    ids=["numbers", "roman", "symbols", "bracketed"],
+)
+def test_a_notes_table_is_recognised_by_its_incoming_links(markers):
+    html = f"<table>{_note_rows(markers)}</table>"
+    assert _is_notes(html, _targets(1, 2, 3))
+
+
+@pytest.mark.unit
+def test_anchors_before_rows_count_too():
+    html = f"<table>{_note_rows(['1.', '2.', '3.'], anchor_after=False)}</table>"
+    assert _is_notes(html, _targets(1, 2, 3))
+
+
+@pytest.mark.unit
+def test_notes_without_back_links_are_still_notes():
+    # One library book: real notes, every row referenced, no link in the
+    # first cell. The issue's first rule (a link in every first cell) missed it.
+    html = f"<table>{_note_rows(['1.', '2.', '3.'], backlink=False)}</table>"
+    assert _is_notes(html, _targets(1, 2, 3))
+
+
+@pytest.mark.unit
+def test_most_rows_referenced_is_enough():
+    # One library notes table has a note nothing links to.
+    html = f"<table>{_note_rows(['1.', '2.', '3.', '4.', '5.'])}</table>"
+    assert _is_notes(html, _targets(1, 2, 3, 4))
+    assert not _is_notes(html, _targets(1, 2, 3))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html, targets",
+    [
+        # pg6133's contents: roman numerals linking out, nothing linking in.
+        (f"<table>{_note_rows(['I.', 'II.', 'III.'])}</table>", set()),
+        # Three columns.
+        (
+            "<table>"
+            + "".join(
+                f'<tr><td>{n}.</td><td>a</td><td>b</td></tr><a id="n{n}"></a>'
+                for n in (1, 2, 3)
+            )
+            + "</table>",
+            _targets(1, 2, 3),
+        ),
+        # Two rows.
+        (f"<table>{_note_rows(['1.', '2.'])}</table>", _targets(1, 2)),
+        # A first cell that is a word, not a marker.
+        (f"<table>{_note_rows(['1.', 'Apples', '3.'])}</table>", _targets(1, 2, 3)),
+        # A row missing its second cell.
+        (
+            f"<table>{_note_rows(['1.', '2.'])}"
+            '<tr><td>3.</td></tr><a id="n3"></a></table>',
+            _targets(1, 2, 3),
+        ),
+        # Links into another file's anchors of the same names don't count.
+        (
+            f"<table>{_note_rows(['1.', '2.', '3.'])}</table>",
+            _targets(1, 2, 3, file="other.xhtml"),
+        ),
+    ],
+    ids=["contents", "three-columns", "two-rows", "word", "missing-cell", "other-file"],
+)
+def test_tables_that_are_not_notes_stay_native(html, targets):
+    assert not _is_notes(html, targets)
+
+
+@pytest.mark.unit
+def test_a_notes_table_is_written_as_one_paragraph_per_note():
+    html = f"<table>{_note_rows(['1.', '2.', '3.'])}</table><p>After.</p>"
+    blocks = extract_blocks_from_html(
+        _doc(html),
+        native_tables=True,
+        base_href="notes.xhtml",
+        link_targets=_targets(1, 2, 3),
+    )
+    assert not any(b.get("type") == "table" for b in blocks)
+    assert [b["text"] for b in blocks] == [
+        "1. Note 1 text.",
+        "2. Note 2 text.",
+        "3. Note 3 text.",
+        "After.",
+    ]
+    # calibre's layout: each note's anchor follows its own row (#223).
+    assert [b["anchor_ids"] for b in blocks[:3]] == [["n1"], ["n2"], ["n3"]]
+
+
+@pytest.mark.unit
+def test_links_from_another_file_make_a_notes_table():
+    # The book-wide pass: the chapter links into the notes file.
+    log = _silent_log()
+    log.warn = MagicMock()
+    infos = []
+    log.info = lambda msg, *a, **k: infos.append(str(msg))
+    chapter = "".join(
+        f'<p>Claim {n}<a id="r{n}" href="ch1.xhtml#n{n}"><sup>{n}</sup></a>.</p>'
+        for n in (1, 2, 3)
+    )
+    notes = (
+        "<table>"
+        + "".join(
+            f'<tr><td><a href="ch0.xhtml#r{n}">{n}.</a></td><td>Note {n} text.</td></tr>'
+            f'<a id="n{n}"></a>'
+            for n in (1, 2, 3)
+        )
+        + "</table>"
+    )
+    chapters = extract_chapters_from_oeb(
+        _table_book(chapter, notes), log, native_tables=True
+    )
+    blocks = [b for c in chapters for b in c.get("blocks") or []]
+    assert not any(b.get("type") == "table" for b in blocks)
+    assert "1. Note 1 text." in [b["text"] for b in blocks]
+    # Written as notes on purpose: logged, not warned about.
+    assert not [c for c in log.warn.call_args_list if "table" in str(c).lower()]
+    assert any("1 notes table" in m and "#268" in m for m in infos), infos
+
+
+@pytest.mark.unit
+def test_without_incoming_links_the_same_table_stays_native():
+    notes = (
+        "<table>"
+        + "".join(
+            f'<tr><td><a href="ch0.xhtml#r{n}">{n}.</a></td><td>Note {n} text.</td></tr>'
+            f'<a id="n{n}"></a>'
+            for n in (1, 2, 3)
+        )
+        + "</table>"
+    )
+    chapters = extract_chapters_from_oeb(
+        _table_book("<p>No links here.</p>", notes), _silent_log(), native_tables=True
+    )
+    blocks = [b for c in chapters for b in c.get("blocks") or []]
+    assert any(b.get("type") == "table" for b in blocks)
