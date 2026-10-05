@@ -339,6 +339,12 @@ _LONG_WORDS = [
 ]
 
 
+#: The poem line chapter 1 links to, deep in chapter 15's long cell (#261).
+POEM_LINE = 50
+POEM_LINE_ID = "poem-line-50"
+#: The note in chapter 16's notes cell that chapter 1 links to (#261).
+CELL_NOTE_ID = "gate-note-2"
+
 _POEM_WORDS = [
     "lamp",
     "tide",
@@ -366,7 +372,8 @@ def _poem_table(lines=60):
     for n in range(1, lines + 1):
         a = _POEM_WORDS[n % len(_POEM_WORDS)]
         b = _POEM_WORDS[(n * 7) % len(_POEM_WORDS)]
-        parts.append(f"<p>Line {n}: the {a} beside the {b},</p>")
+        pid = f' id="{POEM_LINE_ID}"' if n == POEM_LINE else ""
+        parts.append(f"<p{pid}>Line {n}: the {a} beside the {b},</p>")
         if n % 5 == 0 and n < lines:
             parts.append(f"<span>{n}</span>")
     return "<table><tr><td>" + "\n".join(parts) + "</td></tr></table>"
@@ -377,13 +384,13 @@ def _text_and_notes():
     inside the text cell to a note in the notes cell (#261)."""
     text = (
         "<td><p>The keeper rose before the light<sup>"
-        '<a href="#gate-note-2">2</a></sup> and walked the wall.</p>'
+        f'<a href="#{CELL_NOTE_ID}">2</a></sup> and walked the wall.</p>'
         "<p>He counted lamps from north to south.</p>"
         "<p>At dusk he counted them again.</p></td>"
     )
     notes = (
         "<td><p>1. Wall: the harbour wall.</p>"
-        '<p id="gate-note-2">2. Light: the first light, about five.</p>'
+        f'<p id="{CELL_NOTE_ID}">2. Light: the first light, about five.</p>'
         "<p>3. Dusk: about eight.</p></td>"
     )
     return f"<table><tr>{text}{notes}</tr></table>"
@@ -471,7 +478,16 @@ def _chapter_one():
         f' <a href="chapter_7.xhtml#{TABLE_ID}">the table</a>, and'
         f' <a href="{TABLE_FIRST_FILE}">the file that opens with a table</a>.</p>'
     )
-    return _chapter(1, _plain(), after="\n".join([links, cell_link, table_links]))
+    paragraph_links = (
+        f'<p>Inside cells of paragraphs: <a href="chapter_15.xhtml#{POEM_LINE_ID}">'
+        f'line {POEM_LINE} of the poem</a>, and <a href="chapter_16.xhtml#{CELL_NOTE_ID}">'
+        "note 2 of the chapter 16 notes</a>.</p>"
+    )
+    return _chapter(
+        1,
+        _plain(),
+        after="\n".join([links, cell_link, table_links, paragraph_links]),
+    )
 
 
 def _target_table(label, table_id=""):
@@ -703,8 +719,8 @@ def main():
         f" 16. Once the book is indexed, search for '{SEARCH_WORD}'. It is only\n"
         "     in one ch 10 cell. Does the result open that page?\n"
         " 17. Ch 15: on the Native file the heading and each of the 60 lines\n"
-        "     is its own line, with the numbers 5, 10, ... 55 on lines of their\n"
-        "     own. Page forward to line 60 and back to the heading: no line\n"
+        "     is its own line, with all 11 numbers 5, 10, 15, ... 55 on lines of\n"
+        "     their own (check 15, 30 and 45 too). Page forward to line 60 and back to the heading: no line\n"
         "     lost, repeated or cut off at a page edge. (On the Rows file the\n"
         "     whole poem is one paragraph: 5.8.10's behaviour, #261.)\n"
         " 18. Ch 16: two columns, each paragraph on its own line. Tap the\n"
@@ -712,6 +728,10 @@ def main():
         "     cell, not open a table view.\n"
         " 19. Ch 17: the list shows 1., 2., 3., one item per line, beside\n"
         "     'Every day'.\n"
+        " 20. Ch 1: tap 'line 50 of the poem': it should open the page with\n"
+        "     'Line 50' in ch 15. Tap 'note 2 of the chapter 16 notes': it should\n"
+        "     open the page with note 2 in ch 16. Either doing nothing is a\n"
+        "     navigation failure.\n"
     )
     return 0
 
