@@ -680,6 +680,45 @@ def make_table_layout(out_dir: Path) -> Path:
     )
 
 
+def make_table_paragraph_cells(out_dir: Path) -> Path:
+    """Native tables whose cells hold several blocks (#261).
+
+    The shape of pg21053's tables: a one-column table boxing a poem (a
+    heading, verse lines, a line number loose between them), and a
+    two-column table of a text beside its notes, with an anchor on a
+    paragraph inside a cell that a later paragraph links to. Each block is
+    written as a `$269` text entry inside a `$269` cell container. Tier 2
+    decodes this file with KFX Input and checks each cell comes back holding
+    its paragraphs.
+    """
+    body = (
+        "<p>A song and its notes.</p>\n"
+        "<table>\n"
+        "<tr><td><h5>Harbour Song</h5>\n"
+        "<p>The lamps are lit along the wall,</p>\n"
+        "<p>the tide comes slowly in,</p>\n"
+        "<span>5</span>\n"
+        "<p>and every bell is answered.</p></td></tr>\n"
+        "</table>\n"
+        "<table>\n"
+        "<tr><td><p>The keeper counted lamps.</p>\n"
+        '<p id="dusk">He finished at dusk.</p></td>\n'
+        "<td><p>1. Lamps: oil lamps.</p>\n"
+        "<p>2. Dusk: about eight.</p></td></tr>\n"
+        "</table>\n"
+        '<p>See <a href="#dusk">the second line</a> of the text.</p>'
+    )
+    return (
+        EpubBuilder()
+        .set_metadata(title="Table Paragraph Cells Golden", author="Golden Author")
+        .add_chapter(
+            "Songs",
+            _xhtml_page("Songs", body).encode("utf-8"),
+        )
+        .build(out_dir, "table_paragraph_cells")
+    )
+
+
 def make_contents_illustration(out_dir: Path) -> Path:
     """An illustration printed inside the source contents section (#117).
 
@@ -740,6 +779,7 @@ GOLDEN_INPUTS: list[tuple[str, callable]] = [
     ("sub_super_marks", make_sub_super_marks),
     ("table_cells", make_table_cells),
     ("table_layout", make_table_layout),
+    ("table_paragraph_cells", make_table_paragraph_cells),
     ("contents_illustration", make_contents_illustration),
     ("with_cover", make_with_cover),
     ("multi_chapter", make_multi_chapter),
