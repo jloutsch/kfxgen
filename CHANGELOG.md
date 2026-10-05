@@ -1,5 +1,92 @@
 # Changelog
 
+## 5.8.10 — Tables read on every Kindle
+
+**Fixed (#254, #260): the Voyage and the Oasis squeezed tables until words
+broke a character per line.** Kindle Previewer writes two properties on every
+table, which mark it for the Kindle's table viewer (`$629`, `$630`), and
+declares the `yj_table_viewer` feature. kfxgen wrote neither. Without them the
+Voyage 5.13.6 and the Oasis 5.18.2.1.1 squeezed even 8-column tables until a
+long word broke one character per line, and in a 24-column table only the
+first column could be read. With them, both laid out every table from 8 to 24
+columns, and the Paperwhite 5.19.2 did too. Every Kindle table now carries the
+two properties, and a book with one declares the feature. A book without a
+Kindle table is byte-identical to 5.8.9.
+
+**Changed: tables up to 24 columns are Kindle tables.** The limit was 8
+columns in 5.8.9. Wider tables are still written as one paragraph per row:
+nothing wider was checked on a device, and the text would be too small to
+read. In the Gutenberg 90 this moves 5 tables from rows to Kindle tables
+(510 Kindle tables, 157 rows). In the library sample checked in the #260
+review, it moves 67 tables in 18 books (4,061 Kindle tables).
+
+**How it was found.** The #254 spike compared Kindle Previewer's output with
+kfxgen's:
+- **Previewer 3.106 and 4.0.1** put the viewer properties on every table,
+  whatever its width. They write column widths only when the book's CSS sets
+  them, never from the content.
+- **Previewer 3.106** also gave 17- and 24-column tables an image of the
+  whole table, for devices without one feature (`$751`). kfxgen doesn't do
+  this.
+- **Previewer 4.0.1** won't make a KFX book with a table over 15 columns. It
+  writes an old MOBI instead.
+
+A spike pair then showed the effect on all three Kindles: the same book with
+and without the properties.
+
+**Known limits, all tracked under #219:**
+- **These tables are still written as rows:** cells holding several
+  paragraphs (#261; 130 of the 157 remaining in the Gutenberg 90), images in
+  cells (#262; the other 27), nested tables (#263; none in either test set),
+  and tables over 24 columns.
+- **CSS borders, padding and column widths** are not written (#264).
+- **A list item whose only content is a table** loses its list number (#265).
+- **Text size.** Some real tables of 9 to 17 columns show small text in
+  portrait. Landscape is easier, and at 17 columns the text shrinks to fit.
+- From 5.8.9, unchanged: notes become chapters in a book with no table of
+  contents (#225); progress follows the paragraph count (#227); hidden text
+  and HTML comments are printed (#256, #252).
+
+**Checks:**
+- **Tests:** a test that every Kindle table carries both properties; tests
+  that the feature is declared exactly when a table is written, including a
+  book whose only table is cut as its chapter title (#260 review); the column
+  limit's boundary at 24/25. Each was seen failing on code without the
+  change, or, for the no-table test, with the feature always declared.
+  Default suite
+  1,307 passed; `tier3_strict` 15, where only `table_cells` and
+  `table_layout` change; tier 2 through KFX Input 73; calibre-gated tests 42.
+- **Gutenberg 90 against 5.8.9:**
+  - **Real calibre 9.14.0, at fd24362 (before the review fix):** all 180
+    conversions succeed. Words are identical in all 90 books, the 56 books
+    without a Kindle table are byte-identical, and every table carries the
+    properties.
+  - **The test shim, after the review fix:** the same results, and in all 90
+    books the feature is declared exactly when a table is written.
+- **Library sample, 343 books** (measured in the #260 review, before the
+  review fix): words identical in every book; all 4,061 Kindle tables carry
+  the properties; 495,852 links, none unresolved, none landing on a table
+  container.
+
+### Device verification
+
+Firmware is the last version recorded for each device, not re-read. The
+spike pair was "Spike254 Native" and "Spike254 Viewer", built from 5.8.9
+with the limit lifted. The gate pair was "Table Gate Native" and
+"Table Gate Rows", built by `research/make_table_sideload.py` at fd24362.
+
+| Device | Firmware | Check | Result |
+|---|---|---|---|
+| Voyage 7th gen (2014) | 5.13.6 | spike pair, 11 tables of 8–24 columns, with and without the properties | with: every table readable; without: words broken a character per line, 24 columns cut off |
+| Oasis 10th gen (2019) | 5.18.2.1.1 | spike pair | only the file with the properties acceptable, for every table |
+| Paperwhite 11th gen (2021) | 5.19.2 | spike pair, file with the properties | every table correct |
+| Voyage 7th gen (2014) | 5.13.6 | gate pair, short check: TOC button and jumps, a note link, embedded fonts in cells, 24 columns, long words in 8 columns, a link inside a cell | pass |
+| Oasis 10th gen (2019) | 5.18.2.1.1 | gate pair: the 25-column table | written as rows, every value readable |
+| Paperwhite 11th gen (2021) | 5.19.2 | gate pair: a link inside a cell opens its note, not a table view; selection and dictionary in a cell | pass |
+
+Not checked on the gate pair: the 2,000-row table, search and progress. All
+three passed in 5.8.9's gate on the earlier structure.
+
 ## 5.8.9 — Tables with columns
 
 **New (#219, #251): simple tables are real Kindle tables.** In 5.8.8 each
