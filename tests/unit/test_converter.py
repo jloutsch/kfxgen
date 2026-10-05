@@ -2455,7 +2455,6 @@ def test_thead_tbody_tfoot_colspan_rowspan_go_native():
         "<table><tr><td><table><tr><td>x</td></tr></table></td></tr></table>",
         '<table><tr><td><img src="a.png"/></td></tr></table>',
         "<table><tr><td><svg/></td></tr></table>",
-        "<table><tr><td><p>one</p><p>two</p></td></tr></table>",
         "<table><caption>only a caption</caption></table>",
         "<table><td>cell with no row</td></table>",
         "<table><tr></tr></table>",
@@ -2464,7 +2463,6 @@ def test_thead_tbody_tfoot_colspan_rowspan_go_native():
         "nested",
         "img",
         "svg",
-        "two-paragraph-cell",
         "no-rows",
         "cell-outside-row",
         "no-cells",
@@ -2510,6 +2508,36 @@ def test_a_cell_with_line_breaks_counts_them_in_length():
     assert not _conv._table_is_native(
         _first_table(f"<table><tr><td>{text}{br_tags}</td></tr></table>")
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "cell, native",
+    [
+        ("<td><p>a</p><p>b</p></td>", True),
+        ("<td><h5>1</h5><p>a</p><span>5</span><p>b</p></td>", True),
+        ("<td><div><p>a</p></div></td>", True),
+        ("<td><ul><li>a</li><li>b</li></ul></td>", True),
+        (f"<td><p>{'x' * 2001}</p><p>b</p></td>", False),
+        (f"<td><p>a</p>{'x' * 2001}</td>", False),
+        (f"<td><p>{'x' * 1500}</p><p>{'y' * 1500}</p></td>", True),
+    ],
+    ids=[
+        "two-p",
+        "heading-loose",
+        "wrapped-p",
+        "list",
+        "long-p",
+        "long-loose",
+        "long-cell-short-p",
+    ],
+)
+def test_a_cell_holding_several_blocks_stays_native(cell, native):
+    # #261: 131 Gutenberg tables fell back for this alone, and the rows build
+    # ran each poem in them into one paragraph. The generator's 2,000-character
+    # cut applies to each paragraph of such a cell, not to the whole cell.
+    html = f"<table><tr>{cell}<td>z</td></tr></table>"
+    assert _conv._table_is_native(_first_table(html)) is native
 
 
 @pytest.mark.unit

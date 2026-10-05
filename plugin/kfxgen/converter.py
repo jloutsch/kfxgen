@@ -52,8 +52,8 @@ _CELL_TAGS = {"td", "th"}
 # Native table layout (#219). A table the first version can't express
 # correctly keeps 5.8.8's one paragraph per row instead.
 
-#: Block-level tags a cell may hold at most one of. Two or more would need a
-#: cell holding several paragraphs, which v1 doesn't write.
+#: Block-level tags in a cell. A cell holding two or more is a container of
+#: paragraphs, one per block, as Kindle Previewer writes it (#261).
 _CELL_BLOCK_TAGS = {
     "p",
     "div",
@@ -666,8 +666,9 @@ def _table_is_native(table):
     """True when `table` can be written as a real KFX table (#219).
 
     Anything else keeps rows as paragraphs: a nested table, an image or other
-    object, a cell holding more than one block, a cell longer than the
-    generator's chunk size, a cell outside a row, or no rows or cells at all.
+    object, a cell or a paragraph in a cell longer than the generator's chunk
+    size, a cell outside a row, or no rows or cells at all. A cell holding
+    several blocks is written as paragraphs (#261).
 
     Also anything the row path handles and the native walk would not: a
     hidden or contents-listing row, row group or cell (the row path drops it;
@@ -726,19 +727,51 @@ def _table_is_native(table):
             if _local_tag(e.getparent().tag) != "tr":
                 return False
             cells += 1
-            blocks = [
-                d
-                for d in e.iter()
-                if d is not e and _local_tag(d.tag) in _CELL_BLOCK_TAGS
-            ]
-            if len(blocks) > 1:
-                return False
-            cell_length = len("".join(e.itertext())) + sum(
-                1 for d in e.iter() if _local_tag(d.tag) == "br"
-            )
-            if cell_length > _MAX_NATIVE_CELL_CHARS:
+            if _longest_cell_run(e) > _MAX_NATIVE_CELL_CHARS:
                 return False
     return rows > 0 and cells > 0 and _table_width(table) <= _MAX_NATIVE_COLUMNS
+
+
+def _text_length(elem):
+    """Characters `elem` writes: its text, plus one per <br>, which the
+    converter turns into a newline."""
+    return len("".join(elem.itertext())) + sum(
+        1 for d in elem.iter() if _local_tag(d.tag) == "br"
+    )
+
+
+def _cell_paragraph_count(cell):
+    """Block elements in a cell. Two or more make it a container of
+    paragraphs (#261); fewer keep it one text entry."""
+    return sum(
+        1
+        for d in cell.iter()
+        if d is not cell and _local_tag(d.tag) in _CELL_BLOCK_TAGS
+    )
+
+
+def _longest_cell_run(cell):
+    """The longest text entry a cell would be written as.
+
+    A cell of plain text, or one block, is one entry. A cell of several blocks
+    is one entry per block with no block inside it, plus its loose text; that
+    is counted as one run, which can only overstate. The generator cuts an
+    entry at 2,000 characters, which inside a table would split a cell or a
+    paragraph in two (#226, #261)."""
+    if _cell_paragraph_count(cell) < 2:
+        return _text_length(cell)
+    leaves = [
+        d
+        for d in cell.iter()
+        if d is not cell
+        and _local_tag(d.tag) in _CELL_BLOCK_TAGS
+        and not any(
+            _local_tag(x.tag) in _CELL_BLOCK_TAGS for x in d.iter() if x is not d
+        )
+    ]
+    leaf_lengths = [_text_length(d) for d in leaves]
+    loose = _text_length(cell) - sum(leaf_lengths)
+    return max(leaf_lengths + [loose])
 
 
 def _table_width(table):
