@@ -2670,7 +2670,7 @@ def test_a_contents_listing_in_a_cell_is_recorded_at_the_table():
         nav_listing_at=at,
     )
     table_index = next(i for i, b in enumerate(blocks) if b.get("type") == "table")
-    assert at == [table_index]
+    assert [index for index, _ in at] == [table_index]
 
 
 @pytest.mark.unit
@@ -5326,3 +5326,246 @@ def test_without_incoming_links_the_same_table_stays_native():
     )
     blocks = [b for c in chapters for b in c.get("blocks") or []]
     assert any(b.get("type") == "table" for b in blocks)
+
+
+# --- comments and processing instructions are not text (#252) --------------
+#
+# lxml gives a comment or a processing instruction a `.text`, which the
+# walkers read as content: pg1998 printed "H2 anchor" 142 times, and a
+# publisher's <?dp n="12" folio="ix"?> page markers printed as
+# 'n="12" folio="ix"'. Their tails are real text and stay.
+
+
+def _texts(body, **kw):
+    return [b["text"] for b in extract_blocks_from_html(_doc(body), **kw)]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "body, texts",
+    [
+        ("<p>x</p><!-- three --><p>y</p>", ["x", "y"]),
+        ("<p>alpha<!-- one -->beta</p>", ["alphabeta"]),
+        ("<div>lead<!-- two --><p>para</p></div>", ["lead", "para"]),
+        ("<p><em>a<!-- four -->b</em></p>", ["ab"]),
+        ("<!-- H2 anchor --><h2>Chapter</h2>", ["Chapter"]),
+        (
+            '<p>The road went on.<?dp n="12" folio="ix" ?> It was late.</p>',
+            ["The road went on. It was late."],
+        ),
+        ('<p>x</p><?dp n="13"?><p>y</p>', ["x", "y"]),
+    ],
+    ids=[
+        "between-paragraphs",
+        "inside-a-paragraph",
+        "in-a-container",
+        "inside-emphasis",
+        "before-a-heading",
+        "page-marker-inside",
+        "page-marker-between",
+    ],
+)
+def test_comments_and_processing_instructions_are_not_text(body, texts):
+    assert _texts(body) == texts
+
+
+@pytest.mark.unit
+def test_a_comment_keeps_the_emphasis_of_its_tail():
+    (block,) = extract_blocks_from_html(_doc("<p><em>a<!-- c -->b</em> c</p>"))
+    assert block["text"] == "ab c"
+    assert block["spans"] == [(0, 2, frozenset({I}))]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("native", [True, False], ids=["native", "rows"])
+def test_comments_in_a_table_are_not_text(native):
+    body = (
+        "<table><tr><td>x<!-- c -->y</td><td>z</td></tr>"
+        "<!-- between rows --><tr><td>p<?dp n='2'?>q</td><td>r</td></tr></table>"
+    )
+    blocks = extract_blocks_from_html(_doc(body), native_tables=native)
+    if native:
+        (table,) = blocks
+        assert [[c["text"] for c in r["cells"]] for r in table["table"]["rows"]] == [
+            ["xy", "z"],
+            ["pq", "r"],
+        ]
+    else:
+        assert [b["text"] for b in blocks] == ["xy z", "pq r"]
+
+
+@pytest.mark.unit
+def test_a_comment_in_a_paragraph_cell_is_not_a_paragraph():
+    blocks = extract_blocks_from_html(
+        _doc("<table><tr><td><p>a</p><!-- gap --><p>b</p></td></tr></table>"),
+        native_tables=True,
+    )
+    (table,) = blocks
+    cell = table["table"]["rows"][0]["cells"][0]
+    assert [p["text"] for p in cell["paragraphs"]] == ["a", "b"]
+
+
+# --- a listing belongs to the chapter that held it (#276) -------------------
+#
+# A discarded contents listing records the index of the block after it. When
+# that block starts the next chapter, the listing was credited to that chapter,
+# whose content the contents rebuild then replaced (pg45130's part page; and,
+# once #252 removed comment blocks that happened to sit in between, pg2160's
+# letter "To Mr HENRY DAVIS"). It belongs to the next chapter only when that
+# chapter's TOC entry points at the listing itself or an id inside it
+# (`<div id="toc" class="toc">`).
+
+
+def _listing_chapters(files, toc):
+    spine = []
+    for href, body in files:
+        at = []
+        blocks = extract_blocks_from_html(_doc(body), base_href=href, nav_listing_at=at)
+        spine.append(
+            {
+                "href": href,
+                "text": "\n\n".join(b["text"] for b in blocks),
+                "blocks": _conv._attach_anchor_keys(blocks, href),
+                "nav_listing_at": at,
+                "note_ids": set(),
+            }
+        )
+    toc = [{"title": t, "href": h} for t, h in toc]
+    return _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+
+
+_LISTING = (
+    '<div class="toc"><p><a href="front.xhtml#p1">Part One</a></p>'
+    '<p><a href="c1.xhtml">Chapter 1</a></p></div>'
+)
+
+
+@pytest.mark.unit
+def test_a_listing_ending_where_the_next_chapter_starts_belongs_to_the_one_before():
+    chapters = _listing_chapters(
+        [
+            (
+                "front.xhtml",
+                f'<h1 id="nav">Navigation</h1>{_LISTING}'
+                '<h1 id="p1">Part One</h1><p>Part text.</p>',
+            ),
+            ("c1.xhtml", "<h1>Chapter 1</h1><p>One.</p>"),
+        ],
+        [
+            ("Navigation", "front.xhtml#nav"),
+            ("Part One", "front.xhtml#p1"),
+            ("Chapter 1", "c1.xhtml"),
+        ],
+    )
+    flagged = {c["title"]: bool(c.get("_had_nav_listing")) for c in chapters}
+    assert flagged == {"Navigation": True, "Part One": False, "Chapter 1": False}
+
+
+@pytest.mark.unit
+def test_a_toc_entry_on_the_listing_itself_owns_it():
+    listing = _LISTING.replace('<div class="toc">', '<div id="toc" class="toc">')
+    chapters = _listing_chapters(
+        [
+            (
+                "front.xhtml",
+                f"<h1>Title</h1><p>By someone.</p>{listing}"
+                '<p>After the listing.</p><h1 id="p1">Part One</h1><p>Part text.</p>',
+            ),
+            ("c1.xhtml", "<h1>Chapter 1</h1><p>One.</p>"),
+        ],
+        [
+            ("Title", "front.xhtml"),
+            ("Contents", "front.xhtml#toc"),
+            ("Part One", "front.xhtml#p1"),
+            ("Chapter 1", "c1.xhtml"),
+        ],
+    )
+    flagged = {c["title"]: bool(c.get("_had_nav_listing")) for c in chapters}
+    assert flagged == {
+        "Title": False,
+        "Contents": True,
+        "Part One": False,
+        "Chapter 1": False,
+    }
+
+
+@pytest.mark.unit
+def test_a_toc_entry_on_an_id_inside_the_listing_owns_it():
+    # #286 review: the TOC may name a heading inside the listing rather than
+    # the listing element itself.
+    listing = _LISTING.replace(
+        '<div class="toc">', '<div class="toc"><h2 id="toc-head">Contents</h2>'
+    )
+    chapters = _listing_chapters(
+        [
+            (
+                "front.xhtml",
+                f"<h1>Title</h1><p>By someone.</p>{listing}"
+                '<p>After the listing.</p><h1 id="p1">Part One</h1><p>Part text.</p>',
+            ),
+            ("c1.xhtml", "<h1>Chapter 1</h1><p>One.</p>"),
+        ],
+        [
+            ("Title", "front.xhtml"),
+            ("Contents", "front.xhtml#toc-head"),
+            ("Part One", "front.xhtml#p1"),
+            ("Chapter 1", "c1.xhtml"),
+        ],
+    )
+    flagged = {c["title"]: bool(c.get("_had_nav_listing")) for c in chapters}
+    assert flagged == {
+        "Title": False,
+        "Contents": True,
+        "Part One": False,
+        "Chapter 1": False,
+    }
+
+
+@pytest.mark.unit
+def test_a_listing_at_the_start_of_a_file_stays_with_that_file():
+    chapters = _listing_chapters(
+        [
+            ("a.xhtml", "<h1>Opening</h1><p>Start.</p>"),
+            ("toc.xhtml", f"{_LISTING}<p>Notes on the contents.</p>"),
+            ("c1.xhtml", "<h1>Chapter 1</h1><p>One.</p>"),
+        ],
+        [
+            ("Opening", "a.xhtml"),
+            ("Contents", "toc.xhtml"),
+            ("Chapter 1", "c1.xhtml"),
+        ],
+    )
+    flagged = {c["title"]: bool(c.get("_had_nav_listing")) for c in chapters}
+    assert flagged == {"Opening": False, "Contents": True, "Chapter 1": False}
+
+
+@pytest.mark.unit
+def test_a_title_page_holding_a_listing_is_not_replaced_by_the_contents_page():
+    # pg2160 and pg2701 print their contents listing on the title page. Once
+    # the listing is credited to the page that held it (#276), the rebuild
+    # took the short title-and-byline page for the contents page and replaced
+    # it. A contents page keeps at most one block of its own: its heading.
+    chapters = [
+        {
+            "title": "THE EXPEDITION",
+            "text": "THE EXPEDITION\n\nby Tobias Smollett",
+            "blocks": [{"text": "THE EXPEDITION"}, {"text": "by Tobias Smollett"}],
+            "_had_nav_listing": True,
+        },
+        {"title": "Letter", "text": "Dear sir, a long letter."},
+    ]
+    assert _conv._nav_listing_contents_chapter(chapters) is None
+
+
+@pytest.mark.unit
+def test_a_listing_page_with_just_its_heading_becomes_the_contents_page():
+    chapters = [
+        {
+            "title": "Navigation",
+            "text": "Navigation",
+            "blocks": [{"text": "Navigation"}],
+            "_had_nav_listing": True,
+        },
+        {"title": "Part One", "text": "Part text."},
+    ]
+    assert _conv._nav_listing_contents_chapter(chapters) is chapters[0]
