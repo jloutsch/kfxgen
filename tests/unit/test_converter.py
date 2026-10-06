@@ -7,6 +7,7 @@ matching against the manifest, instead of being silently dropped.
 
 import logging
 import os
+import re
 import sys
 from unittest.mock import MagicMock
 
@@ -5656,3 +5657,141 @@ def test_inline_text_inside_a_cell_is_unchanged():
     # Only block boundaries gain a space; runs inside one block stay as written.
     texts = _cell_texts("<table><tr><td>a<em>b</em>c</td></tr></table>", False)
     assert texts == ["abc"]
+
+
+# --- a cell's vertical alignment (#269) --------------------------------------
+#
+# A native cell carries its computed vertical-align: its own, else its row's,
+# else its row group's. calibre's Stylizer computes the CSS but ignores the
+# HTML `valign` attribute, so the converter reads that itself. calibre's UA
+# sheet gives td/tr `inherit` and row groups (and `table > tr`) `middle`.
+
+
+def _declared_valign(elem):
+    # Stands in for the resolver's `vertical-align` (Stylizer.get): the
+    # element's own inline rule, else the UA sheet's value.
+    m = re.search(r"vertical-align:\s*([\w-]+)", elem.get("style") or "")
+    if m:
+        return {"vertical-align": m.group(1)}
+    tag = _conv._local_tag(elem.tag)
+    parent = elem.getparent()
+    if tag in ("tbody", "thead", "tfoot") or (
+        tag == "tr" and parent is not None and _conv._local_tag(parent.tag) == "table"
+    ):
+        return {"vertical-align": "middle"}
+    if tag in ("td", "th", "tr"):
+        return {"vertical-align": "inherit"}
+    return {}
+
+
+def _first_cell_valign(table_html, resolver=_declared_valign):
+    blocks = extract_blocks_from_html(
+        _doc(table_html), style_resolver=resolver, native_tables=True
+    )
+    (table,) = [b for b in blocks if b.get("type") == "table"]
+    return table["table"]["rows"][0]["cells"][0]["valign"]
+
+
+_LONG = "<td>a long neighbouring cell</td>"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "table_html, expected",
+    [
+        (f"<table><tbody><tr><td>x</td>{_LONG}</tr></tbody></table>", "middle"),
+        (f"<table><tr><td>x</td>{_LONG}</tr></table>", "middle"),
+        (
+            f'<table><tr><td style="vertical-align: top">x</td>{_LONG}</tr></table>',
+            "top",
+        ),
+        (
+            f'<table><tr><td style="vertical-align: bottom">x</td>{_LONG}</tr></table>',
+            "bottom",
+        ),
+        (
+            f'<table><tr><td style="vertical-align: baseline">x</td>{_LONG}</tr></table>',
+            "baseline",
+        ),
+        (
+            f'<table><tbody><tr style="vertical-align: top"><td>x</td>{_LONG}</tr></tbody></table>',
+            "top",
+        ),
+        (
+            f'<table><tbody style="vertical-align: bottom"><tr><td>x</td>{_LONG}</tr></tbody></table>',
+            "bottom",
+        ),
+        (f'<table><tr><td valign="top">x</td>{_LONG}</tr></table>', "top"),
+        (f'<table><tr><td valign="BOTTOM">x</td>{_LONG}</tr></table>', "bottom"),
+        (
+            f'<table><tbody><tr valign="top"><td>x</td>{_LONG}</tr></tbody></table>',
+            "top",
+        ),
+        (f'<table><tr valign="bottom"><td>x</td>{_LONG}</tr></table>', "bottom"),
+        (
+            f'<table><tbody valign="top"><tr><td>x</td>{_LONG}</tr></tbody></table>',
+            "top",
+        ),
+        (
+            f'<table><tr><td valign="top" style="vertical-align: middle">x</td>{_LONG}</tr></table>',
+            "middle",
+        ),
+        (
+            f'<table><tbody style="vertical-align: bottom"><tr valign="top"><td>x</td>{_LONG}</tr></tbody></table>',
+            "top",
+        ),
+        (
+            f'<table><tbody><tr style="vertical-align: top"><td style="vertical-align: inherit">x</td>{_LONG}</tr></tbody></table>',
+            "top",
+        ),
+        (f'<table><tr><td valign="sideways">x</td>{_LONG}</tr></table>', "middle"),
+    ],
+    ids=[
+        "unset-tbody",
+        "unset-bare-tr",
+        "css-top",
+        "css-bottom",
+        "css-baseline",
+        "row-css-top",
+        "group-css-bottom",
+        "attr-top",
+        "attr-uppercase",
+        "row-attr-top",
+        "bare-row-attr-bottom",
+        "group-attr-beats-ua-middle",
+        "cell-css-beats-cell-attr",
+        "row-attr-beats-group-css",
+        "explicit-inherit",
+        "attr-invalid",
+    ],
+)
+def test_a_cell_carries_its_computed_vertical_align(table_html, expected):
+    assert _first_cell_valign(table_html) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "table_html, expected",
+    [
+        (f"<table><tr><td>x</td>{_LONG}</tr></table>", None),
+        (f'<table><tr><td valign="top">x</td>{_LONG}</tr></table>', "top"),
+        (
+            f'<table><tbody valign="bottom"><tr><td>x</td>{_LONG}</tr></tbody></table>',
+            "bottom",
+        ),
+    ],
+    ids=["unset", "attr", "group-attr"],
+)
+def test_without_a_stylizer_only_valign_counts(table_html, expected):
+    assert _first_cell_valign(table_html, resolver=None) == expected
+
+
+@pytest.mark.unit
+def test_a_paragraph_cell_carries_its_vertical_align():
+    html = f'<table><tr><td valign="top"><p>one</p><p>two</p></td>{_LONG}</tr></table>'
+    blocks = extract_blocks_from_html(
+        _doc(html), style_resolver=_declared_valign, native_tables=True
+    )
+    (table,) = [b for b in blocks if b.get("type") == "table"]
+    cell = table["table"]["rows"][0]["cells"][0]
+    assert cell.get("paragraphs") and cell["valign"] == "top"

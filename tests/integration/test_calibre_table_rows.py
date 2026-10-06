@@ -728,3 +728,58 @@ def test_notes_tables_are_written_as_paragraphs_through_calibre(calibre):
     assert tables == [], calibre_version
     for n in range(1, 7):
         assert f"{n}. Note {n} text." in texts, (calibre_version, texts)
+
+
+# A cell's vertical-align (#269). Expected values are what Kindle Previewer
+# 4.0.1 wrote for the same cells: $58 top, $60 bottom, $320 middle or unset,
+# no $633 for baseline. calibre's Stylizer ignores `valign`, so the attribute
+# cases check the converter's own reading of it.
+VALIGN_CSS = """
+td.vtop { vertical-align: top; }
+td.vmid { vertical-align: middle; }
+tr.rtop { vertical-align: top; }
+tbody.gbottom { vertical-align: bottom; }
+"""
+_LONG_CELL = "<td>a neighbouring cell long enough to wrap onto several lines</td>"
+VALIGN_ROWS = [
+    ("VUNSET", "", "", "$320"),
+    ("VCSSTOP", ' class="vtop"', "", "$58"),
+    ("VSTYLEBOTTOM", ' style="vertical-align: bottom"', "", "$60"),
+    ("VBASELINE", ' style="vertical-align: baseline"', "", None),
+    ("VROWTOP", "", ' class="rtop"', "$58"),
+    ("VATTRTOP", ' valign="top"', "", "$58"),
+    ("VROWATTRBOTTOM", "", ' valign="bottom"', "$60"),
+    ("VATTRTOPCSSMID", ' valign="top" class="vmid"', "", "$320"),
+]
+VALIGN_TABLE = (
+    "<table><tbody>"
+    + "".join(
+        f"<tr{tr}><td{td}>{cid}</td>{_LONG_CELL}</tr>" for cid, td, tr, _ in VALIGN_ROWS
+    )
+    + f'</tbody><tbody class="gbottom"><tr><td>VGROUPBOTTOM</td>{_LONG_CELL}</tr></tbody>'
+    + f'<tbody valign="top"><tr><td>VGROUPATTRTOP</td>{_LONG_CELL}</tr></tbody>'
+    + "</table>"
+)
+VALIGN_EXPECTED = {cid: want for cid, _, _, want in VALIGN_ROWS}
+VALIGN_EXPECTED.update(VGROUPBOTTOM="$60", VGROUPATTRTOP="$58")
+
+
+def test_native_cells_take_their_vertical_align(calibre):
+    tmp, _, calibre_version = calibre
+    epub = tmp / "valign-269.epub"
+    _build_epub(epub, [("c1", "VALIGN", VALIGN_TABLE)], VALIGN_CSS, {})
+    kfx = tmp / "valign-269.kfx"
+    _ebook_convert(calibre, epub, kfx, native=True)
+    got = {}
+    paragraphs = _paragraphs(kfx)
+    for i, (text, style) in enumerate(paragraphs):
+        if text in VALIGN_EXPECTED:
+            v = style.get("$633")
+            # The neighbouring cell inherits the same row and row group.
+            n = paragraphs[i + 1][1].get("$633")
+            got[text] = None if v is None else str(v)
+            if text in ("VROWTOP", "VROWATTRBOTTOM", "VGROUPBOTTOM", "VGROUPATTRTOP"):
+                assert str(n) == got[text], (calibre_version, text, n)
+            else:
+                assert str(n) == "$320", (calibre_version, text, n)
+    assert got == VALIGN_EXPECTED, calibre_version

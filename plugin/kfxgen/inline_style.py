@@ -287,6 +287,9 @@ def parse_vertical_align(value):
 
 #: CSS text-align keyword -> KFX $34 value symbol.
 ALIGN_MAP = {"left": "$59", "right": "$61", "center": "$320", "justify": "$321"}
+# A table cell's vertical-align as $633, as Kindle Previewer 4 writes it. Any
+# other value (baseline, super, text-top, a length) gets no $633 there. (#269)
+VALIGN_MAP = {"top": "$58", "middle": "$320", "bottom": "$60"}
 
 
 def _parse_font_family(value):

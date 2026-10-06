@@ -7,7 +7,7 @@ import re
 from urllib.parse import unquote
 
 from ._img_tokens import IMG_TOKEN_RE
-from .inline_style import ALIGN_MAP
+from .inline_style import ALIGN_MAP, VALIGN_MAP
 from .kfxlib_minimal.kfx_container import KfxContainer
 from .kfxlib_minimal.standard_symbols import StandardSymbolTable
 from .kfxlib_minimal.ion import IonStruct, IonDecimal, IonAnnotation, IonBLOB, IS
@@ -1696,19 +1696,26 @@ class NativeKFXGenerator:
         rowspan=1,
         font_family=None,
         font_size=1.0,
+        valign="middle",
     ):
-        """$157 for a table cell: Previewer's padding and vertical centring,
-        plus the cell's own alignment, header weight and spans (#219), and
-        the chapter's font size, omitted at 1.0 as build_fragment_157 does."""
+        """$157 for a table cell: Previewer's padding, plus the cell's own
+        alignment, header weight and spans (#219), its vertical alignment
+        (#269; none for a value outside VALIGN_MAP, as Previewer writes it),
+        and the chapter's font size, omitted at 1.0 as build_fragment_157
+        does."""
         self.symtab.create_local_symbol(entity_name)
         lh = lambda v: IonStruct(IS("$307"), IonDecimal(v), IS("$306"), IS("$310"))  # noqa: E731
         pct = lambda v: IonStruct(IS("$307"), IonDecimal(v), IS("$306"), IS("$314"))  # noqa: E731
         value = IonStruct(
-            IS("$633"), IS("$320"),
             IS("$52"), lh("0.03125"), IS("$53"), pct("0.117"),
             IS("$54"), lh("0.03125"), IS("$55"), pct("0.117"),
             IS("$173"), IS(entity_name),
         )  # fmt: skip
+        if valign in VALIGN_MAP:
+            # First, where it has always been written, so a middle cell's
+            # bytes don't change.
+            value[IS("$633")] = IS(VALIGN_MAP[valign])
+            value.move_to_end(IS("$633"), last=False)
         if align in ALIGN_MAP:
             value[IS("$34")] = IS(ALIGN_MAP[align])
         if bold:
@@ -3313,6 +3320,7 @@ class NativeKFXGenerator:
                         "header": bool(cell.get("header")),
                         "colspan": cell.get("colspan", 1),
                         "rowspan": cell.get("rowspan", 1),
+                        "valign": cell.get("valign"),
                     }
                     if cell.get("paragraphs"):
                         # A cell holding several blocks (#261): a container,
@@ -3352,6 +3360,7 @@ class NativeKFXGenerator:
                                 "header": bool(cell.get("header")),
                                 "colspan": cell.get("colspan", 1),
                                 "rowspan": cell.get("rowspan", 1),
+                                "valign": cell.get("valign"),
                             },
                         }
                     )
@@ -4011,6 +4020,9 @@ class NativeKFXGenerator:
                 "colspan": cell["colspan"],
                 "rowspan": cell["rowspan"],
                 "font_size": font_size,
+                # Unset is middle, as calibre's UA sheet makes it, so the two
+                # share one style.
+                "valign": cell.get("valign") or "middle",
             }
             if cell_fam:
                 cattrs["font_family"] = cell_fam

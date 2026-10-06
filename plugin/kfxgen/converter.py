@@ -958,6 +958,39 @@ def _row_align(tr, row_align, style_resolver):
     return row_align
 
 
+_VALIGN_ATTR_VALUES = {"top", "middle", "bottom", "baseline"}
+_VALIGN_SCOPE = _CELL_TAGS | {"tr", "thead", "tbody", "tfoot"}
+
+
+def _cell_valign(cell, style_resolver):
+    """A cell's computed vertical-align: its own, else its row's, else its row
+    group's (#269). None when nothing sets it, which only happens without a
+    Stylizer.
+
+    calibre's Stylizer computes the CSS but ignores the `valign` attribute,
+    which calibre keeps in the markup, so it is read here: on each element
+    a CSS value wins over the attribute, as an author rule beats a
+    presentational hint. calibre's UA sheet gives td/tr `inherit`, so the
+    walk goes on, and row groups and `table > tr` `middle`, which can't be
+    told from an author's `middle`: there the attribute wins, as it does
+    over the UA rule in a browser. Kindle Previewer 4 gives the same answer
+    for every case in the #269 probe."""
+    el = cell
+    while el is not None and _local_tag(el.tag) in _VALIGN_SCOPE:
+        css = style_resolver(el) if style_resolver is not None else None
+        declared = ((css or {}).get("vertical-align") or "").strip().lower()
+        attr = (el.get("valign") or "").strip().lower()
+        if attr not in _VALIGN_ATTR_VALUES:
+            attr = ""
+        ua_middle = declared == "middle" and _local_tag(el.tag) not in _CELL_TAGS
+        if declared and declared != "inherit" and not (ua_middle and attr):
+            return declared
+        if attr:
+            return attr
+        el = el.getparent()
+    return None
+
+
 def _table_cell(cell, style_resolver, base_href):
     text, spans, marks = normalize_runs_with_anchors(
         _walk_inline(cell, style_resolver=style_resolver, base_href=base_href)
@@ -973,6 +1006,7 @@ def _table_cell(cell, style_resolver, base_href):
         "header": _local_tag(cell.tag) == "th",
         "colspan": _span_attr(cell, "colspan"),
         "rowspan": _span_attr(cell, "rowspan"),
+        "valign": _cell_valign(cell, style_resolver),
     }
 
 
@@ -995,6 +1029,7 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
         "header": _local_tag(cell.tag) == "th",
         "colspan": _span_attr(cell, "colspan"),
         "rowspan": _span_attr(cell, "rowspan"),
+        "valign": _cell_valign(cell, style_resolver),
         "paragraphs": paragraphs,
     }
 
