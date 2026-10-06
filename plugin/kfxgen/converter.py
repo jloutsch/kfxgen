@@ -1544,9 +1544,10 @@ def extract_blocks_from_html(
     When style_resolver is given, it is called per block element (elem -> css_dict|None)
     and the result is passed to compute_block_style to populate block_style.
 
-    `nav_listing_at`, when given, collects the block index at which each
-    contents listing was discarded, so the caller can tell which chapter held
-    one. A listing that *was* the chapter's content has to be handed to the
+    `nav_listing_at`, when given, collects one `(index, ids)` pair for each
+    contents listing discarded: the index of the block that now follows it, and
+    the anchor ids the listing itself held, so the caller can tell which
+    chapter held it (#276). A listing that *was* the chapter's content has to be handed to the
     contents rebuild rather than simply deleted, or the book loses its
     contents page (#132).
 
@@ -2392,8 +2393,8 @@ def _assemble_chapters_by_coordinate(
     #
     # A listing that ends where the next chapter starts records that chapter's
     # first index too. It belongs to that chapter only when the chapter's TOC
-    # entry names the listing itself (`<div id="toc" class="toc">`, 391 of 393
-    # library cases); otherwise it belongs to the chapter holding the block
+    # entry names the listing itself or an id inside it (`<div id="toc"
+    # class="toc">`); otherwise it belongs to the chapter holding the block
     # before it. A listing at the start of its file stays with that file. (#276)
     starts = {}
     for fi, si, _title in coords:

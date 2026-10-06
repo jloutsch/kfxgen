@@ -5412,7 +5412,8 @@ def test_a_comment_in_a_paragraph_cell_is_not_a_paragraph():
 # whose content the contents rebuild then replaced (pg45130's part page; and,
 # once #252 removed comment blocks that happened to sit in between, pg2160's
 # letter "To Mr HENRY DAVIS"). It belongs to the next chapter only when that
-# chapter's TOC entry points at the listing itself (391 of 393 library cases).
+# chapter's TOC entry points at the listing itself or an id inside it
+# (`<div id="toc" class="toc">`).
 
 
 def _listing_chapters(files, toc):
@@ -5475,6 +5476,38 @@ def test_a_toc_entry_on_the_listing_itself_owns_it():
         [
             ("Title", "front.xhtml"),
             ("Contents", "front.xhtml#toc"),
+            ("Part One", "front.xhtml#p1"),
+            ("Chapter 1", "c1.xhtml"),
+        ],
+    )
+    flagged = {c["title"]: bool(c.get("_had_nav_listing")) for c in chapters}
+    assert flagged == {
+        "Title": False,
+        "Contents": True,
+        "Part One": False,
+        "Chapter 1": False,
+    }
+
+
+@pytest.mark.unit
+def test_a_toc_entry_on_an_id_inside_the_listing_owns_it():
+    # #286 review: the TOC may name a heading inside the listing rather than
+    # the listing element itself.
+    listing = _LISTING.replace(
+        '<div class="toc">', '<div class="toc"><h2 id="toc-head">Contents</h2>'
+    )
+    chapters = _listing_chapters(
+        [
+            (
+                "front.xhtml",
+                f"<h1>Title</h1><p>By someone.</p>{listing}"
+                '<p>After the listing.</p><h1 id="p1">Part One</h1><p>Part text.</p>',
+            ),
+            ("c1.xhtml", "<h1>Chapter 1</h1><p>One.</p>"),
+        ],
+        [
+            ("Title", "front.xhtml"),
+            ("Contents", "front.xhtml#toc-head"),
             ("Part One", "front.xhtml#p1"),
             ("Chapter 1", "c1.xhtml"),
         ],
