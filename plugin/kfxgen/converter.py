@@ -1031,9 +1031,11 @@ def _table_bordered(table, style_resolver):
     `rules` other than none, `frame` other than void, or a CSS border on the
     table or on any of its own cells. calibre's Stylizer doesn't map the
     attributes, so they are read here. A row's border isn't drawn in the
-    separated-borders model and doesn't count."""
+    separated-borders model and doesn't count. The attribute's value is
+    read as HTML reads it: its leading digits, so "0px" and "0.5" are 0, and
+    a value with none (an empty one) is 1."""
     border = table.get("border")
-    if border is not None and border.strip() != "0":
+    if border is not None and int(re.match(r"\s*(\d*)", border).group(1) or 1):
         return True
     if (table.get("rules") or "none").strip().lower() != "none":
         return True
