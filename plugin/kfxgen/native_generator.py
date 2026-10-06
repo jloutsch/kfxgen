@@ -2041,6 +2041,10 @@ class NativeKFXGenerator:
                     IS("$584"),
                     alt,
                 )
+                if story_name is None:
+                    # A picture in a table cell: no style, so it shows at its
+                    # own size within the cell (#262).
+                    del entry[IS("$157")]
                 if resource_name:
                     entry[IS("$175")] = IS(resource_name)
                 # Image entries hold no text, so they carry no content
@@ -3295,6 +3299,58 @@ class NativeKFXGenerator:
                 pos += self.CHUNK_SIZE
             return assigned
 
+        def _emit_paragraph(block):
+            """A paragraph's chunks: its text, cut at each picture into text
+            and image chunks, with spans and anchors placed on the piece
+            holding them; anchors no piece holds go on the first chunk.
+            Used for the body's paragraphs and for a cell paragraph holding
+            a picture (#262)."""
+            preformatted = bool(block.get("preformatted"))
+            para = block["text"].rstrip() if preformatted else block["text"].strip()
+            if not para.strip():
+                return
+            para_spans = block.get("spans", [])
+            block_style = block.get("block_style")
+            block_anchor_keys = block.get("anchor_keys") or []
+            block_offsets = block.get("anchor_offsets") or {}
+            block_first_chunk = len(all_chunks)
+            for chunk in _emit_text_chunks(para, preformatted):
+                if chunk["type"] == "image":
+                    # Figure ids live on image blocks; without this
+                    # a link to a figure resolved to nothing. (#62)
+                    at_start = [
+                        k for k in block_anchor_keys if not block_offsets.get(k)
+                    ]
+                    if at_start:
+                        chunk["anchor_keys"] = at_start
+                        block_anchor_keys = [
+                            k for k in block_anchor_keys if k not in set(at_start)
+                        ]
+                    all_chunks.append(chunk)
+                else:
+                    placed = _append_text_with_spans(
+                        chunk["text"],
+                        para,
+                        para_spans,
+                        block_style,
+                        block_anchor_keys,
+                        block_offsets,
+                    )
+                    block_anchor_keys = [
+                        k for k in block_anchor_keys if k not in placed
+                    ]
+            # Anything whose offset landed in no piece — a clamped
+            # value, or text the chunker could not locate — belongs
+            # to the block's first chunk rather than nowhere.
+            if block_anchor_keys and len(all_chunks) > block_first_chunk:
+                first = all_chunks[block_first_chunk]
+                first["anchor_keys"] = _dedupe_keys(
+                    (first.get("anchor_keys") or []) + block_anchor_keys
+                )
+                first.setdefault("anchor_offsets", {}).update(
+                    dict.fromkeys(block_anchor_keys, 0)
+                )
+
         def _emit_table_chunks(block):
             """Marker chunks around a native table's cells (#219). `open`
             becomes a container entry with one position; `close` ends it and
@@ -3365,7 +3421,20 @@ class NativeKFXGenerator:
                                 "cell": cell_info,
                             }
                         )
+                        inside = len(all_chunks)
                         for para in cell["paragraphs"]:
+                            if IMG_TOKEN_RE.search(para["text"]):
+                                # A picture is an image entry in the cell,
+                                # with no style of its own, as Kindle
+                                # Previewer writes it (#262).
+                                first = len(all_chunks)
+                                _emit_paragraph(para)
+                                for ch in all_chunks[first:]:
+                                    if ch["type"] == "image":
+                                        ch["in_cell"] = True
+                                    else:
+                                        ch["in_header_cell"] = cell_info["header"]
+                                continue
                             all_chunks.append(
                                 {
                                     "type": "text",
@@ -3377,6 +3446,10 @@ class NativeKFXGenerator:
                                     "in_header_cell": cell_info["header"],
                                 }
                             )
+                        if len(all_chunks) == inside:
+                            # Only a picture the book doesn't hold: keep the
+                            # cell, as an empty text cell is kept.
+                            all_chunks.append({"type": "text", "text": " "})
                         all_chunks.append({"type": "close"})
                         continue
                     all_chunks.append(
@@ -3550,59 +3623,7 @@ class NativeKFXGenerator:
                         if block.get("type") == "table":
                             _emit_table_chunks(block)
                             continue
-                        preformatted = bool(block.get("preformatted"))
-                        para = (
-                            block["text"].rstrip()
-                            if preformatted
-                            else block["text"].strip()
-                        )
-                        if not para.strip():
-                            continue
-                        para_spans = block.get("spans", [])
-                        block_style = block.get("block_style")
-                        block_anchor_keys = block.get("anchor_keys") or []
-                        block_offsets = block.get("anchor_offsets") or {}
-                        block_first_chunk = len(all_chunks)
-                        for chunk in _emit_text_chunks(para, preformatted):
-                            if chunk["type"] == "image":
-                                # Figure ids live on image blocks; without this
-                                # a link to a figure resolved to nothing. (#62)
-                                at_start = [
-                                    k
-                                    for k in block_anchor_keys
-                                    if not block_offsets.get(k)
-                                ]
-                                if at_start:
-                                    chunk["anchor_keys"] = at_start
-                                    block_anchor_keys = [
-                                        k
-                                        for k in block_anchor_keys
-                                        if k not in set(at_start)
-                                    ]
-                                all_chunks.append(chunk)
-                            else:
-                                placed = _append_text_with_spans(
-                                    chunk["text"],
-                                    para,
-                                    para_spans,
-                                    block_style,
-                                    block_anchor_keys,
-                                    block_offsets,
-                                )
-                                block_anchor_keys = [
-                                    k for k in block_anchor_keys if k not in placed
-                                ]
-                        # Anything whose offset landed in no piece — a clamped
-                        # value, or text the chunker could not locate — belongs
-                        # to the block's first chunk rather than nowhere.
-                        if block_anchor_keys and len(all_chunks) > block_first_chunk:
-                            first = all_chunks[block_first_chunk]
-                            first["anchor_keys"] = _dedupe_keys(
-                                (first.get("anchor_keys") or []) + block_anchor_keys
-                            )
-                            first.setdefault("anchor_offsets", {}).update(
-                                dict.fromkeys(block_anchor_keys, 0)
-                            )
+                        _emit_paragraph(block)
 
             # Illustrations the source printed in a contents section that was
             # replaced. They arrive as their own key rather than inside
@@ -3952,7 +3973,9 @@ class NativeKFXGenerator:
             keys_used = {
                 _image_size_key(c)
                 for c in all_chunks
-                if isinstance(c, dict) and c.get("type") == "image"
+                if isinstance(c, dict)
+                and c.get("type") == "image"
+                and not c.get("in_cell")
             }
             kinds_used = {axis for axis, _ in keys_used}
             widths_used = {pct for axis, pct in keys_used if axis == "w"}
@@ -4104,7 +4127,11 @@ class NativeKFXGenerator:
                     continue
                 entry_nodes.append(None)
                 if chunk.get("type") == "image":
-                    entry_styles.append(_image_style_for(chunk) or story_names[ch_idx])
+                    entry_styles.append(
+                        None
+                        if chunk.get("in_cell")
+                        else _image_style_for(chunk) or story_names[ch_idx]
+                    )
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)
