@@ -2468,6 +2468,9 @@ def _assemble_chapters_by_coordinate(
             # wrapper. One corpus book was 835 of 994 nav entries this way,
             # each an 85-character filename (#143).
             ch["_omit_from_toc"] = True
+            # The filename title is ours, not the book's: never print it as
+            # the page's heading either, as for the head above (#133, #275).
+            ch["_omit_title_heading"] = True
             chapters.append(ch)
 
     return chapters

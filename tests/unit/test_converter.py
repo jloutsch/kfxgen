@@ -3758,6 +3758,30 @@ class TestUntocedChaptersAreNotListed:
         assert orphan.get("_omit_from_toc") is True
         assert "A note from the author" in orphan["text"]
 
+    def _tail_book(self):
+        spine = [
+            _spine_item("book.xhtml", [("Chapter I", ["c1"]), ("Body", [])]),
+            self._spine("bm_001.xhtml", "A note from the author. back"),
+        ]
+        toc = [{"title": "I", "href": "book.xhtml#c1"}]
+        return _assemble_chapters_by_coordinate(spine, toc, _silent_log())
+
+    def test_a_tail_orphan_does_not_print_its_file_name(self):
+        # #275: #143 took the file-name label out of the nav pane, but it was
+        # still printed as the page's heading: 43 in pg120, 3,471 pages in a
+        # library sample. The label is ours, not the book's, as for the head.
+        assert self._tail_book()[-1].get("_omit_title_heading") is True
+
+    def test_no_heading_chunk_holds_the_file_name(self):
+        from kfxgen.native_generator import NativeKFXGenerator
+
+        chapters = self._tail_book()
+        chunks = NativeKFXGenerator()._build_chapter_content(chapters)["all_chunks"]
+        texts = [c["text"] for c in chunks if c.get("type") == "text"]
+        assert "bm_001" not in texts
+        assert any("A note from the author" in t for t in texts)
+        assert "I" in texts  # the TOC-named chapter keeps its heading
+
     def test_chapters_the_toc_names_are_still_listed(self):
         """The control. Omitting must not reach real entries — the nav pane is
         the project's headline feature."""
