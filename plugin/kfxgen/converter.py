@@ -505,6 +505,8 @@ def _walk_inline(
         # A comment or a processing instruction: lxml gives it a `.text`, but
         # it is markup, not content ("H2 anchor", a <?dp n="12"?> page
         # marker). Its `.tail` is real text, and the caller keeps it. (#252)
+        # An unresolved entity node lands here too; calibre resolves entities
+        # before the plugin sees the tree, so a conversion never meets one.
         return []
     local = _local_tag(elem.tag)
     if local == "br":
@@ -1761,7 +1763,8 @@ def extract_blocks_from_html(
     def _walk_element(elem):
         if not isinstance(elem.tag, str):
             # A comment or a processing instruction between blocks is markup,
-            # not a paragraph (#252).
+            # not a paragraph (#252). Also an unresolved entity node, which a
+            # calibre tree never holds.
             return
         if _is_non_rendered(elem):
             return
