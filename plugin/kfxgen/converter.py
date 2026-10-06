@@ -1710,7 +1710,9 @@ def extract_blocks_from_html(
             # A contents listing in a cell was recorded at an index inside
             # the cell, whose blocks are taken out; it belongs to the table,
             # which goes where the cell's blocks began.
-            nav_listing_at[listings:] = [start] * (len(nav_listing_at) - listings)
+            nav_listing_at[listings:] = [
+                (start, ids) for _, ids in nav_listing_at[listings:]
+            ]
         if pending_ids and out:
             last = out[-1]
             for aid in pending_ids:
@@ -1765,7 +1767,12 @@ def extract_blocks_from_html(
             return
         if _is_nav_listing(elem):
             if nav_listing_at is not None:
-                nav_listing_at.append(len(blocks))
+                # The listing's own ids travel with its position: a TOC entry
+                # aimed at one of them is what makes the chapter starting
+                # after the listing its owner (#276).
+                nav_listing_at.append(
+                    (len(blocks), frozenset(_subtree_anchor_ids(elem)))
+                )
             _discard_listing(elem)
             return
         background = _css_background_image(
@@ -2379,13 +2386,33 @@ def _assemble_chapters_by_coordinate(
     # a real short chapter's content with a contents page. Clamp such an index
     # back onto the file's last block so every listing lands strictly inside
     # the chapter that held it.
+    #
+    # A listing that ends where the next chapter starts records that chapter's
+    # first index too. It belongs to that chapter only when the chapter's TOC
+    # entry names the listing itself (`<div id="toc" class="toc">`, 391 of 393
+    # library cases); otherwise it belongs to the chapter holding the block
+    # before it. A listing at the start of its file stays with that file. (#276)
+    starts = {}
+    for fi, si, _title in coords:
+        starts[fi] = si
+    toc_frag_at = {}
+    for entry in toc_entries:
+        frag = _href_fragment(entry["href"])
+        if frag:
+            toc_frag_at.setdefault(_normalize_href(entry["href"]), set()).update(
+                (frag, unquote(frag))
+            )
     nav_flat = set()
     for si, s_item in enumerate(spine_items_ordered):
         last = len(spine_blocks[si]) - 1
-        for local in s_item.get("nav_listing_at") or ():
-            if last < 0:
-                continue
-            nav_flat.add(file_offset[si] + min(local, last))
+        if last < 0:
+            continue
+        frags_here = toc_frag_at.get(_normalize_href(s_item["href"]), set())
+        for local, ids in s_item.get("nav_listing_at") or ():
+            fi = file_offset[si] + min(local, last)
+            if fi in starts and 0 < local <= last and not (ids & frags_here):
+                fi -= 1
+            nav_flat.add(fi)
 
     def _flag_nav(ch, start, end):
         """Mark a chapter that held a discarded listing. Half-open, matching
@@ -2767,7 +2794,18 @@ def _nav_listing_contents_chapter(chapters):
         if not ch.get("_had_nav_listing"):
             continue
         remnant = _IMG_TOKEN_RE.sub("", ch.get("text") or "").strip()
-        if len(remnant) <= _NAV_REMNANT_MAX_LEN:
+        if len(remnant) > _NAV_REMNANT_MAX_LEN:
+            continue
+        # At most one block of its own, its heading. A short page of two or
+        # more is something else that also carried the listing: pg2160 and
+        # pg2701 print theirs on the title page, whose title and byline the
+        # rebuild would replace (#252/#276 review).
+        texts = [
+            b
+            for b in ch.get("blocks") or ()
+            if _IMG_TOKEN_RE.sub("", b.get("text") or "").strip()
+        ]
+        if len(texts) <= 1:
             return ch
     return None
 
