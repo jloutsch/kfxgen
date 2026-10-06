@@ -642,7 +642,7 @@ def test_fixture_multi_chapter_shape():
 #: Link spans publisher_structure must emit. An exact number so a silently
 #: dropped link fails; update deliberately when the fixture gains a link.
 #:
-#: Six from the contents page kfxgen generates in place of the discarded nav
+#: Two from the contents page kfxgen generates in place of the discarded nav
 #: document (#132), plus four from part1's body: the <sup> marker and the
 #: cross-folder prose link (which share a target and so resolve to one anchor
 #: between them), the endnote-appendix link, and the whole-file afterword
@@ -650,18 +650,22 @@ def test_fixture_multi_chapter_shape():
 #: document a recognised listing — a link pinned there would no longer be
 #: resolved at all, and this count would have passed vacuously (#76).
 #:
-#: Deleting the anchor-carry in `native_generator` drops this by two: the
-#: appendix link dies (its target id is on the elided heading — the #62 case),
-#: and so does the whole-file `back/afterword.xhtml` link, because that
-#: chapter's `<h1>Afterword</h1>` is elided too and takes the bare-filename
-#: key with it. The carry protects whole-file targets as well as fragments.
-EXPECTED_PUBLISHER_LINKS = 10
+#: The contents page had six until #284: it also listed the four unlisted back
+#: pages (part1, notes, notes, afterword) by file name. Pages the nav pane
+#: leaves out (#143) are now left off it too.
+#:
+#: Deleting the anchor-carry in `native_generator` drops this by one: the
+#: appendix link dies (its target id is on the elided heading — the #62 case).
+#: It used to drop by two, because back/afterword.xhtml's `<h1>Afterword</h1>`
+#: was elided as well; since #284 an unlisted page keeps its own opening words.
+EXPECTED_PUBLISHER_LINKS = 6
 
 #: Distinct `$266` anchors those links resolve to — one per unique target.
 #: Asserted alongside the link count because a link and its anchor are emitted
 #: from different code paths; a count that moves without the other moving is a
-#: resolution bug, not a fixture edit.
-EXPECTED_PUBLISHER_ANCHORS = 9
+#: resolution bug, not a fixture edit. 9 until #284, when the contents page
+#: stopped listing the four unlisted back pages.
+EXPECTED_PUBLISHER_ANCHORS = 5
 
 
 @pytest.mark.integration

@@ -2468,6 +2468,9 @@ def _assemble_chapters_by_coordinate(
             # wrapper. One corpus book was 835 of 994 nav entries this way,
             # each an 85-character filename (#143).
             ch["_omit_from_toc"] = True
+            # The filename title is ours, not the book's: never print it as
+            # the page's heading either, as for the head above (#133, #275).
+            ch["_omit_title_heading"] = True
             chapters.append(ch)
 
     return chapters
@@ -2886,6 +2889,11 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
             continue
         ch_lower = _normalize_title(ch["title"])
         if ch_lower in CONTENTS_SKIP_TITLES:
+            continue
+        if ch.get("_omit_from_toc"):
+            # Left out of the navigation pane (#143), so left off this page
+            # too: its title is a label kfxgen made up, such as a file name.
+            # (#284 review: 835 of pg22210's 992 entries.)
             continue
         toc_links.append({"text": ch["title"], "target_chapter_idx": i})
 
