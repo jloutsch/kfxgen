@@ -1,5 +1,68 @@
 # Changelog
 
+## 5.8.12 — Notes read as notes
+
+**Changed (#268, #273): notes laid out as a table are written as one
+paragraph per note.** Many books converted by calibre from MOBI or AZW3 lay
+out their endnotes as a two-column table: the note's number, then the note.
+Since 5.8.9 these were Kindle tables, and in a Kindle table the number sits
+beside the middle of a long note. Compared on the Paperwhite with the same
+book written both ways, the paragraphs read better: each note starts on its
+own line with its number at the start. Such a table is now written as one
+paragraph per note, as in 5.8.8, and every note link still lands on its own
+note.
+
+A table counts as notes when:
+- every row has two cells, and there are at least three rows;
+- every first cell is a note marker: a number, a roman numeral or a
+  symbol (`*`, `†`, `‡`), optionally bracketed or followed by a full stop;
+- **the book links into it:** at least 80% of its rows are link targets
+  from elsewhere in the book.
+
+The last condition is what tells notes from look-alikes. A contents table
+has the same shape, but its links point out to the chapters (pg6133), and
+nothing links into a data table or a numbered list set as a table. These
+stay Kindle tables. The issue first proposed "a link in every first cell";
+measured on the test sets, that rule matched pg6133's contents table and
+missed one book's notes, which have no back-links.
+
+**Known limits:**
+- **A contents table that the chapters link back to,** and that isn't
+  marked as a contents listing, would be taken for notes and written as
+  paragraphs. Neither test set has one.
+- From earlier releases, unchanged: images in cells (#262), nested tables
+  (#263), CSS borders and widths (#264), a list item holding only a table
+  (#265) and vertical alignment in cells (#269); notes becoming chapters in
+  a book with no table of contents (#225); progress following the paragraph
+  count (#227); hidden text and HTML comments printed (#256, #252).
+
+**Checks:**
+- **Tests:** the rule's positive and negative cases, including pg6133's
+  contents shape, notes without back-links, the 80% threshold, words that
+  look like roman numerals, and percent-encoded ids. The book-wide link pass
+  is tested end to end, and a calibre-gated test runs a notes book through
+  real calibre. Default suite 1,361 passed; `tier3_strict` 16 (every golden
+  byte-identical); calibre-gated tests pass.
+- **Gutenberg 90 against 5.8.11:** byte-identical, through the test shim
+  and through real calibre 9.14.0. No Gutenberg table is linked into, so
+  none changes.
+- **Library sample** (the 8 books with a notes-shaped table the book links
+  into, through the shim): 32 notes tables become paragraphs; words
+  identical in all 8 books; 9,186 links in both builds, none unresolved.
+- **Speed:** the check takes 0.04 s on a 5,000-row notes table.
+
+### Device verification
+
+`research/make_notes_table_sideload.py` builds "Notes Table New" (this
+release) and "Notes Table Old" (5.8.11) from one invented book. Firmware is
+the last version recorded for the device, not re-read.
+
+| Device | Firmware | Check | Result |
+|---|---|---|---|
+| Voyage 7th gen (2014) | 5.13.6 | notes in calibre's layout and notes without back-links; note links and a back-link; a contents table, a data table and a numbered list; the TOC | pass: notes read as paragraphs, each starting with its marker; every link lands; the three other tables stay tables |
+
+The Paperwhite and the Oasis were not run.
+
 ## 5.8.11 — Poems and notes inside tables
 
 **Fixed (#261, #267): a table cell holding several paragraphs ran them
