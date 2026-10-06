@@ -3260,17 +3260,17 @@ def test_a_link_into_a_paragraph_cell_lands_on_its_paragraph(tmp_path):
 
 
 @pytest.mark.unit
-def test_every_table_carries_amazons_table_viewer_properties(tmp_path):
-    # Kindle Previewer 3.106 and 4.0.1 write these on every table without CSS
-    # widths. Without them the Voyage (5.13.6) and the Oasis (5.18.2.1.1)
-    # squeeze columns until words break a character per line, even at 8
-    # columns; with them, tables up to 24 columns read correctly (#254).
+def test_every_multi_column_table_carries_amazons_table_viewer_properties(tmp_path):
+    # Without these the Voyage (5.13.6) and the Oasis (5.18.2.1.1) squeeze
+    # columns until words break a character per line, even at 8 columns;
+    # with them, tables up to 24 columns read correctly (#254). Without them
+    # the Voyage also stacks the cells of a plain 2-3 column table (#272).
     top, _ = _storyline(
         tmp_path,
         [
             _table_block([["a1", "b1"]]),
             {"text": "Between.", "spans": []},
-            _table_block([["c1"]]),
+            _table_block([["c1", "d1", "e1"]]),
         ],
     )
     tables = [e for e in top if str(e["$159"]) == "$278"]
@@ -3291,8 +3291,8 @@ def _content_features(tmp_path, blocks):
 
 
 @pytest.mark.unit
-def test_a_book_with_a_table_declares_the_table_viewer(tmp_path):
-    features = _content_features(tmp_path, [_table_block([["a"]])])
+def test_a_book_with_a_zoom_table_declares_the_table_viewer(tmp_path):
+    features = _content_features(tmp_path, [_table_block([["a", "b", "c", "d"]])])
     assert features.get("yj_table_viewer") == 1
 
 
@@ -3653,3 +3653,79 @@ def test_middle_and_unset_cells_share_one_style(tmp_path):
     a, b, c = _cell_styles(tmp_path, ["middle", None, "top"])
     assert a is b or a == b
     assert len({str(s["$173"]) for s in (a, b, c)}) == 2
+
+
+# --- which tables get the zoom button (#272) ---------------------------------
+#
+# Every table of 2 or more columns carries the table-viewer properties
+# ($629/$630); a one-column table doesn't, and reads as plain paragraphs.
+# Kindle Previewer 4.0.1 also leaves the viewer off plain 2-3 column tables,
+# but the Voyage then stacks their cells (#272 device check), so those keep
+# it. Every table keeps `max-width: 100%` ($65), as since 5.8.9.
+
+
+def _shaped_table(rows):
+    """rows: (group, [header flag per cell], colspan of the first cell)."""
+    block = _table_block([["c"] * len(flags) for _, flags, _ in rows])
+    for row, (group, flags, span) in zip(block["table"]["rows"], rows):
+        row["group"] = group
+        for cell, h in zip(row["cells"], flags):
+            cell["header"] = h
+        row["cells"][0]["colspan"] = span
+    return block
+
+
+def _zoom_and_max_width(tmp_path, block):
+    top, styles = _storyline(tmp_path, [block])
+    (table,) = [e for e in top if str(e["$159"]) == "$278"]
+    style = styles[str(table["$157"])]
+    return "$629" in table, "$630" in table, "$65" in style
+
+
+B, H = False, True
+_SHAPES = [
+    ("one-column", [("body", [B], 1), ("body", [B], 1)], False),
+    ("one-column-thead", [("head", [H], 1), ("body", [B], 1)], False),
+    ("one-row-one-cell", [("body", [B], 1)], False),
+    ("2x2-plain", [("body", [B, B], 1)] * 2, True),
+    ("3x6-plain", [("body", [B, B, B], 1)] * 6, True),
+    ("one-row-two-cells", [("body", [B, B], 1)], True),
+    ("4-columns-plain", [("body", [B, B, B, B], 1)] * 2, True),
+    ("2-columns-by-colspan", [("body", [B], 2), ("body", [B, B], 1)], True),
+    ("2-columns-only-by-colspan", [("body", [B], 2), ("body", [B], 1)], True),
+    ("thead", [("head", [B, B], 1), ("body", [B, B], 1)], True),
+    ("row-headings-only", [("body", [H, B], 1), ("body", [H, B], 1)], True),
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "rows, zoom", [s[1:] for s in _SHAPES], ids=[s[0] for s in _SHAPES]
+)
+def test_a_table_of_two_or_more_columns_gets_the_zoom_button(tmp_path, rows, zoom):
+    has_629, has_630, has_max_width = _zoom_and_max_width(tmp_path, _shaped_table(rows))
+    assert (has_629, has_630) == (zoom, zoom)
+    assert has_max_width
+
+
+def _declares_table_viewer(tmp_path, blocks):
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    gen.generate_full_book(
+        "T", "A", [{"title": "C", "text": "x", "blocks": blocks}], output_path=str(out)
+    )
+    feats = [
+        str(e["$492"])
+        for f in load_fragments(out)
+        if str(f.ftype) == "$585"
+        for e in val(f)["$590"]
+    ]
+    return "yj_table_viewer" in feats
+
+
+@pytest.mark.unit
+def test_yj_table_viewer_is_declared_only_when_a_table_has_the_zoom_button(tmp_path):
+    one_column = _shaped_table([("body", [B], 1)] * 2)
+    two_columns = _shaped_table([("body", [B, B], 1)] * 2)
+    assert _declares_table_viewer(tmp_path, [one_column]) is False
+    assert _declares_table_viewer(tmp_path, [one_column, two_columns]) is True

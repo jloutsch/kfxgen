@@ -783,3 +783,61 @@ def test_native_cells_take_their_vertical_align(calibre):
             else:
                 assert str(n) == "$320", (calibre_version, text, n)
     assert got == VALIGN_EXPECTED, calibre_version
+
+
+# Which tables get the zoom button (#272): every table of 2 or more columns,
+# and no one-column table, through the real pipeline.
+ZOOM_CSS = "td.ruled { border-bottom: 1px solid black; }\n"
+ZOOM_TABLES = [
+    (
+        "ZPLAIN",
+        "",
+        "<tr><td>{c}</td><td>b</td></tr><tr><td>c</td><td>d</td></tr>",
+        True,
+    ),
+    (
+        "ZTHREE",
+        "",
+        "<tr><td>{c}</td><td>b</td><td>x</td></tr><tr><td>c</td><td>d</td><td>y</td></tr>",
+        True,
+    ),
+    ("ZONECOL", "", "<tr><td>{c}</td></tr><tr><td>c</td></tr>", False),
+    ("ZONECOLBORDER", ' border="1"', "<tr><td>{c}</td></tr><tr><td>c</td></tr>", False),
+    ("ZONECOLHEAD", "", "<tr><th>{c}</th></tr><tr><td>c</td></tr>", False),
+    (
+        "ZCELLRULE",
+        "",
+        '<tr><td class="ruled">{c}</td><td>b</td></tr><tr><td>c</td><td>d</td></tr>',
+        True,
+    ),
+]
+
+
+def test_only_multi_column_tables_get_the_zoom_button(calibre):
+    tmp, _, calibre_version = calibre
+    epub = tmp / "zoom-272.epub"
+    cases = [
+        ("c1", cid, f"<table{attrs}>{rows.format(c=cid)}</table>")
+        for cid, attrs, rows, _ in ZOOM_TABLES
+    ]
+    _build_epub(epub, cases, ZOOM_CSS, {})
+    kfx = tmp / "zoom-272.kfx"
+    _ebook_convert(calibre, epub, kfx, native=True)
+    frags = load_fragments(kfx)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    content = {
+        str(val(f)["name"]): list(val(f)["$146"]) for f in by_type(frags, "$145")
+    }
+    got = {}
+    for story in by_type(frags, "$259"):
+        for e in iter_entries(val(story)["$146"]):
+            if str(e.get("$159")) != "$278":
+                continue
+            first = next(
+                x for x in iter_entries(e["$146"]) if x.get("$145") is not None
+            )
+            ref = first["$145"]
+            text = str(content[str(ref["name"])][int(ref["$403"])])
+            got[text] = ("$629" in e, "$65" in styles[str(e["$157"])])
+    want = {cid: (zoom, True) for cid, _, _, zoom in ZOOM_TABLES}
+    assert got == want, calibre_version
