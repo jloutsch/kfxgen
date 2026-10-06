@@ -571,6 +571,19 @@ def _walk_inline(
             for href, alt in _svg_image_refs(child):
                 token = _make_img_token(href, alt, SVG_IMAGE_SIZE)
                 parts.append((token, frozenset()))
+        elif clocal in _CELL_BLOCK_TAGS:
+            # A block walked inline (a table row's cells on the rows path, a
+            # cell mixing text and a block): its edges are a word boundary
+            # even when the HTML puts no whitespace there. "cellone" and
+            # "<p>celltwo</p>" read "cellonecelltwo" before. Text inside one
+            # block is unchanged. (#279)
+            parts.append((" ", frozenset()))
+            parts.extend(
+                _walk_inline(
+                    child, cur, style_resolver, is_root=False, base_href=base_href
+                )
+            )
+            parts.append((" ", frozenset()))
         else:
             parts.extend(
                 _walk_inline(

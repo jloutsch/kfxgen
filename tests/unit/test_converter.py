@@ -5569,3 +5569,90 @@ def test_a_listing_page_with_just_its_heading_becomes_the_contents_page():
         {"title": "Part One", "text": "Part text."},
     ]
     assert _conv._nav_listing_contents_chapter(chapters) is chapters[0]
+
+
+# --- blocks inside a cell are separated (#279) -------------------------------
+#
+# A cell's blocks were joined with nothing between them when the HTML had no
+# whitespace there: real calibre wrote <td>cellone<p>celltwo</p></td> as
+# "cellonecelltwo". Native paragraph cells (#261) walk each block apart; every
+# other path walks the cell inline and now puts a space at block boundaries.
+
+
+def _cell_texts(body, native):
+    blocks = extract_blocks_from_html(_doc(body), native_tables=native)
+    out = []
+    for b in blocks:
+        if b.get("type") == "table":
+            for r in b["table"]["rows"]:
+                for c in r["cells"]:
+                    out.append(
+                        [p["text"] for p in c["paragraphs"]]
+                        if c.get("paragraphs")
+                        else c["text"]
+                    )
+        else:
+            out.append(b["text"])
+    return out
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "cells, native, expected",
+    [
+        ("<td><p>one two</p><p>three</p></td>", False, ["one two three"]),
+        ("<td><p>one two</p><p>three</p></td>", True, [["one two", "three"]]),
+        ("<td>one<p>two</p></td>", True, ["one two"]),
+        ("<td><p>one</p>two</td>", True, ["one two"]),
+        ('<td><img src="a.png"/><p>one</p><p>two</p></td>', True, None),
+        ('<td><img src="a.png"/></td><td><p>one</p><p>two</p></td>', True, None),
+        ("<td>cellone<p>celltwo</p></td>", False, ["cellone celltwo"]),
+    ],
+    ids=[
+        "rows-two-p",
+        "native-two-p",
+        "native-lead-text",
+        "native-tail-text",
+        "image-same-cell",
+        "image-other-cell",
+        "rows-calibre-repro",
+    ],
+)
+def test_blocks_inside_a_cell_do_not_run_together(cells, native, expected):
+    texts = _cell_texts(f"<table><tr>{cells}</tr></table>", native)
+    if expected is None:
+        # An image sends the table to rows (#262); the words stay apart.
+        assert not any("onetwo" in str(t) for t in texts), texts
+        assert any("one two" in str(t) for t in texts), texts
+    else:
+        assert texts == expected
+
+
+@pytest.mark.unit
+def test_a_notes_table_keeps_a_notes_paragraphs_apart():
+    # The notes path (#268) writes each row as one paragraph through the rows
+    # path: "para apara b" before #279.
+    rows = "".join(
+        f'<tr><td><a href="ch.xhtml#r{n}">{n}.</a></td>'
+        f"<td><p>para {n}a</p><p>para {n}b</p></td></tr>"
+        f'<a id="n{n}"></a>'
+        for n in (1, 2, 3)
+    )
+    blocks = extract_blocks_from_html(
+        _doc(f"<table>{rows}</table>"),
+        native_tables=True,
+        base_href="notes.xhtml",
+        link_targets={f"notes.xhtml#n{n}" for n in (1, 2, 3)},
+    )
+    assert [b["text"] for b in blocks] == [
+        "1. para 1a para 1b",
+        "2. para 2a para 2b",
+        "3. para 3a para 3b",
+    ]
+
+
+@pytest.mark.unit
+def test_inline_text_inside_a_cell_is_unchanged():
+    # Only block boundaries gain a space; runs inside one block stay as written.
+    texts = _cell_texts("<table><tr><td>a<em>b</em>c</td></tr></table>", False)
+    assert texts == ["abc"]
