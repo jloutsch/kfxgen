@@ -501,6 +501,11 @@ def _walk_inline(
     descendants, never for the block element itself: a paragraph carrying
     `vertical-align` would otherwise turn its whole text into one raised
     run. (#52)"""
+    if not isinstance(elem.tag, str):
+        # A comment or a processing instruction: lxml gives it a `.text`, but
+        # it is markup, not content ("H2 anchor", a <?dp n="12"?> page
+        # marker). Its `.tail` is real text, and the caller keeps it. (#252)
+        return []
     local = _local_tag(elem.tag)
     if local == "br":
         # A forced line break, which the normalizer turns into a newline. It
@@ -1752,6 +1757,10 @@ def extract_blocks_from_html(
             pending_markers[:] = before
 
     def _walk_element(elem):
+        if not isinstance(elem.tag, str):
+            # A comment or a processing instruction between blocks is markup,
+            # not a paragraph (#252).
+            return
         if _is_non_rendered(elem):
             return
         if _is_nav_listing(elem):

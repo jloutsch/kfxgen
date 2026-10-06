@@ -5326,3 +5326,80 @@ def test_without_incoming_links_the_same_table_stays_native():
     )
     blocks = [b for c in chapters for b in c.get("blocks") or []]
     assert any(b.get("type") == "table" for b in blocks)
+
+
+# --- comments and processing instructions are not text (#252) --------------
+#
+# lxml gives a comment or a processing instruction a `.text`, which the
+# walkers read as content: pg1998 printed "H2 anchor" 142 times, and a
+# publisher's <?dp n="12" folio="ix"?> page markers printed as
+# 'n="12" folio="ix"'. Their tails are real text and stay.
+
+
+def _texts(body, **kw):
+    return [b["text"] for b in extract_blocks_from_html(_doc(body), **kw)]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "body, texts",
+    [
+        ("<p>x</p><!-- three --><p>y</p>", ["x", "y"]),
+        ("<p>alpha<!-- one -->beta</p>", ["alphabeta"]),
+        ("<div>lead<!-- two --><p>para</p></div>", ["lead", "para"]),
+        ("<p><em>a<!-- four -->b</em></p>", ["ab"]),
+        ("<!-- H2 anchor --><h2>Chapter</h2>", ["Chapter"]),
+        (
+            '<p>The road went on.<?dp n="12" folio="ix" ?> It was late.</p>',
+            ["The road went on. It was late."],
+        ),
+        ('<p>x</p><?dp n="13"?><p>y</p>', ["x", "y"]),
+    ],
+    ids=[
+        "between-paragraphs",
+        "inside-a-paragraph",
+        "in-a-container",
+        "inside-emphasis",
+        "before-a-heading",
+        "page-marker-inside",
+        "page-marker-between",
+    ],
+)
+def test_comments_and_processing_instructions_are_not_text(body, texts):
+    assert _texts(body) == texts
+
+
+@pytest.mark.unit
+def test_a_comment_keeps_the_emphasis_of_its_tail():
+    (block,) = extract_blocks_from_html(_doc("<p><em>a<!-- c -->b</em> c</p>"))
+    assert block["text"] == "ab c"
+    assert block["spans"] == [(0, 2, frozenset({I}))]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("native", [True, False], ids=["native", "rows"])
+def test_comments_in_a_table_are_not_text(native):
+    body = (
+        "<table><tr><td>x<!-- c -->y</td><td>z</td></tr>"
+        "<!-- between rows --><tr><td>p<?dp n='2'?>q</td><td>r</td></tr></table>"
+    )
+    blocks = extract_blocks_from_html(_doc(body), native_tables=native)
+    if native:
+        (table,) = blocks
+        assert [[c["text"] for c in r["cells"]] for r in table["table"]["rows"]] == [
+            ["xy", "z"],
+            ["pq", "r"],
+        ]
+    else:
+        assert [b["text"] for b in blocks] == ["xy z", "pq r"]
+
+
+@pytest.mark.unit
+def test_a_comment_in_a_paragraph_cell_is_not_a_paragraph():
+    blocks = extract_blocks_from_html(
+        _doc("<table><tr><td><p>a</p><!-- gap --><p>b</p></td></tr></table>"),
+        native_tables=True,
+    )
+    (table,) = blocks
+    cell = table["table"]["rows"][0]["cells"][0]
+    assert [p["text"] for p in cell["paragraphs"]] == ["a", "b"]
