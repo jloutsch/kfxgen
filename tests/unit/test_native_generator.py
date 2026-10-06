@@ -3889,3 +3889,37 @@ def test_a_cell_whose_only_picture_is_missing_keeps_an_empty_entry(tmp_path):
     # becoming an empty container.
     _, _, shapes = _picture_book(tmp_path, [_picture_table([_para(_pic("gone.png"))])])
     assert shapes == [("text", " ")]
+
+
+def _link_lands(tmp_path, target_block):
+    from kfxgen.inline_style import make_link_flag
+
+    gen = NativeKFXGenerator()
+    link = {
+        "text": "See",
+        "spans": [(0, 3, frozenset({make_link_flag("c.xhtml#fig")}))],
+        "anchor_keys": [],
+    }
+    gen.generate_full_book(
+        "T",
+        "A",
+        [{"title": "C", "text": "x", "blocks": [link, target_block]}],
+        output_path=str(tmp_path / "o.kfx"),
+        images={"a.png": _png(400, 300)},
+    )
+    return bool(_collect_link_targets(gen))
+
+
+@pytest.mark.unit
+def test_a_link_to_a_missing_picture_in_a_cell_still_lands(tmp_path):
+    # #290 review: a picture the book doesn't hold (or one of 100 bytes or
+    # less, which the generator skips) emitted nothing, so its id was lost
+    # and the link to it became plain text. On main it landed on the row.
+    table = _picture_table([_para(_pic("gone.png"), ["c.xhtml#fig"])])
+    assert _link_lands(tmp_path, table)
+
+
+@pytest.mark.unit
+def test_a_link_to_a_missing_picture_in_a_cell_with_text_still_lands(tmp_path):
+    table = _picture_table([_para(_pic("gone.png"), ["c.xhtml#fig"]), _para("Caption")])
+    assert _link_lands(tmp_path, table)

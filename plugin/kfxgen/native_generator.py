@@ -3304,11 +3304,15 @@ class NativeKFXGenerator:
             and image chunks, with spans and anchors placed on the piece
             holding them; anchors no piece holds go on the first chunk.
             Used for the body's paragraphs and for a cell paragraph holding
-            a picture (#262)."""
+            a picture (#262).
+
+            Returns the anchor keys it could not place because it emitted
+            nothing (only a picture the book doesn't hold), so the caller
+            can put them elsewhere."""
             preformatted = bool(block.get("preformatted"))
             para = block["text"].rstrip() if preformatted else block["text"].strip()
             if not para.strip():
-                return
+                return []
             para_spans = block.get("spans", [])
             block_style = block.get("block_style")
             block_anchor_keys = block.get("anchor_keys") or []
@@ -3350,6 +3354,7 @@ class NativeKFXGenerator:
                 first.setdefault("anchor_offsets", {}).update(
                     dict.fromkeys(block_anchor_keys, 0)
                 )
+            return block_anchor_keys if len(all_chunks) == block_first_chunk else []
 
         def _emit_table_chunks(block):
             """Marker chunks around a native table's cells (#219). `open`
@@ -3422,13 +3427,14 @@ class NativeKFXGenerator:
                             }
                         )
                         inside = len(all_chunks)
+                        unplaced = []
                         for para in cell["paragraphs"]:
                             if IMG_TOKEN_RE.search(para["text"]):
                                 # A picture is an image entry in the cell,
                                 # with no style of its own, as Kindle
                                 # Previewer writes it (#262).
                                 first = len(all_chunks)
-                                _emit_paragraph(para)
+                                unplaced += _emit_paragraph(para)
                                 for ch in all_chunks[first:]:
                                     if ch["type"] == "image":
                                         ch["in_cell"] = True
@@ -3450,6 +3456,17 @@ class NativeKFXGenerator:
                             # Only a picture the book doesn't hold: keep the
                             # cell, as an empty text cell is kept.
                             all_chunks.append({"type": "text", "text": " "})
+                        if unplaced:
+                            # Ids of such a picture go on the cell's first
+                            # entry, so a link to one still lands (#290
+                            # review); on main it landed on the row.
+                            first = all_chunks[inside]
+                            first["anchor_keys"] = _dedupe_keys(
+                                (first.get("anchor_keys") or []) + unplaced
+                            )
+                            first.setdefault("anchor_offsets", {}).update(
+                                dict.fromkeys(unplaced, 0)
+                            )
                         all_chunks.append({"type": "close"})
                         continue
                     all_chunks.append(
