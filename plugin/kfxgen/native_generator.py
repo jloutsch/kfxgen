@@ -3419,15 +3419,20 @@ class NativeKFXGenerator:
                     all_chunks.append({"type": "text", "text": link["text"]})
                     toc_link_chunks[chunk_idx] = link["target_chapter_idx"]
             else:
+                # The title is cut from the body only because the heading
+                # prints it. With the heading suppressed by the caller, the
+                # matching words are the page's own and stay (#284 review:
+                # back/notes.xhtml lost its "Notes").
+                cut_title = not chapter.get("_omit_title_heading")
                 text = chapter["text"]
                 stripped = text.lstrip()
-                if stripped[: len(title)].lower() == title.lower():
+                if cut_title and stripped[: len(title)].lower() == title.lower():
                     text = stripped[len(title) :].lstrip()
                 if text:
                     blocks = chapter.get("blocks")
                     if blocks is not None:
                         iter_blocks = list(blocks)
-                        if iter_blocks:
+                        if iter_blocks and cut_title:
                             first = iter_blocks[0]
                             first_stripped = first["text"].lstrip()
                             table_cut = None

@@ -3071,7 +3071,9 @@ def test_carried_title_keys_skip_a_leading_table_open():
             {
                 "title": "Tides",
                 "text": "x",
-                "_omit_title_heading": True,
+                # A heading omitted for another reason: since #284 a chapter
+                # whose heading is suppressed keeps its title words.
+                "_is_cover": True,
                 "blocks": [
                     {"text": "Tides", "spans": [], "anchor_keys": ["k_title"]},
                     _table_block([["a"], ["b"]]),
@@ -3086,6 +3088,27 @@ def test_carried_title_keys_skip_a_leading_table_open():
         ("row", ["k_title"]),
         ("row", []),
     ]
+
+
+@pytest.mark.unit
+def test_a_suppressed_heading_does_not_cut_the_title_words():
+    # #284 review: with no heading printed, cutting the title from the first
+    # block removed the book's own words and put nothing in their place.
+    ch = NativeKFXGenerator()._build_chapter_content(
+        [
+            {
+                "title": "notes",
+                "text": "Notes\n\nThe note.",
+                "_omit_title_heading": True,
+                "blocks": [
+                    {"text": "Notes", "spans": []},
+                    {"text": "The note.", "spans": []},
+                ],
+            }
+        ]
+    )
+    texts = [c["text"] for c in ch["all_chunks"] if c.get("type") == "text"]
+    assert texts == ["Notes", "The note."]
 
 
 def _storyline(tmp_path, blocks):

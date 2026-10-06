@@ -2890,6 +2890,11 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
         ch_lower = _normalize_title(ch["title"])
         if ch_lower in CONTENTS_SKIP_TITLES:
             continue
+        if ch.get("_omit_from_toc"):
+            # Left out of the navigation pane (#143), so left off this page
+            # too: its title is a label kfxgen made up, such as a file name.
+            # (#284 review: 835 of pg22210's 992 entries.)
+            continue
         toc_links.append({"text": ch["title"], "target_chapter_idx": i})
 
     # Illustrations that happen to sit in this section are content, and are
