@@ -3135,7 +3135,6 @@ def test_table_nests_like_amazons_minimal_table(tmp_path):
     table = top[2]
     assert str(table["$159"]) == "$278"
     assert table["$150"] is False
-    # A plain 2x2 table has no zoom button, as Previewer writes it (#272).
     assert [str(k) for k in table] == [
         "$155",
         "$159",
@@ -3143,6 +3142,8 @@ def test_table_nests_like_amazons_minimal_table(tmp_path):
         "$150",
         "$456",
         "$457",
+        "$629",
+        "$630",
         "$146",
     ]
     (body,) = table["$146"]
@@ -3259,20 +3260,17 @@ def test_a_link_into_a_paragraph_cell_lands_on_its_paragraph(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_zoom_table_carries_amazons_table_viewer_properties(tmp_path):
+def test_every_multi_column_table_carries_amazons_table_viewer_properties(tmp_path):
     # Without these the Voyage (5.13.6) and the Oasis (5.18.2.1.1) squeeze
     # columns until words break a character per line, even at 8 columns;
-    # with them, tables up to 24 columns read correctly (#254). Kindle
-    # Previewer 4.0.1 writes them on tables of 4+ columns, and on narrower
-    # ones with a border or a header row (#272).
-    bordered = _table_block([["a1", "b1"]])
-    bordered["table"]["bordered"] = True
+    # with them, tables up to 24 columns read correctly (#254). Without them
+    # the Voyage also stacks the cells of a plain 2-3 column table (#272).
     top, _ = _storyline(
         tmp_path,
         [
-            _table_block([["a1", "b1", "c1", "d1"]]),
+            _table_block([["a1", "b1"]]),
             {"text": "Between.", "spans": []},
-            bordered,
+            _table_block([["c1", "d1", "e1"]]),
         ],
     )
     tables = [e for e in top if str(e["$159"]) == "$278"]
@@ -3659,13 +3657,14 @@ def test_middle_and_unset_cells_share_one_style(tmp_path):
 
 # --- which tables get the zoom button (#272) ---------------------------------
 #
-# Kindle Previewer 4.0.1 writes the table-viewer properties ($629/$630) on a
-# table of 2+ columns that has a header row, a border, or 4+ columns, and
-# `max-width: 100%` ($65) on every other table, never both. Each case below is
-# a probed table shape (one table per chapter, Previewer 4.0.1).
+# Every table of 2 or more columns carries the table-viewer properties
+# ($629/$630); a one-column table doesn't, and reads as plain paragraphs.
+# Kindle Previewer 4.0.1 also leaves the viewer off plain 2-3 column tables,
+# but the Voyage then stacks their cells (#272 device check), so those keep
+# it. Every table keeps `max-width: 100%` ($65), as since 5.8.9.
 
 
-def _shaped_table(rows, bordered=False):
+def _shaped_table(rows):
     """rows: (group, [header flag per cell], colspan of the first cell)."""
     block = _table_block([["c"] * len(flags) for _, flags, _ in rows])
     for row, (group, flags, span) in zip(block["table"]["rows"], rows):
@@ -3673,7 +3672,6 @@ def _shaped_table(rows, bordered=False):
         for cell, h in zip(row["cells"], flags):
             cell["header"] = h
         row["cells"][0]["colspan"] = span
-    block["table"]["bordered"] = bordered
     return block
 
 
@@ -3686,66 +3684,28 @@ def _zoom_and_max_width(tmp_path, block):
 
 B, H = False, True
 _SHAPES = [
-    ("one-column", [("body", [B], 1), ("body", [B], 1)], False, False),
-    ("one-column-bordered", [("body", [B], 1), ("body", [B], 1)], True, False),
-    ("one-column-thead", [("head", [H], 1), ("body", [B], 1)], False, False),
-    ("2x2-plain", [("body", [B, B], 1)] * 2, False, False),
-    ("3x6-plain", [("body", [B, B, B], 1)] * 6, False, False),
-    ("4-columns-plain", [("body", [B, B, B, B], 1)] * 2, False, True),
-    ("4-columns-by-colspan", [("body", [B, B], 3), ("body", [B, B], 1)], False, True),
-    ("2-columns-bordered", [("body", [B, B], 1)] * 2, True, True),
-    ("thead", [("head", [B, B], 1), ("body", [B, B], 1)], False, True),
-    ("tfoot", [("body", [B, B], 1), ("foot", [B, B], 1)], False, True),
-    (
-        "first-row-th",
-        [("body", [H, H], 1), ("body", [B, B], 1), ("body", [B, B], 1)],
-        False,
-        True,
-    ),
-    ("first-row-mixed", [("body", [H, B], 1), ("body", [B, B], 1)], False, True),
-    (
-        "column-and-row-headings",
-        [("body", [H, H, H], 1), ("body", [H, B, B], 1)],
-        False,
-        True,
-    ),
-    ("row-headings-only", [("body", [H, B], 1), ("body", [H, B], 1)], False, False),
-    (
-        "two-heading-rows",
-        [("body", [H, H], 1), ("body", [H, H], 1), ("body", [B, B], 1)],
-        False,
-        False,
-    ),
-    (
-        "last-row-th",
-        [("body", [B, B], 1), ("body", [B, B], 1), ("body", [H, H], 1)],
-        False,
-        True,
-    ),
-    ("last-row-mixed", [("body", [B, B], 1), ("body", [H, B], 1)], False, False),
-    (
-        "middle-row-th",
-        [("body", [B, B], 1), ("body", [H, H], 1), ("body", [B, B], 1)],
-        False,
-        False,
-    ),
-    ("one-row-all-th", [("body", [H, H], 1)], False, False),
+    ("one-column", [("body", [B], 1), ("body", [B], 1)], False),
+    ("one-column-thead", [("head", [H], 1), ("body", [B], 1)], False),
+    ("one-row-one-cell", [("body", [B], 1)], False),
+    ("2x2-plain", [("body", [B, B], 1)] * 2, True),
+    ("3x6-plain", [("body", [B, B, B], 1)] * 6, True),
+    ("one-row-two-cells", [("body", [B, B], 1)], True),
+    ("4-columns-plain", [("body", [B, B, B, B], 1)] * 2, True),
+    ("2-columns-by-colspan", [("body", [B], 2), ("body", [B, B], 1)], True),
+    ("2-columns-only-by-colspan", [("body", [B], 2), ("body", [B], 1)], True),
+    ("thead", [("head", [B, B], 1), ("body", [B, B], 1)], True),
+    ("row-headings-only", [("body", [H, B], 1), ("body", [H, B], 1)], True),
 ]
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "rows, bordered, zoom", [s[1:] for s in _SHAPES], ids=[s[0] for s in _SHAPES]
+    "rows, zoom", [s[1:] for s in _SHAPES], ids=[s[0] for s in _SHAPES]
 )
-def test_a_table_gets_the_zoom_button_as_previewer_gives_it(
-    tmp_path, rows, bordered, zoom
-):
-    has_629, has_630, has_max_width = _zoom_and_max_width(
-        tmp_path, _shaped_table(rows, bordered)
-    )
+def test_a_table_of_two_or_more_columns_gets_the_zoom_button(tmp_path, rows, zoom):
+    has_629, has_630, has_max_width = _zoom_and_max_width(tmp_path, _shaped_table(rows))
     assert (has_629, has_630) == (zoom, zoom)
-    # Previewer writes one or the other, never both.
-    assert has_max_width is not zoom
+    assert has_max_width
 
 
 def _declares_table_viewer(tmp_path, blocks):
@@ -3765,7 +3725,7 @@ def _declares_table_viewer(tmp_path, blocks):
 
 @pytest.mark.unit
 def test_yj_table_viewer_is_declared_only_when_a_table_has_the_zoom_button(tmp_path):
-    plain = _shaped_table([("body", [B, B], 1)] * 2)
-    zoom = _shaped_table([("body", [B, B, B, B], 1)] * 2)
-    assert _declares_table_viewer(tmp_path, [plain]) is False
-    assert _declares_table_viewer(tmp_path, [plain, zoom]) is True
+    one_column = _shaped_table([("body", [B], 1)] * 2)
+    two_columns = _shaped_table([("body", [B, B], 1)] * 2)
+    assert _declares_table_viewer(tmp_path, [one_column]) is False
+    assert _declares_table_viewer(tmp_path, [one_column, two_columns]) is True

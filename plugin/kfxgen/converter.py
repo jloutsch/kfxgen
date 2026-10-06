@@ -97,26 +97,6 @@ _MAX_NATIVE_COLUMNS = 24
 _security_log = logging.getLogger(__name__ + ".security")
 
 
-def _has_visible_border(style):
-    """True when any side of the element has a border style other than none or
-    hidden and a width above zero, from calibre's computed values (#272).
-    calibre computes `border: none` to style `none`, and `border: 0` to width
-    0; a keyword width (thin, medium, thick) counts as drawn."""
-    for side in ("top", "right", "bottom", "left"):
-        kind = str(_computed_value(style, f"border-{side}-style") or "none").lower()
-        if kind in ("none", "hidden"):
-            continue
-        width = _computed_value(style, f"border-{side}-width")
-        try:
-            if float(width) <= 0:
-                continue
-        except (TypeError, ValueError):
-            if width is None:
-                continue
-        return True
-    return False
-
-
 def _computed_value(style, prop):
     """Return a Calibre Style's fully computed value for `prop`.
 
@@ -198,9 +178,6 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # the declared value is what can take the marker away.
                     "list-style-type": _computed_value(st, "list-style-type"),
                     "display": st.get("display"),
-                    # Whether any side draws a border: a table's or a cell's
-                    # gives the table the zoom button (#272).
-                    "border-visible": _has_visible_border(st),
                 }
             except Exception:
                 return None
@@ -1014,43 +991,6 @@ def _cell_valign(cell, style_resolver):
     return None
 
 
-def _table_rows(table):
-    """The table's own rows: its `<tr>` children and its row groups'. A
-    nested table's rows are not among them."""
-    for child in table:
-        tag = _local_tag(child.tag)
-        if tag == "tr":
-            yield child
-        elif tag in _ROW_GROUPS:
-            yield from (r for r in child if _local_tag(r.tag) == "tr")
-
-
-def _table_bordered(table, style_resolver):
-    """Whether a table draws a border, as Kindle Previewer 4 decides its zoom
-    button (#272): a `border` attribute other than 0 (an empty one counts),
-    `rules` other than none, `frame` other than void, or a CSS border on the
-    table or on any of its own cells. calibre's Stylizer doesn't map the
-    attributes, so they are read here. A row's border isn't drawn in the
-    separated-borders model and doesn't count. The attribute's value is
-    read as HTML reads it: its leading digits, so "0px" and "0.5" are 0, and
-    a value with none (an empty one) is 1."""
-    border = table.get("border")
-    if border is not None and int(re.match(r"\s*(\d*)", border).group(1) or 1):
-        return True
-    if (table.get("rules") or "none").strip().lower() != "none":
-        return True
-    if (table.get("frame") or "void").strip().lower() != "void":
-        return True
-    if style_resolver is None:
-        return False
-    cells = [
-        c for row in _table_rows(table) for c in row if _local_tag(c.tag) in _CELL_TAGS
-    ]
-    return any(
-        (style_resolver(el) or {}).get("border-visible") for el in [table, *cells]
-    )
-
-
 def _table_cell(cell, style_resolver, base_href):
     text, spans, marks = normalize_runs_with_anchors(
         _walk_inline(cell, style_resolver=style_resolver, base_href=base_href)
@@ -1215,11 +1155,7 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
         "block_style": None,
         "anchor_ids": every,
         "anchor_offsets": dict.fromkeys(every, 0),
-        "table": {
-            "anchor_ids": own,
-            "rows": rows,
-            "bordered": _table_bordered(table, style_resolver),
-        },
+        "table": {"anchor_ids": own, "rows": rows},
     }
     return captions, block, carry
 

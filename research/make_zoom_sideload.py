@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Build a sideload A/B pair for which tables get the zoom button (#272).
 
-Kindle Previewer 4.0.1 gives a table the table viewer (the zoom button) when
-it has 2 or more columns and a header row, a border, or 4 or more columns, and
-writes `max-width: 100%` on every other table. This builds one source book and
-converts it twice through the real `ebook-convert`, each plugin in its own
-isolated calibre config under the output directory:
+Every table of 2 or more columns keeps the table viewer (the zoom button); a
+one-column table goes without it and reads as plain paragraphs. (Kindle
+Previewer 4.0.1 also leaves it off plain 2-3 column tables, but on the Voyage
+those then lose their columns, which chapters 2 and 3 showed with an earlier
+build of #272.) This builds one source book and converts it twice through
+the real `ebook-convert`, each plugin in its own isolated calibre config under
+the output directory:
 
     "Zoom New"   this checkout's plugin
     "Zoom Old"   an earlier plugin zip given with --old-plugin (for example
@@ -16,8 +18,8 @@ The titles differ so the two files get different ASINs and neither replaces
 the other on the device. All text in the book is invented. Six chapters:
 
     1  a one-column poem box, long enough to cross a page, with a link     New: no button
-    2  a plain two-column table, short label beside running text           New: no button
-    3  a plain three-column table with long words                          New: no button
+    2  a plain two-column table, short label beside running text           New: button
+    3  a plain three-column table with long words                          New: button
     4  a two-column table with a border                                    New: button
     5  a plain four-column table                                           New: button
     6  a two-column table with a header row                                New: button
@@ -28,15 +30,12 @@ the other on the device. All text in the book is invented. Six chapters:
 Output (default `test_books/zoom/`) is gitignored. Do not commit it.
 
 On each device, both books:
-  1. Ch 1, 2, 3: New shows no zoom button; Old shows one at the bottom left.
-  2. Ch 1 on New: every line of the poem on its own line, the poem pages
-     onto the next page normally, and the link "the harbour survey" opens
-     chapter 2.
-  3. Ch 2 and 3 on New: the columns sit side by side and every word is whole
-     (no word broken a character per line).
-  4. Ch 4, 5, 6: the zoom button on both books, and tapping it opens the
-     table.
-  5. The TOC button is present and each of the 6 entries opens its chapter.
+  1. Ch 1: New shows no zoom button; Old shows one at the bottom left.
+  2. Ch 1 on New: the stanzas read as paragraphs, the poem pages onto the
+     next page normally, and the link "the harbour survey" opens chapter 2.
+  3. Ch 2 to 6: the zoom button on both books, the columns side by side,
+     and tapping the button opens the table.
+  4. The TOC button is present and each of the 6 entries opens its chapter.
 """
 
 import argparse

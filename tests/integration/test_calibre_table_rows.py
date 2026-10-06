@@ -785,52 +785,35 @@ def test_native_cells_take_their_vertical_align(calibre):
     assert got == VALIGN_EXPECTED, calibre_version
 
 
-# Which tables get the zoom button (#272). Expected values are what Kindle
-# Previewer 4.0.1 wrote for the same tables. The CSS border cases check the
-# resolver's computed `border-visible` under the real Stylizer.
-ZOOM_CSS = """
-td.ruled { border-bottom: 1px solid black; }
-table.none { border: none; }
-table.zero { border: 0 solid black; }
-"""
+# Which tables get the zoom button (#272): every table of 2 or more columns,
+# and no one-column table, through the real pipeline.
+ZOOM_CSS = "td.ruled { border-bottom: 1px solid black; }\n"
 ZOOM_TABLES = [
     (
         "ZPLAIN",
         "",
         "<tr><td>{c}</td><td>b</td></tr><tr><td>c</td><td>d</td></tr>",
-        False,
+        True,
     ),
+    (
+        "ZTHREE",
+        "",
+        "<tr><td>{c}</td><td>b</td><td>x</td></tr><tr><td>c</td><td>d</td><td>y</td></tr>",
+        True,
+    ),
+    ("ZONECOL", "", "<tr><td>{c}</td></tr><tr><td>c</td></tr>", False),
+    ("ZONECOLBORDER", ' border="1"', "<tr><td>{c}</td></tr><tr><td>c</td></tr>", False),
+    ("ZONECOLHEAD", "", "<tr><th>{c}</th></tr><tr><td>c</td></tr>", False),
     (
         "ZCELLRULE",
         "",
         '<tr><td class="ruled">{c}</td><td>b</td></tr><tr><td>c</td><td>d</td></tr>',
         True,
     ),
-    (
-        "ZNONE",
-        ' class="none"',
-        "<tr><td>{c}</td><td>b</td></tr><tr><td>c</td><td>d</td></tr>",
-        False,
-    ),
-    (
-        "ZZERO",
-        ' class="zero"',
-        "<tr><td>{c}</td><td>b</td></tr><tr><td>c</td><td>d</td></tr>",
-        False,
-    ),
-    (
-        "ZATTR",
-        ' border="1"',
-        "<tr><td>{c}</td><td>b</td></tr><tr><td>c</td><td>d</td></tr>",
-        True,
-    ),
-    ("ZONECOL", ' border="1"', "<tr><td>{c}</td></tr><tr><td>c</td></tr>", False),
-    ("ZWIDE", "", "<tr><td>{c}</td><td>b</td><td>c</td><td>d</td></tr>", True),
-    ("ZHEAD", "", "<tr><th>{c}</th><th>b</th></tr><tr><td>c</td><td>d</td></tr>", True),
 ]
 
 
-def test_tables_get_the_zoom_button_as_previewer_gives_it(calibre):
+def test_only_multi_column_tables_get_the_zoom_button(calibre):
     tmp, _, calibre_version = calibre
     epub = tmp / "zoom-272.epub"
     cases = [
@@ -856,5 +839,5 @@ def test_tables_get_the_zoom_button_as_previewer_gives_it(calibre):
             ref = first["$145"]
             text = str(content[str(ref["name"])][int(ref["$403"])])
             got[text] = ("$629" in e, "$65" in styles[str(e["$157"])])
-    want = {cid: (zoom, not zoom) for cid, _, _, zoom in ZOOM_TABLES}
+    want = {cid: (zoom, True) for cid, _, _, zoom in ZOOM_TABLES}
     assert got == want, calibre_version
