@@ -783,3 +783,78 @@ def test_native_cells_take_their_vertical_align(calibre):
             else:
                 assert str(n) == "$320", (calibre_version, text, n)
     assert got == VALIGN_EXPECTED, calibre_version
+
+
+# Which tables get the zoom button (#272). Expected values are what Kindle
+# Previewer 4.0.1 wrote for the same tables. The CSS border cases check the
+# resolver's computed `border-visible` under the real Stylizer.
+ZOOM_CSS = """
+td.ruled { border-bottom: 1px solid black; }
+table.none { border: none; }
+table.zero { border: 0 solid black; }
+"""
+ZOOM_TABLES = [
+    (
+        "ZPLAIN",
+        "",
+        "<tr><td>{c}</td><td>b</td></tr><tr><td>c</td><td>d</td></tr>",
+        False,
+    ),
+    (
+        "ZCELLRULE",
+        "",
+        '<tr><td class="ruled">{c}</td><td>b</td></tr><tr><td>c</td><td>d</td></tr>',
+        True,
+    ),
+    (
+        "ZNONE",
+        ' class="none"',
+        "<tr><td>{c}</td><td>b</td></tr><tr><td>c</td><td>d</td></tr>",
+        False,
+    ),
+    (
+        "ZZERO",
+        ' class="zero"',
+        "<tr><td>{c}</td><td>b</td></tr><tr><td>c</td><td>d</td></tr>",
+        False,
+    ),
+    (
+        "ZATTR",
+        ' border="1"',
+        "<tr><td>{c}</td><td>b</td></tr><tr><td>c</td><td>d</td></tr>",
+        True,
+    ),
+    ("ZONECOL", ' border="1"', "<tr><td>{c}</td></tr><tr><td>c</td></tr>", False),
+    ("ZWIDE", "", "<tr><td>{c}</td><td>b</td><td>c</td><td>d</td></tr>", True),
+    ("ZHEAD", "", "<tr><th>{c}</th><th>b</th></tr><tr><td>c</td><td>d</td></tr>", True),
+]
+
+
+def test_tables_get_the_zoom_button_as_previewer_gives_it(calibre):
+    tmp, _, calibre_version = calibre
+    epub = tmp / "zoom-272.epub"
+    cases = [
+        ("c1", cid, f"<table{attrs}>{rows.format(c=cid)}</table>")
+        for cid, attrs, rows, _ in ZOOM_TABLES
+    ]
+    _build_epub(epub, cases, ZOOM_CSS, {})
+    kfx = tmp / "zoom-272.kfx"
+    _ebook_convert(calibre, epub, kfx, native=True)
+    frags = load_fragments(kfx)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    content = {
+        str(val(f)["name"]): list(val(f)["$146"]) for f in by_type(frags, "$145")
+    }
+    got = {}
+    for story in by_type(frags, "$259"):
+        for e in iter_entries(val(story)["$146"]):
+            if str(e.get("$159")) != "$278":
+                continue
+            first = next(
+                x for x in iter_entries(e["$146"]) if x.get("$145") is not None
+            )
+            ref = first["$145"]
+            text = str(content[str(ref["name"])][int(ref["$403"])])
+            got[text] = ("$629" in e, "$65" in styles[str(e["$157"])])
+    want = {cid: (zoom, not zoom) for cid, _, _, zoom in ZOOM_TABLES}
+    assert got == want, calibre_version

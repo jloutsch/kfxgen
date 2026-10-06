@@ -591,6 +591,34 @@ def _table_feature_version(chapters):
     return 1
 
 
+def _table_has_zoom(tbl):
+    """Whether a native table gets the table viewer's zoom button, as Kindle
+    Previewer 4.0.1 decides it (#272): a table of 2 or more columns with a
+    header row, a border, or 4 or more columns. Every other table gets
+    `max-width: 100%` instead.
+
+    A header row is a `<thead>` or `<tfoot>`, a first row with more header
+    cells than the second, or a last row of header cells after one that
+    isn't. Previewer also gives the button to a few tables by measuring
+    their text (#272, pg21053's one); that can't be reproduced here."""
+    rows = [r for r in tbl["rows"] if r["cells"]]
+    columns = max(
+        (sum(c.get("colspan", 1) for c in r["cells"]) for r in rows), default=0
+    )
+    if columns < 2:
+        return False
+    if columns >= 4 or tbl.get("bordered"):
+        return True
+    if any(r["group"] in ("head", "foot") for r in rows):
+        return True
+    if len(rows) < 2:
+        return False
+    heads = [sum(1 for c in r["cells"] if c.get("header")) for r in rows]
+    if heads[0] > heads[1]:
+        return True
+    return heads[-1] == len(rows[-1]["cells"]) and heads[-2] < len(rows[-2]["cells"])
+
+
 class NativeKFXGenerator:
     """
     Generates KFX files from scratch using standard symbols and deterministic
@@ -600,6 +628,8 @@ class NativeKFXGenerator:
     def __init__(self):
         self.symtab = StandardSymbolTable()
         self.fragments = []
+        self._zoom_table_styles = set()
+        self._wrote_zoom_table = False
         self.entity_ids = {}  # Map of logical ID to entity ID
         # Start at 349 to avoid collision with fid=348 used by metadata fragments
         # ($585, $490, $538, $410, $419 all use fid=348)
@@ -738,8 +768,9 @@ class NativeKFXGenerator:
     def _declare_table_viewer(self):
         """Add `yj_table_viewer` 1 after `yj_table` in the built $585 (#254).
 
-        Called once the storylines are built, and only when one wrote a $278:
-        a table can be cut whole as a chapter title, so the chapters' blocks
+        Called once the storylines are built, and only when one wrote a $278
+        with the zoom button: Kindle Previewer declares it only then (#272).
+        A table can be cut whole as a chapter title, so the chapters' blocks
         don't say whether the book has one. The symbol is created here, last,
         so every other symbol keeps its number.
         """
@@ -1674,8 +1705,10 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
-    def build_table_style_157(self, entity_name):
-        """$157 for a native table node, as Kindle Previewer writes it (#219)."""
+    def build_table_style_157(self, entity_name, zoom=False):
+        """$157 for a native table node, as Kindle Previewer writes it (#219):
+        `max-width: 100%` ($65) on a table without the zoom button, none on
+        one with it (#272)."""
         self.symtab.create_local_symbol(entity_name)
         value = IonStruct(
             IS("$16"), IonStruct(IS("$307"), IonDecimal("1"), IS("$306"), IS("$505")),
@@ -1684,6 +1717,9 @@ class NativeKFXGenerator:
             IS("$173"), IS(entity_name),
             IS("$83"), 4286611584,
         )  # fmt: skip
+        if zoom:
+            del value[IS("$65")]
+            self._zoom_table_styles.add(entity_name)
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_cell_style_157(
@@ -1980,12 +2016,14 @@ class NativeKFXGenerator:
                     entry[IS("$457")] = IonStruct(
                         IS("$307"), IonDecimal("0.9"), IS("$306"), IS("$318")
                     )
-                    # Table viewer, as Kindle Previewer writes it on every
-                    # table. Without it the Voyage and the Oasis squeeze
-                    # columns until words break a character per line (#254).
-                    entry[IS("$629")] = [IS("$581"), IS("$326")]
-                    entry[IS("$630")] = IS("$632")
-                    self._wrote_native_table = True
+                    # Table viewer (the zoom button), on the tables Kindle
+                    # Previewer gives it to (#272). Without it the Voyage
+                    # and the Oasis squeeze wide columns until words break
+                    # a character per line (#254).
+                    if story_name in self._zoom_table_styles:
+                        entry[IS("$629")] = [IS("$581"), IS("$326")]
+                        entry[IS("$630")] = IS("$632")
+                        self._wrote_zoom_table = True
                 elif node == "cell":
                     self.symtab.create_local_symbol(story_name)
                     entry[IS("$157")] = IS(story_name)
@@ -2514,7 +2552,8 @@ class NativeKFXGenerator:
         self.entity_ids = {}
         self.next_entity_id = 349
         self.field_403_counter = 10
-        self._wrote_native_table = False
+        self._wrote_zoom_table = False
+        self._zoom_table_styles = set()
 
         from .font_table import FontTable  # noqa: PLC0415
 
@@ -2951,7 +2990,7 @@ class NativeKFXGenerator:
         )
         self.fragments.append(self.build_fragment_270(container_id, entity_map))
 
-        if self._wrote_native_table:
+        if self._wrote_zoom_table:
             self._declare_table_viewer()
 
         # 16. Build $ion_symbol_table fragment (REQUIRED for Kindle)
@@ -3291,7 +3330,12 @@ class NativeKFXGenerator:
                 for k in (part.get("anchor_keys") or [])
             }
             own = [k for k in (tbl.get("anchor_keys") or []) if k not in inner]
-            table_open = {"type": "open", "node": "table", "anchor_keys": []}
+            table_open = {
+                "type": "open",
+                "node": "table",
+                "anchor_keys": [],
+                "zoom": _table_has_zoom(tbl),
+            }
             all_chunks.append(table_open)
             group = None
             last_row = None
@@ -4049,7 +4093,11 @@ class NativeKFXGenerator:
                     node = chunk.get("node")
                     if node == "table":
                         entry_styles.append(
-                            _allocate_style("_tbl", builder=self.build_table_style_157)
+                            _allocate_style(
+                                "_tbl",
+                                builder=self.build_table_style_157,
+                                zoom=bool(chunk.get("zoom")),
+                            )
                         )
                     elif node == "cell":
                         entry_styles.append(
