@@ -33,7 +33,8 @@ missed one book's notes, which have no back-links.
   paragraphs. Neither test set has one.
 - From earlier releases, unchanged: images in cells (#262), nested tables
   (#263), CSS borders and widths (#264), a list item holding only a table
-  (#265) and vertical alignment in cells (#269); notes becoming chapters in
+  (#265), vertical alignment in cells (#269), and every Kindle table showing
+  the zoom button, one-column boxes included (#272); notes becoming chapters in
   a book with no table of contents (#225); progress following the paragraph
   count (#227); hidden text and HTML comments printed (#256, #252).
 
@@ -61,8 +62,10 @@ the last version recorded for the device, not re-read.
 | Device | Firmware | Check | Result |
 |---|---|---|---|
 | Voyage 7th gen (2014) | 5.13.6 | notes in calibre's layout and notes without back-links; note links and a back-link; a contents table, a data table and a numbered list; the TOC | pass: notes read as paragraphs, each starting with its marker; every link lands; the three other tables stay tables |
+| Oasis 10th gen (2019) | 5.18.2.1.1 | the same checks, on "Notes Table New" | pass: notes read as paragraphs, each starting with its marker; references 1, 5 and 8 and the *, † and ‡ notes land on their own notes; the "4." back-link returns; the contents, data and list tables stay tables; all 6 TOC entries open |
 
-The Paperwhite and the Oasis were not run.
+The Paperwhite was not run on this book. It showed the same paragraph
+layout on the #223 book in the comparison above.
 
 ## 5.8.11 — Poems and notes inside tables
 
