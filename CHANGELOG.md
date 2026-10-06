@@ -15,7 +15,8 @@ note.
 A table counts as notes when:
 - every row has two cells, and there are at least three rows;
 - every first cell is a note marker: a number, a roman numeral or a
-  symbol (`*`, `†`, `‡`), optionally bracketed or followed by a full stop;
+  symbol such as `*`, `†` or `‡`, optionally bracketed or followed by a
+  full stop;
 - **the book links into it:** at least 80% of its rows are link targets
   from elsewhere in the book.
 
