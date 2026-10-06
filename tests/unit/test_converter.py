@@ -5615,7 +5615,7 @@ def _cell_texts(body, native):
         "native-tail-text",
         "image-same-cell",
         "image-other-cell",
-        "rows-calibre-repro",
+        "rows-lead-text",
     ],
 )
 def test_blocks_inside_a_cell_do_not_run_together(cells, native, expected):

@@ -572,11 +572,14 @@ def _walk_inline(
                 token = _make_img_token(href, alt, SVG_IMAGE_SIZE)
                 parts.append((token, frozenset()))
         elif clocal in _CELL_BLOCK_TAGS:
-            # A block walked inline (a table row's cells on the rows path, a
-            # cell mixing text and a block): its edges are a word boundary
-            # even when the HTML puts no whitespace there. "cellone" and
-            # "<p>celltwo</p>" read "cellonecelltwo" before. Text inside one
-            # block is unchanged. (#279)
+            # A block walked inline (a cell on the rows path, a native cell
+            # mixing text and a block): its edges are a word boundary even
+            # when the HTML puts no whitespace there.
+            # <td>cellone<p>celltwo</p></td> read "cellonecelltwo" before.
+            # Text inside one block is unchanged. Outside tables this also
+            # reaches a <dl>, which the block walker doesn't treat as a block:
+            # its outer edges get a space, but its dt/dd still join (#229).
+            # (#279)
             parts.append((" ", frozenset()))
             parts.extend(
                 _walk_inline(
