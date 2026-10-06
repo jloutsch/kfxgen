@@ -3594,3 +3594,62 @@ def test_cell_style_carries_the_chapters_font_size(tmp_path):
 def test_cell_style_omits_a_default_font_size(tmp_path, font_size):
     (style,) = _cell_styles_at_font_size(tmp_path, font_size)
     assert "$16" not in style
+
+
+# --- a cell's vertical alignment (#269) --------------------------------------
+#
+# Kindle Previewer 4 writes $633 $58 for top, $60 for bottom and $320 for middle
+# or nothing set, and no $633 for baseline, super, text-top or a length.
+
+
+def _cell_styles(tmp_path, valigns, paragraphs=False):
+    """One native row with a cell per entry of `valigns`; each cell's $157."""
+    block = _table_block([[f"c{i}" for i in range(len(valigns))]])
+    for cell, v in zip(block["table"]["rows"][0]["cells"], valigns):
+        if v is not None:
+            cell["valign"] = v
+        if paragraphs:
+            cell["paragraphs"] = [
+                {"text": f"{cell['text']}a", "spans": [], "block_style": None},
+                {"text": f"{cell['text']}b", "spans": [], "block_style": None},
+            ]
+    top, styles = _storyline(tmp_path, [block])
+    table = next(e for e in top if str(e["$159"]) == "$278")
+    (row,) = table["$146"][0]["$146"]
+    return [styles[str(c["$157"])] for c in row["$146"]]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "valign, expected",
+    [
+        ("top", "$58"),
+        ("bottom", "$60"),
+        ("middle", "$320"),
+        (None, "$320"),
+        ("baseline", None),
+        ("super", None),
+        ("text-top", None),
+        ("3px", None),
+    ],
+)
+@pytest.mark.parametrize(
+    "paragraphs", [False, True], ids=["text-cell", "paragraph-cell"]
+)
+def test_a_cells_vertical_align_reaches_its_style(
+    tmp_path, valign, expected, paragraphs
+):
+    (style,) = _cell_styles(tmp_path, [valign], paragraphs=paragraphs)
+    if expected is None:
+        assert "$633" not in style
+    else:
+        assert str(style["$633"]) == expected
+    # The rest of the cell style is unchanged: Previewer's padding stays.
+    assert all(k in style for k in ("$52", "$53", "$54", "$55"))
+
+
+@pytest.mark.unit
+def test_middle_and_unset_cells_share_one_style(tmp_path):
+    a, b, c = _cell_styles(tmp_path, ["middle", None, "top"])
+    assert a is b or a == b
+    assert len({str(s["$173"]) for s in (a, b, c)}) == 2
