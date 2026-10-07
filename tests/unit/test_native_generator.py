@@ -3923,3 +3923,100 @@ def test_a_link_to_a_missing_picture_in_a_cell_still_lands(tmp_path):
 def test_a_link_to_a_missing_picture_in_a_cell_with_text_still_lands(tmp_path):
     table = _picture_table([_para(_pic("gone.png"), ["c.xhtml#fig"]), _para("Caption")])
     assert _link_lands(tmp_path, table)
+
+
+# --- table and cell borders (#264) -------------------------------------------
+#
+# Kindle Previewer 4.0.1: equal sides as border-width $93, border-style $88
+# and, unless black, border-color $83 (ARGB); one side as its own width
+# ($94-$97), style ($89-$92) and colour ($84-$87). A table's default grey $83
+# goes when its CSS border is black, as Previewer writes it.
+
+_SIDES4 = ("top", "right", "bottom", "left")
+
+
+def _bordered_styles(tmp_path, table_border=None, cell_border=None):
+    block = _table_block([["a", "b"], ["c", "d"]])
+    block["table"]["border"] = table_border
+    for r in block["table"]["rows"]:
+        for c in r["cells"]:
+            c["border"] = cell_border
+    top, styles = _storyline(tmp_path, [block])
+    table = next(e for e in top if str(e["$159"]) == "$278")
+    cell = table["$146"][0]["$146"][0]["$146"][0]
+
+    def flat(st):
+        out = {}
+        for k, v in st.items():
+            k = str(k)
+            if k in ("$173", "$52", "$53", "$54", "$55", "$633"):
+                continue
+            if hasattr(v, "get") and "$307" in {str(x) for x in v}:
+                v = f"{float(v['$307']):g}{ {'$318': 'pt'}.get(str(v['$306']), str(v['$306'])) }"
+            out[k] = str(v)
+        return out
+
+    return flat(styles[str(table["$157"])]), flat(styles[str(cell["$157"])])
+
+
+def _sides(kind, width, colour):
+    return dict.fromkeys(_SIDES4, (kind, width, colour))
+
+
+@pytest.mark.unit
+def test_a_borderless_table_is_unchanged(tmp_path):
+    table, cell = _bordered_styles(tmp_path)
+    assert table == {
+        "$16": "1$505",
+        "$65": "100$314",
+        "$42": "1$310",
+        "$83": "4286611584",
+    }
+    assert cell == {}
+
+
+@pytest.mark.unit
+def test_a_css_black_table_border_writes_width_and_style_and_drops_the_grey(tmp_path):
+    table, _ = _bordered_styles(tmp_path, table_border=_sides("solid", 0.45, None))
+    assert table["$93"] == "0.45pt" and table["$88"] == "$328"
+    assert "$83" not in table
+
+
+@pytest.mark.unit
+def test_the_border_attribute_frame_keeps_the_grey(tmp_path):
+    table, cell = _bordered_styles(
+        tmp_path,
+        table_border=_sides("outset", 1.35, 0xFF808080),
+        cell_border=_sides("inset", 0.45, None),
+    )
+    assert (table["$93"], table["$88"], table["$83"]) == (
+        "1.35pt",
+        "$337",
+        "4286611584",
+    )
+    assert (cell["$93"], cell["$88"]) == ("0.45pt", "$336") and "$83" not in cell
+
+
+@pytest.mark.unit
+def test_a_coloured_cell_border_writes_its_colour(tmp_path):
+    _, cell = _bordered_styles(tmp_path, cell_border=_sides("dotted", 0.9, 0xFFFF0000))
+    assert cell == {"$93": "0.9pt", "$88": "$331", "$83": str(0xFFFF0000)}
+
+
+@pytest.mark.unit
+def test_one_side_writes_that_sides_properties(tmp_path):
+    _, cell = _bordered_styles(
+        tmp_path, cell_border={"bottom": ("solid", 0.45, 0xFF336699)}
+    )
+    assert cell == {"$96": "0.45pt", "$91": "$328", "$86": str(0xFF336699)}
+
+
+@pytest.mark.unit
+def test_cells_with_different_borders_get_different_styles(tmp_path):
+    block = _table_block([["a", "b"]])
+    block["table"]["rows"][0]["cells"][0]["border"] = _sides("solid", 0.45, None)
+    top, styles = _storyline(tmp_path, [block])
+    table = next(e for e in top if str(e["$159"]) == "$278")
+    a, b = table["$146"][0]["$146"][0]["$146"]
+    assert str(a["$157"]) != str(b["$157"])
+    assert "$93" not in styles[str(b["$157"])]

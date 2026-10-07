@@ -5885,3 +5885,162 @@ def test_other_objects_in_a_cell_still_send_the_table_to_rows(tag):
         _picture_cells(f"<table><tr><td><{tag}></{tag}></td><td>x</td></tr></table>")
         is None
     )
+
+
+# --- table and cell borders (#264) -------------------------------------------
+#
+# A native table and each cell carry their borders, as Kindle Previewer 4.0.1
+# writes them: per side (style, width in Previewer's points, colour as ARGB or
+# None for the default). calibre computes a CSS width in points at 0.72 per
+# pixel; Previewer writes 0.45 per pixel. The `border` attribute, which the
+# Stylizer ignores, draws an outset grey frame of N x 0.45pt on the table and
+# an inset 0.45pt border on each cell; a cell's own CSS border wins.
+
+_GREY = 0xFF808080
+_SIDES = ("top", "right", "bottom", "left")
+
+
+def _border_resolver(elem):
+    # Stands in for the resolver's computed `border-sides`: class "b" draws
+    # 1px solid black all round, "red" 2px dotted red, "under" a bottom rule.
+    classes = (elem.get("class") or "").split()
+    if "b" in classes:
+        return {"border-sides": (("solid", 0.72, "black"),) * 4}
+    if "red" in classes:
+        return {"border-sides": (("dotted", 1.44, "red"),) * 4}
+    if "under" in classes:
+        none = ("none", "medium", "currentColor")
+        return {"border-sides": (none, none, ("solid", 0.72, "#336699"), none)}
+    return {}
+
+
+def _bordered(table_html, resolver=_border_resolver):
+    blocks = extract_blocks_from_html(
+        _doc(table_html), style_resolver=resolver, native_tables=True
+    )
+    (table,) = [b for b in blocks if b.get("type") == "table"]
+    first_cell = table["table"]["rows"][0]["cells"][0]
+    return table["table"].get("border"), first_cell.get("border")
+
+
+def _all(style, width, colour):
+    return dict.fromkeys(_SIDES, (style, width, colour))
+
+
+_TWO = "<tr><td{c}>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr>"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "table_html, table_border, cell_border",
+    [
+        (f"<table>{_TWO.format(c='')}</table>", None, None),
+        (
+            f'<table class="b">{_TWO.format(c="")}</table>',
+            _all("solid", 0.45, None),
+            None,
+        ),
+        (
+            f"<table>{_TWO.format(c=' class="red"')}</table>",
+            None,
+            _all("dotted", 0.9, 0xFFFF0000),
+        ),
+        (
+            f"<table>{_TWO.format(c=' class="under"')}</table>",
+            None,
+            {"bottom": ("solid", 0.45, 0xFF336699)},
+        ),
+        (
+            f'<table border="1">{_TWO.format(c="")}</table>',
+            _all("outset", 0.45, _GREY),
+            _all("inset", 0.45, None),
+        ),
+        (
+            f'<table border="3">{_TWO.format(c="")}</table>',
+            _all("outset", 1.35, _GREY),
+            _all("inset", 0.45, None),
+        ),
+        (f'<table border="0">{_TWO.format(c="")}</table>', None, None),
+        (
+            f'<table border="1">{_TWO.format(c=' class="red"')}</table>',
+            _all("outset", 0.45, _GREY),
+            _all("dotted", 0.9, 0xFFFF0000),
+        ),
+    ],
+    ids=[
+        "none",
+        "css-table",
+        "css-cell-dotted-red",
+        "css-cell-bottom-only",
+        "attr-1",
+        "attr-3",
+        "attr-0",
+        "cell-css-beats-attr",
+    ],
+)
+def test_a_table_and_its_cells_carry_their_borders(
+    table_html, table_border, cell_border
+):
+    assert _bordered(table_html) == (table_border, cell_border)
+
+
+@pytest.mark.unit
+def test_without_a_stylizer_only_the_border_attribute_counts():
+    assert _bordered(
+        f'<table border="2" class="b">{_TWO.format(c="")}</table>', None
+    ) == (
+        _all("outset", 0.9, _GREY),
+        _all("inset", 0.45, None),
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "value, argb",
+    [
+        ("black", None),
+        ("currentColor", None),
+        ("red", 0xFFFF0000),
+        ("Gray", 0xFF808080),
+        ("grey", 0xFF808080),
+        ("#f00", 0xFFFF0000),
+        ("#336699", 0xFF336699),
+        ("rgb(51, 102, 153)", 0xFF336699),
+        ("#000000", None),
+        ("darkslategray", None),
+        (None, None),
+    ],
+)
+def test_border_colour_as_argb(value, argb):
+    assert _conv._border_colour(value) == argb
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "side, expected",
+    [
+        (("hidden", 0.72, "black"), None),
+        (("none", 0.72, "black"), None),
+        (("solid", 0.0, "black"), None),
+        (("solid", "thin", "black"), {"top": ("solid", 0.45, None)}),
+        (("solid", "medium", "red"), {"top": ("solid", 1.35, 0xFFFF0000)}),
+        (("solid", 0.72, "transparent"), None),
+        (("solid", 0.72, "rgba(0, 0, 0, 0)"), None),
+        (("solid", 0.72, "rgba(255, 0, 0, 0.0)"), None),
+        (("solid", 0.72, "rgba(255, 0, 0, 1)"), {"top": ("solid", 0.45, 0xFFFF0000)}),
+    ],
+    ids=[
+        "hidden",
+        "none",
+        "zero-width",
+        "thin",
+        "medium",
+        "transparent",
+        "rgba-zero",
+        "rgba-zero-float",
+        "rgba-opaque",
+    ],
+)
+def test_css_border_reads_one_computed_side(side, expected):
+    none = ("none", "medium", "currentColor")
+    assert _conv._css_border({"border-sides": (side, none, none, none)}) == expected
