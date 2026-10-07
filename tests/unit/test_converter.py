@@ -6133,6 +6133,15 @@ _COLS = (
             f"{_rows3(_PLAIN3)}</table>",
             (None, [[True, False], [False] * 3]),
         ),
+        (
+            f"<table><tr><td{_aw('20%')}{_sw('120px')}>x</td><td>y</td><td>z</td></tr></table>",
+            (None, [[False] * 3]),
+        ),
+        (
+            '<table><tr><td rowspan="2">a</td><td>b</td><td>c</td></tr>'
+            f"<tr><td{_aw('40%')}>x</td><td{_aw('60%')}>y</td></tr></table>",
+            (("cell", [None, 40.0, 60.0]), [[False] * 3, [True, True]]),
+        ),
     ],
     ids=[
         "none",
@@ -6144,6 +6153,8 @@ _COLS = (
         "last-row-wins",
         "absolute-units-ignored",
         "spanning-cell-sets-none",
+        "css-absolute-beats-attr-percent",
+        "rowspan-shifts-columns",
     ],
 )
 def test_a_table_records_its_column_widths(table_html, expected):
