@@ -6024,8 +6024,22 @@ def test_border_colour_as_argb(value, argb):
         (("solid", 0.0, "black"), None),
         (("solid", "thin", "black"), {"top": ("solid", 0.45, None)}),
         (("solid", "medium", "red"), {"top": ("solid", 1.35, 0xFFFF0000)}),
+        (("solid", 0.72, "transparent"), None),
+        (("solid", 0.72, "rgba(0, 0, 0, 0)"), None),
+        (("solid", 0.72, "rgba(255, 0, 0, 0.0)"), None),
+        (("solid", 0.72, "rgba(255, 0, 0, 1)"), {"top": ("solid", 0.45, 0xFFFF0000)}),
     ],
-    ids=["hidden", "none", "zero-width", "thin", "medium"],
+    ids=[
+        "hidden",
+        "none",
+        "zero-width",
+        "thin",
+        "medium",
+        "transparent",
+        "rgba-zero",
+        "rgba-zero-float",
+        "rgba-opaque",
+    ],
 )
 def test_css_border_reads_one_computed_side(side, expected):
     none = ("none", "medium", "currentColor")

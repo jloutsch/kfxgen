@@ -1000,13 +1000,26 @@ def _border_colour(value):
     elif re.fullmatch(r"#[0-9a-f]{6}", v):
         rgb = int(v[1:], 16)
     else:
-        m = re.fullmatch(r"rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)", v)
+        m = re.fullmatch(
+            r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*[\d.]+\s*)?\)", v
+        )
         if m:
             r, g, b = (min(int(x), 255) for x in m.groups())
             rgb = (r << 16) | (g << 8) | b
     if not rgb:
         return None
     return 0xFF000000 | rgb
+
+
+def _is_transparent(value):
+    """True for a colour that draws nothing: `transparent`, or rgba() with an
+    alpha of 0. Read as unreadable it would become the default black (#292
+    review)."""
+    v = str(value or "").strip().lower()
+    if v == "transparent":
+        return True
+    m = re.fullmatch(r"rgba\(.*,\s*([\d.]+)\s*\)", v)
+    return bool(m) and float(m.group(1)) == 0
 
 
 def _css_border(css):
@@ -1019,7 +1032,7 @@ def _css_border(css):
     out = {}
     for side, (kind, width, colour) in zip(_BORDER_SIDES, sides):
         kind = str(kind or "none").lower()
-        if kind in ("none", "hidden"):
+        if kind in ("none", "hidden") or _is_transparent(colour):
             continue
         try:
             pt = float(width)
@@ -1158,7 +1171,11 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
     )
 
     attr_px = _attr_border_px(table)
-    # The `border` attribute's inset rule round every cell (#264).
+    # The `border` attribute's inset rule round every cell (#264). A CSS
+    # `border: none` on the table or a cell doesn't cancel it: calibre's
+    # computed `none` can't be told from the UA default, so only a drawn CSS
+    # border replaces the attribute's (#292 review; no library table has
+    # both).
     attr_cell_border = (
         dict.fromkeys(_BORDER_SIDES, ("inset", 0.45, None)) if attr_px else None
     )
