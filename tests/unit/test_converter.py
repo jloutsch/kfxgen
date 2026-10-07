@@ -6154,3 +6154,28 @@ def test_a_table_records_its_column_widths(table_html, expected):
 def test_without_a_stylizer_width_attributes_still_count():
     html = f"<table><col{_aw('20%')}/><col{_aw('80%')}/>{_rows3(('', ''))}</table>"
     assert _widths(html, None)[0] == ("col", [20.0, 80.0])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "attrs, expected",
+    [
+        ("", None),
+        (_sw("100%"), 100.0),
+        (_aw("100%"), 100.0),
+        (_sw("80%"), 80.0),
+        (_sw("300px"), None),
+    ],
+    ids=["none", "css-100", "attr-100", "css-80", "absolute"],
+)
+def test_a_table_records_its_percentage_width(attrs, expected):
+    # Kindle Previewer 4.0.1 writes a percentage table width as min-width
+    # $63 (and width $56 at 100%); without it the Kindle sizes the table to
+    # its content and narrow columns' widths don't show (#264).
+    blocks = extract_blocks_from_html(
+        _doc(f"<table{attrs}>{_rows3(_PLAIN3)}</table>"),
+        style_resolver=_width_resolver,
+        native_tables=True,
+    )
+    (table,) = [b for b in blocks if b.get("type") == "table"]
+    assert table["table"].get("width") == expected

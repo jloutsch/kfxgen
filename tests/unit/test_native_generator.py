@@ -4098,3 +4098,29 @@ def test_column_widths_are_written_as_previewer_writes_them(
 def test_a_cell_that_sets_a_width_gets_border_box_sizing(tmp_path):
     _, box = _widths_table(tmp_path, ("cell", [None, 40.0, None]), width_set=[1])
     assert box == [False, True, False]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "width, expected",
+    [
+        (None, {}),
+        (100.0, {"$56": "100$314", "$63": "100$314", "$546": "$377"}),
+        (80.0, {"$63": "80$314", "$546": "$377"}),
+    ],
+    ids=["none", "100", "80"],
+)
+def test_a_percentage_table_width_is_written_as_previewer_writes_it(
+    tmp_path, width, expected
+):
+    block = _table_block([["a", "b"]])
+    block["table"]["width"] = width
+    top, styles = _storyline(tmp_path, [block])
+    table = next(e for e in top if str(e["$159"]) == "$278")
+    st = styles[str(table["$157"])]
+    got = {
+        str(k): f"{float(v['$307']):g}{str(v['$306'])}" if hasattr(v, "get") else str(v)
+        for k, v in st.items()
+        if str(k) in ("$56", "$63", "$546")
+    }
+    assert got == expected

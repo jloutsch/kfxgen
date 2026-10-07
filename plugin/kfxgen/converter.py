@@ -1345,6 +1345,9 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
             "rows": rows,
             "border": table_border,
             "column_widths": _column_widths(table, style_resolver),
+            # A percentage table width: without it the Kindle sizes the
+            # table to its content and narrow columns' widths don't show.
+            "width": _width_pct(table, style_resolver),
         },
     }
     return captions, block, carry

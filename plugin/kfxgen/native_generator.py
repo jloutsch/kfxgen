@@ -1802,7 +1802,7 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
-    def build_table_style_157(self, entity_name, border=None):
+    def build_table_style_157(self, entity_name, border=None, width=None):
         """$157 for a native table node, as Kindle Previewer writes it (#219),
         with the table's own border (#264)."""
         self.symtab.create_local_symbol(entity_name)
@@ -1814,6 +1814,16 @@ class NativeKFXGenerator:
             IS("$83"), 4286611584,
         )  # fmt: skip
         _apply_border(value, border, is_table=True)
+        if width is not None:
+            # A percentage table width, as Previewer writes it (#264): a
+            # min-width, and at 100% the width too.
+            pct = IonStruct(
+                IS("$307"), IonDecimal(f"{width:g}"), IS("$306"), IS("$314")
+            )
+            if width == 100:
+                value[IS("$56")] = pct
+            value[IS("$63")] = pct
+            value[IS("$546")] = IS("$377")
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_cell_style_157(
@@ -3507,6 +3517,7 @@ class NativeKFXGenerator:
                 "zoom": _table_has_zoom(tbl),
                 "border": tbl.get("border"),
                 "column_widths": tbl.get("column_widths"),
+                "width": tbl.get("width"),
             }
             all_chunks.append(table_open)
             group = None
@@ -4255,6 +4266,7 @@ class NativeKFXGenerator:
                                 "_tbl",
                                 builder=self.build_table_style_157,
                                 border=_border_key(chunk.get("border")),
+                                width=chunk.get("width"),
                             )
                         )
                     elif node == "cell":
