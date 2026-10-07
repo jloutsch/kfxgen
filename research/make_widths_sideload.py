@@ -7,14 +7,17 @@ carry the book's percentage widths as Kindle Previewer 4.0.1 writes them
 through the real `ebook-convert`, each plugin in its own isolated calibre
 config under the output directory:
 
-    "Widths New"   this checkout's plugin
-    "Widths Old"   an earlier plugin zip given with --old-plugin (for example
-                   a build of main before this change): device widths
+    "Widths New 2"   this checkout's plugin
+    "Widths Old 2"   an earlier plugin zip given with --old-plugin (for
+                     example a build of main before this change): device
+                     widths
 
 The titles differ so the two files get different ASINs and neither replaces
-the other on the device. All text in the book is invented. Five chapters, one
-table each; every cell holds the same amount of text, so on Old the columns
-come out about equal:
+the other on the device. ("2": a first version put four words in every cell,
+and a column is never narrower than its longest word, so in portrait every
+narrow column sat at that minimum and the widths seemed to be ignored.) Every
+cell now holds a two-digit number, so the widths have room to show; on Old the
+columns come out about equal. Five chapters, one table each:
 
     1  <col> widths 20% / 30% / 50%
     2  cell widths 25% / 25% / 50%
@@ -27,7 +30,8 @@ come out about equal:
 
 Output (default `test_books/widths/`) is gitignored. Do not commit it.
 
-On each device, "Widths New" (Old has columns of about equal width):
+On each device, in portrait, "Widths New 2" (Old 2 has columns of about
+equal width):
   1. Ch 1 and 2: the third column about as wide as the first two together.
   2. Ch 3: the first column narrow, its words still whole (not broken a
      letter per line); the second column takes the rest.
@@ -59,14 +63,12 @@ from make_table_sideload import (  # noqa: E402
 from tests._kfx_introspect import by_type, iter_entries, load_fragments, val  # noqa: E402
 from tests.fixtures.epub_builder import EpubBuilder  # noqa: E402
 
-_WORDS = "harbour lamp beacon"
-
 
 def _rows(n, cell_attrs=None):
     cell_attrs = cell_attrs or [""] * n
     return "".join(
         "<tr>"
-        + "".join(f"<td{cell_attrs[c]}>Row {r} {_WORDS}</td>" for c in range(n))
+        + "".join(f"<td{cell_attrs[c]}>{10 + 17 * r + 7 * c}</td>" for c in range(n))
         + "</tr>"
         for r in (1, 2, 3)
     )
@@ -142,13 +144,13 @@ def main():
 
     env = install_plugin(out)
     new = out / "widths-new.kfx"
-    convert_with_calibre(env, source, new, "Widths New", native=True)
+    convert_with_calibre(env, source, new, "Widths New 2", native=True)
     print(f"built with: {calibre_version(env)}, isolated configs")
     print(f"  {new.name}: widths per table {widths_per_chapter(new)}")
     if args.old_plugin:
         old_env = install_zip(out, args.old_plugin)
         old = out / "widths-old.kfx"
-        convert_with_calibre(old_env, source, old, "Widths Old", native=True)
+        convert_with_calibre(old_env, source, old, "Widths Old 2", native=True)
         print(f"  {old.name}: widths per table {widths_per_chapter(old)}")
     print(__doc__[__doc__.index("On each device") :])
     return 0
