@@ -373,12 +373,17 @@ class IonBinary(IonSerial):
                             bytes_to_separated_hex(data),
                         )
                     )
+                    # Not scaled: 10**-exponent for an exponent of -51 million
+                    # took a minute to build, and a positive one divides by
+                    # zero. Dropped like an out-of-range fraction (#293).
+                    microsecond = None
+                    fraction_exponent = 0
+                else:
+                    microsecond = (fraction_coefficient * 1000000) // int(
+                        10**-fraction_exponent
+                    )
 
-                microsecond = (fraction_coefficient * 1000000) // int(
-                    10**-fraction_exponent
-                )
-
-                if microsecond < 0 or microsecond > 999999:
+                if microsecond is not None and (microsecond < 0 or microsecond > 999999):
                     log.error(
                         "Incorrect IonTimestamp fraction %d usec: %s"
                         % (microsecond, bytes_to_separated_hex(data))
