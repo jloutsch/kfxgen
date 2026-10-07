@@ -34,7 +34,7 @@ import os
 import sys
 
 import pytest
-from hypothesis import HealthCheck, given, settings, strategies as st
+from hypothesis import HealthCheck, example, given, settings, strategies as st
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin"))
 
@@ -104,6 +104,9 @@ class TestDeserializerByteFuzz:
 
     @_FUZZ
     @given(body=st.binary(min_size=0, max_size=2048))
+    # A timestamp whose fraction exponent is about -51 million: decoding it
+    # computed 10**51514698 and took a minute (#293).
+    @example(body=b"m\x9b\x9f\xc6\xf9\x12\xb8\xb5\x85XH\x1a\xca&")
     def test_signature_prefixed_bytes(self, body):
         """Prefix the valid Ion signature so the bytes get past the signature
         gate and exercise the value-decode paths with hostile content."""
@@ -307,3 +310,40 @@ class TestDeferredTypeRoundTrip:
         assert isinstance(out, IonAnnotation)
         assert list(out.annotations) == list(value.annotations)
         assert out.value == value.value
+
+
+# --- an Ion timestamp's fraction exponent (#293) -----------------------------
+#
+# The decoder scaled a timestamp's fraction by 10**-exponent even for an
+# exponent it logs as unexpected: -51 million took a minute to build, and a
+# positive one divided by zero. Outside -6..-1 the fraction is now dropped.
+
+
+def _timestamp(fraction_exponent, coefficient):
+    from kfxgen.kfxlib_minimal.ion_binary import (
+        serialize_signedint,
+        serialize_vlsint,
+        serialize_vluint,
+    )
+
+    parts = [serialize_vlsint(0), serialize_vluint(2024)]
+    parts += [serialize_vluint(v) for v in (1, 2, 3, 4, 5)]
+    parts += [serialize_vlsint(fraction_exponent), serialize_signedint(coefficient)]
+    return b"".join(bytes(p) for p in parts)
+
+
+@pytest.mark.unit
+def test_a_millisecond_fraction_still_decodes():
+    value = IonBinary().deserialize_timestamp_value(_timestamp(-3, 123))
+    assert (value.year, value.second, value.microsecond) == (2024, 5, 123000)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("exponent", [-51514698, -7, 1, 5])
+def test_an_unexpected_fraction_exponent_is_dropped_at_once(exponent):
+    import time
+
+    start = time.monotonic()
+    value = IonBinary().deserialize_timestamp_value(_timestamp(exponent, 38))
+    assert time.monotonic() - start < 1.0
+    assert (value.year, value.second, value.microsecond) == (2024, 5, 0)
