@@ -73,7 +73,9 @@ _CELL_BLOCK_TAGS = {
     "article",
     "figure",
 }
-#: Content v1 can't place inside a cell.
+#: Content a native table can't place inside a cell. An <img> is the
+#: exception: a cell holding one is a container of paragraphs in which the
+#: picture is a paragraph of its own (#262).
 _NON_TEXT_TAGS = {
     "img",
     "svg",
@@ -784,8 +786,8 @@ def _book_link_targets(oeb_book):
 def _table_is_native(table):
     """True when `table` can be written as a real KFX table (#219).
 
-    Anything else keeps rows as paragraphs: a nested table, an image or other
-    object, a cell or a paragraph in a cell longer than the generator's chunk
+    Anything else keeps rows as paragraphs: a nested table, an object other
+    than an <img> (#262), a cell or a paragraph in a cell longer than the generator's chunk
     size, a cell outside a row, or no rows or cells at all. A cell holding
     several blocks is written as paragraphs (#261).
 
@@ -840,7 +842,7 @@ def _table_is_native(table):
             rows += 1
         elif tag == "table" and e is not table:
             return False
-        elif tag in _NON_TEXT_TAGS:
+        elif tag in _NON_TEXT_TAGS and tag != "img":
             return False
         elif tag in _CELL_TAGS:
             if _local_tag(e.getparent().tag) != "tr":
@@ -1034,19 +1036,6 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
     }
 
 
-def _has_picture_paragraph(table_block):
-    """True when a paragraph cell holds a picture: an empty element drawn with
-    a background image (#168) walks to an image block. Pictures in cells are
-    #262; until then the table keeps rows, so the image token is never written
-    as text (#267 review)."""
-    return any(
-        _IMG_TOKEN_RE.search(p["text"])
-        for r in table_block["table"]["rows"]
-        for c in r["cells"]
-        for p in c.get("paragraphs") or ()
-    )
-
-
 def _cell_ids(cell):
     """Every anchor id a cell holds: its own and its paragraphs'."""
     return list(cell["anchor_ids"]) + [
@@ -1071,7 +1060,10 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
     rows, carry, captions = [], [], []
 
     def build_cell(cell):
-        if walk_cell is not None and _cell_paragraph_count(cell) >= 2:
+        # A cell with a picture is walked as the body is, so the picture is a
+        # paragraph of its own, which the generator writes as an image (#262).
+        has_picture = any(_local_tag(d.tag) == "img" for d in cell.iter())
+        if walk_cell is not None and (_cell_paragraph_count(cell) >= 2 or has_picture):
             built = _paragraph_cell(cell, style_resolver, walk_cell)
             if built is not None:
                 return built
@@ -1859,9 +1851,7 @@ def extract_blocks_from_html(
                 elem, style_resolver, base_href, walk_cell=_walk_cell
             )
             past_start = set(table["anchor_ids"]) - _table_start_ids(table)
-            native = not (toc_targets and past_start & set(toc_targets)) and not (
-                _has_picture_paragraph(table)
-            )
+            native = not (toc_targets and past_start & set(toc_targets))
             if not native and nav_listing_at is not None:
                 # The rows walk below records any listing again.
                 del nav_listing_at[listings:]

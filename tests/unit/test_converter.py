@@ -2454,7 +2454,7 @@ def test_thead_tbody_tfoot_colspan_rowspan_go_native():
     "html",
     [
         "<table><tr><td><table><tr><td>x</td></tr></table></td></tr></table>",
-        '<table><tr><td><img src="a.png"/></td></tr></table>',
+        '<table><tr><td><video src="a.mp4"></video></td></tr></table>',
         "<table><tr><td><svg/></td></tr></table>",
         "<table><caption>only a caption</caption></table>",
         "<table><td>cell with no row</td></table>",
@@ -2462,7 +2462,7 @@ def test_thead_tbody_tfoot_colspan_rowspan_go_native():
     ],
     ids=[
         "nested",
-        "img",
+        "video",
         "svg",
         "no-rows",
         "cell-outside-row",
@@ -2615,11 +2615,11 @@ def test_ids_in_a_paragraph_cell_land_on_their_paragraph():
 
 
 @pytest.mark.unit
-def test_a_background_picture_in_a_paragraph_cell_sends_the_table_to_rows():
+def test_a_background_picture_in_a_cell_is_its_own_paragraph():
     # #267 review: the body walker draws an empty no-repeat background as a
-    # picture (#168). In a cell it came back as a "paragraph" holding the raw
-    # image token, written as text. Pictures in cells are #262; until then the
-    # table keeps rows, as for an <img>.
+    # picture (#168). In a cell it once came back as a "paragraph" holding the
+    # raw image token beside text. The table stays native and the picture is
+    # a paragraph of its own, which the generator writes as an image (#262).
     def resolver(elem):
         if elem.get("class") == "pic":
             return {
@@ -2636,8 +2636,9 @@ def test_a_background_picture_in_a_paragraph_cell_sends_the_table_to_rows():
         style_resolver=resolver,
         native_tables=True,
     )
-    assert not any(b.get("type") == "table" for b in blocks)
-    assert not any("\x00" in b["text"] and "Caption" in b["text"] for b in blocks)
+    (table,) = [b for b in blocks if b.get("type") == "table"]
+    paras = [p["text"] for p in table["table"]["rows"][0]["cells"][0]["paragraphs"]]
+    assert [IMG_TOKEN_RE.sub("[img]", t) for t in paras] == ["[img]", "Caption."]
 
 
 @pytest.mark.unit
@@ -4380,7 +4381,7 @@ def test_native_tables_off_keeps_rows_as_paragraphs():
 @pytest.mark.unit
 def test_an_ineligible_table_falls_back_to_rows_with_native_tables_on():
     blocks = _conv.extract_blocks_from_html(
-        _doc('<table><tr><td>a</td><td><img src="i.png"/></td></tr></table>'),
+        _doc('<table><tr><td>a</td><td><video src="v.mp4"></video></td></tr></table>'),
         native_tables=True,
     )
     assert all(b.get("type", "text") != "table" for b in blocks)
@@ -4390,7 +4391,10 @@ def test_an_ineligible_table_falls_back_to_rows_with_native_tables_on():
 def test_only_fallback_tables_count_for_the_warning():
     seen = []
     _conv.extract_blocks_from_html(
-        _doc(f'{_ISSUE_219_TABLE}<table><tr><td><img src="i.png"/></td></tr></table>'),
+        _doc(
+            f"{_ISSUE_219_TABLE}<table><tr><td>a</td>"
+            '<td><video src="v.mp4"></video></td></tr></table>'
+        ),
         native_tables=True,
         tables_seen=seen,
     )
@@ -5605,8 +5609,16 @@ def _cell_texts(body, native):
         ("<td><p>one two</p><p>three</p></td>", True, [["one two", "three"]]),
         ("<td>one<p>two</p></td>", True, ["one two"]),
         ("<td><p>one</p>two</td>", True, ["one two"]),
-        ('<td><img src="a.png"/><p>one</p><p>two</p></td>', True, None),
-        ('<td><img src="a.png"/></td><td><p>one</p><p>two</p></td>', True, None),
+        (
+            '<td><img src="a.png"/><p>one</p><p>two</p></td>',
+            True,
+            [["[img]", "one", "two"]],
+        ),
+        (
+            '<td><img src="a.png"/></td><td><p>one</p><p>two</p></td>',
+            True,
+            [["[img]"], ["one", "two"]],
+        ),
         ("<td>cellone<p>celltwo</p></td>", False, ["cellone celltwo"]),
     ],
     ids=[
@@ -5620,13 +5632,11 @@ def _cell_texts(body, native):
     ],
 )
 def test_blocks_inside_a_cell_do_not_run_together(cells, native, expected):
+    # A picture is its own paragraph in a cell (#262); "[img]" stands for it.
     texts = _cell_texts(f"<table><tr>{cells}</tr></table>", native)
-    if expected is None:
-        # An image sends the table to rows (#262); the words stay apart.
-        assert not any("onetwo" in str(t) for t in texts), texts
-        assert any("one two" in str(t) for t in texts), texts
-    else:
-        assert texts == expected
+    pic = lambda t: IMG_TOKEN_RE.sub("[img]", t)  # noqa: E731
+    texts = [[pic(x) for x in t] if isinstance(t, list) else pic(t) for t in texts]
+    assert texts == expected
 
 
 @pytest.mark.unit
@@ -5795,3 +5805,83 @@ def test_a_paragraph_cell_carries_its_vertical_align():
     (table,) = [b for b in blocks if b.get("type") == "table"]
     cell = table["table"]["rows"][0]["cells"][0]
     assert cell.get("paragraphs") and cell["valign"] == "top"
+
+
+# --- pictures in table cells (#262) ------------------------------------------
+#
+# A table with an <img> in a cell stays native; the cell becomes a container of
+# paragraphs in which each picture is a paragraph of its own (an image token),
+# as Kindle Previewer writes a cell's picture as its own $271 entry.
+
+
+def _picture_cells(table_html):
+    blocks = extract_blocks_from_html(_doc(table_html), native_tables=True)
+    tables = [b for b in blocks if b.get("type") == "table"]
+    if not tables:
+        return None
+    return [
+        [IMG_TOKEN_RE.sub("[img]", p["text"]) for p in c.get("paragraphs") or [c]]
+        for r in tables[0]["table"]["rows"]
+        for c in r["cells"]
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "cells, expected",
+    [
+        ('<td><img src="a.png"/></td><td>text</td>', [["[img]"], ["text"]]),
+        (
+            '<td><img src="a.png"/><br/>Captain Smith</td><td>x</td>',
+            [["[img]", "Captain Smith"], ["x"]],
+        ),
+        (
+            '<td><p><img src="a.png"/></p><p>Captain Smith</p></td><td>x</td>',
+            [["[img]", "Captain Smith"], ["x"]],
+        ),
+        (
+            '<td>Captain Smith<br/><img src="a.png"/></td><td>x</td>',
+            [["Captain Smith", "[img]"], ["x"]],
+        ),
+        (
+            '<td><img src="a.png"/><img src="b.png"/></td><td>x</td>',
+            [["[img]", "[img]"], ["x"]],
+        ),
+    ],
+    ids=[
+        "picture-only",
+        "caption-after-br",
+        "caption-paragraph",
+        "caption-above",
+        "two-pictures",
+    ],
+)
+def test_a_picture_in_a_cell_keeps_the_table_native(cells, expected):
+    assert (
+        _picture_cells(f"<table><tr>{cells}</tr><tr><td>c</td><td>d</td></tr></table>")[
+            :2
+        ]
+        == expected
+    )
+
+
+@pytest.mark.unit
+def test_a_picture_inside_a_line_of_text_is_split_out_of_it():
+    # kfxgen writes a picture as its own entry outside tables too; the text on
+    # either side stays, in order.
+    cells = _picture_cells(
+        '<table><tr><td>Press <img src="i.png"/> to stop.</td><td>x</td></tr></table>'
+    )
+    joined = " ".join(cells[0])
+    assert "[img]" in joined and joined.index("Press") < joined.index(
+        "[img]"
+    ) < joined.index("to stop.")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("tag", ["svg", "video", "object", "math"])
+def test_other_objects_in_a_cell_still_send_the_table_to_rows(tag):
+    assert (
+        _picture_cells(f"<table><tr><td><{tag}></{tag}></td><td>x</td></tr></table>")
+        is None
+    )

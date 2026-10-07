@@ -841,3 +841,105 @@ def test_only_multi_column_tables_get_the_zoom_button(calibre):
             got[text] = ("$629" in e, "$65" in styles[str(e["$157"])])
     want = {cid: (zoom, True) for cid, _, _, zoom in ZOOM_TABLES}
     assert got == want, calibre_version
+
+
+def _grid_png(w, h):
+    """A PNG with varied pixels, so it is over the 100 bytes below which the
+    generator skips an image as empty."""
+    import struct
+    import zlib
+
+    raw = b"".join(
+        b"\x00" + bytes((x * 7 + y * 13 + k) % 256 for x in range(w) for k in range(3))
+        for y in range(h)
+    )
+
+    def chunk(t, d):
+        return (
+            struct.pack(">I", len(d))
+            + t
+            + d
+            + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+        )
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
+def test_a_picture_grid_is_a_native_table_of_unstyled_pictures(calibre):
+    # #262: pictures in cells, as Kindle Previewer writes them: each a $271
+    # entry with no style inside its cell's container, its caption a text
+    # entry after it. Before, any <img> sent the table to rows.
+    tmp, _, calibre_version = calibre
+    body = (
+        "<h1>Chapter</h1><p>Before.</p><table>"
+        '<tr><td><img src="a.png" alt="first"/><br/>Captain Smith</td>'
+        '<td><p><img src="b.png" alt="second"/></p><p>The harbour</p></td></tr>'
+        '<tr><td><img src="b.png" alt="third"/></td><td>Plain text</td></tr>'
+        "</table><p>After.</p>"
+    )
+    page = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter</title></head>'
+        f"<body>{body}</body></html>"
+    )
+    epub = tmp / "picture-grid-262.epub"
+    with zipfile.ZipFile(epub, "w") as z:
+        z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        z.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0" '
+            'xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles>'
+            '<rootfile full-path="content.opf" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>',
+        )
+        z.writestr(
+            "content.opf",
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" '
+            'version="2.0" unique-identifier="i"><metadata '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="i">grid'
+            "</dc:identifier><dc:title>Picture grid</dc:title><dc:language>en"
+            "</dc:language></metadata><manifest>"
+            '<item id="c" href="c.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="a" href="a.png" media-type="image/png"/>'
+            '<item id="b" href="b.png" media-type="image/png"/>'
+            '</manifest><spine><itemref idref="c"/></spine></package>',
+        )
+        z.writestr("c.xhtml", page)
+        z.writestr("a.png", _grid_png(144, 180))
+        z.writestr("b.png", _grid_png(144, 180))
+    kfx = tmp / "picture-grid-262.kfx"
+    _ebook_convert(calibre, epub, kfx, native=True)
+    frags = load_fragments(kfx)
+    content = {
+        str(val(f)["name"]): list(val(f)["$146"]) for f in by_type(frags, "$145")
+    }
+    tables = [
+        e
+        for f in by_type(frags, "$259")
+        for e in iter_entries(val(f)["$146"])
+        if str(e.get("$159")) == "$278"
+    ]
+    assert len(tables) == 1, calibre_version
+    cells = [c for g in tables[0]["$146"] for r in g["$146"] for c in r["$146"]]
+
+    def shape(c):
+        out = []
+        for e in c.get("$146") or [c]:
+            if str(e["$159"]) == "$271":
+                out.append(("picture", str(e["$584"]), "$157" in e))
+            else:
+                ref = e["$145"]
+                out.append(str(content[str(ref["name"])][int(ref["$403"])]))
+        return out
+
+    assert [shape(c) for c in cells] == [
+        [("picture", "first", False), "Captain Smith"],
+        [("picture", "second", False), "The harbour"],
+        [("picture", "third", False)],
+        ["Plain text"],
+    ], calibre_version

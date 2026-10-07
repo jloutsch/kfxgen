@@ -3729,3 +3729,197 @@ def test_yj_table_viewer_is_declared_only_when_a_table_has_the_zoom_button(tmp_p
     two_columns = _shaped_table([("body", [B, B], 1)] * 2)
     assert _declares_table_viewer(tmp_path, [one_column]) is False
     assert _declares_table_viewer(tmp_path, [one_column, two_columns]) is True
+
+
+# --- pictures in table cells (#262) ------------------------------------------
+#
+# Kindle Previewer 4.0.1 writes a cell's picture as a $271 entry inside the
+# cell's $269 container, with no $157 style, so the picture shows at its own
+# size within the cell; a caption is a text entry beside it.
+
+
+def _png(w, h):
+    import struct
+    import zlib
+
+    # Varied pixels, so even a small picture is over the 100 bytes below
+    # which the generator skips an image as empty.
+    raw = b"".join(
+        b"\x00" + bytes((x * 7 + y * 13 + k) % 256 for x in range(w) for k in range(3))
+        for y in range(h)
+    )
+
+    def chunk(t, d):
+        return (
+            struct.pack(">I", len(d))
+            + t
+            + d
+            + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+        )
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
+def _pic(href="a.png"):
+    return f"\x00IMG\x01{href}\x01x\x00"
+
+
+def _para(text, anchor_keys=()):
+    return {
+        "text": text,
+        "spans": [],
+        "block_style": None,
+        "anchor_keys": list(anchor_keys),
+        "anchor_offsets": dict.fromkeys(anchor_keys, 0),
+    }
+
+
+def _picture_table(paragraphs):
+    block = _table_block([["p", "side"]])
+    block["table"]["rows"][0]["cells"][0]["paragraphs"] = paragraphs
+    return block
+
+
+def _picture_book(tmp_path, blocks):
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    gen.generate_full_book(
+        "T",
+        "A",
+        [{"title": "Chapter", "text": "x", "blocks": blocks}],
+        output_path=str(out),
+        images={"a.png": _png(400, 300), "b.png": _png(15, 15)},
+    )
+    frags = load_fragments(out)
+    story = [f for f in frags if str(f.ftype) == "$259"][-1]
+    content = {
+        str(val(f)["name"]): list(val(f)["$146"]) for f in by_type(frags, "$145")
+    }
+    table = next(e for e in val(story)["$146"] if str(e["$159"]) == "$278")
+    cell = table["$146"][0]["$146"][0]["$146"][0]
+
+    def shape(e):
+        if str(e["$159"]) == "$271":
+            return ("picture", "$157" in e, "$175" in e)
+        ref = e["$145"]
+        return ("text", str(content[str(ref["name"])][int(ref["$403"])]))
+
+    return frags, cell, [shape(e) for e in cell["$146"]]
+
+
+@pytest.mark.unit
+def test_a_picture_only_cell_is_a_container_of_one_unstyled_picture(tmp_path):
+    _, cell, shapes = _picture_book(tmp_path, [_picture_table([_para(_pic())])])
+    assert str(cell["$159"]) == "$269"
+    assert shapes == [("picture", False, True)]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "paragraphs, expected",
+    [
+        (
+            [_para(_pic()), _para("Captain Smith")],
+            [("picture", False, True), ("text", "Captain Smith")],
+        ),
+        (
+            [_para("Captain Smith"), _para(_pic())],
+            [("text", "Captain Smith"), ("picture", False, True)],
+        ),
+        (
+            [_para(f"{_pic()}{_pic('b.png')}")],
+            [("picture", False, True), ("picture", False, True)],
+        ),
+        (
+            [_para(f"Press {_pic('b.png')} to stop.")],
+            [("text", "Press"), ("picture", False, True), ("text", "to stop.")],
+        ),
+    ],
+    ids=["caption-below", "caption-above", "two-pictures", "inside-a-line"],
+)
+def test_a_cells_pictures_and_text_are_entries_in_order(tmp_path, paragraphs, expected):
+    _, _, shapes = _picture_book(tmp_path, [_picture_table(paragraphs)])
+    assert shapes == expected
+
+
+@pytest.mark.unit
+def test_pictures_only_in_cells_allocate_no_picture_width_style(tmp_path):
+    # A cell's picture has no style; allocating the width style the body
+    # flow uses would leave an unreferenced $157, which upstream grades an
+    # error (#102).
+    frags, _, _ = _picture_book(tmp_path, [_picture_table([_para(_pic())])])
+    assert not [f for f in by_type(frags, "$157") if str(f.fid).startswith("s_img")]
+
+
+@pytest.mark.unit
+def test_a_link_to_a_picture_in_a_cell_lands(tmp_path):
+    from kfxgen.inline_style import make_link_flag
+
+    gen = NativeKFXGenerator()
+    link = {
+        "text": "See",
+        "spans": [(0, 3, frozenset({make_link_flag("c.xhtml#fig")}))],
+        "anchor_keys": [],
+    }
+    gen.generate_full_book(
+        "T",
+        "A",
+        [
+            {
+                "title": "C",
+                "text": "x",
+                "blocks": [link, _picture_table([_para(_pic(), ["c.xhtml#fig"])])],
+            }
+        ],
+        output_path=str(tmp_path / "o.kfx"),
+        images={"a.png": _png(400, 300)},
+    )
+    assert _collect_link_targets(gen), "the link to the picture was dropped"
+
+
+@pytest.mark.unit
+def test_a_cell_whose_only_picture_is_missing_keeps_an_empty_entry(tmp_path):
+    # A picture the book doesn't hold is dropped, as in the body; the cell
+    # keeps an empty text entry, as an empty text cell does, rather than
+    # becoming an empty container.
+    _, _, shapes = _picture_book(tmp_path, [_picture_table([_para(_pic("gone.png"))])])
+    assert shapes == [("text", " ")]
+
+
+def _link_lands(tmp_path, target_block):
+    from kfxgen.inline_style import make_link_flag
+
+    gen = NativeKFXGenerator()
+    link = {
+        "text": "See",
+        "spans": [(0, 3, frozenset({make_link_flag("c.xhtml#fig")}))],
+        "anchor_keys": [],
+    }
+    gen.generate_full_book(
+        "T",
+        "A",
+        [{"title": "C", "text": "x", "blocks": [link, target_block]}],
+        output_path=str(tmp_path / "o.kfx"),
+        images={"a.png": _png(400, 300)},
+    )
+    return bool(_collect_link_targets(gen))
+
+
+@pytest.mark.unit
+def test_a_link_to_a_missing_picture_in_a_cell_still_lands(tmp_path):
+    # #290 review: a picture the book doesn't hold (or one of 100 bytes or
+    # less, which the generator skips) emitted nothing, so its id was lost
+    # and the link to it became plain text. On main it landed on the row.
+    table = _picture_table([_para(_pic("gone.png"), ["c.xhtml#fig"])])
+    assert _link_lands(tmp_path, table)
+
+
+@pytest.mark.unit
+def test_a_link_to_a_missing_picture_in_a_cell_with_text_still_lands(tmp_path):
+    table = _picture_table([_para(_pic("gone.png"), ["c.xhtml#fig"]), _para("Caption")])
+    assert _link_lands(tmp_path, table)
