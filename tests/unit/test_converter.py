@@ -6044,3 +6044,113 @@ def test_border_colour_as_argb(value, argb):
 def test_css_border_reads_one_computed_side(side, expected):
     none = ("none", "medium", "currentColor")
     assert _conv._css_border({"border-sides": (side, none, none, none)}) == expected
+
+
+# --- column widths (#264) ----------------------------------------------------
+#
+# A native table records its columns' percentage widths, as Kindle Previewer
+# 4.0.1 writes them into $152: from <col> (style or width attribute, `span`
+# repeating it), else from the cells (the last row that sets a column wins; a
+# spanning cell sets none). Absolute widths are left out: Previewer turns them
+# into percentages by laying the page out, which can't be reproduced.
+
+
+def _width_resolver(elem):
+    # Stands in for the resolver's declared `width` (Stylizer.get).
+    m = re.search(r"width:\s*([\d.]+(?:%|px|em))", elem.get("style") or "")
+    return {"width": m.group(1)} if m else {}
+
+
+def _widths(table_html, resolver=_width_resolver):
+    blocks = extract_blocks_from_html(
+        _doc(table_html), style_resolver=resolver, native_tables=True
+    )
+    (table,) = [b for b in blocks if b.get("type") == "table"]
+    t = table["table"]
+    flags = [[c.get("width_set", False) for c in r["cells"]] for r in t["rows"]]
+    return t.get("column_widths"), flags
+
+
+def _rows3(*attrs):
+    return "".join(
+        "<tr>" + "".join(f"<td{a}>x</td>" for a in row) + "</tr>" for row in attrs
+    )
+
+
+def _sw(value):
+    return f' style="width:{value}"'
+
+
+def _aw(value):
+    return f' width="{value}"'
+
+
+_PLAIN3 = ("", "", "")
+_COLS = (
+    f"<table><colgroup><col{_sw('20%')}/><col{_sw('30%')}/><col{_sw('50%')}/>"
+    "</colgroup>"
+)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "table_html, expected",
+    [
+        (f"<table>{_rows3(_PLAIN3)}</table>", (None, [[False] * 3])),
+        (
+            f"{_COLS}{_rows3(_PLAIN3)}</table>",
+            (("col", [20.0, 30.0, 50.0]), [[False] * 3]),
+        ),
+        (
+            f"<table><col{_aw('20%')}/><col/><col{_aw('50%')}/>{_rows3(_PLAIN3)}</table>",
+            (("col", [20.0, None, 50.0]), [[False] * 3]),
+        ),
+        (
+            f'<table><col span="2"{_sw("25%")}/><col{_sw("50%")}/>{_rows3(_PLAIN3)}</table>',
+            (("col", [25.0, 25.0, 50.0]), [[False] * 3]),
+        ),
+        (
+            f"<table>{_rows3(('', _sw('40%'), ''))}</table>",
+            (("cell", [None, 40.0, None]), [[False, True, False]]),
+        ),
+        (
+            f"<table>{_rows3((_aw('25%'), _aw('25%'), _aw('50%')))}</table>",
+            (("cell", [25.0, 25.0, 50.0]), [[True, True, True]]),
+        ),
+        (
+            f"<table>{_rows3((_sw('30%'), '', ''), (_sw('60%'), '', ''))}</table>",
+            (
+                ("cell", [60.0, None, None]),
+                [[True, False, False], [True, False, False]],
+            ),
+        ),
+        (
+            f"<table>{_rows3((_sw('100px'), _sw('5em'), _aw('80')))}</table>",
+            (None, [[False] * 3]),
+        ),
+        (
+            f'<table><tr><td colspan="2"{_sw("60%")}>x</td><td>y</td></tr>'
+            f"{_rows3(_PLAIN3)}</table>",
+            (None, [[True, False], [False] * 3]),
+        ),
+    ],
+    ids=[
+        "none",
+        "col-style",
+        "col-attr-partial",
+        "col-span",
+        "cell-second-column",
+        "cell-attr-all",
+        "last-row-wins",
+        "absolute-units-ignored",
+        "spanning-cell-sets-none",
+    ],
+)
+def test_a_table_records_its_column_widths(table_html, expected):
+    assert _widths(table_html) == expected
+
+
+@pytest.mark.unit
+def test_without_a_stylizer_width_attributes_still_count():
+    html = f"<table><col{_aw('20%')}/><col{_aw('80%')}/>{_rows3(('', ''))}</table>"
+    assert _widths(html, None)[0] == ("col", [20.0, 80.0])

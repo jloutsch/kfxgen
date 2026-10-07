@@ -4020,3 +4020,81 @@ def test_cells_with_different_borders_get_different_styles(tmp_path):
     a, b = table["$146"][0]["$146"][0]["$146"]
     assert str(a["$157"]) != str(b["$157"])
     assert "$93" not in styles[str(b["$157"])]
+
+
+# --- column widths (#264) ----------------------------------------------------
+#
+# Kindle Previewer 4.0.1 writes a table's column widths as $152 on the $278:
+# one entry per <col>, {$56: n%, $546: $377} or {} for a column with none;
+# from cell widths, {$56: n%} with adjacent equal widths merged by a $118
+# count. Trailing empty entries are left out. A cell that sets its own width
+# gets $546 $377 in its style.
+
+
+def _widths_table(tmp_path, column_widths, width_set=()):
+    block = _table_block([["a", "b", "c"], ["d", "e", "f"]])
+    block["table"]["column_widths"] = column_widths
+    for i in width_set:
+        block["table"]["rows"][0]["cells"][i]["width_set"] = True
+    top, styles = _storyline(tmp_path, [block])
+    table = next(e for e in top if str(e["$159"]) == "$278")
+
+    def entry(e):
+        out = {}
+        for k, v in e.items():
+            if hasattr(v, "get"):
+                v = f"{float(v['$307']):g}{str(v['$306'])}"
+            out[str(k)] = str(v)
+        return out
+
+    widths = [entry(e) for e in table["$152"]] if "$152" in table else None
+    cells = table["$146"][0]["$146"][0]["$146"]
+    box = ["$546" in styles[str(c["$157"])] for c in cells]
+    return widths, box
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "column_widths, expected",
+    [
+        (None, None),
+        (
+            ("col", [20.0, 30.0, 50.0]),
+            [
+                {"$56": "20$314", "$546": "$377"},
+                {"$56": "30$314", "$546": "$377"},
+                {"$56": "50$314", "$546": "$377"},
+            ],
+        ),
+        (
+            ("col", [20.0, None, 50.0]),
+            [{"$56": "20$314", "$546": "$377"}, {}, {"$56": "50$314", "$546": "$377"}],
+        ),
+        (("col", [20.0, None, None]), [{"$56": "20$314", "$546": "$377"}]),
+        (("cell", [None, 40.0, None]), [{}, {"$56": "40$314"}]),
+        (
+            ("cell", [25.0, 25.0, 50.0]),
+            [{"$56": "25$314", "$118": "2"}, {"$56": "50$314"}],
+        ),
+        (("cell", [33.5, 33.5, 33.5]), [{"$56": "33.5$314", "$118": "3"}]),
+    ],
+    ids=[
+        "none",
+        "col",
+        "col-gap",
+        "col-trailing-empty",
+        "cell-second",
+        "cell-merged",
+        "cell-all-equal",
+    ],
+)
+def test_column_widths_are_written_as_previewer_writes_them(
+    tmp_path, column_widths, expected
+):
+    assert _widths_table(tmp_path, column_widths)[0] == expected
+
+
+@pytest.mark.unit
+def test_a_cell_that_sets_a_width_gets_border_box_sizing(tmp_path):
+    _, box = _widths_table(tmp_path, ("cell", [None, 40.0, None]), width_set=[1])
+    assert box == [False, True, False]

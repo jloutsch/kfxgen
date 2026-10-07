@@ -1014,3 +1014,63 @@ def test_tables_and_cells_carry_their_borders_through_calibre(calibre):
         ),
         "XRULE": ({"$83": grey}, {"$91": "$328", "$96": "0.45$318"}),
     }, calibre_version
+
+
+# Column widths (#264): percentage widths from <col> and from cells reach $152
+# as Kindle Previewer 4.0.1 writes them, through the real Stylizer.
+WIDTH_CSS = "td.wide { width: 40%; }\n"
+WIDTH_TABLES = [
+    (
+        "WCOL",
+        '<colgroup><col style="width:20%"/><col/><col width="50%"/></colgroup>',
+        "",
+    ),
+    ("WCELL", "", ' class="wide"'),
+]
+
+
+def test_column_widths_reach_the_table_through_calibre(calibre):
+    tmp, _, calibre_version = calibre
+    cases = [
+        (
+            "c1",
+            cid,
+            f"<table>{cols}<tr><td>{cid}</td><td{second}>b</td><td>c</td></tr>"
+            "<tr><td>d</td><td>e</td><td>f</td></tr></table>",
+        )
+        for cid, cols, second in WIDTH_TABLES
+    ]
+    epub = tmp / "widths-264.epub"
+    _build_epub(epub, cases, WIDTH_CSS, {})
+    kfx = tmp / "widths-264.kfx"
+    _ebook_convert(calibre, epub, kfx, native=True)
+    frags = load_fragments(kfx)
+    content = {
+        str(val(f)["name"]): list(val(f)["$146"]) for f in by_type(frags, "$145")
+    }
+
+    def entry(e):
+        return {
+            str(k): f"{float(v['$307']):g}{str(v['$306'])}"
+            if hasattr(v, "get")
+            else str(v)
+            for k, v in e.items()
+        }
+
+    got = {}
+    for f in by_type(frags, "$259"):
+        for e in iter_entries(val(f)["$146"]):
+            if str(e.get("$159")) != "$278":
+                continue
+            first = e["$146"][0]["$146"][0]["$146"][0]
+            ref = first["$145"]
+            name = str(content[str(ref["name"])][int(ref["$403"])])
+            got[name] = [entry(x) for x in e.get("$152") or []]
+    assert got == {
+        "WCOL": [
+            {"$56": "20$314", "$546": "$377"},
+            {},
+            {"$56": "50$314", "$546": "$377"},
+        ],
+        "WCELL": [{}, {"$56": "40$314"}],
+    }, calibre_version
