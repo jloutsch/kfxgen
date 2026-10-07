@@ -594,6 +594,68 @@ def _table_feature_version(chapters):
     return 1
 
 
+#: CSS border style -> KFX symbol, as Kindle Previewer writes it (#264).
+_BORDER_STYLE_SYMBOLS = {
+    "solid": "$328",
+    "double": "$329",
+    "dashed": "$330",
+    "dotted": "$331",
+    "groove": "$334",
+    "ridge": "$335",
+    "inset": "$336",
+    "outset": "$337",
+}
+#: Per side: (width, style, colour) properties.
+_BORDER_SIDE_KEYS = {
+    "top": ("$94", "$89", "$84"),
+    "right": ("$97", "$92", "$87"),
+    "bottom": ("$96", "$91", "$86"),
+    "left": ("$95", "$90", "$85"),
+}
+
+
+def _border_key(border):
+    """A border dict as a hashable style-cache key, or None."""
+    return tuple(sorted(border.items())) if border else None
+
+
+def _apply_border(value, border, is_table):
+    """Write a table's or cell's border into its $157 `value` as Kindle
+    Previewer 4.0.1 does (#264): equal sides as $93/$88 (+$83 unless black),
+    otherwise each drawn side's own width, style and colour. A table's
+    default grey $83 goes when its border is black, or it would draw grey.
+    `border` is the converter's {side: (style, width_pt, argb or None)}."""
+    sides = {
+        side: spec
+        for side, spec in dict(border or ()).items()
+        if spec[0] in _BORDER_STYLE_SYMBOLS and spec[1] > 0
+    }
+    if not sides:
+        return
+
+    def pt(width):
+        return IonStruct(IS("$307"), IonDecimal(f"{width:g}"), IS("$306"), IS("$318"))
+
+    specs = set(sides.values())
+    if len(sides) == 4 and len(specs) == 1:
+        kind, width, colour = specs.pop()
+        value[IS("$93")] = pt(width)
+        value[IS("$88")] = IS(_BORDER_STYLE_SYMBOLS[kind])
+        if colour:
+            value[IS("$83")] = colour
+        elif is_table:
+            value.pop(IS("$83"), None)
+        return
+    for side, (kind, width, colour) in sides.items():
+        w, st, c = _BORDER_SIDE_KEYS[side]
+        value[IS(w)] = pt(width)
+        value[IS(st)] = IS(_BORDER_STYLE_SYMBOLS[kind])
+        if colour:
+            value[IS(c)] = colour
+    if is_table:
+        value.pop(IS("$83"), None)
+
+
 def _table_has_zoom(tbl):
     """Whether a native table gets the table viewer's zoom button: every table
     of 2 or more columns. A one-column table gets `max-width: 100%` instead
@@ -1697,8 +1759,9 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
-    def build_table_style_157(self, entity_name):
-        """$157 for a native table node, as Kindle Previewer writes it (#219)."""
+    def build_table_style_157(self, entity_name, border=None):
+        """$157 for a native table node, as Kindle Previewer writes it (#219),
+        with the table's own border (#264)."""
         self.symtab.create_local_symbol(entity_name)
         value = IonStruct(
             IS("$16"), IonStruct(IS("$307"), IonDecimal("1"), IS("$306"), IS("$505")),
@@ -1707,6 +1770,7 @@ class NativeKFXGenerator:
             IS("$173"), IS(entity_name),
             IS("$83"), 4286611584,
         )  # fmt: skip
+        _apply_border(value, border, is_table=True)
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_cell_style_157(
@@ -1720,6 +1784,7 @@ class NativeKFXGenerator:
         font_family=None,
         font_size=1.0,
         valign="middle",
+        border=None,
     ):
         """$157 for a table cell: Previewer's padding, plus the cell's own
         alignment, header weight and spans (#219), its vertical alignment
@@ -1755,6 +1820,7 @@ class NativeKFXGenerator:
             value[IS("$16")] = IonStruct(
                 IS("$307"), IonDecimal(str(font_size)), IS("$306"), IS("$505")
             )  # rem
+        _apply_border(value, border, is_table=False)
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_fragment_157_image(
@@ -3383,6 +3449,7 @@ class NativeKFXGenerator:
                 "node": "table",
                 "anchor_keys": [],
                 "zoom": _table_has_zoom(tbl),
+                "border": tbl.get("border"),
             }
             all_chunks.append(table_open)
             group = None
@@ -3413,6 +3480,7 @@ class NativeKFXGenerator:
                         "colspan": cell.get("colspan", 1),
                         "rowspan": cell.get("rowspan", 1),
                         "valign": cell.get("valign"),
+                        "border": cell.get("border"),
                     }
                     if cell.get("paragraphs"):
                         # A cell holding several blocks (#261): a container,
@@ -3482,6 +3550,7 @@ class NativeKFXGenerator:
                                 "colspan": cell.get("colspan", 1),
                                 "rowspan": cell.get("rowspan", 1),
                                 "valign": cell.get("valign"),
+                                "border": cell.get("border"),
                             },
                         }
                     )
@@ -4094,6 +4163,7 @@ class NativeKFXGenerator:
                 # Unset is middle, as calibre's UA sheet makes it, so the two
                 # share one style.
                 "valign": cell.get("valign") or "middle",
+                "border": _border_key(cell.get("border")),
             }
             if cell_fam:
                 cattrs["font_family"] = cell_fam
@@ -4120,7 +4190,11 @@ class NativeKFXGenerator:
                     node = chunk.get("node")
                     if node == "table":
                         entry_styles.append(
-                            _allocate_style("_tbl", builder=self.build_table_style_157)
+                            _allocate_style(
+                                "_tbl",
+                                builder=self.build_table_style_157,
+                                border=_border_key(chunk.get("border")),
+                            )
                         )
                     elif node == "cell":
                         entry_styles.append(

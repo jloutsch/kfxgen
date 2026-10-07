@@ -180,6 +180,16 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # the declared value is what can take the marker away.
                     "list-style-type": _computed_value(st, "list-style-type"),
                     "display": st.get("display"),
+                    # Each side's computed border (style, width in points,
+                    # colour), top, right, bottom, left (#264).
+                    "border-sides": tuple(
+                        (
+                            _computed_value(st, f"border-{side}-style"),
+                            _computed_value(st, f"border-{side}-width"),
+                            _computed_value(st, f"border-{side}-color"),
+                        )
+                        for side in _BORDER_SIDES
+                    ),
                 }
             except Exception:
                 return None
@@ -960,6 +970,83 @@ def _row_align(tr, row_align, style_resolver):
     return row_align
 
 
+_BORDER_SIDES = ("top", "right", "bottom", "left")
+#: Kindle Previewer writes a CSS border width at 0.45pt per pixel; calibre
+#: computes it at 0.72pt per pixel. A keyword width is thin 1px, medium 3px,
+#: thick 5px. (#264)
+_PREVIEWER_PT_PER_CALIBRE_PT = 0.625
+_BORDER_KEYWORD_PX = {"thin": 1, "medium": 3, "thick": 5}
+#: The basic CSS colour names. Any other name writes no colour, so the device
+#: draws its default (black), as for `currentColor`.
+_CSS_COLOURS = {
+    "black": 0x000000, "silver": 0xC0C0C0, "gray": 0x808080, "grey": 0x808080,
+    "white": 0xFFFFFF, "maroon": 0x800000, "red": 0xFF0000, "purple": 0x800080,
+    "fuchsia": 0xFF00FF, "green": 0x008000, "lime": 0x00FF00, "olive": 0x808000,
+    "yellow": 0xFFFF00, "navy": 0x000080, "blue": 0x0000FF, "teal": 0x008080,
+    "aqua": 0x00FFFF,
+}  # fmt: skip
+
+
+def _border_colour(value):
+    """A CSS colour as the ARGB integer Previewer writes, or None for black and
+    for anything it can't read, which the device draws as its default black
+    (#264)."""
+    v = str(value or "").strip().lower()
+    rgb = None
+    if v in _CSS_COLOURS:
+        rgb = _CSS_COLOURS[v]
+    elif re.fullmatch(r"#[0-9a-f]{3}", v):
+        rgb = int("".join(c * 2 for c in v[1:]), 16)
+    elif re.fullmatch(r"#[0-9a-f]{6}", v):
+        rgb = int(v[1:], 16)
+    else:
+        m = re.fullmatch(r"rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)", v)
+        if m:
+            r, g, b = (min(int(x), 255) for x in m.groups())
+            rgb = (r << 16) | (g << 8) | b
+    if not rgb:
+        return None
+    return 0xFF000000 | rgb
+
+
+def _css_border(css):
+    """The visible sides of an element's computed CSS border, as
+    {side: (style, width in Previewer's points, ARGB colour or None)}, or None
+    when no side is drawn (#264)."""
+    sides = (css or {}).get("border-sides")
+    if not sides:
+        return None
+    out = {}
+    for side, (kind, width, colour) in zip(_BORDER_SIDES, sides):
+        kind = str(kind or "none").lower()
+        if kind in ("none", "hidden"):
+            continue
+        try:
+            pt = float(width)
+        except (TypeError, ValueError):
+            px = _BORDER_KEYWORD_PX.get(str(width or "").lower())
+            if px is None:
+                continue
+            pt = px * 0.72
+        if pt <= 0:
+            continue
+        out[side] = (
+            kind,
+            round(pt * _PREVIEWER_PT_PER_CALIBRE_PT, 4),
+            _border_colour(colour),
+        )
+    return out or None
+
+
+def _attr_border_px(table):
+    """The `border` attribute's width as HTML reads it (leading digits; an
+    empty value is 1), or 0."""
+    border = table.get("border")
+    if border is None:
+        return 0
+    return int(re.match(r"\s*(\d*)", border).group(1) or 1)
+
+
 _VALIGN_ATTR_VALUES = {"top", "middle", "bottom", "baseline"}
 _VALIGN_SCOPE = _CELL_TAGS | {"tr", "thead", "tbody", "tfoot"}
 
@@ -1058,16 +1145,37 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
     of paragraphs (`_paragraph_cell`). (#261)
     """
     rows, carry, captions = [], [], []
+    # The table's own frame: its CSS border, else the `border` attribute's
+    # outset grey frame of N x 0.45pt, as Kindle Previewer writes it (#264).
+    table_css = style_resolver(table) if style_resolver is not None else None
+    table_border = _css_border(table_css) or (
+        dict.fromkeys(
+            _BORDER_SIDES,
+            ("outset", round(0.45 * _attr_border_px(table), 4), 0xFF808080),
+        )
+        if _attr_border_px(table)
+        else None
+    )
+
+    attr_px = _attr_border_px(table)
+    # The `border` attribute's inset rule round every cell (#264).
+    attr_cell_border = (
+        dict.fromkeys(_BORDER_SIDES, ("inset", 0.45, None)) if attr_px else None
+    )
 
     def build_cell(cell):
+        built = None
         # A cell with a picture is walked as the body is, so the picture is a
         # paragraph of its own, which the generator writes as an image (#262).
         has_picture = any(_local_tag(d.tag) == "img" for d in cell.iter())
         if walk_cell is not None and (_cell_paragraph_count(cell) >= 2 or has_picture):
             built = _paragraph_cell(cell, style_resolver, walk_cell)
-            if built is not None:
-                return built
-        return _table_cell(cell, style_resolver, base_href)
+        if built is None:
+            built = _table_cell(cell, style_resolver, base_href)
+        # A cell's own CSS border wins over the attribute's (#264).
+        css = style_resolver(cell) if style_resolver is not None else None
+        built["border"] = _css_border(css) or attr_cell_border
+        return built
 
     def clamp_rowspans(group_rows):
         """A rowspan ends at its row group's last row, as HTML ends it.
@@ -1147,7 +1255,7 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
         "block_style": None,
         "anchor_ids": every,
         "anchor_offsets": dict.fromkeys(every, 0),
-        "table": {"anchor_ids": own, "rows": rows},
+        "table": {"anchor_ids": own, "rows": rows, "border": table_border},
     }
     return captions, block, carry
 

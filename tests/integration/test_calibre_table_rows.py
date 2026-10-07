@@ -943,3 +943,74 @@ def test_a_picture_grid_is_a_native_table_of_unstyled_pictures(calibre):
         [("picture", "third", False)],
         ["Plain text"],
     ], calibre_version
+
+
+# Borders (#264). Expected values are what Kindle Previewer 4.0.1 wrote for
+# the same tables; the CSS cases need the real Stylizer.
+BORDER_CSS = """
+table.bt { border: 1px solid black; }
+table.dot td { border: 2px dotted red; }
+table.hr th { border-bottom: 1px solid black; }
+"""
+BORDER_TABLES = [
+    ("XATTR", ' border="1"', "td"),
+    ("XTABLE", ' class="bt"', "td"),
+    ("XDOT", ' class="dot"', "td"),
+    ("XRULE", ' class="hr"', "th"),
+]
+_BORDER_KEYS = {f"${n}" for n in range(83, 98)}
+
+
+def test_tables_and_cells_carry_their_borders_through_calibre(calibre):
+    tmp, _, calibre_version = calibre
+    cases = [
+        (
+            "c1",
+            cid,
+            f"<table{attrs}><tr><{tag}>{cid}</{tag}><{tag}>b</{tag}></tr>"
+            "<tr><td>c</td><td>d</td></tr></table>",
+        )
+        for cid, attrs, tag in BORDER_TABLES
+    ]
+    epub = tmp / "borders-264.epub"
+    _build_epub(epub, cases, BORDER_CSS, {})
+    kfx = tmp / "borders-264.kfx"
+    _ebook_convert(calibre, epub, kfx, native=True)
+    frags = load_fragments(kfx)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    content = {
+        str(val(f)["name"]): list(val(f)["$146"]) for f in by_type(frags, "$145")
+    }
+
+    def border(e):
+        out = {}
+        for k, v in styles[str(e["$157"])].items():
+            if str(k) not in _BORDER_KEYS:
+                continue
+            if hasattr(v, "get"):
+                v = f"{float(v['$307']):g}{str(v['$306'])}"
+            out[str(k)] = str(v)
+        return out
+
+    got = {}
+    for f in by_type(frags, "$259"):
+        for e in iter_entries(val(f)["$146"]):
+            if str(e.get("$159")) != "$278":
+                continue
+            first = e["$146"][0]["$146"][0]["$146"][0]
+            ref = first["$145"]
+            name = str(content[str(ref["name"])][int(ref["$403"])])
+            got[name] = (border(e), border(first))
+    grey = "4286611584"
+    assert got == {
+        "XATTR": (
+            {"$83": grey, "$88": "$337", "$93": "0.45$318"},
+            {"$88": "$336", "$93": "0.45$318"},
+        ),
+        "XTABLE": ({"$88": "$328", "$93": "0.45$318"}, {}),
+        "XDOT": (
+            {"$83": grey},
+            {"$83": str(0xFFFF0000), "$88": "$331", "$93": "0.9$318"},
+        ),
+        "XRULE": ({"$83": grey}, {"$91": "$328", "$96": "0.45$318"}),
+    }, calibre_version
