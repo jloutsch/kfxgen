@@ -6190,3 +6190,128 @@ def test_a_table_records_its_percentage_width(attrs, expected):
     )
     (table,) = [b for b in blocks if b.get("type") == "table"]
     assert table["table"].get("width") == expected
+
+
+# --- cell padding and row borders (#264) -------------------------------------
+#
+# A cell's declared padding (calibre's UA default is 1px, which kfxgen already
+# writes) is recorded in ems per side, as Kindle Previewer 4.0.1 converts it
+# (1px = 0.45pt, 12pt = 1em), or ("%", n) for a percentage. Under
+# border-collapse a row's and a row group's CSS borders are recorded too;
+# Previewer writes them on the $279 / row group. Separated, it writes none.
+
+
+def _pad_resolver(elem):
+    out = {}
+    tag = _conv._local_tag(elem.tag)
+    m = re.search(r"padding:\s*([^;]+)", elem.get("style") or "")
+    if tag in ("td", "th"):
+        vals = m.group(1).split() if m else ["1px"]
+        vals = (vals * 4)[:4] if len(vals) == 1 else (vals + vals)[:4]
+        out["padding-sides"] = tuple(vals)
+    classes = (elem.get("class") or "").split()
+    if tag == "table":
+        out["border-collapse"] = "collapse" if "coll" in classes else "separate"
+    if "rb" in classes:
+        none = ("none", "medium", "currentColor")
+        out["border-sides"] = (none, none, ("solid", 0.72, "black"), none)
+    return out
+
+
+def _cell_padding(td_attrs, resolver=_pad_resolver):
+    blocks = extract_blocks_from_html(
+        _doc(f"<table><tr><td{td_attrs}>a</td><td>b</td></tr></table>"),
+        style_resolver=resolver,
+        native_tables=True,
+    )
+    (table,) = [b for b in blocks if b.get("type") == "table"]
+    return table["table"]["rows"][0]["cells"][0].get("padding")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "td_attrs, expected",
+    [
+        ("", None),
+        (
+            ' style="padding: 1em"',
+            dict.fromkeys(("top", "right", "bottom", "left"), 1.0),
+        ),
+        (
+            ' style="padding: 0.5em 10px"',
+            {"top": 0.5, "right": 0.375, "bottom": 0.5, "left": 0.375},
+        ),
+        (
+            ' style="padding: 6pt"',
+            dict.fromkeys(("top", "right", "bottom", "left"), 0.5),
+        ),
+        (' style="padding: 0"', dict.fromkeys(("top", "right", "bottom", "left"), 0.0)),
+        (
+            ' style="padding: 5%"',
+            dict.fromkeys(("top", "right", "bottom", "left"), ("%", 5.0)),
+        ),
+        (
+            ' style="padding: 2ex 1em"',
+            {"top": 0.0375, "right": 1.0, "bottom": 0.0375, "left": 1.0},
+        ),
+    ],
+    ids=[
+        "default-1px",
+        "em",
+        "em-and-px",
+        "pt",
+        "zero",
+        "percent",
+        "unreadable-keeps-default",
+    ],
+)
+def test_a_cell_records_its_padding_in_ems(td_attrs, expected):
+    got = _cell_padding(td_attrs)
+    if isinstance(expected, dict):
+        assert got.keys() == expected.keys()
+        for side, want in expected.items():
+            if isinstance(want, tuple):
+                assert got[side] == want
+            else:
+                assert got[side] == pytest.approx(want)
+    else:
+        assert got == expected
+
+
+@pytest.mark.unit
+def test_without_a_stylizer_a_cell_has_no_padding():
+    assert _cell_padding(' style="padding: 1em"', None) is None
+
+
+def _row_borders(table_attrs, row_attrs, group_attrs=""):
+    blocks = extract_blocks_from_html(
+        _doc(
+            f"<table{table_attrs}><tbody{group_attrs}><tr{row_attrs}><td>a</td><td>b</td></tr>"
+            "<tr><td>c</td><td>d</td></tr></tbody></table>"
+        ),
+        style_resolver=_pad_resolver,
+        native_tables=True,
+    )
+    (table,) = [b for b in blocks if b.get("type") == "table"]
+    first = table["table"]["rows"][0]
+    return first.get("border"), first.get("group_border")
+
+
+_RULE = {"bottom": ("solid", 0.45, None)}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "table_attrs, row_attrs, group_attrs, expected",
+    [
+        (' class="coll"', ' class="rb"', "", (_RULE, None)),
+        ("", ' class="rb"', "", (None, None)),
+        (' class="coll"', "", ' class="rb"', (None, _RULE)),
+        (' class="coll"', "", "", (None, None)),
+    ],
+    ids=["collapse-row", "separate-row", "collapse-group", "collapse-none"],
+)
+def test_rows_and_groups_carry_their_borders_only_under_collapse(
+    table_attrs, row_attrs, group_attrs, expected
+):
+    assert _row_borders(table_attrs, row_attrs, group_attrs) == expected

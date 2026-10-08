@@ -4124,3 +4124,146 @@ def test_a_percentage_table_width_is_written_as_previewer_writes_it(
         if str(k) in ("$56", "$63", "$546")
     }
     assert got == expected
+
+
+# --- cell padding and row borders (#264) -------------------------------------
+#
+# Kindle Previewer 4.0.1: top/bottom padding em / 1.2 lh, left/right
+# em x 3.125 % (over the table's width fraction), a percentage p as
+# p x 32 / 100 em vertically and p % horizontally, a zero side left out.
+# Under border-collapse a row's or group's border goes on its own $157.
+
+
+def _padded_cell(tmp_path, padding, table_width=None):
+    block = _table_block([["a", "b"]])
+    block["table"]["rows"][0]["cells"][0]["padding"] = padding
+    block["table"]["width"] = table_width
+    top, styles = _storyline(tmp_path, [block])
+    table = next(e for e in top if str(e["$159"]) == "$278")
+    cell = table["$146"][0]["$146"][0]["$146"][0]
+    return {
+        str(k): f"{v['$307']}{str(v['$306'])}"
+        for k, v in styles[str(cell["$157"])].items()
+        if str(k) in ("$52", "$53", "$54", "$55")
+    }
+
+
+_SIDES = ("top", "right", "bottom", "left")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "padding, table_width, expected",
+    [
+        (
+            None,
+            None,
+            {
+                "$52": "0.03125$310",
+                "$53": "0.117$314",
+                "$54": "0.03125$310",
+                "$55": "0.117$314",
+            },
+        ),
+        (
+            dict.fromkeys(_SIDES, 1.0),
+            None,
+            {
+                "$52": "0.833333$310",
+                "$53": "3.125$314",
+                "$54": "0.833333$310",
+                "$55": "3.125$314",
+            },
+        ),
+        (
+            dict.fromkeys(_SIDES, 0.375),
+            None,
+            {
+                "$52": "0.3125$310",
+                "$53": "1.172$314",
+                "$54": "0.3125$310",
+                "$55": "1.172$314",
+            },
+        ),
+        (
+            dict.fromkeys(_SIDES, 0.5),
+            None,
+            {
+                "$52": "0.416667$310",
+                "$53": "1.563$314",
+                "$54": "0.416667$310",
+                "$55": "1.563$314",
+            },
+        ),
+        (
+            dict.fromkeys(_SIDES, 0.375),
+            80.0,
+            {
+                "$52": "0.3125$310",
+                "$53": "1.465$314",
+                "$54": "0.3125$310",
+                "$55": "1.465$314",
+            },
+        ),
+        (
+            dict.fromkeys(_SIDES, ("%", 5.0)),
+            None,
+            {
+                "$52": "1.33333$310",
+                "$53": "5$314",
+                "$54": "1.33333$310",
+                "$55": "5$314",
+            },
+        ),
+        (dict.fromkeys(_SIDES, 0.0), None, {}),
+        (
+            {"top": 0.0375, "right": 0.0375, "bottom": 0.0375, "left": 1.0},
+            None,
+            {
+                "$52": "0.03125$310",
+                "$53": "3.125$314",
+                "$54": "0.03125$310",
+                "$55": "0.117$314",
+            },
+        ),
+    ],
+    ids=[
+        "default",
+        "1em",
+        "10px",
+        "6pt",
+        "10px-80pc-table",
+        "5pc",
+        "zero",
+        "left-only",
+    ],
+)
+def test_cell_padding_is_written_as_previewer_writes_it(
+    tmp_path, padding, table_width, expected
+):
+    assert _padded_cell(tmp_path, padding, table_width) == expected
+
+
+@pytest.mark.unit
+def test_a_row_and_a_group_border_get_their_own_style(tmp_path):
+    block = _table_block([["a", "b"], ["c", "d"]])
+    block["table"]["rows"][0]["border"] = {"bottom": ("solid", 0.45, None)}
+    for r in block["table"]["rows"]:
+        r["group_border"] = {"top": ("solid", 0.9, None)}
+    top, styles = _storyline(tmp_path, [block])
+    table = next(e for e in top if str(e["$159"]) == "$278")
+    group = table["$146"][0]
+    rows = group["$146"]
+
+    def border(e):
+        if "$157" not in e:
+            return None
+        return {
+            str(k): f"{float(v['$307']):g}" if hasattr(v, "get") else str(v)
+            for k, v in styles[str(e["$157"])].items()
+            if str(k) != "$173"
+        }
+
+    assert border(group) == {"$94": "0.9", "$89": "$328"}
+    assert border(rows[0]) == {"$96": "0.45", "$91": "$328"}
+    assert border(rows[1]) is None

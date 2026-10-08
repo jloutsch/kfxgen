@@ -182,6 +182,13 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     "display": st.get("display"),
                     # Each side's computed border (style, width in points,
                     # colour), top, right, bottom, left (#264).
+                    # Each side's declared padding, units kept: Kindle
+                    # Previewer converts em and px differently, and the
+                    # computed value is in points either way (#264).
+                    "padding-sides": tuple(
+                        st.get(f"padding-{side}") for side in _BORDER_SIDES
+                    ),
+                    "border-collapse": _computed_value(st, "border-collapse"),
                     "border-sides": tuple(
                         (
                             _computed_value(st, f"border-{side}-style"),
@@ -1116,6 +1123,46 @@ def _css_border(css):
     return out or None
 
 
+#: A cell's default padding, calibre's UA 1px, in Previewer's ems
+#: (1px = 0.45pt, 12pt = 1em). kfxgen writes it for every cell already.
+_DEFAULT_PADDING_EM = 0.45 / 12
+_PADDING_EM_PER_UNIT = {"px": 0.45 / 12, "pt": 1 / 12, "em": 1.0, "rem": 1.0}
+
+
+def _padding_em(value):
+    """A declared padding as Kindle Previewer measures it: ems (1px = 0.45pt,
+    12pt = 1em), ("%", n) for a percentage, or None when unreadable."""
+    m = re.fullmatch(r"\s*([\d.]+)\s*(px|pt|em|rem|%)?\s*", str(value or ""))
+    if not m:
+        return None
+    n = float(m.group(1))
+    unit = m.group(2)
+    if unit == "%":
+        return ("%", n)
+    if unit is None:
+        return 0.0 if n == 0 else None
+    return n * _PADDING_EM_PER_UNIT[unit]
+
+
+def _cell_padding(css):
+    """A cell's padding per side (#264), or None when it is the default on
+    every side, which the generator already writes. An unreadable side
+    keeps the default."""
+    sides = (css or {}).get("padding-sides")
+    if not sides:
+        return None
+    out = {}
+    for side, value in zip(_BORDER_SIDES, sides):
+        em = _padding_em(value)
+        out[side] = _DEFAULT_PADDING_EM if em is None else em
+    if all(
+        not isinstance(v, tuple) and abs(v - _DEFAULT_PADDING_EM) < 1e-9
+        for v in out.values()
+    ):
+        return None
+    return out
+
+
 def _attr_border_px(table):
     """The `border` attribute's width as HTML reads it (leading digits; an
     empty value is 1), or 0."""
@@ -1226,6 +1273,15 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
     # The table's own frame: its CSS border, else the `border` attribute's
     # outset grey frame of N x 0.45pt, as Kindle Previewer writes it (#264).
     table_css = style_resolver(table) if style_resolver is not None else None
+    # Rows and row groups draw their own borders only when collapsed, as a
+    # browser does and Kindle Previewer writes them (#264).
+    collapse = str((table_css or {}).get("border-collapse") or "") == "collapse"
+
+    def part_border(elem):
+        if not collapse or style_resolver is None:
+            return None
+        return _css_border(style_resolver(elem))
+
     table_border = _css_border(table_css) or (
         dict.fromkeys(
             _BORDER_SIDES,
@@ -1257,6 +1313,7 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
         # A cell's own CSS border wins over the attribute's (#264).
         css = style_resolver(cell) if style_resolver is not None else None
         built["border"] = _css_border(css) or attr_cell_border
+        built["padding"] = _cell_padding(css)
         # A cell giving itself a width takes Previewer's border-box sizing
         # (#264).
         built["width_set"] = _width_pct(cell, style_resolver) is not None
@@ -1288,6 +1345,16 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
             elif tag == "tr":
                 last = {
                     "group": group,
+                    "border": part_border(child),
+                    # Consecutive row groups of one kind become one group in
+                    # the KFX, which takes its first row's group border; a
+                    # second <tbody>'s own border-top is dropped (#296
+                    # review: 2 such tables in the library, both unstyled).
+                    "group_border": (
+                        part_border(container)
+                        if _local_tag(container.tag) in _ROW_GROUPS
+                        else None
+                    ),
                     "anchor_ids": carry
                     + _own_anchor_ids(child)
                     + [

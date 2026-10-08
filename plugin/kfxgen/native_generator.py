@@ -699,6 +699,36 @@ def _column_widths_152(column_widths):
     return out
 
 
+def _padding_values(padding, table_width):
+    """A cell's padding as Kindle Previewer 4.0.1 writes it (#264):
+    {"$52": IonStruct, ...} for each side that isn't zero. Top and bottom
+    em / 1.2 lh; left and right em x 3.125 %, over the table's width
+    fraction; a percentage p is p x 32 / 100 em vertically and p %
+    horizontally."""
+    from decimal import ROUND_HALF_UP, Decimal
+
+    frac = (table_width / 100.0) if table_width else 1.0
+    keys = {"top": "$52", "right": "$55", "bottom": "$54", "left": "$53"}
+    out = {}
+    for side, value in padding.items():
+        if isinstance(value, (tuple, list)):
+            em, pct = value[1] * 32 / 100.0, value[1] / frac
+        else:
+            em, pct = value, value * 3.125 / frac
+        if em == 0:
+            continue
+        if side in ("top", "bottom"):
+            out[keys[side]] = IonStruct(
+                IS("$307"), IonDecimal(f"{em / 1.2:.6g}"), IS("$306"), IS("$310")
+            )
+        else:
+            q = Decimal(repr(pct)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+            out[keys[side]] = IonStruct(
+                IS("$307"), IonDecimal(str(q.normalize())), IS("$306"), IS("$314")
+            )
+    return out
+
+
 def _table_has_zoom(tbl):
     """Whether a native table gets the table viewer's zoom button: every table
     of 2 or more columns. A one-column table gets `max-width: 100%` instead
@@ -1826,6 +1856,14 @@ class NativeKFXGenerator:
             value[IS("$546")] = IS("$377")
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
+    def build_part_style_157(self, entity_name, border=None):
+        """$157 for a table row or row group that draws its own border under
+        border-collapse, as Kindle Previewer writes it (#264)."""
+        self.symtab.create_local_symbol(entity_name)
+        value = IonStruct(IS("$173"), IS(entity_name))
+        _apply_border(value, border, is_table=False)
+        return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
+
     def build_cell_style_157(
         self,
         entity_name,
@@ -1839,6 +1877,8 @@ class NativeKFXGenerator:
         valign="middle",
         border=None,
         border_box=False,
+        padding=None,
+        table_width=None,
     ):
         """$157 for a table cell: Previewer's padding, plus the cell's own
         alignment, header weight and spans (#219), its vertical alignment
@@ -1875,6 +1915,12 @@ class NativeKFXGenerator:
                 IS("$307"), IonDecimal(str(font_size)), IS("$306"), IS("$505")
             )  # rem
         _apply_border(value, border, is_table=False)
+        if padding:
+            # The cell's own padding replaces Previewer's 1px default (#264).
+            for key in ("$52", "$53", "$54", "$55"):
+                value.pop(IS(key), None)
+            for key, v in _padding_values(dict(padding), table_width).items():
+                value[IS(key)] = v
         if border_box:
             # A cell that sets its own width, as Previewer writes it (#264).
             value[IS("$546")] = IS("$377")
@@ -2147,6 +2193,13 @@ class NativeKFXGenerator:
                 elif node == "cell":
                     self.symtab.create_local_symbol(story_name)
                     entry[IS("$157")] = IS(story_name)
+                elif (
+                    container_extras
+                    and i < len(container_extras)
+                    and container_extras[i]
+                ):
+                    for k, v in container_extras[i].items():
+                        entry[IS(k)] = v
                 entry[IS("$146")] = []
                 stack[-1].append(entry)
                 stack.append(entry[IS("$146")])
@@ -3531,13 +3584,20 @@ class NativeKFXGenerator:
                     if group is not None:
                         all_chunks.append({"type": "close"})
                     group = row["group"]
-                    all_chunks.append({"type": "open", "node": group})
+                    all_chunks.append(
+                        {
+                            "type": "open",
+                            "node": group,
+                            "border": row.get("group_border"),
+                        }
+                    )
                 leading = own if last_row is None else []
                 keys = _dedupe_keys(leading + carried + (row.get("anchor_keys") or []))
                 carried = []
                 last_row = {
                     "type": "open",
                     "node": "row",
+                    "border": row.get("border"),
                     "anchor_keys": keys,
                     "anchor_offsets": dict.fromkeys(keys, 0),
                 }
@@ -3550,6 +3610,8 @@ class NativeKFXGenerator:
                         "valign": cell.get("valign"),
                         "border": cell.get("border"),
                         "width_set": cell.get("width_set"),
+                        "padding": cell.get("padding"),
+                        "table_width": tbl.get("width"),
                     }
                     if cell.get("paragraphs"):
                         # A cell holding several blocks (#261): a container,
@@ -3621,6 +3683,8 @@ class NativeKFXGenerator:
                                 "valign": cell.get("valign"),
                                 "border": cell.get("border"),
                                 "width_set": cell.get("width_set"),
+                                "padding": cell.get("padding"),
+                                "table_width": tbl.get("width"),
                             },
                         }
                     )
@@ -4235,6 +4299,8 @@ class NativeKFXGenerator:
                 "valign": cell.get("valign") or "middle",
                 "border": _border_key(cell.get("border")),
                 "border_box": bool(cell.get("width_set")),
+                "padding": _border_key(cell.get("padding")),
+                "table_width": cell.get("table_width") if cell.get("padding") else None,
             }
             if cell_fam:
                 cattrs["font_family"] = cell_fam
@@ -4293,7 +4359,17 @@ class NativeKFXGenerator:
                         if node == "table"
                         else None
                     )
-                    entry_extras.append({"$152": widths} if widths else None)
+                    extras = {"$152": widths} if widths else {}
+                    if node in ("row", "head", "body", "foot") and chunk.get("border"):
+                        # A row's or group's own border under collapse (#264).
+                        extras["$157"] = IS(
+                            _allocate_style(
+                                "_tp",
+                                builder=self.build_part_style_157,
+                                border=_border_key(chunk["border"]),
+                            )
+                        )
+                    entry_extras.append(extras or None)
                     continue
                 entry_nodes.append(None)
                 entry_extras.append(None)
