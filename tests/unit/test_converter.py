@@ -6315,3 +6315,15 @@ def test_rows_and_groups_carry_their_borders_only_under_collapse(
     table_attrs, row_attrs, group_attrs, expected
 ):
     assert _row_borders(table_attrs, row_attrs, group_attrs) == expected
+
+
+@pytest.mark.unit
+def test_table_width_is_the_widest_row_not_the_last():
+    # #297 review: `width = end` instead of `max(width, end)` was not caught.
+    # The native check can't see it (any row past the limit returns at once),
+    # so the function's own value is pinned: the widest row wins.
+    doc = _doc(
+        "<table><tr>" + "<td>x</td>" * 5 + "</tr><tr><td>a</td><td>b</td></tr></table>"
+    )
+    (table,) = list(doc.iter("{http://www.w3.org/1999/xhtml}table"))
+    assert _conv._table_width(table) == 5

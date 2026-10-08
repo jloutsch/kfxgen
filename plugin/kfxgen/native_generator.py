@@ -1687,6 +1687,7 @@ class NativeKFXGenerator:
         margin_right=None,
         font_family=None,
         baseline_style=None,
+        no_align=False,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -1829,6 +1830,11 @@ class NativeKFXGenerator:
         # metrics instead of trusting a percentage measured on two devices.
         if baseline_style is not None:
             value[IS("$44")] = IS(baseline_style)
+
+        if no_align:
+            # A run inside a table cell: a span can't carry text-align, and
+            # KFX Input flags one that differs from the cell's (#281).
+            del value[IS("$34")]
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
@@ -2375,256 +2381,6 @@ class NativeKFXGenerator:
         return YJFragment(
             fid=IS(section_name), ftype=IS("$260"), value=value
         ), section_name
-
-    def build_fragment_389(self, toc_entries, entity_id=None):
-        """
-        Builds Fragment $389 (Navigation / Table of Contents) - LEGACY
-
-        NOTE: This is the legacy TOC structure. For better Kindle compatibility,
-        use build_book_navigation() which creates Fragment $410 (book_navigation).
-
-        Based on template generator analysis, Fragment 389 has this structure:
-        - Top level: LIST (not struct!)
-        - First element: Struct with Field $392
-        - Field $392: List of navigation containers
-        - Each container: Struct with Field $235 (type, e.g., $212 for TOC) and Field $247 (nav units)
-        - Each nav unit: Struct with Field $246 (target with $155 EID) and Field $241 (label with $244 text)
-
-        Navigation chain:
-        - Fragment 389 TOC entry -> EID ($246.$155) points to Fragment 259
-        - Fragment 259 maps to Fragment 157s
-        - Fragment 157s reference Fragment 145 content
-
-        Args:
-            toc_entries: List of dicts with 'title', 'level', and 'target_entity_id' (Fragment 259 entity ID)
-            entity_id: Optional entity ID (auto-assigned if None)
-
-        Returns:
-            YJFragment with type $389
-        """
-        if entity_id is None:
-            entity_id = self.next_entity_id
-            self.next_entity_id += 1
-
-        # Ensure symbols exist
-        self.symtab.create_local_symbol(str(entity_id))
-        self.symtab.create_local_symbol("$212")  # TOC container type
-
-        # Build navigation units
-        nav_units = []
-        for entry in toc_entries:
-            # Target should be Fragment 259 entity ID (the storyline that contains the content)
-            target_eid = entry.get(
-                "target_entity_id", 348
-            )  # Default to metadata if not specified
-            title = entry.get("title", "Untitled")
-
-            # Navigation unit structure:
-            # - Field $246: Target struct with Field $155 (entity ID pointing to Fragment 259)
-            # - Field $241: Label struct with Field $244 (display text for TOC)
-            # - Field $175: Alternative title field
-            nav_unit = IonStruct(
-                IS("$246"),
-                IonStruct(
-                    IS("$155"),
-                    target_eid,  # Points to Fragment 259 entity ID
-                ),
-                IS("$241"),
-                IonStruct(
-                    IS("$244"),
-                    title,  # Display text for TOC entry
-                ),
-                IS("$175"),
-                title,  # Alternative title field
-            )
-            nav_units.append(nav_unit)
-
-        # Navigation container structure:
-        # - Field $235: Container type ($212 = TOC/NCX)
-        # - Field $247: List of navigation units
-        nav_container = IonStruct(
-            IS("$235"),
-            IS("$212"),  # TOC container type
-            IS("$247"),
-            nav_units,
-        )
-
-        # Top-level structure:
-        # - Field $392: List of navigation containers
-        nav_struct = IonStruct(IS("$392"), [nav_container])
-
-        # CRITICAL: Fragment 389 value must be a LIST, not a struct!
-        # The list contains one struct with Field $392
-        value = [nav_struct]
-
-        return YJFragment(fid=IS(f"${entity_id}"), ftype=IS("$389"), value=value)
-
-    def build_book_navigation(self, toc_entries, landmarks=None):
-        """
-        Builds Fragment $410 (book_navigation) - RECOMMENDED TOC STRUCTURE
-
-        Based on KFX reverse engineering from Kindle Previewer:
-
-        Structure:
-        $book_navigation::{
-          nav_containers: [
-            $nav_container::{
-              nav_container_name: "toc",
-              nav_type: $toc,
-              entries: [
-                $nav_unit::{
-                  nav_unit_name: "chapter_1",
-                  representation: "Chapter 1",
-                  target_position: { position: <position_id> }
-                },
-                ...
-              ]
-            }
-          ]
-        }
-
-        Symbol Reference:
-        - $410 = book_navigation (ftype)
-        - $413 = nav_containers (field)
-        - $256 = nav_type (field)
-        - $260 = nav_container_name (field)
-        - $268 = entries (field)
-        - $261 = nav_unit_name (field)
-        - $262 = representation (field)
-        - $267 = target_position (field)
-        - $233 = toc (nav_type value)
-
-        Uses fid=$348 (single fragment marker) to avoid FID registration issues.
-
-        Args:
-            toc_entries: List of dicts with:
-                - 'title': Display text for TOC entry
-                - 'position': Position ID (typically Fragment 259 entity ID or position reference)
-                - 'name': Optional unique identifier (auto-generated if not provided)
-                - 'children': Optional nested entries (for hierarchical TOC)
-            landmarks: Optional list of landmark dicts with:
-                - 'title': Display text
-                - 'position': Position ID
-                - 'landmark_type': Type symbol (e.g., '$bodymatter', '$cover_page')
-
-        Returns:
-            YJFragment with type $410 (book_navigation)
-        """
-        # Register required symbols
-        self.symtab.create_local_symbol("position")
-        self.symtab.create_local_symbol("toc")
-
-        # Build TOC navigation units
-        toc_nav_units = []
-        for i, entry in enumerate(toc_entries):
-            title = entry.get("title", f"Chapter {i + 1}")
-            position = entry.get(
-                "position", entry.get("target_entity_id", 1800 + i * 10)
-            )
-            name = entry.get("name", f"toc_entry_{i}")
-
-            # Build nav_unit structure
-            # $261 = nav_unit_name
-            # $262 = representation
-            # $267 = target_position
-            nav_unit = IonStruct(
-                IS("$261"),
-                name,  # nav_unit_name
-                IS("$262"),
-                title,  # representation (display text)
-                IS("$267"),
-                IonStruct(  # target_position
-                    IS("position"), position
-                ),
-            )
-
-            # Handle nested children for hierarchical TOC
-            children = entry.get("children", [])
-            if children:
-                child_units = []
-                for j, child in enumerate(children):
-                    child_title = child.get("title", f"Section {j + 1}")
-                    child_position = child.get(
-                        "position", child.get("target_entity_id", position + j + 1)
-                    )
-                    child_name = child.get("name", f"{name}_sub_{j}")
-
-                    child_unit = IonStruct(
-                        IS("$261"),
-                        child_name,
-                        IS("$262"),
-                        child_title,
-                        IS("$267"),
-                        IonStruct(IS("position"), child_position),
-                    )
-                    child_units.append(child_unit)
-
-                # $268 = entries (for nested children)
-                nav_unit[IS("$268")] = child_units
-
-            toc_nav_units.append(nav_unit)
-
-        # Build TOC nav_container
-        # $260 = nav_container_name
-        # $256 = nav_type
-        # $268 = entries
-        # $233 = toc (symbol for nav_type value)
-        toc_container = IonStruct(
-            IS("$260"),
-            "toc",  # nav_container_name
-            IS("$256"),
-            IS("$233"),  # nav_type = $toc
-            IS("$268"),
-            toc_nav_units,  # entries
-        )
-
-        nav_containers = [toc_container]
-
-        # Add landmarks container if provided
-        # Note: Landmarks use string values for landmark_type to avoid symbol registration issues
-        if landmarks:
-            landmark_units = []
-            for i, lm in enumerate(landmarks):
-                lm_title = lm.get("title", f"Landmark {i + 1}")
-                lm_position = lm.get("position", 1000 + i)
-                lm_name = lm.get("name", f"landmark_{i}")
-                lm_type = lm.get("landmark_type", "bodymatter")
-
-                # Remove $ prefix if present (use string value)
-                if lm_type.startswith("$"):
-                    lm_type = lm_type[1:]
-
-                # $259 = landmark_type field (use string value)
-                lm_unit = IonStruct(
-                    IS("$261"),
-                    lm_name,
-                    IS("$262"),
-                    lm_title,
-                    IS("$267"),
-                    IonStruct(IS("position"), lm_position),
-                    IS("$259"),
-                    lm_type,  # landmark_type as string
-                )
-                landmark_units.append(lm_unit)
-
-            # $257 = landmarks (nav_type value)
-            landmarks_container = IonStruct(
-                IS("$260"),
-                "landmarks",
-                IS("$256"),
-                IS("$257"),  # nav_type = $landmarks
-                IS("$268"),
-                landmark_units,
-            )
-            nav_containers.append(landmarks_container)
-
-        # Build book_navigation value
-        # $413 = nav_containers
-        book_nav_value = IonStruct(IS("$413"), nav_containers)
-
-        # CRITICAL: Use fid=$348 (single fragment marker) to avoid FID registration issues
-        # This avoids the symbol table max_id mismatch that was causing $0 serialization
-        return YJFragment(fid=IS("$348"), ftype=IS("$410"), value=book_nav_value)
 
     def generate_full_book(
         self,
@@ -4254,7 +4010,9 @@ class NativeKFXGenerator:
         # books with no embeddable fonts stay byte-identical.
         has_fonts = bool(self.font_table.faces)
 
-        def _emphasis_style(flags, family_list, blk_bold=False, blk_italic=False):
+        def _emphasis_style(
+            flags, family_list, blk_bold=False, blk_italic=False, in_cell=False
+        ):
             # Effective emphasis = inline run flags OR the block's CSS emphasis.
             # The applied $157 always carries the run's own weight/style ($13/$12)
             # so it matches the $262 face descriptor the Kindle resolves against
@@ -4274,6 +4032,8 @@ class NativeKFXGenerator:
                 attrs["font_size"], attrs["baseline_style"] = superscript_metrics()
             elif FLAG_SUB in flags:
                 attrs["font_size"], attrs["baseline_style"] = subscript_metrics()
+            if in_cell:
+                attrs["no_align"] = True
             return _allocate_style("_em", **attrs)
 
         def _cell_style(cell, bs, font_size):
@@ -4471,7 +4231,13 @@ class NativeKFXGenerator:
                         for f in (FLAG_BOLD, FLAG_ITALIC, FLAG_SUPER, FLAG_SUB)
                     )
                     style = (
-                        _emphasis_style(flags, chunk_fam, _blk_b, _blk_i)
+                        _emphasis_style(
+                            flags,
+                            chunk_fam,
+                            _blk_b,
+                            _blk_i,
+                            in_cell="cell" in chunk or "in_header_cell" in chunk,
+                        )
                         if has_emphasis or not anchor
                         else None
                     )
@@ -4506,6 +4272,36 @@ class NativeKFXGenerator:
             if name not in registered:
                 extra_style_names.append(name)
                 registered.add(name)
+
+        # Drop styles no storyline uses. A chapter's default paragraph style
+        # is allocated up front, and a chapter of nothing but tables (or one
+        # whose plain paragraphs were all removed) never applies it; KFX Input
+        # grades an unreferenced $157 an error (#281). Pruned at the end, so
+        # every other style keeps its name and symbol number. Every $157
+        # reference is written by build_fragment_259.
+        referenced = set()
+
+        def _refs(nodes):
+            for e in nodes or []:
+                if IS("$157") in e:
+                    referenced.add(str(e[IS("$157")]))
+                for sp in e.get(IS("$142")) or []:
+                    if IS("$157") in sp:
+                        referenced.add(str(sp[IS("$157")]))
+                _refs(e.get(IS("$146")))
+
+        for frag in self.fragments:
+            if frag.ftype == IS("$259"):
+                _refs(frag.value.get(IS("$146")))
+        unused = registered - referenced
+        if unused:
+            self.fragments = [
+                f
+                for f in self.fragments
+                if not (f.ftype == IS("$157") and str(f.fid) in unused)
+            ]
+            story_names = [n for n in story_names if n not in unused]
+            extra_style_names[:] = [n for n in extra_style_names if n not in unused]
 
         return {
             "story_names": story_names,
