@@ -460,8 +460,8 @@ def _key_doc(base_href, href):
 
 def _prepend_keys(block, keys):
     """Put `keys` at the start of `block`, as a file's own key goes on its
-    first block, and on a native table's own keys too, which its first row
-    takes (#219)."""
+    first block. A native table needs them on its own keys too, which its
+    first row takes; from the block's keys alone they reach a later row."""
     block["anchor_keys"] = _dedupe_keep_order(
         keys + list(block.get("anchor_keys") or [])
     )
@@ -493,7 +493,9 @@ def _resolve_link_target(href, base_href):
     if _URL_SCHEME_RE.match(href):
         return None
     # A fragment is percent-encoded in a URL but an id is written as-is, so
-    # "#fn%3A1" names id="fn:1" (#278).
+    # "#fn%3A1" names id="fn:1" (#278). Only the decoded form is matched: an
+    # id that itself holds "%" (id="x%41", linked raw as "#x%41") now misses.
+    # None of 1,373 library EPUBs has such an id.
     fragment = unquote(_href_fragment(href) or "")
     file_part = href.split("#", 1)[0]
     if file_part:
@@ -2877,7 +2879,10 @@ def extract_chapters_from_oeb(
 
     # Keys of spine files that show nothing (only `<div id="e"></div>`): the
     # file's own key and its ids. Without a block they went nowhere and links
-    # to them were plain text; they go on the next shown block (#278).
+    # to them were plain text; they go on the next shown block (#278). If
+    # that block is later dropped (a "Contents", title or half-title page's
+    # first block), they are lost with it: 2 of 66 such keys in the library
+    # sample, with no link to either.
     orphan_keys = []
 
     for i, item in enumerate(oeb_book.spine):

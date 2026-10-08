@@ -6429,7 +6429,7 @@ def test_percent_encoded_links_land(tmp_path):
 # follows.
 
 
-def _empty_file_book(directory, empty_last=False):
+def _empty_file_book(directory, empty_last=False, next_html="<p>Next shown block.</p>"):
     from tests.fixtures.epub_builder import EpubBuilder
     from tests.fixtures.golden.inputs import _xhtml_page
     from tests.fixtures.oeb_shim import EpubAsOeb
@@ -6441,9 +6441,7 @@ def _empty_file_book(directory, empty_last=False):
         b.add_chapter("Two", _xhtml_page("Two", '<div id="e"></div>').encode())
     else:
         b.add_chapter("Two", _xhtml_page("Two", '<div id="e"></div>').encode())
-        b.add_chapter(
-            "Three", _xhtml_page("Three", "<p>Next shown block.</p>").encode()
-        )
+        b.add_chapter("Three", _xhtml_page("Three", next_html).encode())
         # A later chapter, so the next shown block is not also the last one.
         b.add_chapter("Four", _xhtml_page("Four", "<p>Later block.</p>").encode())
     return EpubAsOeb(str(b.build(directory, "e")))
@@ -6489,3 +6487,30 @@ def test_links_into_an_empty_file_land(tmp_path):
         if "$179" in sp
     ]
     assert len(linked) == 2
+
+
+@pytest.mark.unit
+def test_links_into_an_empty_file_before_a_table_land_on_its_first_row(tmp_path):
+    from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
+
+    table = (
+        "<table><tr><td>a1</td><td>b1</td></tr><tr><td>a2</td><td>b2</td></tr></table>"
+    )
+    out = tmp_path / "e.kfx"
+    _conv.convert_oeb_to_kfx(
+        _empty_file_book(tmp_path, next_html=table),
+        str(out),
+        opts=MagicMock(kfxgen_disable_native_tables=False),
+        log=_silent_log(),
+    )
+    frags = load_fragments(out)
+    entries = [
+        e for st in by_type(frags, "$259") for e in iter_entries(val(st)["$146"])
+    ]
+    rows = [e["$155"] for e in entries if str(e.get("$159")) == "$279"]
+    targets = {str(f.fid): val(f)["$183"]["$155"] for f in by_type(frags, "$266")}
+    linked = [
+        str(sp["$179"]) for e in entries for sp in e.get("$142") or [] if "$179" in sp
+    ]
+    assert len(linked) == 2
+    assert {targets[n] for n in linked} == {rows[0]}
