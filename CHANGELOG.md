@@ -1,5 +1,73 @@
 # Changelog
 
+## 5.9.0 — Tables finished
+
+This release completes the native Kindle tables first shipped in 5.8.9 (#219).
+The table changes were compared against Kindle Previewer 4.0.1's own output,
+and the visible ones checked on Kindles: a Paperwhite (5.19.2), a Voyage
+(5.13.6) and an Oasis (5.18.2.1.1).
+
+**Pictures in cells (#262).** A table with a picture in a cell stays a Kindle
+table instead of falling back to one paragraph per row: each picture sits in
+its cell at its own size, its caption beside it. In the library sample this
+brings back 645 tables in 103 books; in the Gutenberg 90, 26 tables in 6
+books.
+
+**Borders (#264).** Tables and cells draw the book's borders: the `border`
+attribute, CSS borders on the table or on any cell (style, width and colour,
+per side), and, when the table's borders are collapsed, borders on rows and
+row groups.
+
+**Column widths (#264).** Percentage column widths from `<col>` or from the
+cells are kept, as is a percentage table width.
+
+**Padding (#264).** A cell's own padding is kept.
+
+**Vertical alignment (#269).** A cell keeps its `vertical-align` (top,
+middle, bottom), from its own CSS, its row or row group, or the `valign`
+attribute. Cells were always centred before.
+
+**Zoom button (#272).** One-column tables, such as boxed poems, no longer
+show the zoom button. Every table of two or more columns keeps it: without
+it the Voyage lost the columns of plain 2- and 3-column tables.
+
+**Cell text (#279).** Text either side of a block inside a cell no longer
+runs together ("cellonecelltwo").
+
+**Cleaner files (#281).** Many books carried an unused paragraph style,
+which Kindle's own decoder reports as an error (53 of the Gutenberg 90
+through real calibre); it is no longer written. Formatted words inside
+cells no longer carry an alignment they can't use.
+
+**Outside tables:**
+- HTML comments and processing instructions are no longer printed as text
+  ("H2 anchor" in Gutenberg books) (#252).
+- A contents listing that ends where the next chapter starts no longer
+  replaces that chapter (#276).
+- Unlisted back pages no longer print their file name as a heading or appear
+  by file name on the Contents page (#275).
+
+**Known limits:**
+- **Table and column sizes are the Kindle's.** A table's overall width
+  follows its content: a table set to `width: 100%` still takes only the
+  width it needs. A column is never narrower than its longest word, so in
+  portrait narrow columns often come out equal. Kindle Previewer writes the
+  same values, so Amazon's books behave the same.
+- **Only top and bottom padding shows.** On the Voyage and the Paperwhite,
+  left and right padding has no visible effect in any unit.
+- **Widths in px or em are not kept,** only percentages: Kindle Previewer
+  turns absolute widths into percentages by laying the page out, which
+  can't be reproduced.
+- **A table inside a table** still makes the outer table one paragraph per
+  row (#263). The library sample has 10 such tables in 3 books.
+- **Red and other colours** are written but show as grey on e-ink.
+- **Some borders are not drawn:** the `rules` and `frame` attributes, and the
+  border of a second `<tbody>` (it joins the first).
+- From earlier releases, unchanged: notes becoming chapters in a book with
+  no table of contents (#225); progress following the paragraph count
+  (#227); hidden page-number markers printed mid-sentence (#256); a
+  paragraph holding only a missing picture losing its link target (#291).
+
 ## 5.8.12 — Notes read as notes
 
 **Changed (#268, #273): notes laid out as a table are written as one
