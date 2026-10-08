@@ -3563,25 +3563,11 @@ class NativeKFXGenerator:
                             elif first_stripped[: len(title)].lower() == title.lower():
                                 remainder = first_stripped[len(title) :].lstrip()
                                 removed = len(first["text"]) - len(remainder)
-                                rebased_spans = []
-                                for s, length, flags in first.get("spans", []):
-                                    new_s = s - removed
-                                    new_end = s + length - removed
-                                    start = max(new_s, 0)
-                                    end = min(new_end, len(remainder))
-                                    if end > start:
-                                        rebased_spans.append(
-                                            (start, end - start, flags)
-                                        )
                                 if remainder:
-                                    # Copy-and-override so any other keys on the
-                                    # block dict (e.g. block_style, future keys)
-                                    # are forwarded, not silently dropped.
-                                    iter_blocks[0] = {
-                                        **first,
-                                        "text": remainder,
-                                        "spans": rebased_spans,
-                                    }
+                                    # Spans and anchor offsets both shift, or
+                                    # a return link landed title-length
+                                    # characters late (#277).
+                                    iter_blocks[0] = _trim_text(first, removed)
                                 else:
                                     # The block is gone, but its ids are what
                                     # the TOC links to — a back-matter file
