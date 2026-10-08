@@ -6514,3 +6514,86 @@ def test_links_into_an_empty_file_before_a_table_land_on_its_first_row(tmp_path)
     ]
     assert len(linked) == 2
     assert {targets[n] for n in linked} == {rows[0]}
+
+
+# ── #280: text written straight into <body> ──────────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "body, texts",
+    [
+        ("<p>c</p>tail", ["c", "tail"]),
+        ("<p>c</p><br/>tail", ["c", "tail"]),
+        ("lead<p>c</p>", ["lead", "c"]),
+        ("<p>a</p>mid<p>b</p>", ["a", "mid", "b"]),
+        ("<table><tr><td>c</td></tr></table>tail", ["c", "tail"]),
+        ("<ul><li>c</li></ul>tail", ["• c", "tail"]),
+        (
+            "<p>First.</p>loose tail text <b>bold</b> more loose<p>See.</p>",
+            ["First.", "loose tail text bold more loose", "See."],
+        ),
+    ],
+)
+def test_loose_body_text_is_kept(body, texts):
+    assert _texts(body) == texts
+
+
+@pytest.mark.unit
+def test_loose_body_text_keeps_its_runs():
+    """As inside a <div>: one paragraph, its bold run and its link kept."""
+    blocks = extract_blocks_from_html(
+        _doc('<p>a</p>see <b>this</b> and <a href="c2.xhtml#n">that</a><p>b</p>'),
+        base_href="c1.xhtml",
+    )
+    from kfxgen.inline_style import FLAG_BOLD, make_link_flag
+
+    assert blocks[1]["text"] == "see this and that"
+    assert blocks[1]["spans"] == [
+        (4, 4, frozenset({FLAG_BOLD})),
+        (13, 4, frozenset({make_link_flag("c2.xhtml#n")})),
+    ]
+
+
+@pytest.mark.unit
+def test_a_body_without_loose_text_keeps_one_paragraph_per_child():
+    """Notes written as inline elements straight in <body>, one after the
+    other, stay one paragraph each; walking such a body like a <div> ran a
+    library book's 149 notes into one paragraph."""
+    assert _texts("<span>1. One.</span>\n<span>2. Two.</span>") == [
+        "1. One.",
+        "2. Two.",
+    ]
+
+
+@pytest.mark.unit
+def test_a_nav_listing_in_a_body_with_loose_text_is_still_discarded():
+    for listing in (
+        '<ol><li><a href="c1.xhtml">Chapter I</a></li></ol>',
+        # Links alone hold no block, so only the listing test sends it on.
+        '<a href="c1.xhtml">Chapter I</a> <a href="c2.xhtml">Chapter II</a>',
+    ):
+        body = f'lead<nav epub:type="toc">{listing}</nav><p>Real prose.</p>'
+        assert _texts(body) == ["lead", "Real prose."]
+
+
+@pytest.mark.unit
+def test_an_aside_in_a_body_with_loose_text_keeps_its_paragraphs():
+    assert _texts("lead<aside><p>a</p><p>b</p></aside>") == ["lead", "a", "b"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("tag", ["center", "address", "header", "dl"])
+def test_a_browser_block_next_to_loose_body_text_stays_its_own_paragraph(tag):
+    assert _texts(f"loose<{tag}>C</{tag}>tail") == ["loose", "C", "tail"]
+
+
+@pytest.mark.unit
+def test_a_display_block_span_next_to_loose_body_text_stays_its_own_paragraph():
+    blocks = extract_blocks_from_html(
+        _doc("loose<span>C</span>tail"),
+        style_resolver=lambda e: (
+            {"display": "block"} if e.tag.endswith("span") else None
+        ),
+    )
+    assert [b["text"] for b in blocks] == ["loose", "C", "tail"]

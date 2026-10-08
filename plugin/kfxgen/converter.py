@@ -1820,6 +1820,35 @@ def _already_numbered(text, n):
     return any(re.match(rf"[(\[]?{re.escape(f)}[.)\]]", lowered) for f in forms)
 
 
+# Elements a browser lays out as blocks that `block_tags` does not list. Next
+# to text written straight into <body>, each stays its own paragraph rather
+# than running into that text (#280).
+_BODY_BLOCK_TAGS = frozenset(
+    {
+        "img",
+        "svg",
+        "address",
+        "aside",
+        "center",
+        "dd",
+        "details",
+        "dl",
+        "dt",
+        "fieldset",
+        "figcaption",
+        "footer",
+        "form",
+        "header",
+        "hgroup",
+        "hr",
+        "main",
+        "menu",
+        "nav",
+        "summary",
+    }
+)
+
+
 def _list_marker(li, css, ordinals):
     """(marker text, ordinal or None) for `li`, or None when it shows none."""
     display = str((css or {}).get("display") or "").strip().lower()
@@ -2048,6 +2077,19 @@ def extract_blocks_from_html(
         pending_markers[:] = saved_markers
         return out
 
+    def _is_block_at_body(child):
+        if not isinstance(child.tag, str):
+            return True
+        if _local_tag(child.tag) in _BODY_BLOCK_TAGS:
+            return True
+        css = style_resolver(child) if style_resolver is not None else None
+        display = str((css or {}).get("display") or "").strip().lower()
+        return (
+            display.startswith(("block", "list-item", "table", "flex", "grid"))
+            or _is_nav_listing(child)
+            or any(d.tag in block_tags for d in child.iter())
+        )
+
     def _walk(elem):
         if _local_tag(elem.tag) != "li" or _is_non_rendered(elem):
             start = len(blocks)
@@ -2223,6 +2265,13 @@ def extract_blocks_from_html(
             return
         pending_ids.extend(_own_anchor_ids(elem))
 
+        _walk_container(elem)
+
+    def _walk_container(elem, is_block=None):
+        """`elem`'s children in order: block children walked as blocks, each
+        run of inline content between them (its own text, inline children,
+        tails) one paragraph. `is_block` overrides which children count as
+        blocks."""
         # A container can hold its own inline content alongside block children —
         # `<li>Part<ol>…</ol></li>`, `<div>lead-in<p>…</p></div>`. That inline
         # content is real text and used to be dropped on the floor, because this
@@ -2283,7 +2332,11 @@ def extract_blocks_from_html(
                     if aid not in row_block["anchor_ids"]:
                         row_block["anchor_ids"].append(aid)
                         row_block["anchor_offsets"][aid] = 0
-            elif child.tag in block_tags or _local_tag(child.tag) in ("img", "svg"):
+            elif (
+                is_block(child)
+                if is_block is not None
+                else child.tag in block_tags or _local_tag(child.tag) in ("img", "svg")
+            ):
                 _flush_inline()
                 start = len(blocks)
                 _walk(child)
@@ -2311,6 +2364,13 @@ def extract_blocks_from_html(
     is_svg_document = _local_tag(body.tag) == "svg"
     if is_svg_document:
         _emit_svg_blocks(body)
+    elif (body.text or "").strip() or any((c.tail or "").strip() for c in body):
+        # Text written straight into <body>, outside any paragraph, is kept
+        # the way it is inside a <div> (#280). A body without any keeps the
+        # walk below, child by child. Any child that walk would treat as more
+        # than a run of text still goes to it: a <nav> listing is discarded
+        # there, and an <aside> or <header> holding paragraphs keeps them.
+        _walk_container(body, is_block=_is_block_at_body)
     else:
         for child in body:
             _walk(child)
