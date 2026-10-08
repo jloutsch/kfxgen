@@ -1346,6 +1346,10 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
                 last = {
                     "group": group,
                     "border": part_border(child),
+                    # Consecutive row groups of one kind become one group in
+                    # the KFX, which takes its first row's group border; a
+                    # second <tbody>'s own border-top is dropped (#296
+                    # review: 2 such tables in the library, both unstyled).
                     "group_border": (
                         part_border(container)
                         if _local_tag(container.tag) in _ROW_GROUPS

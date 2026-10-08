@@ -6250,8 +6250,20 @@ def _cell_padding(td_attrs, resolver=_pad_resolver):
             ' style="padding: 5%"',
             dict.fromkeys(("top", "right", "bottom", "left"), ("%", 5.0)),
         ),
+        (
+            ' style="padding: 2ex 1em"',
+            {"top": 0.0375, "right": 1.0, "bottom": 0.0375, "left": 1.0},
+        ),
     ],
-    ids=["default-1px", "em", "em-and-px", "pt", "zero", "percent"],
+    ids=[
+        "default-1px",
+        "em",
+        "em-and-px",
+        "pt",
+        "zero",
+        "percent",
+        "unreadable-keeps-default",
+    ],
 )
 def test_a_cell_records_its_padding_in_ems(td_attrs, expected):
     got = _cell_padding(td_attrs)
