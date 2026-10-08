@@ -1074,3 +1074,92 @@ def test_column_widths_reach_the_table_through_calibre(calibre):
         ],
         "WCELL": [{}, {"$56": "40$314"}],
     }, calibre_version
+
+
+# Cell padding and row borders (#264), through the real Stylizer: Kindle
+# Previewer 4.0.1's values for the same tables.
+PAD_CSS = """
+table.pem td { padding: 1em; }
+table.pmix td { padding: 0.5em 10px; }
+table.coll { border-collapse: collapse; }
+tr.rb { border-bottom: 1px solid black; }
+"""
+PAD_TABLES = [
+    ("PEM", ' class="pem"', ""),
+    ("PMIX", ' class="pmix"', ""),
+    ("PRULE", ' class="coll"', ' class="rb"'),
+    ("PSEP", "", ' class="rb"'),
+]
+
+
+def test_padding_and_row_borders_reach_the_kfx_through_calibre(calibre):
+    tmp, _, calibre_version = calibre
+    cases = [
+        (
+            "c1",
+            cid,
+            f"<table{attrs}><tr{tr}><td>{cid}</td><td>b</td></tr>"
+            "<tr><td>c</td><td>d</td></tr></table>",
+        )
+        for cid, attrs, tr in PAD_TABLES
+    ]
+    epub = tmp / "padding-264.epub"
+    _build_epub(epub, cases, PAD_CSS, {})
+    kfx = tmp / "padding-264.kfx"
+    _ebook_convert(calibre, epub, kfx, native=True)
+    frags = load_fragments(kfx)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    content = {
+        str(val(f)["name"]): list(val(f)["$146"]) for f in by_type(frags, "$145")
+    }
+
+    def props(e, keys):
+        if "$157" not in e:
+            return {}
+        return {
+            str(k): f"{v['$307']}{str(v['$306'])}" if hasattr(v, "get") else str(v)
+            for k, v in styles[str(e["$157"])].items()
+            if str(k) in keys
+        }
+
+    got = {}
+    for f in by_type(frags, "$259"):
+        for e in iter_entries(val(f)["$146"]):
+            if str(e.get("$159")) != "$278":
+                continue
+            row = e["$146"][0]["$146"][0]
+            first = row["$146"][0]
+            ref = first["$145"]
+            name = str(content[str(ref["name"])][int(ref["$403"])])
+            got[name] = (
+                props(first, {"$52", "$53", "$54", "$55"}),
+                props(row, {"$91", "$96"}),
+            )
+    default = {
+        "$52": "0.03125$310",
+        "$53": "0.117$314",
+        "$54": "0.03125$310",
+        "$55": "0.117$314",
+    }
+    assert got == {
+        "PEM": (
+            {
+                "$52": "0.833333$310",
+                "$53": "3.125$314",
+                "$54": "0.833333$310",
+                "$55": "3.125$314",
+            },
+            {},
+        ),
+        "PMIX": (
+            {
+                "$52": "0.416667$310",
+                "$53": "1.172$314",
+                "$54": "0.416667$310",
+                "$55": "1.172$314",
+            },
+            {},
+        ),
+        "PRULE": (default, {"$91": "$328", "$96": "0.45$318"}),
+        "PSEP": (default, {}),
+    }, calibre_version
