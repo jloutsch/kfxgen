@@ -656,6 +656,49 @@ def _apply_border(value, border, is_table):
         value.pop(IS("$83"), None)
 
 
+def _column_widths_152(column_widths):
+    """A table's $152 column list as Kindle Previewer 4.0.1 writes it (#264),
+    or None. From <col>: one entry per column, {$56: n%, $546: $377} or {}.
+    From cells: {$56: n%}, adjacent equal widths merged by a $118 count.
+    Trailing empty entries are left out."""
+    if not column_widths:
+        return None
+    source, widths = column_widths
+    widths = list(widths)
+    while widths and widths[-1] is None:
+        widths.pop()
+    if not widths:
+        return None
+
+    def pct(w):
+        return IonStruct(IS("$307"), IonDecimal(f"{w:g}"), IS("$306"), IS("$314"))
+
+    out = []
+    if source == "col":
+        for w in widths:
+            out.append(
+                IonStruct()
+                if w is None
+                else IonStruct(IS("$56"), pct(w), IS("$546"), IS("$377"))
+            )
+        return out
+    i = 0
+    while i < len(widths):
+        w = widths[i]
+        n = 1
+        while i + n < len(widths) and widths[i + n] == w and w is not None:
+            n += 1
+        if w is None:
+            out.append(IonStruct())
+        else:
+            entry = IonStruct(IS("$56"), pct(w))
+            if n > 1:
+                entry[IS("$118")] = n
+            out.append(entry)
+        i += n
+    return out
+
+
 def _table_has_zoom(tbl):
     """Whether a native table gets the table viewer's zoom button: every table
     of 2 or more columns. A one-column table gets `max-width: 100%` instead
@@ -1759,7 +1802,7 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
-    def build_table_style_157(self, entity_name, border=None):
+    def build_table_style_157(self, entity_name, border=None, width=None):
         """$157 for a native table node, as Kindle Previewer writes it (#219),
         with the table's own border (#264)."""
         self.symtab.create_local_symbol(entity_name)
@@ -1771,6 +1814,16 @@ class NativeKFXGenerator:
             IS("$83"), 4286611584,
         )  # fmt: skip
         _apply_border(value, border, is_table=True)
+        if width is not None:
+            # A percentage table width, as Previewer writes it (#264): a
+            # min-width, and at 100% the width too.
+            pct = IonStruct(
+                IS("$307"), IonDecimal(f"{width:g}"), IS("$306"), IS("$314")
+            )
+            if width == 100:
+                value[IS("$56")] = pct
+            value[IS("$63")] = pct
+            value[IS("$546")] = IS("$377")
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_cell_style_157(
@@ -1785,6 +1838,7 @@ class NativeKFXGenerator:
         font_size=1.0,
         valign="middle",
         border=None,
+        border_box=False,
     ):
         """$157 for a table cell: Previewer's padding, plus the cell's own
         alignment, header weight and spans (#219), its vertical alignment
@@ -1821,6 +1875,9 @@ class NativeKFXGenerator:
                 IS("$307"), IonDecimal(str(font_size)), IS("$306"), IS("$505")
             )  # rem
         _apply_border(value, border, is_table=False)
+        if border_box:
+            # A cell that sets its own width, as Previewer writes it (#264).
+            value[IS("$546")] = IS("$377")
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_fragment_157_image(
@@ -1980,6 +2037,7 @@ class NativeKFXGenerator:
         image_specs=None,
         emphasis_spans=None,
         container_nodes=None,
+        container_extras=None,
     ):
         """
         Builds Fragment $259 (Storyline / Flow Map)
@@ -2074,6 +2132,14 @@ class NativeKFXGenerator:
                     # squeeze wide columns until words break a character
                     # per line (#254), and the Voyage stacks the cells of
                     # a plain 2-3 column table (#272).
+                    extras = (
+                        container_extras[i]
+                        if container_extras and i < len(container_extras)
+                        else None
+                    )
+                    if extras:
+                        for k, v in extras.items():
+                            entry[IS(k)] = v
                     if node == "zoom-table":
                         entry[IS("$629")] = [IS("$581"), IS("$326")]
                         entry[IS("$630")] = IS("$632")
@@ -3450,6 +3516,8 @@ class NativeKFXGenerator:
                 "anchor_keys": [],
                 "zoom": _table_has_zoom(tbl),
                 "border": tbl.get("border"),
+                "column_widths": tbl.get("column_widths"),
+                "width": tbl.get("width"),
             }
             all_chunks.append(table_open)
             group = None
@@ -3481,6 +3549,7 @@ class NativeKFXGenerator:
                         "rowspan": cell.get("rowspan", 1),
                         "valign": cell.get("valign"),
                         "border": cell.get("border"),
+                        "width_set": cell.get("width_set"),
                     }
                     if cell.get("paragraphs"):
                         # A cell holding several blocks (#261): a container,
@@ -3551,6 +3620,7 @@ class NativeKFXGenerator:
                                 "rowspan": cell.get("rowspan", 1),
                                 "valign": cell.get("valign"),
                                 "border": cell.get("border"),
+                                "width_set": cell.get("width_set"),
                             },
                         }
                     )
@@ -4164,6 +4234,7 @@ class NativeKFXGenerator:
                 # share one style.
                 "valign": cell.get("valign") or "middle",
                 "border": _border_key(cell.get("border")),
+                "border_box": bool(cell.get("width_set")),
             }
             if cell_fam:
                 cattrs["font_family"] = cell_fam
@@ -4184,6 +4255,7 @@ class NativeKFXGenerator:
             entry_image_specs = []
             entry_emphasis_spans = []
             entry_nodes = []
+            entry_extras = []
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
                 if chunk.get("type") in ("open", "close"):
@@ -4194,6 +4266,7 @@ class NativeKFXGenerator:
                                 "_tbl",
                                 builder=self.build_table_style_157,
                                 border=_border_key(chunk.get("border")),
+                                width=chunk.get("width"),
                             )
                         )
                     elif node == "cell":
@@ -4215,8 +4288,15 @@ class NativeKFXGenerator:
                     entry_nodes.append(
                         "zoom-table" if node == "table" and chunk.get("zoom") else node
                     )
+                    widths = (
+                        _column_widths_152(chunk.get("column_widths"))
+                        if node == "table"
+                        else None
+                    )
+                    entry_extras.append({"$152": widths} if widths else None)
                     continue
                 entry_nodes.append(None)
+                entry_extras.append(None)
                 if chunk.get("type") == "image":
                     entry_styles.append(
                         None
@@ -4336,6 +4416,7 @@ class NativeKFXGenerator:
                 image_specs=entry_image_specs,
                 emphasis_spans=entry_emphasis_spans,
                 container_nodes=entry_nodes,
+                container_extras=entry_extras,
             )
             storyline_names.append(sl_name)
             self.fragments.append(frag_259)

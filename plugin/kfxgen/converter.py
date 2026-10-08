@@ -934,6 +934,71 @@ def _table_width(table):
     return width
 
 
+def _cell_columns(table):
+    """Each cell with the grid column it starts in, row by row, as
+    `_table_width` walks the grid: colspans, and the cells rowspan carries
+    down within a row group."""
+    groups = [table] + [c for c in table if _local_tag(c.tag) in _ROW_GROUPS]
+    for group in groups:
+        carry = []
+        for tr in group:
+            if _local_tag(tr.tag) != "tr":
+                continue
+            row_cells = [c for c in tr if _local_tag(c.tag) in _CELL_TAGS]
+            if not row_cells:
+                continue
+            col = 0
+            for cell in row_cells:
+                while col < len(carry) and carry[col]:
+                    col += 1
+                span = _span_attr(cell, "colspan")
+                yield cell, col, span
+                end = col + span
+                carry.extend([0] * (end - len(carry)))
+                carry[col:end] = [_span_attr(cell, "rowspan")] * (end - col)
+                col = end
+            carry = [max(n - 1, 0) for n in carry]
+
+
+def _width_pct(elem, style_resolver):
+    """An element's width as a percentage, or None: its CSS width when it
+    declares one, else its `width` attribute. Absolute widths count as none
+    (#264): Kindle Previewer turns them into percentages by laying the page
+    out."""
+    css = style_resolver(elem) if style_resolver is not None else None
+    declared = (css or {}).get("width")
+    value = declared if declared is not None else elem.get("width")
+    m = re.fullmatch(r"\s*([\d.]+)\s*%\s*", str(value or ""))
+    return float(m.group(1)) if m else None
+
+
+def _column_widths(table, style_resolver):
+    """The table's column widths as Kindle Previewer writes them into $152
+    (#264): ("col", [pct or None per column]) from <col>/<colgroup>, with
+    `span` repeating a column; else ("cell", [...]) from the cells, the last
+    row that gives a single-column cell a width winning; else None."""
+    cols = []
+    for child in table:
+        tag = _local_tag(child.tag)
+        members = [child] if tag == "col" else []
+        if tag == "colgroup":
+            members = [c for c in child if _local_tag(c.tag) == "col"]
+        for col in members:
+            cols.extend([_width_pct(col, style_resolver)] * _span_attr(col, "span"))
+    if any(w is not None for w in cols):
+        return ("col", cols)
+    widths = []
+    for cell, col, span in _cell_columns(table):
+        widths.extend([None] * (col + span - len(widths)))
+        if span == 1:
+            pct = _width_pct(cell, style_resolver)
+            if pct is not None:
+                widths[col] = pct
+    if any(w is not None for w in widths):
+        return ("cell", widths)
+    return None
+
+
 _ROW_GROUPS = {"thead": "head", "tbody": "body", "tfoot": "foot"}
 _ROW_GROUP_ORDER = {"head": 0, "body": 1, "foot": 2}
 
@@ -1192,6 +1257,9 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
         # A cell's own CSS border wins over the attribute's (#264).
         css = style_resolver(cell) if style_resolver is not None else None
         built["border"] = _css_border(css) or attr_cell_border
+        # A cell giving itself a width takes Previewer's border-box sizing
+        # (#264).
+        built["width_set"] = _width_pct(cell, style_resolver) is not None
         return built
 
     def clamp_rowspans(group_rows):
@@ -1272,7 +1340,15 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
         "block_style": None,
         "anchor_ids": every,
         "anchor_offsets": dict.fromkeys(every, 0),
-        "table": {"anchor_ids": own, "rows": rows, "border": table_border},
+        "table": {
+            "anchor_ids": own,
+            "rows": rows,
+            "border": table_border,
+            "column_widths": _column_widths(table, style_resolver),
+            # A percentage table width: without it the Kindle sizes the
+            # table to its content and narrow columns' widths don't show.
+            "width": _width_pct(table, style_resolver),
+        },
     }
     return captions, block, carry
 
