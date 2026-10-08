@@ -6327,3 +6327,165 @@ def test_table_width_is_the_widest_row_not_the_last():
     )
     (table,) = list(doc.iter("{http://www.w3.org/1999/xhtml}table"))
     assert _conv._table_width(table) == 5
+
+
+# --- percent-encoded link targets (#278) -------------------------------------
+#
+# A link's file name and fragment are percent-encoded in the markup, while an
+# id is written as-is and calibre keeps some file names encoded and others not.
+# Link keys and anchor keys are now both built from the decoded file name, and
+# a link's fragment is decoded, so the two meet.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "href, base, expected",
+    [
+        ("c2.xhtml#fn%3A1", "c1.xhtml", "c2.xhtml#fn:1"),
+        ("c2.xhtml#%C3%A9", "c1.xhtml", "c2.xhtml#é"),
+        ("my%20notes.xhtml#t1", "c1.xhtml", "my notes.xhtml#t1"),
+        ("not%C3%A9s.xhtml#t1", "c1.xhtml", "notés.xhtml#t1"),
+        ("my notes.xhtml#t1", "c1.xhtml", "my notes.xhtml#t1"),
+        ("#fn%3A1", "my%20notes.xhtml", "my notes.xhtml#fn:1"),
+        ("c2.xhtml#plain", "c1.xhtml", "c2.xhtml#plain"),
+    ],
+    ids=[
+        "frag-colon",
+        "frag-utf8",
+        "file-space",
+        "file-utf8",
+        "file-literal-space",
+        "same-file",
+        "plain",
+    ],
+)
+def test_a_link_key_is_decoded(href, base, expected):
+    assert _conv._resolve_link_target(href, base) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("base", ["my%20notes.xhtml", "my notes.xhtml"])
+def test_an_anchor_key_uses_the_decoded_file_name(base):
+    blocks = [{"text": "t", "anchor_ids": ["t1"], "anchor_offsets": {}}]
+    _conv._attach_anchor_keys(blocks, base)
+    assert "my notes.xhtml#t1" in blocks[0]["anchor_keys"]
+
+
+def _encoded_links_book(directory):
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.golden.inputs import _xhtml_page
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    links = (
+        '<p>See <a href="chapter_2.xhtml#fn%3A1">one</a>, '
+        '<a href="chapter_2.xhtml#%C3%A9">two</a>, '
+        '<a href="my%20notes.xhtml#t1">three</a>, '
+        '<a href="not%C3%A9s.xhtml#t1">four</a> and '
+        '<a href="chapter_2.xhtml#plain">five</a>.</p>'
+    )
+    targets = (
+        '<p id="fn:1">Note one.</p><p id="é">Note two.</p><p id="plain">Note five.</p>'
+    )
+    b = EpubBuilder().set_metadata(title="Links", author="A")
+    b.add_chapter("One", _xhtml_page("One", links).encode("utf-8"))
+    b.add_chapter("Two", _xhtml_page("Two", targets).encode("utf-8"))
+    for i, (href, text) in enumerate(
+        (("my%20notes.xhtml", "Note three."), ("notés.xhtml", "Note four."))
+    ):
+        b.add_manifest_item(
+            item_id=f"x{i}",
+            href=href,
+            media_type="application/xhtml+xml",
+            data=_xhtml_page(f"X{i}", f'<p id="t1">{text}</p>').encode("utf-8"),
+            in_spine=True,
+        )
+    return EpubAsOeb(str(b.build(directory, "links")))
+
+
+@pytest.mark.unit
+def test_percent_encoded_links_land(tmp_path):
+    from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
+
+    out = tmp_path / "links.kfx"
+    _conv.convert_oeb_to_kfx(
+        _encoded_links_book(tmp_path), str(out), opts=MagicMock(), log=_silent_log()
+    )
+    frags = load_fragments(out)
+    linked = [
+        sp
+        for story in by_type(frags, "$259")
+        for e in iter_entries(val(story)["$146"])
+        for sp in e.get("$142") or []
+        if "$179" in sp
+    ]
+    assert len(linked) == 5
+
+
+# --- links into a file with no text (#278) -----------------------------------
+#
+# A spine file that shows nothing (only `<div id="e"></div>`) produced no
+# block, so its own key and its ids went nowhere and links to it were plain
+# text. They now go on the next shown block, or the last one when nothing
+# follows.
+
+
+def _empty_file_book(directory, empty_last=False):
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.golden.inputs import _xhtml_page
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    links = '<p>To <a href="chapter_2.xhtml">file</a> and <a href="chapter_2.xhtml#e">frag</a>.</p>'
+    b = EpubBuilder().set_metadata(title="E", author="A")
+    b.add_chapter("One", _xhtml_page("One", links).encode())
+    if empty_last:
+        b.add_chapter("Two", _xhtml_page("Two", '<div id="e"></div>').encode())
+    else:
+        b.add_chapter("Two", _xhtml_page("Two", '<div id="e"></div>').encode())
+        b.add_chapter(
+            "Three", _xhtml_page("Three", "<p>Next shown block.</p>").encode()
+        )
+        # A later chapter, so the next shown block is not also the last one.
+        b.add_chapter("Four", _xhtml_page("Four", "<p>Later block.</p>").encode())
+    return EpubAsOeb(str(b.build(directory, "e")))
+
+
+def _block_keys(oeb):
+    chapters = _conv.extract_chapters_from_oeb(
+        oeb, MagicMock(), {"title": "T", "author": "A"}, native_tables=True
+    )
+    return {
+        blk["text"]: set(blk.get("anchor_keys") or ())
+        for ch in chapters
+        for blk in ch.get("blocks") or []
+    }
+
+
+@pytest.mark.unit
+def test_an_empty_files_keys_go_on_the_next_shown_block(tmp_path):
+    keys = _block_keys(_empty_file_book(tmp_path))
+    assert {"chapter_2.xhtml", "chapter_2.xhtml#e"} <= keys["Next shown block."]
+    assert not {"chapter_2.xhtml", "chapter_2.xhtml#e"} & keys["Later block."]
+
+
+@pytest.mark.unit
+def test_an_empty_last_files_keys_go_on_the_last_block(tmp_path):
+    keys = _block_keys(_empty_file_book(tmp_path, empty_last=True))
+    assert {"chapter_2.xhtml", "chapter_2.xhtml#e"} <= keys["To file and frag."]
+
+
+@pytest.mark.unit
+def test_links_into_an_empty_file_land(tmp_path):
+    from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
+
+    out = tmp_path / "e.kfx"
+    _conv.convert_oeb_to_kfx(
+        _empty_file_book(tmp_path), str(out), opts=MagicMock(), log=_silent_log()
+    )
+    linked = [
+        sp
+        for story in by_type(load_fragments(out), "$259")
+        for e in iter_entries(val(story)["$146"])
+        for sp in e.get("$142") or []
+        if "$179" in sp
+    ]
+    assert len(linked) == 2
