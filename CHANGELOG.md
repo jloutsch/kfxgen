@@ -44,7 +44,8 @@ cells no longer carry an alignment they can't use.
   ("H2 anchor" in Gutenberg books) (#252).
 - A contents listing that ends where the next chapter starts no longer
   replaces that chapter (#276).
-- Unlisted back pages no longer print their file name as a heading (#275).
+- Unlisted back pages no longer print their file name as a heading or appear
+  by file name on the Contents page (#275).
 
 **Known limits:**
 - **Table and column sizes are the Kindle's.** A table's overall width
@@ -60,6 +61,8 @@ cells no longer carry an alignment they can't use.
 - **A table inside a table** still makes the outer table one paragraph per
   row (#263). The library sample has 10 such tables in 3 books.
 - **Red and other colours** are written but show as grey on e-ink.
+- **Some borders are not drawn:** the `rules` and `frame` attributes, and the
+  border of a second `<tbody>` (it joins the first).
 - From earlier releases, unchanged: notes becoming chapters in a book with
   no table of contents (#225); progress following the paragraph count
   (#227); hidden page-number markers printed mid-sentence (#256); a
