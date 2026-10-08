@@ -450,6 +450,29 @@ def _resolve_img_src(base_href, src):
     return _resolve_doc_path(base_href, src) or src
 
 
+def _key_doc(base_href, href):
+    """`_resolve_doc_path`, decoded: the file part of an anchor or link key.
+    calibre keeps some file names percent-encoded (spaces) and others not
+    (non-ASCII), and a link may spell either, so keys use the decoded name on
+    both sides (#278). Picture lookups keep `_resolve_doc_path` as is."""
+    return unquote(_resolve_doc_path(base_href, href))
+
+
+def _prepend_keys(block, keys):
+    """Put `keys` at the start of `block`, as a file's own key goes on its
+    first block. A native table needs them on its own keys too, which its
+    first row takes; from the block's keys alone they reach a later row."""
+    block["anchor_keys"] = _dedupe_keep_order(
+        keys + list(block.get("anchor_keys") or [])
+    )
+    block.setdefault("anchor_offsets", {}).update(dict.fromkeys(keys, 0))
+    tbl = block.get("table")
+    if tbl is not None:
+        tbl["anchor_keys"] = _dedupe_keep_order(
+            keys + list(tbl.get("anchor_keys") or [])
+        )
+
+
 def _resolve_link_target(href, base_href):
     """Normalize an in-book `<a href>` to a "<file>#<fragment>" anchor key.
 
@@ -469,13 +492,17 @@ def _resolve_link_target(href, base_href):
     # in-book target simply never has one, so reject the whole shape here.
     if _URL_SCHEME_RE.match(href):
         return None
-    fragment = _href_fragment(href)
+    # A fragment is percent-encoded in a URL but an id is written as-is, so
+    # "#fn%3A1" names id="fn:1" (#278). Only the decoded form is matched: an
+    # id that itself holds "%" (id="x%41", linked raw as "#x%41") now misses.
+    # None of 1,373 library EPUBs has such an id.
+    fragment = unquote(_href_fragment(href) or "")
     file_part = href.split("#", 1)[0]
     if file_part:
-        target_file = _resolve_doc_path(base_href, file_part)
+        target_file = _key_doc(base_href, file_part)
     else:
         # Same-file link: "#frag" is relative to the document it appears in.
-        target_file = _resolve_doc_path(base_href, "") if base_href else ""
+        target_file = _key_doc(base_href, "") if base_href else ""
     if not target_file:
         return None
     return f"{target_file}#{fragment}" if fragment else target_file
@@ -745,7 +772,7 @@ def _is_notes_table(table, base_href, link_targets):
     "<file>#<id>" keys every in-book link resolves to."""
     if not link_targets or not base_href:
         return False
-    doc = _resolve_doc_path(base_href, "")
+    doc = _key_doc(base_href, "")
     rows = [
         tr
         for tr in table.iter()
@@ -1583,7 +1610,7 @@ def _attach_anchor_keys(blocks, base_href):
     `anchor_offsets` is re-keyed the same way, turning {id: offset} into
     {key: offset} so the generator can carry each offset into the anchor it
     builds. (#79)"""
-    normalized = _resolve_doc_path(base_href, "") if base_href else ""
+    normalized = _key_doc(base_href, "") if base_href else ""
     for block in blocks:
         by_id = block.get("anchor_offsets") or {}
         block["anchor_keys"] = (
@@ -2850,6 +2877,14 @@ def extract_chapters_from_oeb(
 
     log.info(f"Processing {len(oeb_book.spine)} spine items...")
 
+    # Keys of spine files that show nothing (only `<div id="e"></div>`): the
+    # file's own key and its ids. Without a block they went nowhere and links
+    # to them were plain text; they go on the next shown block (#278). If
+    # that block is later dropped (a "Contents", title or half-title page's
+    # first block), they are lost with it: 2 of 66 such keys in the library
+    # sample, with no link to either.
+    orphan_keys = []
+
     for i, item in enumerate(oeb_book.spine):
         # Per-item try/except (#73): a single bad item logs a warning and
         # the loop continues. The previous shape wrapped the whole loop in
@@ -2894,7 +2929,21 @@ def extract_chapters_from_oeb(
             continue
 
         if not text or len(text.strip()) == 0:
+            empty_href = getattr(item, "href", "") or ""
+            doc_key = _key_doc(empty_href, "") if empty_href else ""
+            if doc_key:
+                orphan_keys.append(doc_key)
+                orphan_keys.extend(
+                    f"{doc_key}#{aid}"
+                    for elem in item.data.iter()
+                    if isinstance(elem.tag, str)
+                    for aid in _own_anchor_ids(elem)
+                )
             continue
+
+        if orphan_keys:
+            _prepend_keys(blocks[0], orphan_keys)
+            orphan_keys = []
 
         # Get the href for this spine item
         href = getattr(item, "href", "") or ""
@@ -2914,6 +2963,16 @@ def extract_chapters_from_oeb(
         table_blocks.extend((href, b) for b in tables_seen)
         notes_blocks.extend((href, b) for b in notes_seen)
         log.info(f"  Spine item {i + 1}: {len(text)} chars ({norm_href})")
+
+    if orphan_keys and spine_items_ordered:
+        # Nothing shown followed: the book's last block takes them.
+        last = spine_items_ordered[-1]["blocks"][-1]
+        last["anchor_keys"] = _dedupe_keep_order(
+            list(last.get("anchor_keys") or []) + orphan_keys
+        )
+        last.setdefault("anchor_offsets", {}).update(
+            {k: len(last.get("text") or "") for k in orphan_keys}
+        )
 
     if not spine_items_ordered:
         # Raise instead of returning a "No content extracted." sentinel (#72).
