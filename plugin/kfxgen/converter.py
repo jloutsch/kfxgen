@@ -1820,6 +1820,35 @@ def _already_numbered(text, n):
     return any(re.match(rf"[(\[]?{re.escape(f)}[.)\]]", lowered) for f in forms)
 
 
+# Elements a browser lays out as blocks that `block_tags` does not list. Next
+# to text written straight into <body>, each stays its own paragraph rather
+# than running into that text (#280).
+_BODY_BLOCK_TAGS = frozenset(
+    {
+        "img",
+        "svg",
+        "address",
+        "aside",
+        "center",
+        "dd",
+        "details",
+        "dl",
+        "dt",
+        "fieldset",
+        "figcaption",
+        "footer",
+        "form",
+        "header",
+        "hgroup",
+        "hr",
+        "main",
+        "menu",
+        "nav",
+        "summary",
+    }
+)
+
+
 def _list_marker(li, css, ordinals):
     """(marker text, ordinal or None) for `li`, or None when it shows none."""
     display = str((css or {}).get("display") or "").strip().lower()
@@ -2049,9 +2078,14 @@ def extract_blocks_from_html(
         return out
 
     def _is_block_at_body(child):
+        if not isinstance(child.tag, str):
+            return True
+        if _local_tag(child.tag) in _BODY_BLOCK_TAGS:
+            return True
+        css = style_resolver(child) if style_resolver is not None else None
+        display = str((css or {}).get("display") or "").strip().lower()
         return (
-            not isinstance(child.tag, str)
-            or _local_tag(child.tag) in ("img", "svg")
+            display.startswith(("block", "list-item", "table", "flex", "grid"))
             or _is_nav_listing(child)
             or any(d.tag in block_tags for d in child.iter())
         )

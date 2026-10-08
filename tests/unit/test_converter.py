@@ -6580,3 +6580,20 @@ def test_a_nav_listing_in_a_body_with_loose_text_is_still_discarded():
 @pytest.mark.unit
 def test_an_aside_in_a_body_with_loose_text_keeps_its_paragraphs():
     assert _texts("lead<aside><p>a</p><p>b</p></aside>") == ["lead", "a", "b"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("tag", ["center", "address", "header", "dl"])
+def test_a_browser_block_next_to_loose_body_text_stays_its_own_paragraph(tag):
+    assert _texts(f"loose<{tag}>C</{tag}>tail") == ["loose", "C", "tail"]
+
+
+@pytest.mark.unit
+def test_a_display_block_span_next_to_loose_body_text_stays_its_own_paragraph():
+    blocks = extract_blocks_from_html(
+        _doc("loose<span>C</span>tail"),
+        style_resolver=lambda e: (
+            {"display": "block"} if e.tag.endswith("span") else None
+        ),
+    )
+    assert [b["text"] for b in blocks] == ["loose", "C", "tail"]
