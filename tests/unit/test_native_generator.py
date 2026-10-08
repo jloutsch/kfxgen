@@ -4514,3 +4514,27 @@ def test_an_anchor_past_its_paragraphs_end_still_lands(tmp_path):
     # Both ends resolve: the note's anchor and the marker's.
     found = dict(_anchor_named_by_return_link(gen))
     assert len(found) == 2
+
+
+@pytest.mark.unit
+def test_trim_text_clamps_anchor_offsets_to_the_text_left():
+    """An anchor inside the cut goes to the start, not a negative offset
+    (KFX Input: "locate_offset failed"); one past the end goes to the end."""
+    from kfxgen.native_generator import _trim_text
+
+    part = {"text": "Chapter One. Text", "anchor_offsets": {"in": 4, "past": 99}}
+    assert _trim_text(part, 11)["anchor_offsets"] == {"in": 0, "past": 6}
+
+
+@pytest.mark.unit
+def test_an_anchor_inside_the_cut_title_lands_on_the_paragraph_start(tmp_path):
+    body = "Chapter One. It was a long day.X"
+    chapters = _round_trip_chapters(body, len(body) - 1)
+    # `<p>Chapter <a id="ref1"/>One. ...`: the id sits inside the title.
+    chapters[0]["blocks"][0]["anchor_offsets"] = {"chapter_001.xhtml#ref1": 8}
+    gen = NativeKFXGenerator()
+    gen.generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
+    )
+    found = dict(_anchor_named_by_return_link(gen))
+    assert {off for _pos, off in found.values()} == {None}
