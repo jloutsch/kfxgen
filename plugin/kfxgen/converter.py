@@ -393,6 +393,65 @@ def _svg_image_refs(svg):
     return refs
 
 
+# SVG parts that hold text no reader sees: its title and description, its
+# stylesheet and scripts, and its metadata.
+_SVG_TEXT_SKIP = _SVG_NON_RENDERED_CONTAINERS | {
+    "title",
+    "desc",
+    "style",
+    "script",
+    "metadata",
+    "foreignobject",
+}
+
+
+_SVG_CONDITIONS = ("systemLanguage", "requiredFeatures", "requiredExtensions")
+
+
+def _svg_text_paragraphs(svg):
+    """The words an <svg> draws as <text>: (text, <text> element) for each,
+    in document order (#231). Picture books set a page's words over the art
+    this way.
+
+    A <tspan> or <textPath> with its own x or y starts a new line, so it is a
+    word break; one without continues the run it sits in. A <switch> draws
+    one child: its first without a condition (the fallback a reader shows),
+    else its first."""
+    out = []
+
+    def run(node):
+        s = node.text or ""
+        for child in node:
+            if _local_tag(child.tag) in ("tspan", "textPath", "a"):
+                placed = child.get("x") is not None or child.get("y") is not None
+                if placed and s and not s[-1].isspace():
+                    s += " "
+                s += run(child)
+            s += child.tail or ""
+        return s
+
+    def visit(node):
+        local = _local_tag(node.tag)
+        if not local or local.lower() in _SVG_TEXT_SKIP:
+            return
+        if local == "text":
+            text = " ".join(run(node).split())
+            if text:
+                out.append((text, node))
+        elif local == "switch":
+            kids = [c for c in node if _local_tag(c.tag)]
+            plain = [c for c in kids if not any(c.get(a) for a in _SVG_CONDITIONS)]
+            if plain or kids:
+                visit((plain or kids)[0])
+        else:
+            for child in node:
+                visit(child)
+
+    for child in svg:
+        visit(child)
+    return out
+
+
 _URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:")
 
 
@@ -617,6 +676,11 @@ def _walk_inline(
             for href, alt in _svg_image_refs(child):
                 token = _make_img_token(href, alt, SVG_IMAGE_SIZE)
                 parts.append((token, frozenset()))
+            for text, node in _svg_text_paragraphs(child):
+                parts.append((" ", frozenset()))
+                for aid in _subtree_anchor_ids(node):
+                    parts.append(make_anchor_mark(aid))
+                parts.append((f"{text} ", frozenset()))
         elif clocal in _CELL_BLOCK_TAGS:
             # A block walked inline (a cell on the rows path, a native cell
             # mixing text and a block): its edges are a word boundary even
@@ -2016,9 +2080,30 @@ def extract_blocks_from_html(
         )
 
     def _emit_svg_blocks(elem):
-        """Each <image> an <svg> draws becomes an image block of its own."""
+        """Each <image> an <svg> draws becomes an image block of its own, and
+        the words it draws as <text> follow as paragraphs: their place on the
+        picture is lost, their reading order is not (#231)."""
         for href, alt in _svg_image_refs(elem):
             _emit_image_block(elem, href, alt, SVG_IMAGE_SIZE)
+        drew_picture = bool(_svg_image_refs(elem))
+        for text, node in _svg_text_paragraphs(elem):
+            ids = []
+            if not drew_picture:
+                # No picture took the <svg>'s own ids or those carried to
+                # it: the first paragraph does.
+                ids = pending_ids[:] + _own_anchor_ids(elem)
+                pending_ids.clear()
+                drew_picture = True
+            ids = _dedupe_keep_order(ids + _subtree_anchor_ids(node))
+            blocks.append(
+                {
+                    "text": text,
+                    "spans": [],
+                    "block_style": None,
+                    "anchor_ids": ids,
+                    "anchor_offsets": dict.fromkeys(ids, 0),
+                }
+            )
 
     def _discard_listing(elem):
         """Drop a contents listing's text, keeping the two things in it that
@@ -2402,12 +2487,8 @@ def extract_blocks_from_html(
         # ids inside <defs>. The flat-text fallback below scoops all of it
         # into the body — 1,894 characters of CSS from the cover of the
         # IDPF/epub3-samples book, 220 of RDF from two of its pages. A vector
-        # page that draws no bitmap contributes nothing instead.
-        #
-        # SVG <text> is the one thing this gives up, and knowingly: nothing
-        # downstream renders it today, and the alternative on the same path is
-        # the stylesheet reaching the reader. Worth revisiting with a
-        # reference file that has some.
+        # page that draws no bitmap and no <text> contributes nothing instead;
+        # its <text> was read above (#231).
         return []
 
     # Fallback: no block elements — flat extraction, no spans (unchanged rule).
@@ -2944,6 +3025,7 @@ def extract_chapters_from_oeb(
     # first block), they are lost with it: 2 of 66 such keys in the library
     # sample, with no link to either.
     orphan_keys = []
+    svg_text_files = 0  # files whose SVG draws words, said once (#231)
 
     for i, item in enumerate(oeb_book.spine):
         # Per-item try/except (#73): a single bad item logs a warning and
@@ -2983,6 +3065,11 @@ def extract_chapters_from_oeb(
                 - note_ids,
             )
             text = "\n\n".join(b["text"] for b in blocks)
+            svg_text_files += any(
+                _svg_text_paragraphs(e)
+                for e in item.data.iter()
+                if _local_tag(e.tag) == "svg"
+            )
         except Exception as e:
             href_for_log = getattr(item, "href", "") or "<unknown>"
             log.warn(f"  Spine item {i + 1} parse failed ({href_for_log}): {e}")
@@ -3023,6 +3110,13 @@ def extract_chapters_from_oeb(
         table_blocks.extend((href, b) for b in tables_seen)
         notes_blocks.extend((href, b) for b in notes_seen)
         log.info(f"  Spine item {i + 1}: {len(text)} chars ({norm_href})")
+
+    if svg_text_files:
+        log.warn(
+            f"  Words drawn in SVG pictures in {svg_text_files} "
+            f"file{'s' if svg_text_files != 1 else ''} are written after the "
+            "picture, not over it (#231)"
+        )
 
     if orphan_keys and spine_items_ordered:
         # Nothing shown followed: the book's last block takes them.

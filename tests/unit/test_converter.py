@@ -6597,3 +6597,161 @@ def test_a_display_block_span_next_to_loose_body_text_stays_its_own_paragraph():
         ),
     )
     assert [b["text"] for b in blocks] == ["loose", "C", "tail"]
+
+
+# ── #231: words an SVG draws as <text> ───────────────────────────────────────
+
+_SVG_NS = (
+    'xmlns:svg="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"'
+)
+
+
+def _svg_page(inner):
+    return (
+        f'<svg:svg {_SVG_NS} viewBox="0 0 10 10">'
+        '<svg:image xlink:href="p.jpg" width="10" height="10"/>'
+        f"{inner}</svg:svg>"
+    )
+
+
+@pytest.mark.unit
+def test_svg_text_follows_its_picture():
+    blocks = extract_blocks_from_html(
+        _doc(_svg_page('<svg:text x="1" y="5">Once upon</svg:text>'))
+    )
+    assert [b["text"] for b in blocks] == [
+        _conv._make_img_token("p.jpg", "", _conv.SVG_IMAGE_SIZE),
+        "Once upon",
+    ]
+
+
+@pytest.mark.unit
+def test_svg_text_in_a_div_follows_its_picture_in_the_same_block():
+    """A <div> holding only the <svg> is one block: picture, then words."""
+    (block,) = extract_blocks_from_html(
+        _doc(f"<div>{_svg_page('<svg:text>Once upon</svg:text>')}</div>")
+    )
+    token = _conv._make_img_token("p.jpg", "", _conv.SVG_IMAGE_SIZE)
+    assert block["text"] == f"{token} Once upon"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "inner, texts",
+    [
+        # A tspan placed on a line of its own is a word break.
+        (
+            '<svg:text><svg:tspan x="1" y="2">Once</svg:tspan>'
+            '<svg:tspan x="1" y="4">upon</svg:tspan></svg:text>',
+            ["Once upon"],
+        ),
+        # One without a position continues the line: a run, not a new word.
+        ("<svg:text>Won<svg:tspan>der</svg:tspan>ful</svg:text>", ["Wonderful"]),
+        # Each <text> is its own paragraph, in document order.
+        (
+            "<svg:text>One.</svg:text><svg:g><svg:text>Two.</svg:text></svg:g>",
+            ["One.", "Two."],
+        ),
+        # Text in parts SVG does not paint, or that are not shown, is not read.
+        (
+            "<svg:defs><svg:text>hidden</svg:text></svg:defs>"
+            "<svg:title>a title</svg:title><svg:style>.a{}</svg:style>"
+            "<svg:text>  shown  </svg:text><svg:text> </svg:text>",
+            ["shown"],
+        ),
+    ],
+)
+def test_svg_text_paragraphs(inner, texts):
+    blocks = extract_blocks_from_html(_doc(_svg_page(inner)))
+    assert [b["text"] for b in blocks[1:]] == texts
+
+
+@pytest.mark.unit
+def test_an_svg_documents_text_follows_its_picture():
+    """A spine document that is itself an SVG (#165)."""
+    doc = etree.fromstring(
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" '
+            'xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 10 10">'
+            '<image xlink:href="p.jpg" width="10" height="10"/>'
+            '<text x="1" y="5">Once upon</text></svg>'
+        ).encode()
+    )
+    texts = [b["text"] for b in extract_blocks_from_html(doc)]
+    assert texts[1:] == ["Once upon"]
+
+
+@pytest.mark.unit
+def test_svg_text_in_a_paragraph_stays_in_it():
+    body = (
+        f'<p {_SVG_NS}>Before <svg:svg><svg:image xlink:href="p.jpg"/>'
+        "<svg:text>Once upon</svg:text></svg:svg> after.</p>"
+    )
+    text = _texts(body)[0]
+    assert text.endswith("Once upon after.")
+
+
+@pytest.mark.unit
+def test_svg_text_is_reported_once_per_book(tmp_path):
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.golden.inputs import _xhtml_page
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    page = _svg_page("<svg:text>Once upon</svg:text>")
+    b = EpubBuilder().set_metadata(title="S", author="A")
+    b.add_chapter("One", _xhtml_page("One", page).encode())
+    b.add_chapter("Two", _xhtml_page("Two", page).encode())
+    b.add_chapter("Three", _xhtml_page("Three", "<p>No pictures.</p>").encode())
+    log = MagicMock()
+    _conv.extract_chapters_from_oeb(
+        EpubAsOeb(str(b.build(tmp_path, "s"))), log, {"title": "T", "author": "A"}
+    )
+    said = [c.args[0] for c in log.warn.call_args_list if "SVG" in c.args[0]]
+    assert said == [
+        "  Words drawn in SVG pictures in 2 files are written after the picture, "
+        "not over it (#231)"
+    ]
+
+
+@pytest.mark.unit
+def test_svg_text_takes_its_ids_so_links_to_it_land():
+    blocks = extract_blocks_from_html(
+        _doc(
+            _svg_page(
+                '<svg:text id="tx">Once <svg:tspan id="ts">upon</svg:tspan></svg:text>'
+            )
+        )
+    )
+    assert blocks[1]["anchor_ids"] == ["tx", "ts"]
+
+
+@pytest.mark.unit
+def test_a_text_only_svgs_ids_go_on_its_first_paragraph():
+    body = (
+        f'<svg:svg {_SVG_NS} id="sv"><svg:text>One.</svg:text>'
+        '<svg:text id="two">Two.</svg:text></svg:svg>'
+    )
+    blocks = extract_blocks_from_html(_doc(body))
+    assert [(b["text"], b["anchor_ids"]) for b in blocks] == [
+        ("One.", ["sv"]),
+        ("Two.", ["two"]),
+    ]
+
+
+@pytest.mark.unit
+def test_svg_text_in_a_paragraph_keeps_its_id():
+    body = f'<p {_SVG_NS}>See <svg:svg><svg:text id="tx">this</svg:text></svg:svg> now.</p>'
+    (block,) = extract_blocks_from_html(_doc(body), base_href="c.xhtml")
+    offset = block["anchor_offsets"]["c.xhtml#tx"]
+    assert block["text"][offset:].startswith("this")
+
+
+@pytest.mark.unit
+def test_an_svg_switch_draws_one_child():
+    """The first child without a condition is what a reader shows."""
+    inner = (
+        '<svg:switch><svg:text systemLanguage="fr">Bonjour</svg:text>'
+        "<svg:text>Hello</svg:text><svg:text>Other</svg:text></svg:switch>"
+    )
+    blocks = extract_blocks_from_html(_doc(_svg_page(inner)))
+    assert [b["text"] for b in blocks[1:]] == ["Hello"]
