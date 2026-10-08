@@ -1687,6 +1687,7 @@ class NativeKFXGenerator:
         margin_right=None,
         font_family=None,
         baseline_style=None,
+        no_align=False,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -1829,6 +1830,11 @@ class NativeKFXGenerator:
         # metrics instead of trusting a percentage measured on two devices.
         if baseline_style is not None:
             value[IS("$44")] = IS(baseline_style)
+
+        if no_align:
+            # A run inside a table cell: a span can't carry text-align, and
+            # KFX Input flags one that differs from the cell's (#281).
+            del value[IS("$34")]
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
@@ -4254,7 +4260,9 @@ class NativeKFXGenerator:
         # books with no embeddable fonts stay byte-identical.
         has_fonts = bool(self.font_table.faces)
 
-        def _emphasis_style(flags, family_list, blk_bold=False, blk_italic=False):
+        def _emphasis_style(
+            flags, family_list, blk_bold=False, blk_italic=False, in_cell=False
+        ):
             # Effective emphasis = inline run flags OR the block's CSS emphasis.
             # The applied $157 always carries the run's own weight/style ($13/$12)
             # so it matches the $262 face descriptor the Kindle resolves against
@@ -4274,6 +4282,8 @@ class NativeKFXGenerator:
                 attrs["font_size"], attrs["baseline_style"] = superscript_metrics()
             elif FLAG_SUB in flags:
                 attrs["font_size"], attrs["baseline_style"] = subscript_metrics()
+            if in_cell:
+                attrs["no_align"] = True
             return _allocate_style("_em", **attrs)
 
         def _cell_style(cell, bs, font_size):
@@ -4471,7 +4481,13 @@ class NativeKFXGenerator:
                         for f in (FLAG_BOLD, FLAG_ITALIC, FLAG_SUPER, FLAG_SUB)
                     )
                     style = (
-                        _emphasis_style(flags, chunk_fam, _blk_b, _blk_i)
+                        _emphasis_style(
+                            flags,
+                            chunk_fam,
+                            _blk_b,
+                            _blk_i,
+                            in_cell="cell" in chunk or "in_header_cell" in chunk,
+                        )
                         if has_emphasis or not anchor
                         else None
                     )
@@ -4506,6 +4522,36 @@ class NativeKFXGenerator:
             if name not in registered:
                 extra_style_names.append(name)
                 registered.add(name)
+
+        # Drop styles no storyline uses. A chapter's default paragraph style
+        # is allocated up front, and a chapter of nothing but tables (or one
+        # whose plain paragraphs were all removed) never applies it; KFX Input
+        # grades an unreferenced $157 an error (#281). Pruned at the end, so
+        # every other style keeps its name and symbol number. Every $157
+        # reference is written by build_fragment_259.
+        referenced = set()
+
+        def _refs(nodes):
+            for e in nodes or []:
+                if IS("$157") in e:
+                    referenced.add(str(e[IS("$157")]))
+                for sp in e.get(IS("$142")) or []:
+                    if IS("$157") in sp:
+                        referenced.add(str(sp[IS("$157")]))
+                _refs(e.get(IS("$146")))
+
+        for frag in self.fragments:
+            if frag.ftype == IS("$259"):
+                _refs(frag.value.get(IS("$146")))
+        unused = registered - referenced
+        if unused:
+            self.fragments = [
+                f
+                for f in self.fragments
+                if not (f.ftype == IS("$157") and str(f.fid) in unused)
+            ]
+            story_names = [n for n in story_names if n not in unused]
+            extra_style_names[:] = [n for n in extra_style_names if n not in unused]
 
         return {
             "story_names": story_names,

@@ -4267,3 +4267,101 @@ def test_a_row_and_a_group_border_get_their_own_style(tmp_path):
     assert border(group) == {"$94": "0.9", "$89": "$328"}
     assert border(rows[0]) == {"$96": "0.45", "$91": "$328"}
     assert border(rows[1]) is None
+
+
+# --- run styles inside table cells (#281) ------------------------------------
+#
+# A run's style is a whole paragraph style plus its emphasis, so it carried the
+# default text-align: justify. In body text that matches the paragraph; in a
+# cell KFX Input flags it as an ineffective span property. Runs in cells now
+# carry no $34; body runs are unchanged.
+
+
+def _run_styles(tmp_path, blocks):
+    top, styles = _storyline(tmp_path, blocks)
+    out = []
+    for e in iter_entries(top):
+        for sp in e.get("$142") or []:
+            if "$157" in sp:
+                out.append(("$34" in styles[str(sp["$157"])], str(e["$159"])))
+    return out
+
+
+@pytest.mark.unit
+def test_a_run_in_a_table_cell_carries_no_text_align(tmp_path):
+    from kfxgen.inline_style import FLAG_ITALIC
+
+    block = _table_block([["a x", "b"]])
+    block["table"]["rows"][0]["cells"][0]["spans"] = [(2, 1, frozenset({FLAG_ITALIC}))]
+    assert _run_styles(tmp_path, [block]) == [(False, "$269")]
+
+
+@pytest.mark.unit
+def test_a_run_in_a_paragraph_cell_carries_no_text_align(tmp_path):
+    from kfxgen.inline_style import FLAG_BOLD
+
+    block = _table_block([["p", "b"]])
+    block["table"]["rows"][0]["cells"][0]["paragraphs"] = [
+        {
+            "text": "one x",
+            "spans": [(4, 1, frozenset({FLAG_BOLD}))],
+            "block_style": None,
+        },
+        {"text": "two", "spans": [], "block_style": None},
+    ]
+    assert _run_styles(tmp_path, [block]) == [(False, "$269")]
+
+
+@pytest.mark.unit
+def test_a_run_in_body_text_keeps_its_text_align(tmp_path):
+    from kfxgen.inline_style import FLAG_ITALIC
+
+    para = {
+        "text": "a x",
+        "spans": [(2, 1, frozenset({FLAG_ITALIC}))],
+        "anchor_keys": [],
+    }
+    assert _run_styles(tmp_path, [para]) == [(True, "$269")]
+
+
+# --- no unreferenced styles (#281) -------------------------------------------
+#
+# The chapter's default paragraph style was written whether or not anything
+# used it: a chapter of nothing but tables, or (pg2701 since #286) one whose
+# only plain paragraphs were removed, left it unreferenced, which KFX Input
+# grades an error.
+
+
+def _unreferenced_styles(tmp_path, blocks):
+    out = tmp_path / "t.kfx"
+    NativeKFXGenerator().generate_full_book(
+        "T",
+        "A",
+        [{"title": "Chapter", "text": "x", "blocks": blocks}],
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    referenced = set()
+    for story in by_type(frags, "$259"):
+        for e in iter_entries(val(story)["$146"]):
+            if "$157" in e:
+                referenced.add(str(e["$157"]))
+            for sp in e.get("$142") or []:
+                if "$157" in sp:
+                    referenced.add(str(sp["$157"]))
+    return {str(f.fid) for f in by_type(frags, "$157")} - referenced
+
+
+@pytest.mark.unit
+def test_a_tables_only_chapter_writes_no_unreferenced_style(tmp_path):
+    assert (
+        _unreferenced_styles(tmp_path, [_table_block([["a", "b"], ["c", "d"]])])
+        == set()
+    )
+
+
+@pytest.mark.unit
+def test_an_ordinary_chapter_still_writes_its_paragraph_style(tmp_path):
+    assert (
+        _unreferenced_styles(tmp_path, [{"text": "Plain text.", "spans": []}]) == set()
+    )
