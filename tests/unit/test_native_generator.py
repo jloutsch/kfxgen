@@ -4518,8 +4518,8 @@ def test_an_anchor_past_its_paragraphs_end_still_lands(tmp_path):
 
 @pytest.mark.unit
 def test_trim_text_clamps_anchor_offsets_to_the_text_left():
-    """An anchor inside the cut goes to the start, not a negative offset
-    (KFX Input: "locate_offset failed"); one past the end goes to the end."""
+    """An anchor inside the cut goes to the start, not a negative offset;
+    one past the end goes to the end."""
     from kfxgen.native_generator import _trim_text
 
     part = {"text": "Chapter One. Text", "anchor_offsets": {"in": 4, "past": 99}}
