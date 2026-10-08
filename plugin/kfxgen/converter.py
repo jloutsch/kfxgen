@@ -912,39 +912,10 @@ def _longest_cell_run(cell):
     return max(leaf_lengths + [loose])
 
 
-def _table_width(table):
-    """Columns the widest row covers: its colspans plus the cells rowspan
-    carries down from earlier rows of the same row group. Stops counting once
-    past `_MAX_NATIVE_COLUMNS`."""
-    groups = [table] + [c for c in table if _local_tag(c.tag) in _ROW_GROUPS]
-    width = 0
-    for group in groups:
-        carry = []  # rows each column is still held for, from rows above
-        for tr in group:
-            if _local_tag(tr.tag) != "tr":
-                continue
-            row_cells = [c for c in tr if _local_tag(c.tag) in _CELL_TAGS]
-            if not row_cells:
-                continue  # never written, so it ends no rowspan
-            col = 0
-            for cell in row_cells:
-                while col < len(carry) and carry[col]:
-                    col += 1
-                end = col + _span_attr(cell, "colspan")
-                if end > _MAX_NATIVE_COLUMNS:
-                    return end
-                carry.extend([0] * (end - len(carry)))
-                carry[col:end] = [_span_attr(cell, "rowspan")] * (end - col)
-                col = end
-            width = max(width, len(carry))
-            carry = [max(n - 1, 0) for n in carry]
-    return width
-
-
 def _cell_columns(table):
-    """Each cell with the grid column it starts in, row by row, as
-    `_table_width` walks the grid: colspans, and the cells rowspan carries
-    down within a row group."""
+    """Each cell with the grid column it starts in, row by row: colspans, and
+    the cells rowspan carries down from earlier rows of the same row group. A
+    row with no cells is never written, so it ends no rowspan."""
     groups = [table] + [c for c in table if _local_tag(c.tag) in _ROW_GROUPS]
     for group in groups:
         carry = []
@@ -965,6 +936,19 @@ def _cell_columns(table):
                 carry[col:end] = [_span_attr(cell, "rowspan")] * (end - col)
                 col = end
             carry = [max(n - 1, 0) for n in carry]
+
+
+def _table_width(table):
+    """Columns the widest row covers: its colspans plus the cells rowspan
+    carries down from earlier rows of the same row group, as `_cell_columns`
+    walks the grid. Stops counting once past `_MAX_NATIVE_COLUMNS`."""
+    width = 0
+    for _cell, col, span in _cell_columns(table):
+        end = col + span
+        if end > _MAX_NATIVE_COLUMNS:
+            return end
+        width = max(width, end)
+    return width
 
 
 def _width_pct(elem, style_resolver):
