@@ -4365,3 +4365,113 @@ def test_an_ordinary_chapter_still_writes_its_paragraph_style(tmp_path):
     assert (
         _unreferenced_styles(tmp_path, [{"text": "Plain text.", "spans": []}]) == set()
     )
+
+
+# --- a body paragraph holding only a missing picture (#291) -----------------
+#
+# A picture the book doesn't hold (or one of 100 bytes or less, which the
+# generator skips) emits nothing, so its paragraph's ids were dropped and a
+# link to one became plain text. They now go on the next block's first entry
+# (a table's first row), else the chapter's last entry, else its placeholder.
+
+_GONE = "\x00IMG\x01gone.png\x01x\x00"
+
+
+def _keys_by_chunk(blocks):
+    gen = NativeKFXGenerator()
+    gen._resolved_image_refs = None
+    chunks = gen._build_chapter_content(
+        [{"title": "Chapter", "text": "x", "blocks": blocks}]
+    )["all_chunks"]
+    return [
+        (c.get("type"), c.get("node"), c.get("text"), tuple(c.get("anchor_keys") or ()))
+        for c in chunks
+        if c.get("anchor_keys")
+    ]
+
+
+def _gone(key="c.xhtml#fig"):
+    return {
+        "text": _GONE,
+        "spans": [],
+        "anchor_keys": [key],
+        "anchor_offsets": {key: 0},
+    }
+
+
+@pytest.mark.unit
+def test_a_missing_pictures_id_goes_on_the_next_paragraph():
+    keys = _keys_by_chunk(
+        [{"text": "Before.", "spans": []}, _gone(), {"text": "After.", "spans": []}]
+    )
+    assert ("text", None, "After.", ("c.xhtml#fig",)) in keys
+
+
+@pytest.mark.unit
+def test_a_missing_pictures_id_at_the_chapters_end_goes_on_the_last_entry():
+    keys = _keys_by_chunk([{"text": "Before.", "spans": []}, _gone()])
+    assert ("text", None, "Before.", ("c.xhtml#fig",)) in keys
+
+
+@pytest.mark.unit
+def test_a_missing_pictures_id_before_a_table_goes_on_its_first_row():
+    keys = _keys_by_chunk([_gone(), _table_block([["a", "b"]])])
+    assert ("open", "row", None, ("c.xhtml#fig",)) in keys
+
+
+@pytest.mark.unit
+def test_a_chapter_of_only_a_missing_picture_keeps_its_id():
+    keys = _keys_by_chunk([_gone()])
+    assert [k[3] for k in keys] == [("c.xhtml#fig",)]
+
+
+@pytest.mark.unit
+def test_a_link_to_a_missing_picture_in_the_body_lands(tmp_path):
+    # The case #290's review found; on main it was plain text.
+    from kfxgen.inline_style import make_link_flag
+
+    gen = NativeKFXGenerator()
+    link = {
+        "text": "See",
+        "spans": [(0, 3, frozenset({make_link_flag("c.xhtml#fig")}))],
+        "anchor_keys": [],
+    }
+    gen.generate_full_book(
+        "T",
+        "A",
+        [
+            {
+                "title": "C",
+                "text": "x",
+                "blocks": [link, _gone(), {"text": "After.", "spans": []}],
+            }
+        ],
+        output_path=str(tmp_path / "o.kfx"),
+    )
+    assert _collect_link_targets(gen), "the link to the missing picture was dropped"
+
+
+@pytest.mark.unit
+def test_a_missing_pictures_id_with_no_other_entry_lands_on_the_placeholder():
+    # A chapter with no title heading and nothing but the missing picture:
+    # the id goes on the placeholder entry every chapter keeps.
+    gen = NativeKFXGenerator()
+    gen._resolved_image_refs = None
+    chunks = gen._build_chapter_content(
+        [
+            {"title": "One", "text": "x", "blocks": [{"text": "Text.", "spans": []}]},
+            {
+                "title": "Two",
+                "text": "x",
+                "blocks": [_gone()],
+                "_omit_title_heading": True,
+            },
+        ]
+    )
+    start, end = chunks["chapter_chunk_ranges"][1]
+    second = chunks["all_chunks"][start:end]
+    # The placeholder is a blank entry (a no-break space).
+    assert [
+        ((c.get("text") or "").strip(), tuple(c.get("anchor_keys") or ()))
+        for c in second
+    ] == [("", ("c.xhtml#fig",))]

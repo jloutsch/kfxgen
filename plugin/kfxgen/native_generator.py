@@ -3297,6 +3297,23 @@ class NativeKFXGenerator:
                 )
             return block_anchor_keys if len(all_chunks) == block_first_chunk else []
 
+        def _attach_keys(index, keys):
+            """Put anchor `keys` at offset 0 on the chunk at `index`, or on a
+            table's first row when it opens a table: rows, not the `$278`,
+            are link targets (#219)."""
+            chunk = all_chunks[index]
+            if chunk.get("node") == "table":
+                depth = 0
+                for c in all_chunks[index:]:
+                    depth += {"open": 1, "close": -1}.get(c["type"], 0)
+                    if depth == 0:
+                        break
+                    if c.get("node") == "row":
+                        chunk = c
+                        break
+            chunk["anchor_keys"] = _dedupe_keys((chunk.get("anchor_keys") or []) + keys)
+            chunk.setdefault("anchor_offsets", {}).update(dict.fromkeys(keys, 0))
+
         def _emit_table_chunks(block):
             """Marker chunks around a native table's cells (#219). `open`
             becomes a container entry with one position; `close` ends it and
@@ -3595,11 +3612,36 @@ class NativeKFXGenerator:
                             {"text": p, "spans": []} for p in text.split("\n\n")
                         ]
 
+                    # Ids of a paragraph that emitted nothing (only a picture
+                    # the book doesn't hold) wait for the next block's first
+                    # chunk, so a link to one still lands (#291).
+                    pending = []
                     for block in para_iter:
+                        first = len(all_chunks)
                         if block.get("type") == "table":
                             _emit_table_chunks(block)
-                            continue
-                        _emit_paragraph(block)
+                            unplaced = []
+                        else:
+                            unplaced = _emit_paragraph(block)
+                        if pending and len(all_chunks) > first:
+                            _attach_keys(first, pending)
+                            pending = []
+                        pending += unplaced
+                    if pending:
+                        # Nothing followed in the chapter: the last entry
+                        # before, else the chapter's start (below).
+                        last = next(
+                            (
+                                i
+                                for i in range(len(all_chunks) - 1, start_idx - 1, -1)
+                                if all_chunks[i].get("type") in ("text", "image")
+                            ),
+                            None,
+                        )
+                        if last is not None:
+                            _attach_keys(last, pending)
+                        else:
+                            carried_anchor_keys.extend(pending)
 
             # Illustrations the source printed in a contents section that was
             # replaced. They arrive as their own key rather than inside
