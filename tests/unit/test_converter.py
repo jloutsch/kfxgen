@@ -6711,3 +6711,47 @@ def test_svg_text_is_reported_once_per_book(tmp_path):
         "  Words drawn in SVG pictures in 2 files are written after the picture, "
         "not over it (#231)"
     ]
+
+
+@pytest.mark.unit
+def test_svg_text_takes_its_ids_so_links_to_it_land():
+    blocks = extract_blocks_from_html(
+        _doc(
+            _svg_page(
+                '<svg:text id="tx">Once <svg:tspan id="ts">upon</svg:tspan></svg:text>'
+            )
+        )
+    )
+    assert blocks[1]["anchor_ids"] == ["tx", "ts"]
+
+
+@pytest.mark.unit
+def test_a_text_only_svgs_ids_go_on_its_first_paragraph():
+    body = (
+        f'<svg:svg {_SVG_NS} id="sv"><svg:text>One.</svg:text>'
+        '<svg:text id="two">Two.</svg:text></svg:svg>'
+    )
+    blocks = extract_blocks_from_html(_doc(body))
+    assert [(b["text"], b["anchor_ids"]) for b in blocks] == [
+        ("One.", ["sv"]),
+        ("Two.", ["two"]),
+    ]
+
+
+@pytest.mark.unit
+def test_svg_text_in_a_paragraph_keeps_its_id():
+    body = f'<p {_SVG_NS}>See <svg:svg><svg:text id="tx">this</svg:text></svg:svg> now.</p>'
+    (block,) = extract_blocks_from_html(_doc(body), base_href="c.xhtml")
+    offset = block["anchor_offsets"]["c.xhtml#tx"]
+    assert block["text"][offset:].startswith("this")
+
+
+@pytest.mark.unit
+def test_an_svg_switch_draws_one_child():
+    """The first child without a condition is what a reader shows."""
+    inner = (
+        '<svg:switch><svg:text systemLanguage="fr">Bonjour</svg:text>'
+        "<svg:text>Hello</svg:text><svg:text>Other</svg:text></svg:switch>"
+    )
+    blocks = extract_blocks_from_html(_doc(_svg_page(inner)))
+    assert [b["text"] for b in blocks[1:]] == ["Hello"]

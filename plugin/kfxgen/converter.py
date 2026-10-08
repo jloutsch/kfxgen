@@ -405,12 +405,18 @@ _SVG_TEXT_SKIP = _SVG_NON_RENDERED_CONTAINERS | {
 }
 
 
+_SVG_CONDITIONS = ("systemLanguage", "requiredFeatures", "requiredExtensions")
+
+
 def _svg_text_paragraphs(svg):
-    """The words an <svg> draws as <text>, one string per <text>, in document
-    order (#231). Picture books set a page's words over the art this way.
+    """The words an <svg> draws as <text>: (text, <text> element) for each,
+    in document order (#231). Picture books set a page's words over the art
+    this way.
 
     A <tspan> or <textPath> with its own x or y starts a new line, so it is a
-    word break; one without continues the run it sits in."""
+    word break; one without continues the run it sits in. A <switch> draws
+    one child: its first without a condition (the fallback a reader shows),
+    else its first."""
     out = []
 
     def run(node):
@@ -424,19 +430,25 @@ def _svg_text_paragraphs(svg):
             s += child.tail or ""
         return s
 
-    def walk(node):
-        for child in node:
-            local = _local_tag(child.tag)
-            if not local or local.lower() in _SVG_TEXT_SKIP:
-                continue
-            if local == "text":
-                text = " ".join(run(child).split())
-                if text:
-                    out.append(text)
-                continue
-            walk(child)
+    def visit(node):
+        local = _local_tag(node.tag)
+        if not local or local.lower() in _SVG_TEXT_SKIP:
+            return
+        if local == "text":
+            text = " ".join(run(node).split())
+            if text:
+                out.append((text, node))
+        elif local == "switch":
+            kids = [c for c in node if _local_tag(c.tag)]
+            plain = [c for c in kids if not any(c.get(a) for a in _SVG_CONDITIONS)]
+            if plain or kids:
+                visit((plain or kids)[0])
+        else:
+            for child in node:
+                visit(child)
 
-    walk(svg)
+    for child in svg:
+        visit(child)
     return out
 
 
@@ -664,8 +676,11 @@ def _walk_inline(
             for href, alt in _svg_image_refs(child):
                 token = _make_img_token(href, alt, SVG_IMAGE_SIZE)
                 parts.append((token, frozenset()))
-            for text in _svg_text_paragraphs(child):
-                parts.append((f" {text} ", frozenset()))
+            for text, node in _svg_text_paragraphs(child):
+                parts.append((" ", frozenset()))
+                for aid in _subtree_anchor_ids(node):
+                    parts.append(make_anchor_mark(aid))
+                parts.append((f"{text} ", frozenset()))
         elif clocal in _CELL_BLOCK_TAGS:
             # A block walked inline (a cell on the rows path, a native cell
             # mixing text and a block): its edges are a word boundary even
@@ -2070,14 +2085,23 @@ def extract_blocks_from_html(
         picture is lost, their reading order is not (#231)."""
         for href, alt in _svg_image_refs(elem):
             _emit_image_block(elem, href, alt, SVG_IMAGE_SIZE)
-        for text in _svg_text_paragraphs(elem):
+        drew_picture = bool(_svg_image_refs(elem))
+        for text, node in _svg_text_paragraphs(elem):
+            ids = []
+            if not drew_picture:
+                # No picture took the <svg>'s own ids or those carried to
+                # it: the first paragraph does.
+                ids = pending_ids[:] + _own_anchor_ids(elem)
+                pending_ids.clear()
+                drew_picture = True
+            ids = _dedupe_keep_order(ids + _subtree_anchor_ids(node))
             blocks.append(
                 {
                     "text": text,
                     "spans": [],
                     "block_style": None,
-                    "anchor_ids": [],
-                    "anchor_offsets": {},
+                    "anchor_ids": ids,
+                    "anchor_offsets": dict.fromkeys(ids, 0),
                 }
             )
 
