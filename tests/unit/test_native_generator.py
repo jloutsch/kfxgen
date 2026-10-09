@@ -4664,3 +4664,38 @@ def test_a_title_split_over_a_boxs_first_lines_is_cut(tmp_path):
     entries, _, text, _ = _book(tmp_path, chapters)
     (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
     assert [text(k) for k in b["$146"]] == ["The day began."]
+
+
+@pytest.mark.unit
+def test_ids_waiting_for_a_box_land_on_its_first_paragraph(tmp_path):
+    """A paragraph holding only a picture the book doesn't have emits nothing;
+    its ids wait for the next block (#291). When that is a box they go on its
+    first paragraph, not the `$270` (#309 review)."""
+    from kfxgen.converter import _make_img_token
+    from kfxgen.inline_style import make_link_flag
+
+    missing = {
+        "text": _make_img_token("missing.png", "", None),
+        "spans": [],
+        "anchor_keys": ["c.xhtml#pic"],
+        "anchor_offsets": {"c.xhtml#pic": 0},
+    }
+    box = _box_block([_para("First."), _para("Second.")])
+    link = {
+        "text": "to pic",
+        "spans": [(0, 6, frozenset({make_link_flag("c.xhtml#pic")}))],
+        "anchor_keys": [],
+    }
+    chapters = [
+        {"title": "One", "text": "x", "blocks": [link]},
+        {"title": "Two", "text": "y", "blocks": [_para("Lead."), missing, box]},
+    ]
+    entries, _, text, anchors = _book(tmp_path, chapters)
+    by_id = {e["$155"]: e for e in entries}
+    (target,) = [
+        by_id[anchors[str(sp["$179"])]]
+        for e in entries
+        for sp in e.get("$142") or []
+        if "$179" in sp
+    ]
+    assert str(target.get("$159")) == "$269" and text(target) == "First."
