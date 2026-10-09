@@ -6936,9 +6936,8 @@ def test_a_fallback_chapter_takes_its_files_heading_as_its_title(tmp_path):
         _no_toc_book(tmp_path), MagicMock(), {"title": "T", "author": "A"}
     )
     assert [ch["title"] for ch in chapters] == ["Chapter", "Notes", "Section 3"]
-    assert not chapters[0].get("_omit_title_heading")
-    # No heading of its own: the TOC still needs a name, the page doesn't.
-    assert chapters[2]["_omit_title_heading"]
+    # The book's heading prints as written; kfxgen prints neither title.
+    assert all(ch["_omit_title_heading"] for ch in chapters)
 
 
 @pytest.mark.unit
@@ -7029,3 +7028,23 @@ def test_a_fallback_chapter_headed_contents_does_not_stop_a_listing_rebuild(tmp_
     )
     assert chapters[1]["title"] == _conv.CONTENTS_PAGE_TITLE
     assert "blocks" not in chapters[1]
+
+
+@pytest.mark.unit
+def test_a_fallback_chapters_heading_keeps_its_runs(tmp_path):
+    """The book's heading prints, not a title made from its text, so its
+    italic survives (#306 review)."""
+    chapters = _no_toc_chapters(
+        tmp_path, [("H", "<h2>The <i>Italic</i> Heading</h2><p>Text.</p>")]
+    )
+    first = chapters[0]["blocks"][0]
+    assert first["text"] == "The Italic Heading" and first["spans"]
+    assert chapters[0]["_omit_title_heading"]
+
+
+@pytest.mark.unit
+def test_a_fallback_title_from_a_broken_heading_is_one_line(tmp_path):
+    chapters = _no_toc_chapters(
+        tmp_path, [("H", "<h1>Chapter<br/>One</h1><p>Text.</p>")]
+    )
+    assert chapters[0]["title"] == "Chapter One"

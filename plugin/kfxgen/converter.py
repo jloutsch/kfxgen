@@ -3255,19 +3255,21 @@ def extract_chapters_from_oeb(
         log.info("TOC produced no chapters; using spine items as chapters")
 
     # Fallback: use each spine item as a chapter. A file that opens with a
-    # heading is titled by it, so the heading prints once and the TOC names
-    # the chapter as the book does. Any other keeps "Section N" for the TOC
-    # but doesn't print it: it is no part of the book (#304).
+    # heading is titled by it, so the TOC names the chapter as the book does;
+    # any other is "Section N". Neither title is printed: the first is
+    # already on the page and the second is no part of the book (#304).
     chapters = []
     for i, item in enumerate(spine_items_ordered):
         first = (item.get("blocks") or [{}])[0]
-        heading = first.get("heading") and (first.get("text") or "").strip()
+        heading = first.get("heading") and " ".join((first.get("text") or "").split())
         chapter = {"title": heading or f"Section {i + 1}", "text": item["text"]}
         # The title is the file's, not a TOC label: front-matter rules keyed
         # on titles ("Contents", "Title Page") don't apply to it.
         chapter["_from_spine"] = True
-        if not heading:
-            chapter["_omit_title_heading"] = True
+        # The book's own heading prints, as written: its italics, its CSS and
+        # its line breaks, which a title printed by kfxgen would lose. The
+        # title only names the chapter in the TOC, on one line.
+        chapter["_omit_title_heading"] = True
         if item.get("blocks"):
             chapter["blocks"] = item["blocks"]
         if item.get("nav_listing_at"):
