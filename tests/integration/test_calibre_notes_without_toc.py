@@ -10,9 +10,13 @@ text as a repeat of that heading (". Note 2 text.").
 Notes are recognised by their link pairs: a marker links to the note and a
 link in the note's file links back to the marker. This holds for a notes
 table (anchor before or after each row), and for plain `<p>` and `<div>`
-notes, none of which carries note markup. Each layout is built with and
-without an NCX; with one, calibre keeps the book's own TOC and the notes
-were already right.
+notes, none of which carries note markup; `<aside>` notes carry it. Each
+layout is built with and without an NCX; with one, calibre keeps the
+book's own TOC and the notes were already right.
+
+With every entry of calibre's TOC skipped, each file becomes a chapter,
+titled by the heading it opens with (#304). Before, it was titled
+"Section N", printed above that heading and listed in the Kindle TOC.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found. CI has no calibre, so this is
@@ -48,6 +52,14 @@ LAYOUTS = {
     "p": "<h1>Notes</h1>"
     + "".join(
         f'<p id="n{n}"><a href="ch.xhtml#r{n}">{n}</a>. Note {n} text.</p>'
+        for n in range(1, 7)
+    ),
+    # Note markup: #203 already skipped these entries, so this book fell
+    # back to "Section N" chapters before #225 (#304).
+    "aside": "<h1>Notes</h1>"
+    + "".join(
+        f'<aside role="doc-endnote" id="n{n}"><p><a href="ch.xhtml#r{n}">{n}</a>. '
+        f"Note {n} text.</p></aside>"
         for n in range(1, 7)
     ),
     "div": "<h1>Notes</h1>"
@@ -158,3 +170,30 @@ def test_every_marker_lands_on_its_own_note(book):
         assert on_note and all(
             re.match(rf"{n}\. ?Note {n} text\.", t) for t in on_note
         ), f"{where}: marker {n} lands on {[t[:40] for t in on_note]}"
+
+
+def _toc_labels(kfx):
+    """The labels in the KFX's navigation, as the Kindle's TOC lists them."""
+    frags = load_fragments(kfx)
+    return sorted(
+        set(
+            re.findall(
+                r"\$244: '([^']*)'", repr([val(f) for f in by_type(frags, "$389")])
+            )
+        )
+        - {"heading-nav-unit"}
+    )
+
+
+def test_the_book_prints_no_section_heading(book):
+    """With every entry of calibre's TOC skipped as a note, each file is a
+    chapter: titled by its own heading, and "Section N" never printed (#304)."""
+    kfx, where = book
+    section = [t for t in _texts(kfx) if re.fullmatch(r"Section \d+", t)]
+    assert not section, f"{where}: printed {section}"
+
+
+def test_the_toc_names_the_books_own_chapters(book):
+    kfx, where = book
+    labels = _toc_labels(kfx)
+    assert {"Chapter", "Notes"} <= set(labels), f"{where}: TOC is {labels}"
