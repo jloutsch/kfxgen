@@ -209,13 +209,14 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
 
 
 #: Each length unit as a share of the page width, as Kindle Previewer converts
-#: a container's margin onto its paragraphs: 2em became 6.25 % (#238).
+#: a container's margin onto its paragraphs: 2em became 6.25 % (#238). A px is
+#: 0.45pt and an em 12pt, the rates #296 measured for padding.
 _UNIT_TO_PCT = {
     "$308": 3.125,  # em
     "$505": 3.125,  # rem
-    "$319": 3.125 / 16,  # px, 16 to the em
-    "$318": 3.125 / 12,  # pt, 12 to the em
-    "$316": 3.125 * 96 / 25.4 / 16,  # mm
+    "$319": 3.125 * 0.45 / 12,  # px
+    "$318": 3.125 / 12,  # pt
+    "$316": 3.125 * 72 / 25.4 / 12,  # mm
     "$314": 1.0,  # %
 }
 #: Table parts: a table's margins do not reach its rows (#219).
@@ -235,19 +236,14 @@ def _page_share(margin):
 
 
 def _add_margin(own, extra):
-    """Two (magnitude, unit) margins added: in their unit when they share
-    one, else as a share of the page width. Either may be None."""
+    """A paragraph's margin with a container's added, as a share of the page
+    width, which is how Kindle Previewer writes it: unlike an em margin, it
+    doesn't grow with the reader's font size. Either may be None; with no
+    container margin the paragraph's own is kept as it is."""
     if extra is None:
         return own
-    if own is None:
-        return extra
-    if own[1] == extra[1]:
-        total, unit = float(own[0]) + float(extra[0]), own[1]
-    else:
-        total = float(own[0]) * _UNIT_TO_PCT[own[1]]
-        total += float(extra[0]) * _UNIT_TO_PCT[extra[1]]
-        unit = "$314"
-    return (f"{total:.4f}".rstrip("0").rstrip("."), unit)
+    total = _page_share(own) + _page_share(extra)
+    return (f"{total:.4f}".rstrip("0").rstrip("."), "$314")
 
 
 def _has_real_text(text):
@@ -2588,7 +2584,12 @@ def extract_blocks_from_html(
         Kindle Previewer does: an indented <div> or <blockquote> indents its
         paragraphs (#238). Run after the children, so nested containers add
         up. A table's margins stay off its rows (#219); native tables and
-        pictures keep their own."""
+        pictures keep their own.
+
+        Only margins calibre leaves reach this: its "remove fake margins"
+        step, on by default, strips some container margins first (three
+        nested 3em divs carry nothing; its log says "Removing level ...
+        left margin")."""
         if style_resolver is None or _local_tag(elem.tag) in _NO_CARRY_TAGS:
             return
         css = style_resolver(elem) or {}

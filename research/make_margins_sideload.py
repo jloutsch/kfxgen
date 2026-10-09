@@ -24,7 +24,11 @@ chapter has a "Before" and an "After" paragraph at the normal margin:
      then "Outer again" back at the first indent. Old: all level.
   4. "4. A quotation": New: the quotation indented on both sides, a little
      more than the inset. Old: level with Before/After.
-  5. The TOC button works on every page.
+  5. "5. A pixel inset": New: indented on both sides, a little less than
+     the inset. Old: level with Before/After.
+  6. Make the font larger: New's indents keep their width, since they are
+     a share of the page, as Kindle Previewer writes them.
+  7. The TOC button works on every page.
 """
 
 import argparse
@@ -55,6 +59,7 @@ CSS = """
 .outer { margin-left: 2em; }
 .inner { margin-left: 2em; }
 blockquote.q { margin: 1em 3em; }
+.px { margin-left: 40px; margin-right: 40px; }
 """
 _LINE = "The keeper climbed the stair at dusk and wiped the salt from the glass. "
 
@@ -76,6 +81,7 @@ CHAPTERS = [
         "4. A quotation",
         f'<blockquote class="q"><p>Quoted. {_LINE * 2}</p></blockquote>',
     ),
+    ("5. A pixel inset", f'<div class="px"><p>Pixels. {_LINE}</p></div>'),
 ]
 
 
