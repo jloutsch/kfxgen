@@ -2599,10 +2599,16 @@ def extract_blocks_from_html(
         row_block = None
         for child in elem:
             if follow and row_block is not None and _is_empty_anchor(child):
+                tbl = row_block.get("table")
                 for aid in _own_anchor_ids(child):
                     if aid not in row_block["anchor_ids"]:
                         row_block["anchor_ids"].append(aid)
                         row_block["anchor_offsets"][aid] = 0
+                    # A row that opens with a native table (#263): its first
+                    # row takes the table's own ids; from the block's alone
+                    # they reach a later row.
+                    if tbl is not None and aid not in tbl["anchor_ids"]:
+                        tbl["anchor_ids"].append(aid)
             elif (
                 is_block(child)
                 if is_block is not None

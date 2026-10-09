@@ -7168,3 +7168,55 @@ def test_the_outer_table_still_counts_as_written_in_rows():
     body = f"<table><tr><td>A</td><td>{_INNER}</td></tr></table>"
     blocks = extract_blocks_from_html(_doc(body), native_tables=True, tables_seen=seen)
     assert seen == [blocks[0]]
+
+
+@pytest.mark.unit
+def test_an_anchor_after_a_row_that_opens_with_a_table_lands_on_its_first_row(tmp_path):
+    """Anchors follow their rows (#221) and the row opens with an inner table:
+    the anchor names the table's first row, not its second (#307 review)."""
+    from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.golden.inputs import _xhtml_page
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    table = (
+        f"<table><tr><td>{_INNER}</td><td>x</td></tr>"
+        '<a id="f1"></a><tr><td>y</td><td>z</td></tr><a id="f2"></a></table>'
+    )
+    b = EpubBuilder().set_metadata(title="F", author="A")
+    b.add_chapter(
+        "One", _xhtml_page("One", '<p><a href="chapter_2.xhtml#f1">go</a></p>').encode()
+    )
+    b.add_chapter("Two", _xhtml_page("Two", table).encode())
+    out = tmp_path / "f.kfx"
+    _conv.convert_oeb_to_kfx(
+        EpubAsOeb(str(b.build(tmp_path, "f"))),
+        str(out),
+        opts=MagicMock(kfxgen_disable_native_tables=False),
+        log=_silent_log(),
+    )
+    frags = load_fragments(out)
+    content = {
+        str(val(f)["name"]): list(val(f)["$146"]) for f in by_type(frags, "$145")
+    }
+    ents = {
+        e["$155"]: e
+        for st in by_type(frags, "$259")
+        for e in iter_entries(val(st)["$146"])
+    }
+    anchors = {str(f.fid): val(f)["$183"]["$155"] for f in by_type(frags, "$266")}
+
+    def text(e):
+        if "$145" in e:
+            return str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+        return " ".join(
+            text(c) for c in iter_entries(e.get("$146") or []) if "$145" in c
+        )
+
+    (link,) = [
+        str(sp["$179"])
+        for e in ents.values()
+        for sp in e.get("$142") or []
+        if "$179" in sp
+    ]
+    assert text(ents[anchors[link]]).startswith("in1")
