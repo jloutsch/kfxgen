@@ -7220,3 +7220,130 @@ def test_an_anchor_after_a_row_that_opens_with_a_table_lands_on_its_first_row(tm
         if "$179" in sp
     ]
     assert text(ents[anchors[link]]).startswith("in1")
+
+
+# ── #238 stage 1: a container's side margins reach its paragraphs ────────────
+
+
+def _css_by_class(rules):
+    """A style resolver: {class: css dict}."""
+
+    def resolve(elem):
+        out = {}
+        for cls in (elem.get("class") or "").split():
+            out.update(rules.get(cls, {}))
+        return out or None
+
+    return resolve
+
+
+def _margins(body, rules, **kw):
+    blocks = extract_blocks_from_html(
+        _doc(body), style_resolver=_css_by_class(rules), **kw
+    )
+    return [
+        (
+            b["text"],
+            (b.get("block_style") or {}).get("margin_left"),
+            (b.get("block_style") or {}).get("margin_right"),
+        )
+        for b in blocks
+        if b.get("type") != "table"
+    ]
+
+
+@pytest.mark.unit
+def test_a_containers_side_margins_reach_its_paragraphs():
+    """Kindle Previewer writes `div { margin: 0 2em }` as 6.25 % on each child."""
+    rules = {"inset": {"margin-left": "2em", "margin-right": "1em"}}
+    body = '<p>Before.</p><div class="inset"><p>One.</p><p>Two.</p></div><p>After.</p>'
+    assert _margins(body, rules) == [
+        ("Before.", None, None),
+        ("One.", ("6.25", "$314"), ("3.125", "$314")),
+        ("Two.", ("6.25", "$314"), ("3.125", "$314")),
+        ("After.", None, None),
+    ]
+
+
+@pytest.mark.unit
+def test_nested_containers_and_a_paragraphs_own_margin_add_up():
+    rules = {
+        "a": {"margin-left": "1em"},
+        "b": {"margin-left": "1em"},
+        "p": {"margin-left": "0.5em"},
+    }
+    body = '<div class="a"><div class="b"><p class="p">Deep.</p></div><p>Shallow.</p></div>'
+    assert _margins(body, rules) == [
+        ("Deep.", ("7.8125", "$314"), None),
+        ("Shallow.", ("3.125", "$314"), None),
+    ]
+
+
+@pytest.mark.unit
+def test_margins_in_different_units_add_as_a_share_of_the_page():
+    """1em is 3.125 % of the page, as Kindle Previewer converts it."""
+    rules = {"box": {"margin-left": "10%"}, "p": {"margin-left": "2em"}}
+    body = '<div class="box"><p class="p">Mixed.</p></div>'
+    assert _margins(body, rules) == [("Mixed.", ("16.25", "$314"), None)]
+
+
+@pytest.mark.unit
+def test_inline_text_in_a_container_takes_its_margins():
+    rules = {"inset": {"margin-left": "2em"}}
+    body = '<div class="inset">Loose text.<p>A paragraph.</p></div>'
+    assert _margins(body, rules) == [
+        ("Loose text.", ("6.25", "$314"), None),
+        ("A paragraph.", ("6.25", "$314"), None),
+    ]
+
+
+@pytest.mark.unit
+def test_a_tables_margins_stay_off_its_rows_and_its_native_block():
+    rules = {"t": {"margin-left": "4em"}, "inset": {"margin-left": "2em"}}
+    table = '<table class="t"><tr><td>a</td><td>b</td></tr></table>'
+    rows = _margins(table, rules)
+    assert rows == [("a b", None, None)]
+    blocks = extract_blocks_from_html(
+        _doc(f'<div class="inset">{table}<p>After.</p></div>'),
+        style_resolver=_css_by_class(rules),
+        native_tables=True,
+    )
+    native = [b for b in blocks if b.get("type") == "table"][0]
+    assert (native.get("block_style") or {}).get("margin_left") is None
+    assert blocks[-1]["block_style"]["margin_left"] == ("6.25", "$314")
+
+
+@pytest.mark.unit
+def test_a_picture_in_a_container_keeps_no_margin():
+    rules = {"inset": {"margin-left": "2em"}}
+    body = '<div class="inset"><p><img src="p.png"/></p><p>Caption.</p></div>'
+    blocks = extract_blocks_from_html(_doc(body), style_resolver=_css_by_class(rules))
+    pic, cap = blocks
+    assert (pic.get("block_style") or {}).get("margin_left") is None
+    assert cap["block_style"]["margin_left"] == ("6.25", "$314")
+
+
+@pytest.mark.unit
+def test_carried_margins_never_leave_less_than_half_the_page():
+    """Nested indents that would leave under half the page for text are not
+    carried: the paragraph keeps its own margins."""
+    rules = {
+        "deep": {"margin-left": "12em", "margin-right": "5em"},
+        "p": {"margin-left": "1em"},
+    }
+    body = '<div class="deep"><p class="p">Narrow.</p></div>'
+    # 12em + 1em + 5em is 56.25 % of the page: keep 1em.
+    assert _margins(body, rules) == [("Narrow.", ("1", "$308"), None)]
+    rules["deep"] = {"margin-left": "8em", "margin-right": "5em"}
+    assert _margins(body, rules) == [
+        ("Narrow.", ("28.125", "$314"), ("15.625", "$314"))
+    ]
+
+
+@pytest.mark.unit
+def test_a_px_margin_is_carried_at_previewers_rate():
+    """0.45pt per px and 12pt per em, as #296 measured: 40px is 4.6875 %."""
+    rules = {"px": {"margin-left": "40px"}}
+    assert _margins('<div class="px"><p>Px.</p></div>', rules) == [
+        ("Px.", ("4.6875", "$314"), None)
+    ]
