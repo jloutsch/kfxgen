@@ -4653,3 +4653,14 @@ def test_the_chapter_title_is_cut_from_a_boxs_first_paragraph(tmp_path):
     (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
     assert [text(k) for k in b["$146"]] == [". A first note.", "A second note."]
     assert [text(e) for e in entries if text(e)].count("Notes") == 1
+
+
+@pytest.mark.unit
+def test_a_title_split_over_a_boxs_first_lines_is_cut(tmp_path):
+    """The chapter "IV—Dawn" opens with a box whose first two lines are "IV"
+    and "Dawn": both are the title, as before the box (#238)."""
+    box = _box_block([_para("IV"), _para("Dawn"), _para("The day began.")])
+    chapters = [{"title": "IV—Dawn", "text": box["text"], "blocks": [box]}]
+    entries, _, text, _ = _book(tmp_path, chapters)
+    (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
+    assert [text(k) for k in b["$146"]] == ["The day began."]

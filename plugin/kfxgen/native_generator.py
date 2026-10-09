@@ -406,6 +406,13 @@ def _eat_split_title(blocks, title):
                 for j in _source_order(rows)
                 if _row_text(rows[j])
             )
+        elif blk.get("type") == "box":
+            # A box counts one block per paragraph, as it read before it was
+            # boxed: a title split over its first lines is eaten (#238).
+            entries.extend(
+                (i, ("box", j), kid.get("text", ""))
+                for j, kid in enumerate(blk["blocks"])
+            )
         else:
             entries.append((i, None, blk.get("text", "")))
     eaten = _consume_split_title([{"text": t} for _, _, t in entries], title)
@@ -413,6 +420,18 @@ def _eat_split_title(blocks, title):
         return blocks, []
     last, last_row, _ = entries[eaten - 1]
     carried = [k for blk in blocks[:last] for k in blk.get("anchor_keys") or []]
+    if isinstance(last_row, tuple):
+        box = blocks[last]
+        kids = box["blocks"]
+        carried.extend(
+            k for kid in kids[: last_row[1] + 1] for k in kid.get("anchor_keys") or []
+        )
+        rest = kids[last_row[1] + 1 :]
+        if rest:
+            text = "\n\n".join(kid["text"] for kid in rest)
+            return [{**box, "blocks": rest, "text": text}] + blocks[last + 1 :], carried
+        carried.extend(box.get("anchor_keys") or [])
+        return blocks[last + 1 :], carried
     if last_row is not None:
         order = _source_order(blocks[last]["table"]["rows"])
         kept = _drop_table_rows(blocks[last], set(order[: order.index(last_row) + 1]))
