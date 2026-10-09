@@ -594,8 +594,18 @@ def _is_preformatted(elem, style_resolver):
     return FLAG_PRE in _white_space_flags(elem, style_resolver, frozenset())
 
 
+#: In `_walk_inline(split_tables=True)`, stands in for a table nested in the
+#: row being walked, as `(_TABLE_SPLIT, <table>)`; the caller splits there.
+_TABLE_SPLIT = object()
+
+
 def _walk_inline(
-    elem, flags=frozenset(), style_resolver=None, is_root=True, base_href=None
+    elem,
+    flags=frozenset(),
+    style_resolver=None,
+    is_root=True,
+    base_href=None,
+    split_tables=False,
 ):
     """Yield (segment, flags) pairs for inline content, accumulating italic/
     bold from ancestor <em>/<i>/<strong>/<b> and superscript/subscript from
@@ -663,7 +673,10 @@ def _walk_inline(
         parts.append((text, cur))
     for child in elem:
         clocal = _local_tag(child.tag)
-        if clocal == "img":
+        if split_tables and clocal == "table":
+            # The caller writes it as a table of its own (#263).
+            parts.append((_TABLE_SPLIT, child))
+        elif clocal == "img":
             for aid in _own_anchor_ids(child):
                 parts.append(make_anchor_mark(aid))
             href = _resolve_img_src(base_href, child.get("src", "") or "")
@@ -693,14 +706,24 @@ def _walk_inline(
             parts.append((" ", frozenset()))
             parts.extend(
                 _walk_inline(
-                    child, cur, style_resolver, is_root=False, base_href=base_href
+                    child,
+                    cur,
+                    style_resolver,
+                    is_root=False,
+                    base_href=base_href,
+                    split_tables=split_tables,
                 )
             )
             parts.append((" ", frozenset()))
         else:
             parts.extend(
                 _walk_inline(
-                    child, cur, style_resolver, is_root=False, base_href=base_href
+                    child,
+                    cur,
+                    style_resolver,
+                    is_root=False,
+                    base_href=base_href,
+                    split_tables=split_tables,
                 )
             )
         if child.tail:
@@ -2124,6 +2147,7 @@ def extract_blocks_from_html(
 
     blocks = []
     notes_tables = set()  # ids of tables written as notes paragraphs (#268)
+    native_made = set()  # ids of tables written as native tables
     pending_ids = []  # anchors awaiting the next leaf block (containers, standalone <a>)
     # List markers awaiting the next text block: an item's number belongs on
     # the first text it holds, which may sit in a nested <p> (#201). An entry
@@ -2253,6 +2277,59 @@ def extract_blocks_from_html(
         pending_markers[:] = saved_markers
         return out
 
+    def _walk_split_row(row):
+        """A row holding a table, on the rows path (#263). The row's text
+        before and after each table is a row paragraph, styled as the row;
+        each table is walked as a block of its own, so it can be native.
+        Nesting a table in a table cell is never tried on a device; nothing
+        is nested here."""
+        bstyle = None
+        if style_resolver is not None:
+            css = style_resolver(row)
+            if css is not None:
+                bstyle = compute_block_style(css)
+            if bstyle is not None:
+                bstyle["align"] = _row_align(row, bstyle["align"], style_resolver)
+        preformatted = _is_preformatted(row, style_resolver)
+        segment = []
+
+        def flush():
+            text, spans, mark_offsets = normalize_runs_with_anchors(segment)
+            segment.clear()
+            ids = pending_ids[:]
+            pending_ids.clear()
+            ids.extend(mark_offsets)
+            if not text:
+                # Ids with no text of their own name what follows: the next
+                # piece, or the table's start.
+                pending_ids.extend(ids)
+                return
+            text, spans, mark_offsets = _take_marker(text, spans, mark_offsets)
+            block_ids = _dedupe_keep_order(ids)
+            blocks.append(
+                {
+                    "text": text,
+                    "spans": spans,
+                    "block_style": dict(bstyle) if bstyle else bstyle,
+                    "preformatted": preformatted,
+                    "anchor_ids": block_ids,
+                    "heading": False,
+                    "anchor_offsets": {
+                        aid: mark_offsets.get(aid, 0) for aid in block_ids
+                    },
+                }
+            )
+
+        for part in _walk_inline(
+            row, style_resolver=style_resolver, base_href=base_href, split_tables=True
+        ):
+            if part[0] is _TABLE_SPLIT:
+                flush()
+                _walk(part[1])
+            else:
+                segment.append(part)
+        flush()
+
     def _is_block_at_body(child):
         if not isinstance(child.tag, str):
             return True
@@ -2273,7 +2350,9 @@ def extract_blocks_from_html(
             if (
                 _local_tag(elem.tag) == "table"
                 and len(blocks) > start
-                and not any(b.get("type") == "table" for b in blocks[start:])
+                # Not "no table among its blocks": a table written as rows
+                # can hold a native one (#263).
+                and id(elem) not in native_made
             ):
                 # Notes written as paragraphs on purpose are counted apart
                 # from tables that could not be laid out (#268).
@@ -2380,11 +2459,24 @@ def extract_blocks_from_html(
                 table["anchor_offsets"] = dict.fromkeys(table["anchor_ids"], 0)
                 pending_ids.clear()
             blocks.append(table)
+            native_made.add(id(elem))
             pending_ids.extend(trailing)
             return
 
         is_block = elem.tag in block_tags
         has_block_child = any(child.tag in block_tags for child in elem)
+
+        if (
+            native_tables
+            and _local_tag(elem.tag) == "tr"
+            and not has_block_child
+            and any(
+                isinstance(d.tag, str) and _local_tag(d.tag) == "table"
+                for d in elem.iterdescendants()
+            )
+        ):
+            _walk_split_row(elem)
+            return
 
         if is_block and not has_block_child:
             text, spans, mark_offsets = normalize_runs_with_anchors(

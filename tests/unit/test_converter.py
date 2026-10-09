@@ -7048,3 +7048,123 @@ def test_a_fallback_title_from_a_broken_heading_is_one_line(tmp_path):
         tmp_path, [("H", "<h1>Chapter<br/>One</h1><p>Text.</p>")]
     )
     assert chapters[0]["title"] == "Chapter One"
+
+
+# ── #263: a table holding a table ───────────────────────────────────────────
+
+_INNER = (
+    "<table><tr><td>in1</td><td>in2</td></tr><tr><td>in3</td><td>in4</td></tr></table>"
+)
+
+
+def _shape(blocks):
+    return [
+        ("TABLE", [[c["text"] for c in r["cells"]] for r in b["table"]["rows"]])
+        if b.get("type") == "table"
+        else b["text"]
+        for b in blocks
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "body, shape",
+    [
+        # Kindle Previewer's two probe shapes (#263): the row's text before and
+        # after the inner table stays a row paragraph; the table is its own.
+        (
+            f"<table><tr><td>A</td><td>{_INNER}</td></tr><tr><td>c</td><td>d</td></tr></table>",
+            ["A", ("TABLE", [["in1", "in2"], ["in3", "in4"]]), "c d"],
+        ),
+        (
+            f"<table><tr><td>B</td><td><p>Before.</p>{_INNER}<p>After.</p></td></tr></table>",
+            ["B Before.", ("TABLE", [["in1", "in2"], ["in3", "in4"]]), "After."],
+        ),
+        # The inner table further down inside its cell.
+        (
+            f"<table><tr><td>A</td><td><div><span>s</span>{_INNER}</div></td></tr></table>",
+            ["A s", ("TABLE", [["in1", "in2"], ["in3", "in4"]])],
+        ),
+        # A box inside a box: one table.
+        (
+            "<table><tr><td><table><tr><td>box</td></tr></table></td></tr></table>",
+            [("TABLE", [["box"]])],
+        ),
+        # Two inner tables in one row.
+        (
+            f"<table><tr><td>{_INNER}</td><td>mid</td><td>{_INNER}</td></tr></table>",
+            [
+                ("TABLE", [["in1", "in2"], ["in3", "in4"]]),
+                "mid",
+                ("TABLE", [["in1", "in2"], ["in3", "in4"]]),
+            ],
+        ),
+    ],
+)
+def test_a_nested_table_is_written_as_a_table_of_its_own(body, shape):
+    assert _shape(extract_blocks_from_html(_doc(body), native_tables=True)) == shape
+
+
+@pytest.mark.unit
+def test_with_native_tables_off_a_nested_tables_row_is_one_paragraph():
+    body = f"<table><tr><td>A</td><td>{_INNER}</td></tr></table>"
+    assert _texts(body) == ["A in1 in2 in3 in4"]
+
+
+@pytest.mark.unit
+def test_an_inner_table_that_cannot_be_native_is_written_as_rows():
+    wide = "<table><tr>" + "".join(f"<td>{n}</td>" for n in range(30)) + "</tr></table>"
+    body = f"<table><tr><td>A</td><td>{wide}</td></tr></table>"
+    blocks = extract_blocks_from_html(_doc(body), native_tables=True)
+    assert not any(b.get("type") == "table" for b in blocks)
+    assert [b["text"] for b in blocks] == ["A", " ".join(str(n) for n in range(30))]
+
+
+@pytest.mark.unit
+def test_ids_in_a_split_row_land_on_their_own_piece():
+    body = (
+        '<table><tr id="row"><td><a id="pre"></a></td><td>'
+        '<table><tr><td id="cell">in1</td></tr></table>'
+        'after <a id="tail"></a>text</td></tr></table>'
+    )
+    blocks = extract_blocks_from_html(
+        _doc(body), native_tables=True, base_href="c.xhtml"
+    )
+    table, after = blocks
+    # Ids with no text before the table name its start; the cell keeps its own.
+    assert {"c.xhtml#row", "c.xhtml#pre"} <= set(table["table"]["anchor_keys"])
+    assert table["table"]["rows"][0]["cells"][0]["anchor_ids"] == ["cell"]
+    assert after["text"] == "after text"
+    assert after["anchor_offsets"]["c.xhtml#tail"] == len("after ")
+
+
+@pytest.mark.unit
+def test_each_piece_of_a_split_row_keeps_the_rows_alignment():
+    body = f'<table><tr class="c"><td>Before</td><td>{_INNER}</td><td>After</td></tr></table>'
+
+    def resolver(elem):
+        return {"text-align": "center"} if elem.get("class") == "c" else None
+
+    blocks = extract_blocks_from_html(
+        _doc(body), native_tables=True, style_resolver=resolver
+    )
+    pieces = [b for b in blocks if b.get("type") != "table"]
+    assert [b["text"] for b in pieces] == ["Before", "After"]
+    assert all(b["block_style"]["align"] == "center" for b in pieces)
+
+
+@pytest.mark.unit
+def test_a_list_marker_goes_on_the_text_before_the_inner_table():
+    body = f"<ol><li><table><tr><td>Before</td><td>{_INNER}</td></tr></table></li></ol>"
+    blocks = extract_blocks_from_html(_doc(body), native_tables=True)
+    assert blocks[0]["text"] == "1. Before"
+
+
+@pytest.mark.unit
+def test_the_outer_table_still_counts_as_written_in_rows():
+    """The table warning counts it: its rows are paragraphs, though the table
+    it holds is native."""
+    seen = []
+    body = f"<table><tr><td>A</td><td>{_INNER}</td></tr></table>"
+    blocks = extract_blocks_from_html(_doc(body), native_tables=True, tables_seen=seen)
+    assert seen == [blocks[0]]
