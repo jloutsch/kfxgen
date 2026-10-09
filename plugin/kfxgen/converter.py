@@ -3263,6 +3263,9 @@ def extract_chapters_from_oeb(
         first = (item.get("blocks") or [{}])[0]
         heading = first.get("heading") and (first.get("text") or "").strip()
         chapter = {"title": heading or f"Section {i + 1}", "text": item["text"]}
+        # The title is the file's, not a TOC label: front-matter rules keyed
+        # on titles ("Contents", "Title Page") don't apply to it.
+        chapter["_from_spine"] = True
         if not heading:
             chapter["_omit_title_heading"] = True
         if item.get("blocks"):
@@ -3408,7 +3411,10 @@ def _nav_listing_contents_chapter(chapters):
     None when the book already builds one from a titled chapter — a book must
     not end up with two — or when no flagged chapter is heading-sized.
     """
-    if any(_normalize_title(c["title"]) in _CONTENTS_TITLES for c in chapters):
+    if any(
+        _normalize_title(c["title"]) in _CONTENTS_TITLES and not c.get("_from_spine")
+        for c in chapters
+    ):
         return None
     for ch in chapters:
         if not ch.get("_had_nav_listing"):
@@ -3482,6 +3488,11 @@ def _replace_title_page(chapters, metadata, log):
             # heading and in the reader's navigation alike, so name it that.
             log.info(f"  Rebuilt contents from listing markup: {ch['title']}")
             ch["title"] = CONTENTS_PAGE_TITLE
+            if ch.get("_from_spine"):
+                # Named now, so the name prints (#304).
+                ch.pop("_omit_title_heading", None)
+            continue
+        if ch.get("_from_spine"):
             continue
         ch_title = _normalize_title(ch["title"])
         if ch_title in TITLE_PAGE_TITLES:

@@ -6961,3 +6961,71 @@ def test_a_fallback_chapter_prints_its_heading_once(tmp_path):
     ]
     assert texts.count("Chapter") == 1 and texts.count("Notes") == 1
     assert not [t for t in texts if t.startswith("Section ")]
+
+
+def _no_toc_chapters(directory, pages):
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.golden.inputs import _xhtml_page
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    b = EpubBuilder().set_metadata(title="N", author="A")
+    for title, body in pages:
+        b.add_chapter(title, _xhtml_page(title, body).encode(), listed=False)
+    oeb = EpubAsOeb(str(b.build(directory, "n")))
+    return _conv.extract_chapters_from_oeb(
+        oeb, MagicMock(), {"title": "T", "author": "A"}
+    )
+
+
+@pytest.mark.unit
+def test_a_fallback_chapter_headed_contents_keeps_the_books_own_listing(tmp_path):
+    """Titled "Contents" by its heading, it is still the book's page: kfxgen's
+    rebuild from chapter titles would list "Section N" placeholders instead."""
+    chapters = _no_toc_chapters(
+        tmp_path,
+        [
+            ("C", "<h1>Contents</h1><p>Part one, page 5.</p>"),
+            ("O", "<h1>Part one</h1><p>Text.</p>"),
+        ],
+    )
+    texts = [b["text"] for b in chapters[0].get("blocks") or []]
+    assert "Part one, page 5." in texts
+
+
+@pytest.mark.unit
+def test_a_fallback_contents_listing_rebuilt_by_kfxgen_prints_its_heading(tmp_path):
+    """A listing recognised by its markup becomes kfxgen's contents page, named
+    "Contents" in the body and the TOC alike (#132), placeholder title or not."""
+    # A one-line remnant that isn't a heading, so the title is a placeholder.
+    listing = (
+        "<p>Index</p>"
+        '<nav xmlns:epub="http://www.idpf.org/2007/ops" epub:type="toc">'
+        '<ol><li><a href="chapter_2.xhtml">Part one</a></li></ol></nav>'
+    )
+    chapters = _no_toc_chapters(
+        tmp_path, [("C", listing), ("O", "<h1>Part one</h1><p>Text.</p>")]
+    )
+    assert chapters[0]["title"] == _conv.CONTENTS_PAGE_TITLE
+    assert not chapters[0].get("_omit_title_heading")
+
+
+@pytest.mark.unit
+def test_a_fallback_chapter_headed_contents_does_not_stop_a_listing_rebuild(tmp_path):
+    """On `main` such a page was "Section 1", which left the markup listing
+    elsewhere to become kfxgen's contents page; its own heading doesn't
+    change that."""
+    listing = (
+        "<p>Index</p>"
+        '<nav xmlns:epub="http://www.idpf.org/2007/ops" epub:type="toc">'
+        '<ol><li><a href="chapter_3.xhtml">Part one</a></li></ol></nav>'
+    )
+    chapters = _no_toc_chapters(
+        tmp_path,
+        [
+            ("C", "<h1>Contents</h1><p>Part one, page 5.</p>"),
+            ("L", listing),
+            ("O", "<h1>Part one</h1><p>Text.</p>"),
+        ],
+    )
+    assert chapters[1]["title"] == _conv.CONTENTS_PAGE_TITLE
+    assert "blocks" not in chapters[1]
