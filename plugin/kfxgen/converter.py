@@ -30,6 +30,7 @@ from .inline_style import (
     make_anchor_mark,
     make_link_flag,
     normalize_runs_with_anchors,
+    parse_css_length,
     parse_vertical_align,
 )
 from .native_generator import NativeKFXGenerator
@@ -205,6 +206,48 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
     except Exception as e:
         log.warning(f"  Stylizer unavailable ({e}); skipping per-element CSS")
         return None
+
+
+#: Each length unit as a share of the page width, as Kindle Previewer converts
+#: a container's margin onto its paragraphs: 2em became 6.25 % (#238).
+_UNIT_TO_PCT = {
+    "$308": 3.125,  # em
+    "$505": 3.125,  # rem
+    "$319": 3.125 / 16,  # px, 16 to the em
+    "$318": 3.125 / 12,  # pt, 12 to the em
+    "$316": 3.125 * 96 / 25.4 / 16,  # mm
+    "$314": 1.0,  # %
+}
+#: Table parts: a table's margins do not reach its rows (#219).
+_NO_CARRY_TAGS = frozenset(
+    {"table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption", "colgroup"}
+)
+
+
+#: The most of the page width that margins carried from containers may
+#: leave unused: half (#238).
+_MAX_CARRIED_MARGINS = 50.0
+
+
+def _page_share(margin):
+    """A (magnitude, unit) margin as a share of the page width, in %."""
+    return float(margin[0]) * _UNIT_TO_PCT[margin[1]] if margin else 0.0
+
+
+def _add_margin(own, extra):
+    """Two (magnitude, unit) margins added: in their unit when they share
+    one, else as a share of the page width. Either may be None."""
+    if extra is None:
+        return own
+    if own is None:
+        return extra
+    if own[1] == extra[1]:
+        total, unit = float(own[0]) + float(extra[0]), own[1]
+    else:
+        total = float(own[0]) * _UNIT_TO_PCT[own[1]]
+        total += float(extra[0]) * _UNIT_TO_PCT[extra[1]]
+        unit = "$314"
+    return (f"{total:.4f}".rstrip("0").rstrip("."), unit)
 
 
 def _has_real_text(text):
@@ -2536,7 +2579,35 @@ def extract_blocks_from_html(
             return
         pending_ids.extend(_own_anchor_ids(elem))
 
+        start = len(blocks)
         _walk_container(elem)
+        _carry_container_margins(elem, start)
+
+    def _carry_container_margins(elem, start):
+        """Add a container's side margins to each text block it produced, as
+        Kindle Previewer does: an indented <div> or <blockquote> indents its
+        paragraphs (#238). Run after the children, so nested containers add
+        up. A table's margins stay off its rows (#219); native tables and
+        pictures keep their own."""
+        if style_resolver is None or _local_tag(elem.tag) in _NO_CARRY_TAGS:
+            return
+        css = style_resolver(elem) or {}
+        left = parse_css_length(css.get("margin-left") or "")
+        right = parse_css_length(css.get("margin-right") or "")
+        if left is None and right is None:
+            return
+        for b in blocks[start:]:
+            if b.get("type") == "table" or not _has_real_text(b.get("text") or ""):
+                continue
+            style = dict(b.get("block_style") or compute_block_style({}))
+            new_left = _add_margin(style.get("margin_left"), left)
+            new_right = _add_margin(style.get("margin_right"), right)
+            if _page_share(new_left) + _page_share(new_right) > _MAX_CARRIED_MARGINS:
+                # Nested indents would leave a narrow column of text: keep the
+                # paragraph's own margins. 15 paragraphs in 290 books.
+                continue
+            style["margin_left"], style["margin_right"] = new_left, new_right
+            b["block_style"] = style
 
     def _walk_container(elem, is_block=None):
         """`elem`'s children in order: block children walked as blocks, each
