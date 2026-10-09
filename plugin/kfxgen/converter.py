@@ -168,6 +168,8 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # shorthand is not consulted: Stylizer does not expand it,
                     # and no producer seen writes a page that way.
                     "background-image": st.get("background-image"),
+                    # A box's fill (#238). Declared: it doesn't inherit.
+                    "background-color": st.get("background-color"),
                     "background-repeat": st.get("background-repeat"),
                     # Computed, because it inherits: <code> inside <pre> is
                     # preformatted too, and calibre's UA sheet gives <pre>
@@ -1391,6 +1393,32 @@ def _cell_padding(css):
     return out
 
 
+#: Containers drawn as a box when they have a border or a fill (#238).
+_BOX_TAGS = frozenset({"div", "aside", "section", "blockquote", "article"})
+
+
+def _box_background(css):
+    """A box's fill as the ARGB integer Previewer writes ($70), or None for
+    none, transparent, white (the page) or anything unreadable (#238)."""
+    value = (css or {}).get("background-color")
+    if not value or _is_transparent(value):
+        return None
+    argb = _border_colour(value)
+    return None if argb in (None, 0xFFFFFFFF) else argb
+
+
+def _box_padding(css):
+    """A box's padding per side, in Previewer's ems or ("%", n), or None when
+    it has none. Unlike a cell, a box has no default padding (#238)."""
+    sides = (css or {}).get("padding-sides")
+    if not sides:
+        return None
+    out = {side: _padding_em(v) or 0.0 for side, v in zip(_BORDER_SIDES, sides)}
+    if all(v == 0 for v in out.values()):
+        return None
+    return out
+
+
 def _attr_border_px(table):
     """The `border` attribute's width as HTML reads it (leading digits; an
     empty value is 1), or 0."""
@@ -1843,6 +1871,20 @@ def _attach_anchor_keys(blocks, base_href):
             if normalized
             else {}
         )
+        if block.get("type") == "box":
+            # Its paragraphs are link targets; the box only carries their
+            # ids for the chapter split (#238).
+            for kid in block["blocks"]:
+                by_kid = kid.get("anchor_offsets") or {}
+                kid_ids = kid.get("anchor_ids", ())
+                kid["anchor_keys"] = (
+                    [f"{normalized}#{a}" for a in kid_ids] if normalized else []
+                )
+                kid["anchor_offsets"] = (
+                    {f"{normalized}#{a}": by_kid.get(a, 0) for a in kid_ids}
+                    if normalized
+                    else {}
+                )
         tbl = block.get("table")
         if tbl:
             cells = [c for r in tbl["rows"] for c in r["cells"]]
@@ -2577,7 +2619,58 @@ def extract_blocks_from_html(
 
         start = len(blocks)
         _walk_container(elem)
-        _carry_container_margins(elem, start)
+        if not _make_box(elem, start):
+            _carry_container_margins(elem, start)
+
+    def _make_box(elem, start):
+        """Replace the blocks a bordered or filled container produced with
+        one box block holding them, drawn as Kindle Previewer draws it: a
+        `$270` with the border, fill, padding and side margins, around the
+        paragraphs (#238). Only text paragraphs and headings are boxed.
+        A table, a picture or another box inside stays flat, with the
+        margins carried as stage 1 does: Previewer nests those, which
+        kfxgen has never written. A TOC entry past the box's first
+        paragraph keeps it flat too, as for a native table (#219).
+        Returns whether it made a box."""
+        if style_resolver is None or _local_tag(elem.tag) not in _BOX_TAGS:
+            return False
+        css = style_resolver(elem) or {}
+        border, fill = _css_border(css), _box_background(css)
+        if border is None and fill is None:
+            return False
+        kids = blocks[start:]
+        if not kids or any(
+            b.get("type") in ("table", "box")
+            or not _has_real_text(b.get("text") or "")
+            or _IMG_TOKEN_RE.search(b.get("text") or "")
+            for b in kids
+        ):
+            return False
+        past_start = {aid for b in kids[1:] for aid in b.get("anchor_ids") or ()}
+        if toc_targets and past_start & set(toc_targets):
+            return False
+        left = parse_css_length(css.get("margin-left") or "")
+        right = parse_css_length(css.get("margin-right") or "")
+        ids = _dedupe_keep_order([a for b in kids for a in b.get("anchor_ids") or ()])
+        blocks[start:] = [
+            {
+                "type": "box",
+                "text": "\n\n".join(b["text"] for b in kids),
+                "spans": [],
+                "block_style": None,
+                "blocks": kids,
+                "anchor_ids": ids,
+                "anchor_offsets": dict.fromkeys(ids, 0),
+                "box": {
+                    "border": border,
+                    "background": fill,
+                    "padding": _box_padding(css),
+                    "margin_left": _page_share(left) or None,
+                    "margin_right": _page_share(right) or None,
+                },
+            }
+        ]
+        return True
 
     def _carry_container_margins(elem, start):
         """Add a container's side margins to each text block it produced, as
@@ -2598,6 +2691,16 @@ def extract_blocks_from_html(
         if left is None and right is None:
             return
         for b in blocks[start:]:
+            if b.get("type") == "box":
+                # The box takes them, not its paragraphs.
+                box = b["box"]
+                box["margin_left"] = (box["margin_left"] or 0) + _page_share(
+                    left
+                ) or None
+                box["margin_right"] = (box["margin_right"] or 0) + _page_share(
+                    right
+                ) or None
+                continue
             if b.get("type") == "table" or not _has_real_text(b.get("text") or ""):
                 continue
             style = dict(b.get("block_style") or compute_block_style({}))
@@ -2740,6 +2843,12 @@ def extract_blocks_from_html(
             last_row = tbl["rows"][-1]
             last_row["anchor_ids"] = _dedupe_keep_order(
                 last_row["anchor_ids"] + pending_ids
+            )
+        if last_block.get("type") == "box":
+            # Its last paragraph, not the box (#238).
+            last_kid = last_block["blocks"][-1]
+            last_kid["anchor_ids"] = _dedupe_keep_order(
+                last_kid["anchor_ids"] + pending_ids
             )
 
     if blocks:

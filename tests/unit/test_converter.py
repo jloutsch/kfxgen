@@ -7347,3 +7347,121 @@ def test_a_px_margin_is_carried_at_previewers_rate():
     assert _margins('<div class="px"><p>Px.</p></div>', rules) == [
         ("Px.", ("4.6875", "$314"), None)
     ]
+
+
+# ── #238 stage 2: a bordered or filled container is a box ───────────────────
+
+_BOX_CSS = {
+    "box": {
+        "border-sides": (("solid", "0.75", "black"),) * 4,
+        "padding-sides": ("0.5em",) * 4,
+        "margin-left": "2em",
+        "margin-right": "2em",
+    },
+    "shade": {"background-color": "#dddddd"},
+    "rule": {
+        "border-sides": (("none", "0", None),) * 3 + (("solid", "2.25", "black"),)
+    },
+}
+
+
+def _boxes(body, **kw):
+    return extract_blocks_from_html(
+        _doc(body), style_resolver=_css_by_class(_BOX_CSS), base_href="c.xhtml", **kw
+    )
+
+
+@pytest.mark.unit
+def test_a_bordered_container_becomes_a_box_around_its_paragraphs():
+    blocks = _boxes(
+        '<p>Before.</p><aside class="box"><h4>Tip</h4><p>One.</p></aside><p>After.</p>'
+    )
+    before, box, after = blocks
+    assert box["type"] == "box"
+    assert [k["text"] for k in box["blocks"]] == ["Tip", "One."]
+    assert box["box"]["background"] is None and box["box"]["border"]
+    assert box["box"]["padding"] == dict.fromkeys(
+        ("top", "right", "bottom", "left"), 0.5
+    )
+    # The box takes the margins, its paragraphs keep their own.
+    assert (box["box"]["margin_left"], box["box"]["margin_right"]) == (6.25, 6.25)
+    assert all(
+        (k.get("block_style") or {}).get("margin_left") is None for k in box["blocks"]
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("cls", ["shade", "rule"])
+def test_a_fill_or_a_single_side_makes_a_box(cls):
+    (box,) = _boxes(f'<div class="{cls}"><p>One.</p><p>Two.</p></div>')
+    assert box["type"] == "box"
+
+
+@pytest.mark.unit
+def test_a_white_or_transparent_fill_and_no_border_make_no_box():
+    rules = {
+        "w": {"background-color": "#ffffff"},
+        "t": {"background-color": "transparent"},
+    }
+    for cls in ("w", "t"):
+        blocks = extract_blocks_from_html(
+            _doc(f'<div class="{cls}"><p>One.</p></div>'),
+            style_resolver=_css_by_class(rules),
+        )
+        assert [b.get("type") for b in blocks] == [None]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "inner",
+    [
+        "<table><tr><td>a</td><td>b</td></tr></table>",
+        '<p><img src="p.png"/></p>',
+        '<div class="shade"><p>Inner.</p></div>',
+    ],
+)
+def test_a_box_holding_a_table_a_picture_or_a_box_stays_flat(inner):
+    """Kindle Previewer nests these in the `$270`, which kfxgen has never
+    written; they stay flat, with stage 1's margins."""
+    blocks = _boxes(f'<div class="box"><p>Text.</p>{inner}</div>', native_tables=True)
+    assert not [b for b in blocks if b.get("type") == "box" and b["box"]["border"]]
+    assert blocks[0]["block_style"]["margin_left"] == ("6.25", "$314")
+
+
+@pytest.mark.unit
+def test_a_toc_entry_past_a_boxs_start_keeps_it_flat():
+    body = '<div class="box"><p id="a">One.</p><p id="b">Two.</p></div>'
+    assert _boxes(body, toc_targets={"a"})[0]["type"] == "box"
+    assert [b.get("type") for b in _boxes(body, toc_targets={"b"})] == [None, None]
+
+
+@pytest.mark.unit
+def test_a_boxs_paragraphs_carry_their_own_link_keys():
+    (box,) = _boxes(
+        '<div class="box"><p id="a">One.</p><p id="b">Two <a id="m"></a>x.</p></div>'
+    )
+    assert [k["anchor_keys"] for k in box["blocks"]] == [
+        ["c.xhtml#a"],
+        ["c.xhtml#b", "c.xhtml#m"],
+    ]
+    assert box["blocks"][1]["anchor_offsets"]["c.xhtml#m"] == len("Two ")
+    # The box names them all, so a chapter can start at it.
+    assert set(box["anchor_ids"]) == {"a", "b", "m"}
+
+
+@pytest.mark.unit
+def test_an_outer_containers_margins_go_on_the_box():
+    rules = dict(_BOX_CSS, inset={"margin-left": "1em"})
+    blocks = extract_blocks_from_html(
+        _doc('<div class="inset"><div class="shade"><p>One.</p></div></div>'),
+        style_resolver=_css_by_class(rules),
+    )
+    (box,) = blocks
+    assert box["box"]["margin_left"] == 3.125
+    assert (box["blocks"][0].get("block_style") or {}).get("margin_left") is None
+
+
+@pytest.mark.unit
+def test_an_anchor_at_the_end_of_a_file_after_a_box_goes_on_its_last_paragraph():
+    (box,) = _boxes('<div class="box"><p>One.</p><p>Two.</p></div><a id="eof"></a>')
+    assert "c.xhtml#eof" in box["blocks"][-1]["anchor_keys"]
