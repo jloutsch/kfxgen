@@ -891,6 +891,97 @@ def _book_link_targets(oeb_book):
     return targets
 
 
+_LINE_TAGS = frozenset(
+    {"p", "div", "li", "td", "th", "dd", "dt", "blockquote", "body", "caption"}
+)
+
+
+def _in_running_text(marker):
+    """True when `marker` sits inside text, as a note marker does, rather
+    than being the whole line, as a contents entry is (#225)."""
+    line = marker.getparent()
+    while line is not None and _local_tag(line.tag) not in _LINE_TAGS:
+        line = line.getparent()
+    if line is None:
+        return False
+    whole = "".join(line.itertext())
+    own = "".join(marker.itertext())
+    return bool(whole.replace(own, "", 1).strip())
+
+
+def _note_pair_ids(oeb_book):
+    """{file: ids} of notes and their markers, found by the links between
+    them (#225): a marker carrying id R links to T, and a link in T's file
+    links back to R. Then T is a note and R its marker.
+
+    This is for a TOC calibre built from the book's links, which lists every
+    marker and back-link as an entry: as chapters they split the notes and
+    print their numbers as headings. A notes table and plain `<p>` or `<div>`
+    notes carry no note markup, so `_note_target_ids` can't see them.
+
+    A marker sits in running text; a contents entry is a whole line, and a
+    contents page whose chapters link back to it would otherwise pair the
+    same way when the chapter titles aren't headings.
+
+    A contents page and its chapter headings link to each other the same way,
+    so nothing in, on or around a heading counts. Detection never reads a
+    label: chapters titled "1", "2", "3" are common."""
+    links = []  # (file of the link, target key, keys of the ids it carries)
+    back = {}  # file -> keys its links point at
+    heading = set()  # keys of ids in, on or holding a heading
+    for item in oeb_book.spine:
+        try:
+            data = item.data
+        except Exception:
+            continue
+        if data is None or not hasattr(data, "iter"):
+            continue
+        base = getattr(item, "href", "") or ""
+        doc = _key_doc(base, "") if base else ""
+        for elem in data.iter():
+            if not isinstance(elem.tag, str):
+                continue
+            in_heading = any(
+                isinstance(x.tag, str) and _local_tag(x.tag) in _HEADING_TAGS
+                for x in elem.iter()
+            ) or any(_local_tag(x.tag) in _HEADING_TAGS for x in elem.iterancestors())
+            if in_heading:
+                heading.update(f"{doc}#{aid}" for aid in _own_anchor_ids(elem))
+            if _local_tag(elem.tag) != "a" or not elem.get("href"):
+                continue
+            target = _resolve_link_target(elem.get("href"), base)
+            if not target or "#" not in target:
+                continue
+            if not in_heading:
+                back.setdefault(doc, set()).add(target)
+            carriers = list(_own_anchor_ids(elem))
+            carrier = elem
+            parent = elem.getparent()
+            if (
+                parent is not None
+                and _local_tag(parent.tag) in ("sup", "span", "small")
+                and len([c for c in parent if isinstance(c.tag, str)]) == 1
+                and not (parent.text or "").strip()
+                and not (elem.tail or "").strip()
+            ):
+                carriers += _own_anchor_ids(parent)
+                carrier = parent
+            if carriers and _in_running_text(carrier):
+                links.append((doc, target, [f"{doc}#{aid}" for aid in carriers]))
+
+    found = {}
+    for doc, target, carriers in links:
+        if target in heading:
+            continue
+        target_doc = target.split("#", 1)[0]
+        for marker in carriers:
+            if marker in back.get(target_doc, ()) and marker not in heading:
+                for key in (target, marker):
+                    file, _, aid = key.partition("#")
+                    found.setdefault(file, set()).add(aid)
+    return found
+
+
 def _table_is_native(table):
     """True when `table` can be written as a real KFX table (#219).
 
@@ -3004,6 +3095,12 @@ def extract_chapters_from_oeb(
     # Every in-book link target, before any chapter is walked: whether a
     # table is a notes section depends on links from other files (#268).
     link_targets = _book_link_targets(oeb_book) if native_tables else None
+    # Only a TOC calibre built itself lists the book's links (#225).
+    note_pairs = (
+        _note_pair_ids(oeb_book)
+        if getattr(oeb_book, "auto_generated_toc", False)
+        else {}
+    )
 
     toc_entries = _extract_toc_with_hrefs(oeb_book, log)
     # Fragment ids the TOC names, per file, matched the way chapter assembly
@@ -3048,7 +3145,10 @@ def extract_chapters_from_oeb(
             nav_listing_at = []
             tables_seen = []
             notes_seen = []
-            note_ids = _note_target_ids(item.data)
+            item_href = getattr(item, "href", "") or ""
+            note_ids = _note_target_ids(item.data) | note_pairs.get(
+                _key_doc(item_href, "") if item_href else "", set()
+            )
             blocks = extract_blocks_from_html(
                 item.data,
                 style_resolver=resolver,

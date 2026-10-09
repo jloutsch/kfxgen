@@ -9,7 +9,7 @@ import logging
 import os
 import re
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from lxml import etree
@@ -6755,3 +6755,156 @@ def test_an_svg_switch_draws_one_child():
     )
     blocks = extract_blocks_from_html(_doc(_svg_page(inner)))
     assert [b["text"] for b in blocks[1:]] == ["Hello"]
+
+
+# ── #225: notes found by the links between a marker and its note ────────────
+
+
+def _pair_book(directory, notes_html, chapter_html=None, toc=None):
+    """A chapter with note markers and a notes page. `toc`, when given, is the
+    table of contents calibre built from the links: (label, href) pairs."""
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.golden.inputs import _xhtml_page
+    from tests.fixtures.oeb_shim import EpubAsOeb, _TocNode
+
+    class _CalibreBuiltToc(EpubAsOeb):
+        auto_generated_toc = True
+
+        @property
+        def toc(self):
+            return [_TocNode(label, href) for label, href in toc]
+
+    chapter_html = (
+        chapter_html
+        or "<p>"
+        + " ".join(
+            f'Claim {n}<a id="r{n}" href="chapter_2.xhtml#n{n}"><sup>{n}</sup></a>.'
+            for n in (1, 2)
+        )
+        + "</p>"
+    )
+    b = EpubBuilder().set_metadata(title="P", author="A")
+    b.add_chapter("Chapter", _xhtml_page("Chapter", chapter_html).encode())
+    b.add_chapter("Notes", _xhtml_page("Notes", notes_html).encode())
+    path = str(b.build(directory, "p"))
+    return _CalibreBuiltToc(path) if toc is not None else EpubAsOeb(path)
+
+
+_P_NOTES = "".join(
+    f'<p id="n{n}"><a href="chapter_1.xhtml#r{n}">{n}</a>. Note {n}.</p>'
+    for n in (1, 2)
+)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "notes_html",
+    [
+        _P_NOTES,
+        _P_NOTES.replace("<p ", "<div ").replace("</p>", "</div>"),
+        # A notes table, each anchor before its row.
+        "<table>"
+        + "".join(
+            f'<a id="n{n}"></a><tr><td><a href="chapter_1.xhtml#r{n}">{n}.</a></td>'
+            f"<td>Note {n}.</td></tr>"
+            for n in (1, 2)
+        )
+        + "</table>",
+    ],
+)
+def test_a_note_and_its_marker_are_found_by_their_links(tmp_path, notes_html):
+    pairs = _conv._note_pair_ids(_pair_book(tmp_path, notes_html))
+    assert pairs == {"chapter_1.xhtml": {"r1", "r2"}, "chapter_2.xhtml": {"n1", "n2"}}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "entry",
+    [
+        '<p><a id="toc{n}" href="chapter_2.xhtml#c{n}">Chapter {n}</a></p>',
+        '<li><a id="toc{n}" href="chapter_2.xhtml#c{n}">Chapter {n}</a></li>',
+    ],
+)
+def test_a_contents_page_whose_chapters_link_back_is_kept(tmp_path, entry):
+    """Chapter titles that aren't headings, each with a link back to its
+    contents entry: the same link pair as a note, but every entry is a whole
+    line, not a marker in running text (#305 review)."""
+    contents = "".join(entry.format(n=n) for n in (1, 2, 3))
+    if "<li>" in entry:
+        contents = f"<ul>{contents}</ul>"
+    chapters = "".join(
+        f'<p class="chapter" id="c{n}">Chapter {n}</p><p>Text {n}.</p>'
+        f'<p><a href="chapter_1.xhtml#toc{n}">Back to contents</a></p>'
+        for n in (1, 2, 3)
+    )
+    toc = [(f"Chapter {n}", f"chapter_2.xhtml#c{n}") for n in (1, 2, 3)]
+    oeb = _pair_book(tmp_path, chapters, contents, toc=toc)
+    assert _conv._note_pair_ids(oeb) == {}
+    chapters_out = _conv.extract_chapters_from_oeb(
+        oeb, MagicMock(), {"title": "T", "author": "A"}
+    )
+    # The contents page before them is a chapter of its own, titled as on
+    # `main`; the three entries must each still start one.
+    titles = [ch["title"] for ch in chapters_out]
+    assert titles[-3:] == ["Chapter 1", "Chapter 2", "Chapter 3"]
+
+
+@pytest.mark.unit
+def test_a_heading_that_links_out_is_not_a_marker(tmp_path):
+    """A chapter heading linking to a section that links back to it."""
+    chapter = '<h2><a id="r1" href="chapter_2.xhtml#n1">Chapter One</a></h2>'
+    notes = '<p id="n1"><a href="chapter_1.xhtml#r1">Back</a> to the heading.</p>'
+    assert _conv._note_pair_ids(_pair_book(tmp_path, notes, chapter)) == {}
+
+
+@pytest.mark.unit
+def test_a_marker_wrapped_in_sup_is_found_by_the_sups_id(tmp_path):
+    chapter = '<p>Claim<sup id="r1"><a href="chapter_2.xhtml#n1">1</a></sup>.</p>'
+    notes = '<p id="n1"><a href="chapter_1.xhtml#r1">1</a>. Note.</p>'
+    pairs = _conv._note_pair_ids(_pair_book(tmp_path, notes, chapter))
+    assert pairs == {"chapter_1.xhtml": {"r1"}, "chapter_2.xhtml": {"n1"}}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "notes_html",
+    [
+        # A chapter heading that links back to its contents entry.
+        '<h2 id="n1"><a href="chapter_1.xhtml#r1">Chapter One</a></h2>',
+        '<div id="n1"><h2><a href="chapter_1.xhtml#r1">Chapter One</a></h2></div>',
+        '<a id="n1"></a><h2><a href="chapter_1.xhtml#r1">Chapter One</a></h2>',
+        # The heading is the target; the link back sits under it.
+        '<h2 id="n1">Chapter One</h2><p><a href="chapter_1.xhtml#r1">Contents</a></p>',
+        # No link back: an ordinary cross-reference.
+        '<p id="n1">A section.</p>',
+    ],
+)
+def test_contents_links_and_cross_references_are_not_notes(tmp_path, notes_html):
+    chapter = '<p><a id="r1" href="chapter_2.xhtml#n1">Chapter One</a></p>'
+    assert _conv._note_pair_ids(_pair_book(tmp_path, notes_html, chapter)) == {}
+
+
+@pytest.mark.unit
+def test_note_entries_in_a_toc_calibre_built_are_skipped(tmp_path):
+    """calibre lists the markers and back-links as TOC entries when it builds
+    the TOC; each used to start a chapter, cutting the note's number off as a
+    repeat of its heading ("2", ". Note 2.")."""
+    toc = [("1", "chapter_2.xhtml#n1"), ("2", "chapter_2.xhtml#n2")]
+    toc += [("1.", "chapter_1.xhtml#r1"), ("2.", "chapter_1.xhtml#r2")]
+    oeb = _pair_book(tmp_path, _P_NOTES, toc=toc)
+    chapters = _conv.extract_chapters_from_oeb(
+        oeb, MagicMock(), {"title": "T", "author": "A"}
+    )
+    texts = [b["text"] for ch in chapters for b in ch.get("blocks") or []]
+    assert "1. Note 1." in texts and "2. Note 2." in texts
+    assert not {"1", "2", "1.", "2."} & {ch["title"] for ch in chapters}
+
+
+@pytest.mark.unit
+def test_a_books_own_toc_is_left_as_it_is(tmp_path):
+    """Only a TOC calibre built lists the book's links. One the book wrote
+    itself names its own chapters, whatever they link to."""
+    oeb = _pair_book(tmp_path, _P_NOTES)
+    assert not getattr(oeb, "auto_generated_toc", False)
+    with patch.object(_conv, "_note_pair_ids", side_effect=AssertionError):
+        _conv.extract_chapters_from_oeb(oeb, MagicMock(), {"title": "T", "author": "A"})
