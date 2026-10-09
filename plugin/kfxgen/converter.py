@@ -2412,6 +2412,9 @@ def extract_blocks_from_html(
                         "block_style": bstyle,
                         "preformatted": _is_preformatted(elem, style_resolver),
                         "anchor_ids": block_ids,
+                        # A chapter with no TOC entry takes its title from
+                        # its file's first heading (#304).
+                        "heading": _local_tag(elem.tag) in _HEADING_TAGS,
                         # Ids inherited from an enclosing container point at
                         # this block's start; only ids declared inside it have
                         # a position of their own.
@@ -3251,10 +3254,17 @@ def extract_chapters_from_oeb(
             return chapters
         log.info("TOC produced no chapters; using spine items as chapters")
 
-    # Fallback: use each spine item as a chapter
+    # Fallback: use each spine item as a chapter. A file that opens with a
+    # heading is titled by it, so the heading prints once and the TOC names
+    # the chapter as the book does. Any other keeps "Section N" for the TOC
+    # but doesn't print it: it is no part of the book (#304).
     chapters = []
     for i, item in enumerate(spine_items_ordered):
-        chapter = {"title": f"Section {i + 1}", "text": item["text"]}
+        first = (item.get("blocks") or [{}])[0]
+        heading = first.get("heading") and (first.get("text") or "").strip()
+        chapter = {"title": heading or f"Section {i + 1}", "text": item["text"]}
+        if not heading:
+            chapter["_omit_title_heading"] = True
         if item.get("blocks"):
             chapter["blocks"] = item["blocks"]
         if item.get("nav_listing_at"):

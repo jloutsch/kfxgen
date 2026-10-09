@@ -6908,3 +6908,56 @@ def test_a_books_own_toc_is_left_as_it_is(tmp_path):
     assert not getattr(oeb, "auto_generated_toc", False)
     with patch.object(_conv, "_note_pair_ids", side_effect=AssertionError):
         _conv.extract_chapters_from_oeb(oeb, MagicMock(), {"title": "T", "author": "A"})
+
+
+# ── #304: chapters from spine files when the TOC gives no chapter start ──────
+
+
+def _no_toc_book(directory):
+    """Three files and no TOC entry: two open with a heading, one doesn't."""
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.golden.inputs import _xhtml_page
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    b = EpubBuilder().set_metadata(title="N", author="A")
+    pages = [
+        ("Chapter", "<h1>Chapter</h1><p>Chapter text.</p>"),
+        ("Notes", "<h2>Notes</h2><p>1. A note.</p>"),
+        ("Loose", "<p>A page with no heading.</p>"),
+    ]
+    for title, body in pages:
+        b.add_chapter(title, _xhtml_page(title, body).encode(), listed=False)
+    return EpubAsOeb(str(b.build(directory, "n")))
+
+
+@pytest.mark.unit
+def test_a_fallback_chapter_takes_its_files_heading_as_its_title(tmp_path):
+    chapters = _conv.extract_chapters_from_oeb(
+        _no_toc_book(tmp_path), MagicMock(), {"title": "T", "author": "A"}
+    )
+    assert [ch["title"] for ch in chapters] == ["Chapter", "Notes", "Section 3"]
+    assert not chapters[0].get("_omit_title_heading")
+    # No heading of its own: the TOC still needs a name, the page doesn't.
+    assert chapters[2]["_omit_title_heading"]
+
+
+@pytest.mark.unit
+def test_a_fallback_chapter_prints_its_heading_once(tmp_path):
+    from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
+
+    out = tmp_path / "n.kfx"
+    _conv.convert_oeb_to_kfx(
+        _no_toc_book(tmp_path), str(out), opts=MagicMock(), log=_silent_log()
+    )
+    frags = load_fragments(out)
+    content = {
+        str(val(f)["name"]): list(val(f)["$146"]) for f in by_type(frags, "$145")
+    }
+    texts = [
+        str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+        for st in by_type(frags, "$259")
+        for e in iter_entries(val(st)["$146"])
+        if "$145" in e
+    ]
+    assert texts.count("Chapter") == 1 and texts.count("Notes") == 1
+    assert not [t for t in texts if t.startswith("Section ")]
