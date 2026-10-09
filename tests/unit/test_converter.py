@@ -6818,6 +6818,38 @@ def test_a_note_and_its_marker_are_found_by_their_links(tmp_path, notes_html):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "entry",
+    [
+        '<p><a id="toc{n}" href="chapter_2.xhtml#c{n}">Chapter {n}</a></p>',
+        '<li><a id="toc{n}" href="chapter_2.xhtml#c{n}">Chapter {n}</a></li>',
+    ],
+)
+def test_a_contents_page_whose_chapters_link_back_is_kept(tmp_path, entry):
+    """Chapter titles that aren't headings, each with a link back to its
+    contents entry: the same link pair as a note, but every entry is a whole
+    line, not a marker in running text (#305 review)."""
+    contents = "".join(entry.format(n=n) for n in (1, 2, 3))
+    if "<li>" in entry:
+        contents = f"<ul>{contents}</ul>"
+    chapters = "".join(
+        f'<p class="chapter" id="c{n}">Chapter {n}</p><p>Text {n}.</p>'
+        f'<p><a href="chapter_1.xhtml#toc{n}">Back to contents</a></p>'
+        for n in (1, 2, 3)
+    )
+    toc = [(f"Chapter {n}", f"chapter_2.xhtml#c{n}") for n in (1, 2, 3)]
+    oeb = _pair_book(tmp_path, chapters, contents, toc=toc)
+    assert _conv._note_pair_ids(oeb) == {}
+    chapters_out = _conv.extract_chapters_from_oeb(
+        oeb, MagicMock(), {"title": "T", "author": "A"}
+    )
+    # The contents page before them is a chapter of its own, titled as on
+    # `main`; the three entries must each still start one.
+    titles = [ch["title"] for ch in chapters_out]
+    assert titles[-3:] == ["Chapter 1", "Chapter 2", "Chapter 3"]
+
+
+@pytest.mark.unit
 def test_a_heading_that_links_out_is_not_a_marker(tmp_path):
     """A chapter heading linking to a section that links back to it."""
     chapter = '<h2><a id="r1" href="chapter_2.xhtml#n1">Chapter One</a></h2>'

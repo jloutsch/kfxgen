@@ -891,6 +891,24 @@ def _book_link_targets(oeb_book):
     return targets
 
 
+_LINE_TAGS = frozenset(
+    {"p", "div", "li", "td", "th", "dd", "dt", "blockquote", "body", "caption"}
+)
+
+
+def _in_running_text(marker):
+    """True when `marker` sits inside text, as a note marker does, rather
+    than being the whole line, as a contents entry is (#225)."""
+    line = marker.getparent()
+    while line is not None and _local_tag(line.tag) not in _LINE_TAGS:
+        line = line.getparent()
+    if line is None:
+        return False
+    whole = "".join(line.itertext())
+    own = "".join(marker.itertext())
+    return bool(whole.replace(own, "", 1).strip())
+
+
 def _note_pair_ids(oeb_book):
     """{file: ids} of notes and their markers, found by the links between
     them (#225): a marker carrying id R links to T, and a link in T's file
@@ -900,6 +918,10 @@ def _note_pair_ids(oeb_book):
     marker and back-link as an entry: as chapters they split the notes and
     print their numbers as headings. A notes table and plain `<p>` or `<div>`
     notes carry no note markup, so `_note_target_ids` can't see them.
+
+    A marker sits in running text; a contents entry is a whole line, and a
+    contents page whose chapters link back to it would otherwise pair the
+    same way when the chapter titles aren't headings.
 
     A contents page and its chapter headings link to each other the same way,
     so nothing in, on or around a heading counts. Detection never reads a
@@ -933,6 +955,7 @@ def _note_pair_ids(oeb_book):
             if not in_heading:
                 back.setdefault(doc, set()).add(target)
             carriers = list(_own_anchor_ids(elem))
+            carrier = elem
             parent = elem.getparent()
             if (
                 parent is not None
@@ -942,7 +965,8 @@ def _note_pair_ids(oeb_book):
                 and not (elem.tail or "").strip()
             ):
                 carriers += _own_anchor_ids(parent)
-            if carriers:
+                carrier = parent
+            if carriers and _in_running_text(carrier):
                 links.append((doc, target, [f"{doc}#{aid}" for aid in carriers]))
 
     found = {}
