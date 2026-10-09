@@ -7468,12 +7468,16 @@ def test_an_anchor_at_the_end_of_a_file_after_a_box_goes_on_its_last_paragraph()
 
 
 @pytest.mark.unit
-def test_a_box_has_space_above_and_below():
-    """1em each side unless its CSS sets more: on the device a border sat
-    right under the line above (#309)."""
+def test_a_box_has_space_above():
+    """A line's space above, as an unindented paragraph has, unless its CSS
+    sets more: on the device a border sat right under the line before
+    (#309). The space below is the generator's."""
     (box,) = _boxes('<div class="box"><p>One.</p></div>')
-    assert (box["box"]["space_above"], box["box"]["space_below"]) == (1.0, 1.0)
-    rules = dict(_BOX_CSS, wide=dict(_BOX_CSS["box"], **{"margin-top": "2em"}))
+    assert (box["box"]["space_above"], box["box"]["space_below"]) == (1.2, 0.0)
+    rules = dict(
+        _BOX_CSS,
+        wide=dict(_BOX_CSS["box"], **{"margin-top": "2em", "margin-bottom": "1em"}),
+    )
     (wide,) = extract_blocks_from_html(
         _doc('<div class="wide"><p>One.</p></div>'), style_resolver=_css_by_class(rules)
     )

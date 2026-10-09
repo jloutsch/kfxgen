@@ -28,15 +28,23 @@ chapter has a "Before" and an "After" paragraph outside the box:
      top. New: the line above paragraph 1; the paragraphs run over several
      pages normally, every page turn works, and no text is cut off or
      overlaps at a page break. Old: no line.
-  6. In chapters 1-5 on New: note whether the box sits right against
-     "Before" and "After" or has a gap, and whether its text is the same
-     size as the text outside it.
+  6. Spacing, on New, in "2. A bordered note" (paragraphs with space
+     between them) and in "8. An indented book" (paragraphs indented, no
+     space between them):
+       a. the gap between "Before" and the box's top border, against the
+          gap between its bottom border and "After": about the same?
+       b. the space between the top border and the first line inside,
+          against the space between the last line and the bottom border:
+          about the same?
+       c. the text inside the box: the same size as the text outside?
   7. "6. A box opens the chapter": New: the heading "6. A box opens the
      chapter" once, then a bordered box starting with "The keeper's log".
      The title is not repeated inside the box.
   8. "7. A link into a box": tap "the second line of the bordered note".
      New: it opens chapter 2 at the box. Old: at the same line, no box.
-  9. The TOC button works on every page.
+  9. "8. An indented book": New: the bordered note between two indented
+     paragraphs, its own paragraphs indented too. Old: no border.
+  10. The TOC button works on every page.
 """
 
 import argparse
@@ -67,6 +75,7 @@ CSS = """
 .shade { background-color: #dddddd; }
 .rule { border-left: 3px solid black; padding-left: 1em; }
 .topline { border-top: 1px solid black; }
+.ind p { text-indent: 1.5em; }
 """
 _LINE = "The keeper climbed the stair at dusk and wiped the salt from the glass. "
 
@@ -130,6 +139,17 @@ _LAST = [
             "7. A link into a box",
             '<p>Tap <a href="chapter_2.xhtml#second">the second line of the bordered '
             "note</a>.</p>",
+        ),
+    ),
+    # Paragraphs indented, as many books set them: no space between them.
+    (
+        "8. An indented book",
+        _page(
+            "8. An indented book",
+            f'<h1>8. An indented book</h1><div class="ind"><p>Before. {_LINE}</p>'
+            f'<div class="note"><p>Boxed one. {_LINE}</p><p>Boxed two. {_LINE}</p></div>'
+            f"<p>After. {_LINE}</p></div>",
+            framed=False,
         ),
     ),
 ]

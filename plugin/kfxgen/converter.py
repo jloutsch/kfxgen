@@ -1410,20 +1410,21 @@ def _box_background(css):
     return None if argb in (None, 0xFFFFFFFF) else argb
 
 
-#: Space above and below a box when its CSS sets none: Kindle Previewer
-#: leaves 1em each side, from the paragraphs round it (#238). kfxgen's
-#: paragraphs carry no spacing of their own, so the box does; without it a
-#: border sat right under the line above (device check, #309).
-_BOX_SPACE_EM = 1.0
+#: Space above a box when its CSS sets less: 1 line height (1.2em), what an
+#: unindented paragraph gets above it. kfxgen's paragraphs have space above
+#: and none below, so without it a border sat right under the line before
+#: the box (device check, #309). The space below is the generator's: it
+#: depends on the paragraph that follows (#238).
+_BOX_SPACE_EM = 1.2
 
 
-def _box_space(value):
-    """A box's space above or below, in ems (1px = 0.45pt, 12pt = 1em, as
-    for padding): the declared margin when larger than the default."""
+def _box_space(value, least=0.0):
+    """A box's declared margin above or below, in ems (1px = 0.45pt,
+    12pt = 1em, as for padding), or `least` when that is larger."""
     em = _padding_em(value)
     if isinstance(em, tuple) or em is None:
         em = 0.0
-    return max(em, _BOX_SPACE_EM)
+    return max(em, least)
 
 
 def _box_padding(css):
@@ -2686,7 +2687,7 @@ def extract_blocks_from_html(
                     "padding": _box_padding(css),
                     "margin_left": _page_share(left) or None,
                     "margin_right": _page_share(right) or None,
-                    "space_above": _box_space(css.get("margin-top")),
+                    "space_above": _box_space(css.get("margin-top"), _BOX_SPACE_EM),
                     "space_below": _box_space(css.get("margin-bottom")),
                 },
             }

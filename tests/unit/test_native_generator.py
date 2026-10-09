@@ -4702,11 +4702,48 @@ def test_ids_waiting_for_a_box_land_on_its_first_paragraph(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_boxs_space_above_and_below_is_written_in_line_heights(tmp_path):
-    box = _box_block([_para("Boxed.")], space_above=1.0, space_below=2.4)
-    chapters = [{"title": "One", "text": "x", "blocks": [_para("Before."), box]}]
+def _box_spacing(tmp_path, kids, following):
+    box = _box_block(kids, space_above=1.2, space_below=0.0)
+    chapters = [
+        {"title": "One", "text": "x", "blocks": [_para("Before."), box, following]}
+    ]
     entries, styles, _, _ = _book(tmp_path, chapters)
     (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
     st = {str(k): v for k, v in styles[str(b["$157"])].items()}
-    assert (str(st["$47"]["$307"]), str(st["$47"]["$306"])) == ("0.833333", "$310")
-    assert str(st["$49"]["$307"]) == "2"
+    return {k: str(st[k]["$307"]) for k in ("$47", "$49", "$54") if k in st}
+
+
+def _indented(text):
+    return dict(_para(text), block_style={"indent": ("1", "$308")})
+
+
+@pytest.mark.unit
+def test_a_box_fits_kfxgens_paragraph_spacing(tmp_path):
+    """Unindented paragraphs carry a line of space above and none below
+    (#309 review). A box takes a line above. Below, it adds a line only when
+    the next paragraph brings none. Inside, its bottom padding gains the
+    line its first paragraph has at the top, so the text sits evenly."""
+    # Unindented book: the next paragraph spaces itself; padding evened.
+    plain = _box_spacing(tmp_path, [_para("Boxed.")], _para("After."))
+    assert plain == {"$47": "1", "$54": "1.41667"}
+    # Indented book: the box spaces itself below; padding as declared.
+    indented = _box_spacing(tmp_path, [_indented("Boxed.")], _indented("After."))
+    assert indented == {"$47": "1", "$49": "1", "$54": "0.416667"}
+
+
+@pytest.mark.unit
+def test_a_boxs_declared_space_below_counts_the_next_paragraphs_line(tmp_path):
+    """`margin-bottom: 2em` before an unindented paragraph: that paragraph's
+    line (1.2em) is part of it, so the box adds 0.8em, not 2em."""
+    box = _box_block([_para("Boxed.")], space_above=1.2, space_below=2.0)
+    chapters = [
+        {
+            "title": "One",
+            "text": "x",
+            "blocks": [_para("Before."), box, _para("After.")],
+        }
+    ]
+    entries, styles, _, _ = _book(tmp_path, chapters)
+    (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
+    st = {str(k): v for k, v in styles[str(b["$157"])].items()}
+    assert str(st["$49"]["$307"]) == "0.666667"

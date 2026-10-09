@@ -339,6 +339,23 @@ def _cut_row_text(row, removed):
     return {**row, "cells": cells}
 
 
+#: One line of space, in ems: what an unindented paragraph has above it
+#: (build_fragment_157's $47 1lh), and lh = em / 1.2 in the box style.
+_LINE_EM = 1.2
+_SIDES = ("top", "right", "bottom", "left")
+
+
+def _has_space_above(block):
+    """Whether `block` brings its own space above: an unindented text
+    paragraph does (1 line, $47), an indented one, a table or a box's
+    paragraph run does not, as build_fragment_157 writes them (#309)."""
+    if block.get("type") == "table":
+        return False
+    if block.get("type") == "box":
+        return True
+    return (block.get("block_style") or {}).get("indent") is None
+
+
 def _cut_title_from_box(box, title):
     """(box, carried anchor keys) with `title` cut from the box's first
     paragraph, as the chapter title cut does for a paragraph (#238), or None
@@ -3399,15 +3416,34 @@ class NativeKFXGenerator:
             chunk["anchor_keys"] = _dedupe_keys((chunk.get("anchor_keys") or []) + keys)
             chunk.setdefault("anchor_offsets", {}).update(dict.fromkeys(keys, 0))
 
-        def _emit_box_chunks(block):
+        def _emit_box_chunks(block, following):
             """A box (#238): an `open` chunk, its paragraphs, a `close`. The
             box's own keys (a file's key, ids carried to it) go on its first
             paragraph: a paragraph, not the container, is the link target,
             as a table's first row is (#219). Returns the keys it could not
-            place."""
+            place.
+
+            Spacing follows kfxgen's paragraphs, which carry 1 line of space
+            above when unindented and none below (#309 review): the box gets
+            space below only when `following` brings none of its own, and
+            when its first paragraph has space above inside the border, its
+            bottom padding grows by the same, so the text sits evenly."""
+            box = dict(block["box"])
+            if _has_space_above(block["blocks"][0]):
+                pad = dict(box.get("padding") or dict.fromkeys(_SIDES, 0.0))
+                if not isinstance(pad["bottom"], tuple):
+                    pad["bottom"] = pad["bottom"] + _LINE_EM
+                    box["padding"] = pad
+            below = box.get("space_below") or 0.0
+            if following is not None and not _has_space_above(following):
+                box["space_below"] = max(below, _LINE_EM)
+            else:
+                # The next paragraph's own line counts toward a declared
+                # margin: only what is beyond it is added (#309 review).
+                box["space_below"] = max(below - _LINE_EM, 0.0)
             inner = {k for kid in block["blocks"] for k in kid.get("anchor_keys") or ()}
             own = [k for k in block.get("anchor_keys") or [] if k not in inner]
-            all_chunks.append({"type": "open", "node": "box", "box": block["box"]})
+            all_chunks.append({"type": "open", "node": "box", "box": box})
             pending = own
             for kid in block["blocks"]:
                 first = len(all_chunks)
@@ -3715,13 +3751,19 @@ class NativeKFXGenerator:
                     # the book doesn't hold) wait for the next block's first
                     # chunk, so a link to one still lands (#291).
                     pending = []
-                    for block in para_iter:
+                    para_iter = list(para_iter)
+                    for b_idx, block in enumerate(para_iter):
                         first = len(all_chunks)
                         if block.get("type") == "table":
                             _emit_table_chunks(block)
                             unplaced = []
                         elif block.get("type") == "box":
-                            unplaced = _emit_box_chunks(block)
+                            following = (
+                                para_iter[b_idx + 1]
+                                if b_idx + 1 < len(para_iter)
+                                else None
+                            )
+                            unplaced = _emit_box_chunks(block, following)
                         else:
                             unplaced = _emit_paragraph(block)
                         if pending and len(all_chunks) > first:
