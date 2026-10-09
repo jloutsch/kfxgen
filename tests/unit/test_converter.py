@@ -7465,3 +7465,16 @@ def test_an_outer_containers_margins_go_on_the_box():
 def test_an_anchor_at_the_end_of_a_file_after_a_box_goes_on_its_last_paragraph():
     (box,) = _boxes('<div class="box"><p>One.</p><p>Two.</p></div><a id="eof"></a>')
     assert "c.xhtml#eof" in box["blocks"][-1]["anchor_keys"]
+
+
+@pytest.mark.unit
+def test_a_box_has_space_above_and_below():
+    """1em each side unless its CSS sets more: on the device a border sat
+    right under the line above (#309)."""
+    (box,) = _boxes('<div class="box"><p>One.</p></div>')
+    assert (box["box"]["space_above"], box["box"]["space_below"]) == (1.0, 1.0)
+    rules = dict(_BOX_CSS, wide=dict(_BOX_CSS["box"], **{"margin-top": "2em"}))
+    (wide,) = extract_blocks_from_html(
+        _doc('<div class="wide"><p>One.</p></div>'), style_resolver=_css_by_class(rules)
+    )
+    assert (wide["box"]["space_above"], wide["box"]["space_below"]) == (2.0, 1.0)

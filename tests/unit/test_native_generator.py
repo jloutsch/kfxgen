@@ -4699,3 +4699,14 @@ def test_ids_waiting_for_a_box_land_on_its_first_paragraph(tmp_path):
         if "$179" in sp
     ]
     assert str(target.get("$159")) == "$269" and text(target) == "First."
+
+
+@pytest.mark.unit
+def test_a_boxs_space_above_and_below_is_written_in_line_heights(tmp_path):
+    box = _box_block([_para("Boxed.")], space_above=1.0, space_below=2.4)
+    chapters = [{"title": "One", "text": "x", "blocks": [_para("Before."), box]}]
+    entries, styles, _, _ = _book(tmp_path, chapters)
+    (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
+    st = {str(k): v for k, v in styles[str(b["$157"])].items()}
+    assert (str(st["$47"]["$307"]), str(st["$47"]["$306"])) == ("0.833333", "$310")
+    assert str(st["$49"]["$307"]) == "2"

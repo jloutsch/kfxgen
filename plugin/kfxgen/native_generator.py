@@ -1915,10 +1915,13 @@ class NativeKFXGenerator:
         padding=None,
         margin_left=None,
         margin_right=None,
+        space_above=None,
+        space_below=None,
     ):
         """$157 for a box (#238), as Kindle Previewer 4.0.1 writes a bordered
         or filled container: border as for a table part, fill $70 (ARGB),
-        padding as for a cell, side margins $48/$50 as a share of the page."""
+        padding as for a cell, side margins $48/$50 as a share of the page,
+        and space above and below ($47/$49) in line heights, em / 1.2."""
         self.symtab.create_local_symbol(entity_name)
         value = IonStruct(IS("$173"), IS(entity_name))
         _apply_border(value, dict(border) if border else None, is_table=False)
@@ -1931,6 +1934,11 @@ class NativeKFXGenerator:
             if pct:
                 value[IS(key)] = IonStruct(
                     IS("$307"), IonDecimal(f"{pct:.6g}"), IS("$306"), IS("$314")
+                )
+        for key, em in (("$47", space_above), ("$49", space_below)):
+            if em:
+                value[IS(key)] = IonStruct(
+                    IS("$307"), IonDecimal(f"{em / 1.2:.6g}"), IS("$306"), IS("$310")
                 )
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
@@ -4273,6 +4281,8 @@ class NativeKFXGenerator:
                                 padding=_border_key(box.get("padding")),
                                 margin_left=box.get("margin_left"),
                                 margin_right=box.get("margin_right"),
+                                space_above=box.get("space_above"),
+                                space_below=box.get("space_below"),
                             )
                         )
                     if node in ("row", "head", "body", "foot") and chunk.get("border"):

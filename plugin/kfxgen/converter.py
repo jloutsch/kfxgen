@@ -148,6 +148,9 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     "text-indent": st.get("text-indent"),
                     "margin-left": st.get("margin-left"),
                     "margin-right": st.get("margin-right"),
+                    # Read for a box's space above and below (#238).
+                    "margin-top": st.get("margin-top"),
+                    "margin-bottom": st.get("margin-bottom"),
                     # font-family/-weight/-style are also inherited, usually set
                     # on <body> and inherited by paragraphs.
                     "font-family": _computed_value(st, "font-family"),
@@ -1405,6 +1408,22 @@ def _box_background(css):
         return None
     argb = _border_colour(value)
     return None if argb in (None, 0xFFFFFFFF) else argb
+
+
+#: Space above and below a box when its CSS sets none: Kindle Previewer
+#: leaves 1em each side, from the paragraphs round it (#238). kfxgen's
+#: paragraphs carry no spacing of their own, so the box does; without it a
+#: border sat right under the line above (device check, #309).
+_BOX_SPACE_EM = 1.0
+
+
+def _box_space(value):
+    """A box's space above or below, in ems (1px = 0.45pt, 12pt = 1em, as
+    for padding): the declared margin when larger than the default."""
+    em = _padding_em(value)
+    if isinstance(em, tuple) or em is None:
+        em = 0.0
+    return max(em, _BOX_SPACE_EM)
 
 
 def _box_padding(css):
@@ -2667,6 +2686,8 @@ def extract_blocks_from_html(
                     "padding": _box_padding(css),
                     "margin_left": _page_share(left) or None,
                     "margin_right": _page_share(right) or None,
+                    "space_above": _box_space(css.get("margin-top")),
+                    "space_below": _box_space(css.get("margin-bottom")),
                 },
             }
         ]
