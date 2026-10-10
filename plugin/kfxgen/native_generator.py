@@ -347,13 +347,40 @@ _SIDES = ("top", "right", "bottom", "left")
 
 def _has_space_above(block):
     """Whether `block` brings its own space above: an unindented text
-    paragraph does (1 line, $47), an indented one, a table or a box's
-    paragraph run does not, as build_fragment_157 writes them (#309)."""
+    paragraph does (1 line, $47) and so does a box; an indented paragraph,
+    a table or a picture does not, as build_fragment_157 writes them (#309,
+    #310)."""
     if block.get("type") == "table":
         return False
     if block.get("type") == "box":
         return True
+    if not IMG_TOKEN_RE.sub("", block.get("text") or "").strip():
+        return False
     return (block.get("block_style") or {}).get("indent") is None
+
+
+def _block_keys(block):
+    """Every anchor key a block holds, inside a box or a table included."""
+    keys = list(block.get("anchor_keys") or ())
+    if block.get("type") == "box":
+        for kid in block["blocks"]:
+            keys += _block_keys(kid)
+    tbl = block.get("table")
+    if tbl:
+        keys += tbl.get("anchor_keys") or []
+        for row in tbl["rows"]:
+            keys += row.get("anchor_keys") or []
+            for cell in row["cells"]:
+                for part in [cell, *(cell.get("paragraphs") or ())]:
+                    keys += part.get("anchor_keys") or []
+    return keys
+
+
+def _is_text_block(block):
+    """A paragraph of text: not a table, a box or only a picture."""
+    return block.get("type") not in ("table", "box") and bool(
+        IMG_TOKEN_RE.sub("", block.get("text") or "").strip()
+    )
 
 
 def _cut_title_from_box(box, title):
@@ -363,6 +390,8 @@ def _cut_title_from_box(box, title):
     in it; its own keys are then carried too."""
     kids = box["blocks"]
     first = kids[0]
+    if not _is_text_block(first):
+        return None
     stripped = first["text"].lstrip()
     if stripped[: len(title)].lower() != title.lower():
         return None
@@ -426,10 +455,10 @@ def _eat_split_title(blocks, title):
         elif blk.get("type") == "box":
             # A box counts one block per paragraph, as it read before it was
             # boxed: a title split over its first lines is eaten (#238).
-            entries.extend(
-                (i, ("box", j), kid.get("text", ""))
-                for j, kid in enumerate(blk["blocks"])
-            )
+            for j, kid in enumerate(blk["blocks"]):
+                if not _is_text_block(kid):
+                    break  # a title is never split into a table or a box
+                entries.append((i, ("box", j), kid.get("text", "")))
         else:
             entries.append((i, None, blk.get("text", "")))
     eaten = _consume_split_title([{"text": t} for _, _, t in entries], title)
@@ -3441,13 +3470,23 @@ class NativeKFXGenerator:
                 # The next paragraph's own line counts toward a declared
                 # margin: only what is beyond it is added (#309 review).
                 box["space_below"] = max(below - _LINE_EM, 0.0)
-            inner = {k for kid in block["blocks"] for k in kid.get("anchor_keys") or ()}
+            inner = {k for kid in block["blocks"] for k in _block_keys(kid)}
             own = [k for k in block.get("anchor_keys") or [] if k not in inner]
             all_chunks.append({"type": "open", "node": "box", "box": box})
             pending = own
-            for kid in block["blocks"]:
+            kids = block["blocks"]
+            for k_idx, kid in enumerate(kids):
                 first = len(all_chunks)
-                unplaced = _emit_paragraph(kid)
+                # A table or a box inside is nested in it, as Kindle
+                # Previewer nests them (#310).
+                if kid.get("type") == "table":
+                    _emit_table_chunks(kid)
+                    unplaced = []
+                elif kid.get("type") == "box":
+                    nxt = kids[k_idx + 1] if k_idx + 1 < len(kids) else None
+                    unplaced = _emit_box_chunks(kid, nxt)
+                else:
+                    unplaced = _emit_paragraph(kid)
                 if pending and len(all_chunks) > first:
                     _attach_keys(first, pending)
                     pending = []

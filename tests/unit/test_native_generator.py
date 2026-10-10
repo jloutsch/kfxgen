@@ -4747,3 +4747,130 @@ def test_a_boxs_declared_space_below_counts_the_next_paragraphs_line(tmp_path):
     (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
     st = {str(k): v for k, v in styles[str(b["$157"])].items()}
     assert str(st["$49"]["$307"]) == "0.666667"
+
+
+def _tiny_table(cells):
+    rows = [
+        {
+            "group": "body",
+            "anchor_ids": [],
+            "anchor_keys": [],
+            "cells": [
+                {
+                    "text": t,
+                    "spans": [],
+                    "anchor_ids": [],
+                    "anchor_keys": [],
+                    "anchor_offsets": {},
+                    "block_style": None,
+                    "header": False,
+                    "colspan": 1,
+                    "rowspan": 1,
+                }
+                for t in row
+            ],
+        }
+        for row in cells
+    ]
+    return {
+        "type": "table",
+        "text": " ".join(t for r in cells for t in r),
+        "spans": [],
+        "anchor_ids": [],
+        "anchor_keys": [],
+        "anchor_offsets": {},
+        "table": {
+            "anchor_ids": [],
+            "anchor_keys": [],
+            "anchor_offsets": {},
+            "rows": rows,
+        },
+    }
+
+
+@pytest.mark.unit
+def test_a_box_nests_a_table_and_a_box(tmp_path):
+    """Kindle Previewer nests a `$278` and a `$270` inside the `$270` (#310)."""
+    inner = _box_block([_para("Inner.")], border=None, padding=None)
+    box = _box_block([_para("Outer."), _tiny_table([["a", "b"]]), inner, _para("End.")])
+    chapters = [{"title": "One", "text": "x", "blocks": [_para("Before."), box]}]
+    entries, _, text, _ = _book(tmp_path, chapters)
+    outer = next(e for e in entries if str(e.get("$159")) == "$270")
+    assert [str(k.get("$159")) for k in outer["$146"]] == [
+        "$269",
+        "$278",
+        "$270",
+        "$269",
+    ]
+    assert text(outer["$146"][2]["$146"][0]) == "Inner."
+
+
+@pytest.mark.unit
+def test_the_title_cut_does_not_reach_into_a_boxs_table(tmp_path):
+    """A box opening with a table: its text joins the rows, and a title that
+    matches it isn't cut from the table (#310)."""
+    box = _box_block([_tiny_table([["One", "x"]]), _para("Text.")])
+    chapters = [{"title": "One", "text": box["text"], "blocks": [box]}]
+    entries, _, text, _ = _book(tmp_path, chapters)
+    assert "One" in [text(e) for e in entries if str(e.get("$159")) == "$269"][1:]
+
+
+@pytest.mark.unit
+def test_a_box_opening_with_a_picture_keeps_its_bottom_padding(tmp_path):
+    """A picture has no line of space above, so the box's bottom padding
+    isn't grown to match one (#310)."""
+    from kfxgen.converter import _make_img_token
+
+    pic = _para(_make_img_token("p.png", "", None))
+    box = _box_block([pic, _para("Caption.")])
+    chapters = [{"title": "One", "text": "x", "blocks": [_para("Before."), box]}]
+    entries, styles, _, _ = _book(tmp_path, chapters)
+    b = next(e for e in entries if str(e.get("$159")) == "$270")
+    st = {str(k): v for k, v in styles[str(b["$157"])].items()}
+    assert str(st["$54"]["$307"]) == "0.416667"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "title, kids",
+    [
+        # The table's text is the whole title.
+        ("One", lambda: [_tiny_table([["One"]]), _para("Text.")]),
+        # The title split over a paragraph and the table.
+        ("IV—Dawn", lambda: [_para("IV"), _tiny_table([["Dawn"]]), _para("Text.")]),
+    ],
+)
+def test_the_title_cuts_never_take_a_table_out_of_a_box(tmp_path, title, kids):
+    box = _box_block(kids())
+    chapters = [{"title": title, "text": box["text"], "blocks": [box]}]
+    entries, _, _, _ = _book(tmp_path, chapters)
+    assert [e for e in entries if str(e.get("$159")) == "$278"]
+
+
+@pytest.mark.unit
+def test_a_link_to_a_cell_in_a_boxed_table_lands_on_the_cell(tmp_path):
+    from kfxgen.inline_style import make_link_flag
+
+    table = _tiny_table([["a", "b"]])
+    cell = table["table"]["rows"][0]["cells"][1]
+    cell["anchor_keys"], cell["anchor_offsets"] = ["c.xhtml#c"], {"c.xhtml#c": 0}
+    box = _box_block([_para("First."), table])
+    box["anchor_keys"] = ["c.xhtml#c"]  # the box names every id inside it
+    link = {
+        "text": "to cell",
+        "spans": [(0, 7, frozenset({make_link_flag("c.xhtml#c")}))],
+        "anchor_keys": [],
+    }
+    chapters = [
+        {"title": "One", "text": "x", "blocks": [link]},
+        {"title": "Two", "text": "y", "blocks": [_para("Lead."), box]},
+    ]
+    entries, _, text, anchors = _book(tmp_path, chapters)
+    by_id = {e["$155"]: e for e in entries}
+    (target,) = [
+        by_id[anchors[str(sp["$179"])]]
+        for e in entries
+        for sp in e.get("$142") or []
+        if "$179" in sp
+    ]
+    assert text(target) == "b"

@@ -7413,19 +7413,42 @@ def test_a_white_or_transparent_fill_and_no_border_make_no_box():
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "inner",
+    "inner, kind",
     [
-        "<table><tr><td>a</td><td>b</td></tr></table>",
-        '<p><img src="p.png"/></p>',
-        '<div class="shade"><p>Inner.</p></div>',
+        ("<table><tr><td>a</td><td>b</td></tr></table>", "table"),
+        ('<p><img src="p.png"/></p>', None),
+        ('<div class="shade"><p>Inner.</p></div>', "box"),
     ],
 )
-def test_a_box_holding_a_table_a_picture_or_a_box_stays_flat(inner):
-    """Kindle Previewer nests these in the `$270`, which kfxgen has never
-    written; they stay flat, with stage 1's margins."""
-    blocks = _boxes(f'<div class="box"><p>Text.</p>{inner}</div>', native_tables=True)
-    assert not [b for b in blocks if b.get("type") == "box" and b["box"]["border"]]
-    assert blocks[0]["block_style"]["margin_left"] == ("6.25", "$314")
+def test_a_box_nests_a_table_a_picture_or_a_box(inner, kind):
+    """Kindle Previewer nests these in the `$270` (#310)."""
+    (box,) = _boxes(f'<div class="box"><p>Text.</p>{inner}</div>', native_tables=True)
+    assert box["type"] == "box"
+    assert [k.get("type") for k in box["blocks"]] == [None, kind]
+
+
+@pytest.mark.unit
+def test_text_written_straight_in_a_bordered_div_is_a_box():
+    """A leaf: the <div> is itself the one paragraph. Its margins go on the
+    box, not on the paragraph as well (#310)."""
+    (box,) = _boxes('<p>Before.</p><div class="box">Straight in.</div>')[1:]
+    assert box["type"] == "box"
+    assert [k["text"] for k in box["blocks"]] == ["Straight in."]
+    assert box["box"]["margin_left"] == 6.25
+    assert box["blocks"][0]["block_style"]["margin_left"] is None
+
+
+@pytest.mark.unit
+def test_ids_inside_a_boxs_table_and_nested_box_get_keys():
+    body = (
+        '<div class="box"><p>T.</p><table><tr><td id="c">a</td><td>b</td></tr></table>'
+        '<div class="shade"><p id="n">Inner.</p></div></div>'
+    )
+    (box,) = _boxes(body, native_tables=True)
+    table, inner = box["blocks"][1], box["blocks"][2]
+    assert table["table"]["rows"][0]["cells"][0]["anchor_keys"] == ["c.xhtml#c"]
+    assert inner["blocks"][0]["anchor_keys"] == ["c.xhtml#n"]
+    assert {"c", "n"} <= set(box["anchor_ids"])
 
 
 @pytest.mark.unit

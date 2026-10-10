@@ -1876,7 +1876,8 @@ def _attach_anchor_keys(blocks, base_href):
     {key: offset} so the generator can carry each offset into the anchor it
     builds. (#79)"""
     normalized = _key_doc(base_href, "") if base_href else ""
-    for block in blocks:
+
+    def key_block(block):
         by_id = block.get("anchor_offsets") or {}
         block["anchor_keys"] = (
             [f"{normalized}#{aid}" for aid in block.get("anchor_ids", ())]
@@ -1892,19 +1893,11 @@ def _attach_anchor_keys(blocks, base_href):
             else {}
         )
         if block.get("type") == "box":
-            # Its paragraphs are link targets; the box only carries their
-            # ids for the chapter split (#238).
+            # Its blocks are the link targets, nested boxes and tables
+            # included; the box only carries their ids for the chapter split
+            # (#238, #310).
             for kid in block["blocks"]:
-                by_kid = kid.get("anchor_offsets") or {}
-                kid_ids = kid.get("anchor_ids", ())
-                kid["anchor_keys"] = (
-                    [f"{normalized}#{a}" for a in kid_ids] if normalized else []
-                )
-                kid["anchor_offsets"] = (
-                    {f"{normalized}#{a}": by_kid.get(a, 0) for a in kid_ids}
-                    if normalized
-                    else {}
-                )
+                key_block(kid)
         tbl = block.get("table")
         if tbl:
             cells = [c for r in tbl["rows"] for c in r["cells"]]
@@ -1920,6 +1913,9 @@ def _attach_anchor_keys(blocks, base_href):
                     if normalized
                     else {}
                 )
+
+    for block in blocks:
+        key_block(block)
     # A TOC entry may link to a whole file with no fragment
     # (`<a href="about.xhtml">About the Author</a>`). Give the document's first
     # block a bare-filename key so such links have something to resolve to —
@@ -2616,6 +2612,9 @@ def extract_blocks_from_html(
                         },
                     }
                 )
+                # Text written straight in a bordered or filled <div> is a
+                # box around that one paragraph (#310).
+                _make_box(elem, len(blocks) - 1, leaf=True)
             else:
                 pending_ids.extend(ids)  # empty anchor block: carry ids forward
             return
@@ -2642,15 +2641,15 @@ def extract_blocks_from_html(
         if not _make_box(elem, start):
             _carry_container_margins(elem, start)
 
-    def _make_box(elem, start):
+    def _make_box(elem, start, leaf=False):
         """Replace the blocks a bordered or filled container produced with
         one box block holding them, drawn as Kindle Previewer draws it: a
         `$270` with the border, fill, padding and side margins, around the
-        paragraphs (#238). Only text paragraphs and headings are boxed.
-        A table, a picture or another box inside stays flat, with the
-        margins carried as stage 1 does: Previewer nests those, which
-        kfxgen has never written. A TOC entry past the box's first
-        paragraph keeps it flat too, as for a native table (#219).
+        paragraphs (#238). Tables, pictures and other boxes inside are
+        nested in it, as Previewer nests them (#310). A TOC entry past the
+        box's first block keeps it flat, as for a native table (#219).
+        `leaf`: the container is itself the one paragraph (text written
+        straight in a bordered <div>); its margins move to the box.
         Returns whether it made a box."""
         if style_resolver is None or _local_tag(elem.tag) not in _BOX_TAGS:
             return False
@@ -2659,13 +2658,15 @@ def extract_blocks_from_html(
         if border is None and fill is None:
             return False
         kids = blocks[start:]
-        if not kids or any(
-            b.get("type") in ("table", "box")
-            or not _has_real_text(b.get("text") or "")
-            or _IMG_TOKEN_RE.search(b.get("text") or "")
+        if not kids or not any(
+            b.get("type") in ("table", "box") or (b.get("text") or "").strip()
             for b in kids
         ):
             return False
+        if leaf:
+            style = dict(kids[0].get("block_style") or {})
+            style["margin_left"] = style["margin_right"] = None
+            kids[0]["block_style"] = style
         past_start = {aid for b in kids[1:] for aid in b.get("anchor_ids") or ()}
         if toc_targets and past_start & set(toc_targets):
             return False
