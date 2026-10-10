@@ -4874,3 +4874,22 @@ def test_a_link_to_a_cell_in_a_boxed_table_lands_on_the_cell(tmp_path):
         if "$179" in sp
     ]
     assert text(target) == "b"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "title, inner_kids",
+    [
+        ("IV—Dawn", ["IV", "Dawn"]),  # split over the nested box's lines
+        ("Dawn", ["Dawn"]),  # whole, in its first line
+    ],
+)
+def test_a_title_inside_a_nested_box_is_cut(tmp_path, title, inner_kids):
+    """A library book opens chapters with a box holding a box holding the
+    title: it printed twice until the cuts followed the nested box (#310)."""
+    inner = _box_block([_para(t) for t in inner_kids], border=None, padding=None)
+    outer = _box_block([inner, _para("The day began.")])
+    chapters = [{"title": title, "text": outer["text"], "blocks": [outer]}]
+    entries, _, text, _ = _book(tmp_path, chapters)
+    # The heading prints the title once; the box keeps what follows it.
+    assert [text(e) for e in entries if text(e)] == [title, "The day began."]

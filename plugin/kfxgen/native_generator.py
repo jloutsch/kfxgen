@@ -386,26 +386,72 @@ def _is_text_block(block):
 def _cut_title_from_box(box, title):
     """(box, carried anchor keys) with `title` cut from the box's first
     paragraph, as the chapter title cut does for a paragraph (#238), or None
-    when the box doesn't open with it. The box is None when nothing is left
-    in it; its own keys are then carried too."""
+    when the box doesn't open with it. A box opening with a box is followed
+    into it (#310). The box is None when nothing is left in it; its own keys
+    are then carried too."""
     kids = box["blocks"]
     first = kids[0]
-    if not _is_text_block(first):
+    if first.get("type") == "box":
+        cut = _cut_title_from_box(first, title)
+        if cut is None:
+            return None
+        inner, carried = cut
+        kids = ([inner] if inner else []) + kids[1:]
+    elif not _is_text_block(first):
         return None
-    stripped = first["text"].lstrip()
-    if stripped[: len(title)].lower() != title.lower():
-        return None
-    remainder = stripped[len(title) :].lstrip()
-    if remainder:
-        kids = [_trim_text(first, len(first["text"]) - len(remainder))] + kids[1:]
-        carried = []
     else:
-        kids = kids[1:]
-        carried = list(first.get("anchor_keys") or [])
+        stripped = first["text"].lstrip()
+        if stripped[: len(title)].lower() != title.lower():
+            return None
+        remainder = stripped[len(title) :].lstrip()
+        if remainder:
+            kids = [_trim_text(first, len(first["text"]) - len(remainder))] + kids[1:]
+            carried = []
+        else:
+            kids = kids[1:]
+            carried = list(first.get("anchor_keys") or [])
     if not kids:
         return None, carried + list(box.get("anchor_keys") or [])
     text = "\n\n".join(k["text"] for k in kids)
     return {**box, "blocks": kids, "text": text}, carried
+
+
+def _box_title_lines(box, path=()):
+    """([(path, text)], whole) for the paragraphs a box opens with, through
+    the boxes it opens with, as the split-title cut reads them: they read as
+    lines before they were boxed (#238, #310). `whole` is False when a table
+    or a picture stops the run."""
+    out = []
+    for j, kid in enumerate(box["blocks"]):
+        if kid.get("type") == "box":
+            inner, whole = _box_title_lines(kid, path + (j,))
+            out += inner
+            if not whole:
+                return out, False
+        elif _is_text_block(kid):
+            out.append((path + (j,), kid.get("text", "")))
+        else:
+            return out, False
+    return out, True
+
+
+def _drop_box_lines(box, path):
+    """(box or None, carried keys): `box` with every block up to and
+    including the paragraph at `path` taken out (#310)."""
+    kids = box["blocks"]
+    j = path[0]
+    carried = [k for kid in kids[:j] for k in _block_keys(kid)]
+    if len(path) == 1:
+        carried += list(kids[j].get("anchor_keys") or [])
+        rest = kids[j + 1 :]
+    else:
+        inner, more = _drop_box_lines(kids[j], path[1:])
+        carried += more
+        rest = ([inner] if inner else []) + kids[j + 1 :]
+    if not rest:
+        return None, carried + list(box.get("anchor_keys") or [])
+    text = "\n\n".join(k["text"] for k in rest)
+    return {**box, "blocks": rest, "text": text}, carried
 
 
 def _cut_title_from_table(block, title):
@@ -454,11 +500,12 @@ def _eat_split_title(blocks, title):
             )
         elif blk.get("type") == "box":
             # A box counts one block per paragraph, as it read before it was
-            # boxed: a title split over its first lines is eaten (#238).
-            for j, kid in enumerate(blk["blocks"]):
-                if not _is_text_block(kid):
-                    break  # a title is never split into a table or a box
-                entries.append((i, ("box", j), kid.get("text", "")))
+            # boxed: a title split over its first lines is eaten (#238),
+            # through a box it opens with (#310), never into a table.
+            lines, whole = _box_title_lines(blk)
+            entries.extend((i, ("box", path), text) for path, text in lines)
+            if not whole:
+                break
         else:
             entries.append((i, None, blk.get("text", "")))
     eaten = _consume_split_title([{"text": t} for _, _, t in entries], title)
@@ -467,17 +514,9 @@ def _eat_split_title(blocks, title):
     last, last_row, _ = entries[eaten - 1]
     carried = [k for blk in blocks[:last] for k in blk.get("anchor_keys") or []]
     if isinstance(last_row, tuple):
-        box = blocks[last]
-        kids = box["blocks"]
-        carried.extend(
-            k for kid in kids[: last_row[1] + 1] for k in kid.get("anchor_keys") or []
-        )
-        rest = kids[last_row[1] + 1 :]
-        if rest:
-            text = "\n\n".join(kid["text"] for kid in rest)
-            return [{**box, "blocks": rest, "text": text}] + blocks[last + 1 :], carried
-        carried.extend(box.get("anchor_keys") or [])
-        return blocks[last + 1 :], carried
+        kept, more = _drop_box_lines(blocks[last], last_row[1])
+        carried.extend(more)
+        return ([kept] if kept else []) + blocks[last + 1 :], carried
     if last_row is not None:
         order = _source_order(blocks[last]["table"]["rows"])
         kept = _drop_table_rows(blocks[last], set(order[: order.index(last_row) + 1]))
