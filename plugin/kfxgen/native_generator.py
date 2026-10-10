@@ -347,36 +347,111 @@ _SIDES = ("top", "right", "bottom", "left")
 
 def _has_space_above(block):
     """Whether `block` brings its own space above: an unindented text
-    paragraph does (1 line, $47), an indented one, a table or a box's
-    paragraph run does not, as build_fragment_157 writes them (#309)."""
+    paragraph does (1 line, $47) and so does a box; an indented paragraph,
+    a table or a picture does not, as build_fragment_157 writes them (#309,
+    #310)."""
     if block.get("type") == "table":
         return False
     if block.get("type") == "box":
         return True
+    if not IMG_TOKEN_RE.sub("", block.get("text") or "").strip():
+        return False
     return (block.get("block_style") or {}).get("indent") is None
+
+
+def _block_keys(block):
+    """Every anchor key a block holds, inside a box or a table included."""
+    keys = list(block.get("anchor_keys") or ())
+    if block.get("type") == "box":
+        for kid in block["blocks"]:
+            keys += _block_keys(kid)
+    tbl = block.get("table")
+    if tbl:
+        keys += tbl.get("anchor_keys") or []
+        for row in tbl["rows"]:
+            keys += row.get("anchor_keys") or []
+            for cell in row["cells"]:
+                for part in [cell, *(cell.get("paragraphs") or ())]:
+                    keys += part.get("anchor_keys") or []
+    return keys
+
+
+def _is_text_block(block):
+    """A paragraph of text: not a table, a box or only a picture."""
+    return block.get("type") not in ("table", "box") and bool(
+        IMG_TOKEN_RE.sub("", block.get("text") or "").strip()
+    )
 
 
 def _cut_title_from_box(box, title):
     """(box, carried anchor keys) with `title` cut from the box's first
     paragraph, as the chapter title cut does for a paragraph (#238), or None
-    when the box doesn't open with it. The box is None when nothing is left
-    in it; its own keys are then carried too."""
+    when the box doesn't open with it. A box opening with a box is followed
+    into it (#310). The box is None when nothing is left in it; its own keys
+    are then carried too."""
     kids = box["blocks"]
     first = kids[0]
-    stripped = first["text"].lstrip()
-    if stripped[: len(title)].lower() != title.lower():
+    if first.get("type") == "box":
+        cut = _cut_title_from_box(first, title)
+        if cut is None:
+            return None
+        inner, carried = cut
+        kids = ([inner] if inner else []) + kids[1:]
+    elif not _is_text_block(first):
         return None
-    remainder = stripped[len(title) :].lstrip()
-    if remainder:
-        kids = [_trim_text(first, len(first["text"]) - len(remainder))] + kids[1:]
-        carried = []
     else:
-        kids = kids[1:]
-        carried = list(first.get("anchor_keys") or [])
+        stripped = first["text"].lstrip()
+        if stripped[: len(title)].lower() != title.lower():
+            return None
+        remainder = stripped[len(title) :].lstrip()
+        if remainder:
+            kids = [_trim_text(first, len(first["text"]) - len(remainder))] + kids[1:]
+            carried = []
+        else:
+            kids = kids[1:]
+            carried = list(first.get("anchor_keys") or [])
     if not kids:
         return None, carried + list(box.get("anchor_keys") or [])
     text = "\n\n".join(k["text"] for k in kids)
     return {**box, "blocks": kids, "text": text}, carried
+
+
+def _box_title_lines(box, path=()):
+    """([(path, text)], whole) for the paragraphs a box opens with, through
+    the boxes it opens with, as the split-title cut reads them: they read as
+    lines before they were boxed (#238, #310). `whole` is False when a table
+    or a picture stops the run."""
+    out = []
+    for j, kid in enumerate(box["blocks"]):
+        if kid.get("type") == "box":
+            inner, whole = _box_title_lines(kid, path + (j,))
+            out += inner
+            if not whole:
+                return out, False
+        elif _is_text_block(kid):
+            out.append((path + (j,), kid.get("text", "")))
+        else:
+            return out, False
+    return out, True
+
+
+def _drop_box_lines(box, path):
+    """(box or None, carried keys): `box` with every block up to and
+    including the paragraph at `path` taken out (#310)."""
+    kids = box["blocks"]
+    j = path[0]
+    carried = [k for kid in kids[:j] for k in _block_keys(kid)]
+    if len(path) == 1:
+        carried += list(kids[j].get("anchor_keys") or [])
+        rest = kids[j + 1 :]
+    else:
+        inner, more = _drop_box_lines(kids[j], path[1:])
+        carried += more
+        rest = ([inner] if inner else []) + kids[j + 1 :]
+    if not rest:
+        return None, carried + list(box.get("anchor_keys") or [])
+    text = "\n\n".join(k["text"] for k in rest)
+    return {**box, "blocks": rest, "text": text}, carried
 
 
 def _cut_title_from_table(block, title):
@@ -425,11 +500,12 @@ def _eat_split_title(blocks, title):
             )
         elif blk.get("type") == "box":
             # A box counts one block per paragraph, as it read before it was
-            # boxed: a title split over its first lines is eaten (#238).
-            entries.extend(
-                (i, ("box", j), kid.get("text", ""))
-                for j, kid in enumerate(blk["blocks"])
-            )
+            # boxed: a title split over its first lines is eaten (#238),
+            # through a box it opens with (#310), never into a table.
+            lines, whole = _box_title_lines(blk)
+            entries.extend((i, ("box", path), text) for path, text in lines)
+            if not whole:
+                break
         else:
             entries.append((i, None, blk.get("text", "")))
     eaten = _consume_split_title([{"text": t} for _, _, t in entries], title)
@@ -438,17 +514,9 @@ def _eat_split_title(blocks, title):
     last, last_row, _ = entries[eaten - 1]
     carried = [k for blk in blocks[:last] for k in blk.get("anchor_keys") or []]
     if isinstance(last_row, tuple):
-        box = blocks[last]
-        kids = box["blocks"]
-        carried.extend(
-            k for kid in kids[: last_row[1] + 1] for k in kid.get("anchor_keys") or []
-        )
-        rest = kids[last_row[1] + 1 :]
-        if rest:
-            text = "\n\n".join(kid["text"] for kid in rest)
-            return [{**box, "blocks": rest, "text": text}] + blocks[last + 1 :], carried
-        carried.extend(box.get("anchor_keys") or [])
-        return blocks[last + 1 :], carried
+        kept, more = _drop_box_lines(blocks[last], last_row[1])
+        carried.extend(more)
+        return ([kept] if kept else []) + blocks[last + 1 :], carried
     if last_row is not None:
         order = _source_order(blocks[last]["table"]["rows"])
         kept = _drop_table_rows(blocks[last], set(order[: order.index(last_row) + 1]))
@@ -3441,13 +3509,23 @@ class NativeKFXGenerator:
                 # The next paragraph's own line counts toward a declared
                 # margin: only what is beyond it is added (#309 review).
                 box["space_below"] = max(below - _LINE_EM, 0.0)
-            inner = {k for kid in block["blocks"] for k in kid.get("anchor_keys") or ()}
+            inner = {k for kid in block["blocks"] for k in _block_keys(kid)}
             own = [k for k in block.get("anchor_keys") or [] if k not in inner]
             all_chunks.append({"type": "open", "node": "box", "box": box})
             pending = own
-            for kid in block["blocks"]:
+            kids = block["blocks"]
+            for k_idx, kid in enumerate(kids):
                 first = len(all_chunks)
-                unplaced = _emit_paragraph(kid)
+                # A table or a box inside is nested in it, as Kindle
+                # Previewer nests them (#310).
+                if kid.get("type") == "table":
+                    _emit_table_chunks(kid)
+                    unplaced = []
+                elif kid.get("type") == "box":
+                    nxt = kids[k_idx + 1] if k_idx + 1 < len(kids) else None
+                    unplaced = _emit_box_chunks(kid, nxt)
+                else:
+                    unplaced = _emit_paragraph(kid)
                 if pending and len(all_chunks) > first:
                     _attach_keys(first, pending)
                     pending = []
