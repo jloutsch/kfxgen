@@ -4538,3 +4538,212 @@ def test_an_anchor_inside_the_cut_title_lands_on_the_paragraph_start(tmp_path):
     )
     found = dict(_anchor_named_by_return_link(gen))
     assert {off for _pos, off in found.values()} == {None}
+
+
+# ── #238 stage 2: a box is a `$270` around its paragraphs ────────────────────
+
+
+def _box_block(kids, **box):
+    style = {
+        "border": {
+            s: ("solid", 0.45, None) for s in ("top", "right", "bottom", "left")
+        },
+        "background": 0xFFEEEEEE,
+        "padding": dict.fromkeys(("top", "right", "bottom", "left"), 0.5),
+        "margin_left": 6.25,
+        "margin_right": 6.25,
+    }
+    style.update(box)
+    return {
+        "type": "box",
+        "text": "\n\n".join(k["text"] for k in kids),
+        "spans": [],
+        "blocks": kids,
+        "anchor_keys": [],
+        "box": style,
+    }
+
+
+def _para(text, keys=()):
+    return {
+        "text": text,
+        "spans": [],
+        "anchor_keys": list(keys),
+        "anchor_offsets": dict.fromkeys(keys, 0),
+    }
+
+
+def _book(tmp_path, chapters):
+    from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
+
+    out = tmp_path / "b.kfx"
+    NativeKFXGenerator().generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(out)
+    )
+    frags = load_fragments(out)
+    content = {
+        str(val(f)["name"]): list(val(f)["$146"]) for f in by_type(frags, "$145")
+    }
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    entries = [
+        e for st in by_type(frags, "$259") for e in iter_entries(val(st)["$146"])
+    ]
+
+    def text(e):
+        r = e.get("$145")
+        return str(content[str(r["name"])][int(r["$403"])]) if r else None
+
+    anchors = {str(f.fid): val(f)["$183"]["$155"] for f in by_type(frags, "$266")}
+    return entries, styles, text, anchors
+
+
+@pytest.mark.unit
+def test_a_box_is_a_270_with_its_style_around_its_paragraphs(tmp_path):
+    box = _box_block([_para("Tip"), _para("Box text.")])
+    chapters = [
+        {
+            "title": "One",
+            "text": "x",
+            "blocks": [_para("Before."), box, _para("After.")],
+        }
+    ]
+    entries, styles, text, _ = _book(tmp_path, chapters)
+    (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
+    assert [text(k) for k in b["$146"]] == ["Tip", "Box text."]
+    st = {str(k): v for k, v in styles[str(b["$157"])].items()}
+    assert {"$93", "$88", "$70", "$52", "$53", "$54", "$55", "$48", "$50"} <= set(st)
+    assert int(st["$70"]) == 0xFFEEEEEE
+    assert str(st["$48"]["$307"]) == "6.25" and str(st["$48"]["$306"]) == "$314"
+
+
+@pytest.mark.unit
+def test_links_land_on_the_paragraphs_inside_a_box(tmp_path):
+    from kfxgen.inline_style import make_link_flag
+
+    box = _box_block([_para("First."), _para("Second.", ["c.xhtml#b"])])
+    box["anchor_keys"] = ["c.xhtml"]  # the file's own key, on the box
+    link = {
+        "text": "to file to b",
+        "spans": [
+            (0, 7, frozenset({make_link_flag("c.xhtml")})),
+            (8, 4, frozenset({make_link_flag("c.xhtml#b")})),
+        ],
+        "anchor_keys": [],
+    }
+    chapters = [
+        {"title": "One", "text": "x", "blocks": [link]},
+        {"title": "Two", "text": "y", "blocks": [_para("Lead."), box]},
+    ]
+    entries, _, text, anchors = _book(tmp_path, chapters)
+    by_id = {e["$155"]: e for e in entries}
+    landed = sorted(
+        text(by_id[anchors[str(sp["$179"])]])
+        for e in entries
+        for sp in e.get("$142") or []
+        if "$179" in sp
+    )
+    assert landed == ["First.", "Second."]
+
+
+@pytest.mark.unit
+def test_the_chapter_title_is_cut_from_a_boxs_first_paragraph(tmp_path):
+    box = _box_block([_para("Notes. A first note."), _para("A second note.")])
+    chapters = [{"title": "Notes", "text": box["text"], "blocks": [box]}]
+    entries, _, text, _ = _book(tmp_path, chapters)
+    (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
+    assert [text(k) for k in b["$146"]] == [". A first note.", "A second note."]
+    assert [text(e) for e in entries if text(e)].count("Notes") == 1
+
+
+@pytest.mark.unit
+def test_a_title_split_over_a_boxs_first_lines_is_cut(tmp_path):
+    """The chapter "IV—Dawn" opens with a box whose first two lines are "IV"
+    and "Dawn": both are the title, as before the box (#238)."""
+    box = _box_block([_para("IV"), _para("Dawn"), _para("The day began.")])
+    chapters = [{"title": "IV—Dawn", "text": box["text"], "blocks": [box]}]
+    entries, _, text, _ = _book(tmp_path, chapters)
+    (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
+    assert [text(k) for k in b["$146"]] == ["The day began."]
+
+
+@pytest.mark.unit
+def test_ids_waiting_for_a_box_land_on_its_first_paragraph(tmp_path):
+    """A paragraph holding only a picture the book doesn't have emits nothing;
+    its ids wait for the next block (#291). When that is a box they go on its
+    first paragraph, not the `$270` (#309 review)."""
+    from kfxgen.converter import _make_img_token
+    from kfxgen.inline_style import make_link_flag
+
+    missing = {
+        "text": _make_img_token("missing.png", "", None),
+        "spans": [],
+        "anchor_keys": ["c.xhtml#pic"],
+        "anchor_offsets": {"c.xhtml#pic": 0},
+    }
+    box = _box_block([_para("First."), _para("Second.")])
+    link = {
+        "text": "to pic",
+        "spans": [(0, 6, frozenset({make_link_flag("c.xhtml#pic")}))],
+        "anchor_keys": [],
+    }
+    chapters = [
+        {"title": "One", "text": "x", "blocks": [link]},
+        {"title": "Two", "text": "y", "blocks": [_para("Lead."), missing, box]},
+    ]
+    entries, _, text, anchors = _book(tmp_path, chapters)
+    by_id = {e["$155"]: e for e in entries}
+    (target,) = [
+        by_id[anchors[str(sp["$179"])]]
+        for e in entries
+        for sp in e.get("$142") or []
+        if "$179" in sp
+    ]
+    assert str(target.get("$159")) == "$269" and text(target) == "First."
+
+
+@pytest.mark.unit
+def _box_spacing(tmp_path, kids, following):
+    box = _box_block(kids, space_above=1.2, space_below=0.0)
+    chapters = [
+        {"title": "One", "text": "x", "blocks": [_para("Before."), box, following]}
+    ]
+    entries, styles, _, _ = _book(tmp_path, chapters)
+    (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
+    st = {str(k): v for k, v in styles[str(b["$157"])].items()}
+    return {k: str(st[k]["$307"]) for k in ("$47", "$49", "$54") if k in st}
+
+
+def _indented(text):
+    return dict(_para(text), block_style={"indent": ("1", "$308")})
+
+
+@pytest.mark.unit
+def test_a_box_fits_kfxgens_paragraph_spacing(tmp_path):
+    """Unindented paragraphs carry a line of space above and none below
+    (#309 review). A box takes a line above. Below, it adds a line only when
+    the next paragraph brings none. Inside, its bottom padding gains the
+    line its first paragraph has at the top, so the text sits evenly."""
+    # Unindented book: the next paragraph spaces itself; padding evened.
+    plain = _box_spacing(tmp_path, [_para("Boxed.")], _para("After."))
+    assert plain == {"$47": "1", "$54": "1.41667"}
+    # Indented book: the box spaces itself below; padding as declared.
+    indented = _box_spacing(tmp_path, [_indented("Boxed.")], _indented("After."))
+    assert indented == {"$47": "1", "$49": "1", "$54": "0.416667"}
+
+
+@pytest.mark.unit
+def test_a_boxs_declared_space_below_counts_the_next_paragraphs_line(tmp_path):
+    """`margin-bottom: 2em` before an unindented paragraph: that paragraph's
+    line (1.2em) is part of it, so the box adds 0.8em, not 2em."""
+    box = _box_block([_para("Boxed.")], space_above=1.2, space_below=2.0)
+    chapters = [
+        {
+            "title": "One",
+            "text": "x",
+            "blocks": [_para("Before."), box, _para("After.")],
+        }
+    ]
+    entries, styles, _, _ = _book(tmp_path, chapters)
+    (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
+    st = {str(k): v for k, v in styles[str(b["$157"])].items()}
+    assert str(st["$49"]["$307"]) == "0.666667"

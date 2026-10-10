@@ -99,6 +99,9 @@ _TABLE_NODE_TYPES = {
     # A cell holding several blocks: a $269 container of $269 text entries,
     # as Kindle Previewer writes it (#261).
     "cell": "$269",
+    # A bordered or filled container around paragraphs, as Kindle Previewer
+    # writes a sidebar or callout (#238).
+    "box": "$270",
 }
 
 #: Overrides retired by #123. Warned about rather than ignored: a variable that
@@ -336,6 +339,46 @@ def _cut_row_text(row, removed):
     return {**row, "cells": cells}
 
 
+#: One line of space, in ems: what an unindented paragraph has above it
+#: (build_fragment_157's $47 1lh), and lh = em / 1.2 in the box style.
+_LINE_EM = 1.2
+_SIDES = ("top", "right", "bottom", "left")
+
+
+def _has_space_above(block):
+    """Whether `block` brings its own space above: an unindented text
+    paragraph does (1 line, $47), an indented one, a table or a box's
+    paragraph run does not, as build_fragment_157 writes them (#309)."""
+    if block.get("type") == "table":
+        return False
+    if block.get("type") == "box":
+        return True
+    return (block.get("block_style") or {}).get("indent") is None
+
+
+def _cut_title_from_box(box, title):
+    """(box, carried anchor keys) with `title` cut from the box's first
+    paragraph, as the chapter title cut does for a paragraph (#238), or None
+    when the box doesn't open with it. The box is None when nothing is left
+    in it; its own keys are then carried too."""
+    kids = box["blocks"]
+    first = kids[0]
+    stripped = first["text"].lstrip()
+    if stripped[: len(title)].lower() != title.lower():
+        return None
+    remainder = stripped[len(title) :].lstrip()
+    if remainder:
+        kids = [_trim_text(first, len(first["text"]) - len(remainder))] + kids[1:]
+        carried = []
+    else:
+        kids = kids[1:]
+        carried = list(first.get("anchor_keys") or [])
+    if not kids:
+        return None, carried + list(box.get("anchor_keys") or [])
+    text = "\n\n".join(k["text"] for k in kids)
+    return {**box, "blocks": kids, "text": text}, carried
+
+
 def _cut_title_from_table(block, title):
     """Cut a chapter title from a native table's first row with text.
 
@@ -380,6 +423,13 @@ def _eat_split_title(blocks, title):
                 for j in _source_order(rows)
                 if _row_text(rows[j])
             )
+        elif blk.get("type") == "box":
+            # A box counts one block per paragraph, as it read before it was
+            # boxed: a title split over its first lines is eaten (#238).
+            entries.extend(
+                (i, ("box", j), kid.get("text", ""))
+                for j, kid in enumerate(blk["blocks"])
+            )
         else:
             entries.append((i, None, blk.get("text", "")))
     eaten = _consume_split_title([{"text": t} for _, _, t in entries], title)
@@ -387,6 +437,18 @@ def _eat_split_title(blocks, title):
         return blocks, []
     last, last_row, _ = entries[eaten - 1]
     carried = [k for blk in blocks[:last] for k in blk.get("anchor_keys") or []]
+    if isinstance(last_row, tuple):
+        box = blocks[last]
+        kids = box["blocks"]
+        carried.extend(
+            k for kid in kids[: last_row[1] + 1] for k in kid.get("anchor_keys") or []
+        )
+        rest = kids[last_row[1] + 1 :]
+        if rest:
+            text = "\n\n".join(kid["text"] for kid in rest)
+            return [{**box, "blocks": rest, "text": text}] + blocks[last + 1 :], carried
+        carried.extend(box.get("anchor_keys") or [])
+        return blocks[last + 1 :], carried
     if last_row is not None:
         order = _source_order(blocks[last]["table"]["rows"])
         kept = _drop_table_rows(blocks[last], set(order[: order.index(last_row) + 1]))
@@ -1862,6 +1924,41 @@ class NativeKFXGenerator:
             value[IS("$546")] = IS("$377")
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
+    def build_box_style_157(
+        self,
+        entity_name,
+        border=None,
+        background=None,
+        padding=None,
+        margin_left=None,
+        margin_right=None,
+        space_above=None,
+        space_below=None,
+    ):
+        """$157 for a box (#238), as Kindle Previewer 4.0.1 writes a bordered
+        or filled container: border as for a table part, fill $70 (ARGB),
+        padding as for a cell, side margins $48/$50 as a share of the page,
+        and space above and below ($47/$49) in line heights, em / 1.2."""
+        self.symtab.create_local_symbol(entity_name)
+        value = IonStruct(IS("$173"), IS(entity_name))
+        _apply_border(value, dict(border) if border else None, is_table=False)
+        if background is not None:
+            value[IS("$70")] = background
+        if padding:
+            for k, v in _padding_values(dict(padding), None).items():
+                value[IS(k)] = v
+        for key, pct in (("$48", margin_left), ("$50", margin_right)):
+            if pct:
+                value[IS(key)] = IonStruct(
+                    IS("$307"), IonDecimal(f"{pct:.6g}"), IS("$306"), IS("$314")
+                )
+        for key, em in (("$47", space_above), ("$49", space_below)):
+            if em:
+                value[IS(key)] = IonStruct(
+                    IS("$307"), IonDecimal(f"{em / 1.2:.6g}"), IS("$306"), IS("$310")
+                )
+        return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
+
     def build_part_style_157(self, entity_name, border=None):
         """$157 for a table row or row group that draws its own border under
         border-collapse, as Kindle Previewer writes it (#264)."""
@@ -3311,8 +3408,52 @@ class NativeKFXGenerator:
                     if c.get("node") == "row":
                         chunk = c
                         break
+            elif chunk.get("node") == "box":
+                # Its first paragraph, not the container (#238).
+                chunk = next(
+                    c for c in all_chunks[index:] if c["type"] not in ("open", "close")
+                )
             chunk["anchor_keys"] = _dedupe_keys((chunk.get("anchor_keys") or []) + keys)
             chunk.setdefault("anchor_offsets", {}).update(dict.fromkeys(keys, 0))
+
+        def _emit_box_chunks(block, following):
+            """A box (#238): an `open` chunk, its paragraphs, a `close`. The
+            box's own keys (a file's key, ids carried to it) go on its first
+            paragraph: a paragraph, not the container, is the link target,
+            as a table's first row is (#219). Returns the keys it could not
+            place.
+
+            Spacing follows kfxgen's paragraphs, which carry 1 line of space
+            above when unindented and none below (#309 review): the box gets
+            space below only when `following` brings none of its own, and
+            when its first paragraph has space above inside the border, its
+            bottom padding grows by the same, so the text sits evenly."""
+            box = dict(block["box"])
+            if _has_space_above(block["blocks"][0]):
+                pad = dict(box.get("padding") or dict.fromkeys(_SIDES, 0.0))
+                if not isinstance(pad["bottom"], tuple):
+                    pad["bottom"] = pad["bottom"] + _LINE_EM
+                    box["padding"] = pad
+            below = box.get("space_below") or 0.0
+            if following is not None and not _has_space_above(following):
+                box["space_below"] = max(below, _LINE_EM)
+            else:
+                # The next paragraph's own line counts toward a declared
+                # margin: only what is beyond it is added (#309 review).
+                box["space_below"] = max(below - _LINE_EM, 0.0)
+            inner = {k for kid in block["blocks"] for k in kid.get("anchor_keys") or ()}
+            own = [k for k in block.get("anchor_keys") or [] if k not in inner]
+            all_chunks.append({"type": "open", "node": "box", "box": box})
+            pending = own
+            for kid in block["blocks"]:
+                first = len(all_chunks)
+                unplaced = _emit_paragraph(kid)
+                if pending and len(all_chunks) > first:
+                    _attach_keys(first, pending)
+                    pending = []
+                pending += unplaced
+            all_chunks.append({"type": "close"})
+            return pending
 
         def _emit_table_chunks(block):
             """Marker chunks around a native table's cells (#219). `open`
@@ -3560,6 +3701,14 @@ class NativeKFXGenerator:
                                     iter_blocks, title
                                 )
                                 carried_anchor_keys.extend(eaten_keys)
+                            elif first.get("type") == "box" and (
+                                box_cut := _cut_title_from_box(first, title)
+                            ):
+                                kept_box, keys = box_cut
+                                carried_anchor_keys.extend(keys)
+                                iter_blocks = (
+                                    [kept_box] if kept_box else []
+                                ) + iter_blocks[1:]
                             elif first_stripped[: len(title)].lower() == title.lower():
                                 remainder = first_stripped[len(title) :].lstrip()
                                 removed = len(first["text"]) - len(remainder)
@@ -3602,11 +3751,19 @@ class NativeKFXGenerator:
                     # the book doesn't hold) wait for the next block's first
                     # chunk, so a link to one still lands (#291).
                     pending = []
-                    for block in para_iter:
+                    para_iter = list(para_iter)
+                    for b_idx, block in enumerate(para_iter):
                         first = len(all_chunks)
                         if block.get("type") == "table":
                             _emit_table_chunks(block)
                             unplaced = []
+                        elif block.get("type") == "box":
+                            following = (
+                                para_iter[b_idx + 1]
+                                if b_idx + 1 < len(para_iter)
+                                else None
+                            )
+                            unplaced = _emit_box_chunks(block, following)
                         else:
                             unplaced = _emit_paragraph(block)
                         if pending and len(all_chunks) > first:
@@ -3680,6 +3837,13 @@ class NativeKFXGenerator:
                         if c.get("node") == "row":
                             first_chunk = c
                             break
+                elif first_chunk.get("node") == "box":
+                    # Its first paragraph (#238).
+                    first_chunk = next(
+                        c
+                        for c in all_chunks[start_idx:]
+                        if c["type"] not in ("open", "close")
+                    )
                 first_chunk["anchor_keys"] = _dedupe_keys(
                     (first_chunk.get("anchor_keys") or []) + carried_anchor_keys
                 )
@@ -4148,6 +4312,21 @@ class NativeKFXGenerator:
                         else None
                     )
                     extras = {"$152": widths} if widths else {}
+                    if node == "box":
+                        box = chunk["box"]
+                        extras["$157"] = IS(
+                            _allocate_style(
+                                "_box",
+                                builder=self.build_box_style_157,
+                                border=_border_key(box.get("border")),
+                                background=box.get("background"),
+                                padding=_border_key(box.get("padding")),
+                                margin_left=box.get("margin_left"),
+                                margin_right=box.get("margin_right"),
+                                space_above=box.get("space_above"),
+                                space_below=box.get("space_below"),
+                            )
+                        )
                     if node in ("row", "head", "body", "foot") and chunk.get("border"):
                         # A row's or group's own border under collapse (#264).
                         extras["$157"] = IS(
