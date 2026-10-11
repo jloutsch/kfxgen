@@ -4,6 +4,7 @@ import logging
 import os
 import posixpath
 import re
+import unicodedata
 from urllib.parse import unquote
 
 from ._img_tokens import IMG_TOKEN_RE
@@ -394,6 +395,10 @@ def _opens_with_title(text, title):
     if not title or not rest:
         return True
     last, nxt = title[-1], rest[0]
+    if {unicodedata.east_asian_width(c) for c in (last, nxt)} & {"W", "F"}:
+        # Chinese and Japanese write no spaces between words: "第一章" opens
+        # "第一章天下大势" and is cut, as before (#321 QA).
+        return True
     if nxt.isalpha() and last.isalnum():
         return False
     if nxt.isdigit() and last.isdigit():

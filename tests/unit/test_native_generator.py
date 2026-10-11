@@ -4917,6 +4917,8 @@ def test_a_title_inside_a_nested_box_is_cut(tmp_path, title, inner_kids):
         ("CHAPTER ONE", "Chapter One", True),
         ("Part1", "Part", True),
         ("Other text.", "Notes", False),
+        ("第一章天下大势", "第一章", True),
+        ("第一章 天下大势", "第一章", True),
     ],
 )
 def test_the_title_is_cut_only_as_whole_words(text, title, cut):
