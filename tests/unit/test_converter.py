@@ -7909,3 +7909,150 @@ def test_standard_ebooks_verse_with_a_br_after_each_span_is_single_spaced():
         style_resolver=_class_display(line="block"),
     )
     assert texts == ["A\nB"]
+
+
+# ── #230: scene breaks ───────────────────────────────────────────────────────
+
+
+def _css_for_class(**rules):
+    """A resolver giving each class its css dict; other elements none."""
+    return lambda e: rules.get(e.get("class"))
+
+
+_NO_BORDER = {"border-sides": (("none", "0", "black"),) * 4}
+_RULE_BORDER = {"border-sides": (("inset", "0.75", "gray"),) * 4}
+
+
+def _gaps(blocks):
+    return [b.get("type") or (b["text"], b.get("space_above")) for b in blocks]
+
+
+@pytest.mark.unit
+def test_an_hr_between_paragraphs_is_a_rule_block():
+    blocks = extract_blocks_from_html(_doc("<p>End.</p><hr/><p>Start.</p>"))
+    assert [b.get("type") or b["text"] for b in blocks] == ["End.", "rule", "Start."]
+
+
+@pytest.mark.unit
+def test_a_rule_takes_its_margins_as_space_around_it():
+    blocks = extract_blocks_from_html(
+        _doc('<p>a</p><hr class="r"/><p>b</p>'),
+        style_resolver=_css_for_class(
+            r={**_RULE_BORDER, "margin-top": "2em", "margin-bottom": "12pt"}
+        ),
+    )
+    assert blocks[1]["rule"] == {"space_above": 2.0, "space_below": 1.0}
+
+
+@pytest.mark.unit
+def test_a_rule_without_margins_takes_calibres_half_em():
+    blocks = extract_blocks_from_html(
+        _doc('<p>a</p><hr class="r"/><p>b</p>'),
+        style_resolver=_css_for_class(r=_RULE_BORDER),
+    )
+    assert blocks[1]["rule"] == {"space_above": 0.5, "space_below": 0.5}
+
+
+@pytest.mark.unit
+def test_an_hr_with_no_border_is_space_above_the_next_paragraph():
+    blocks = extract_blocks_from_html(
+        _doc('<p>a</p><hr class="r"/><p>b</p>'),
+        style_resolver=_css_for_class(
+            r={**_NO_BORDER, "margin-top": "1em", "margin-bottom": "1.5em"}
+        ),
+    )
+    # An empty block's margins collapse to the larger, as in a browser.
+    assert _gaps(blocks) == [("a", None), ("b", 1.5)]
+    assert blocks[1]["space_break"] is True
+
+
+@pytest.mark.unit
+def test_an_hrs_id_goes_to_the_next_paragraph():
+    blocks = extract_blocks_from_html(_doc('<p>a</p><hr id="brk"/><p>b</p>'))
+    assert blocks[1]["anchor_ids"] == []
+    assert "brk" in blocks[2]["anchor_ids"]
+
+
+@pytest.mark.unit
+def test_margin_top_is_space_above_the_paragraph():
+    blocks = extract_blocks_from_html(
+        _doc('<p>a</p><p class="brk">b</p>'),
+        style_resolver=_css_for_class(brk={"margin-top": "2em"}),
+    )
+    assert _gaps(blocks) == [("a", None), ("b", 2.0)]
+    assert "space_break" not in blocks[1]
+
+
+@pytest.mark.unit
+def test_margin_bottom_is_space_above_the_next_paragraph():
+    blocks = extract_blocks_from_html(
+        _doc('<p class="end">a</p><p>b</p>'),
+        style_resolver=_css_for_class(end={"margin-bottom": "24pt"}),
+    )
+    assert _gaps(blocks) == [("a", None), ("b", 2.0)]
+
+
+@pytest.mark.unit
+def test_margins_between_two_paragraphs_collapse_to_the_larger():
+    blocks = extract_blocks_from_html(
+        _doc('<p class="end">a</p><p class="brk">b</p>'),
+        style_resolver=_css_for_class(
+            end={"margin-bottom": "1.5em"}, brk={"margin-top": "2em"}
+        ),
+    )
+    assert _gaps(blocks) == [("a", None), ("b", 2.0)]
+
+
+@pytest.mark.unit
+def test_the_first_paragraph_of_a_file_takes_no_space_above():
+    blocks = extract_blocks_from_html(
+        _doc('<p class="brk">a</p>'),
+        style_resolver=_css_for_class(brk={"margin-top": "3em"}),
+    )
+    assert _gaps(blocks) == [("a", None)]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("spacer", ["<p>&#160;</p>", "<p><br/></p>", "<div> </div>"])
+def test_a_spacer_paragraph_is_a_line_of_space_above_the_next(spacer):
+    blocks = extract_blocks_from_html(_doc(f"<p>a</p>{spacer}<p>b</p>"))
+    assert _gaps(blocks) == [("a", None), ("b", 1.2)]
+
+
+@pytest.mark.unit
+def test_two_spacers_are_two_lines():
+    blocks = extract_blocks_from_html(
+        _doc("<p>a</p><p>&#160;</p><p>&#160;</p><p>b</p>")
+    )
+    assert _gaps(blocks) == [("a", None), ("b", 2.4)]
+
+
+@pytest.mark.unit
+def test_an_empty_paragraph_is_no_space():
+    """A browser draws `<p> </p>` as nothing; so does Kindle Previewer."""
+    blocks = extract_blocks_from_html(_doc("<p>a</p><p> </p><p>b</p>"))
+    assert _gaps(blocks) == [("a", None), ("b", None)]
+
+
+@pytest.mark.unit
+def test_a_containers_margins_go_to_its_first_and_last_paragraph():
+    blocks = extract_blocks_from_html(
+        _doc('<p>a</p><div class="sec"><p>b</p><p>c</p></div><p>d</p>'),
+        style_resolver=_css_for_class(
+            sec={"margin-top": "3em", "margin-bottom": "2em"}
+        ),
+    )
+    assert _gaps(blocks) == [("a", None), ("b", 3.0), ("c", None), ("d", 2.0)]
+
+
+@pytest.mark.unit
+def test_an_hr_in_a_table_cell_is_dropped_as_before():
+    blocks = extract_blocks_from_html(
+        _doc("<table><tr><td><p>x</p><hr/><p>y</p></td><td>z</td></tr></table>"),
+        native_tables=True,
+    )
+    assert blocks[0]["type"] == "table"
+    cells = blocks[0]["table"]["rows"][0]["cells"]
+    assert all(
+        p.get("type") != "rule" for c in cells for p in c.get("paragraphs") or ()
+    )

@@ -1489,6 +1489,34 @@ def _box_space(value, least=0.0):
     return max(em, least)
 
 
+#: An <hr>'s margins in calibre's own sheet, above and below (#230).
+_RULE_SPACE_EM = 0.5
+#: One blank line: what a spacer paragraph (`<p>&nbsp;</p>`) adds (#230).
+_LINE_SPACE_EM = 1.2
+
+
+def _margin_em(css, side):
+    """An element's declared margin-top or -bottom in ems (1px = 0.45pt,
+    12pt = 1em, as for padding); 0 when unset, negative or a percentage."""
+    em = _padding_em((css or {}).get(f"margin-{side}"))
+    return 0.0 if isinstance(em, tuple) or em is None else em
+
+
+def _is_spacer(elem):
+    """A paragraph that holds only a non-breaking space or a <br>: a blank
+    line the book put in on purpose, often for a scene break (#230). An
+    empty `<p> </p>` is not one: a browser draws it as nothing."""
+    text = "".join(elem.itertext())
+    if text.replace("\u00a0", "").strip():
+        return False
+    for d in elem.iter():
+        if isinstance(d.tag, str) and _local_tag(d.tag) in ("img", "svg"):
+            return False
+    return "\u00a0" in text or any(
+        isinstance(d.tag, str) and _local_tag(d.tag) == "br" for d in elem.iter()
+    )
+
+
 def _box_padding(css):
     """A box's padding per side, in Previewer's ems or ("%", n), or None when
     it has none. Unlike a cell, a box has no default padding (#238)."""
@@ -2258,6 +2286,53 @@ def _prefix_marker(marker, text, spans, mark_offsets):
     return marker + text, spans, mark_offsets
 
 
+#: The fields every block carries, for a rule or a space that holds no
+#: text (#230).
+_EMPTY_BLOCK = {
+    "text": "",
+    "spans": [],
+    "block_style": None,
+    "anchor_ids": [],
+    "anchor_offsets": {},
+}
+
+
+def _space_between(blocks, margins):
+    """`blocks` with each paragraph's space above it, in ems, as
+    "space_above" (#230): the larger of its own margin-top, the margin-bottom
+    before it and the margins of an invisible <hr> between, as margins
+    collapse in a browser, plus a line for each spacer paragraph. Space the
+    book put in on purpose, a spacer or an <hr>, is marked "space_break".
+    The space blocks are taken out. A file's first paragraph starts a page
+    or follows one in the same chapter, and takes none. Tables, boxes and
+    rules keep their own spacing; space before one is dropped."""
+    out = []
+    above = 0.0  # the larger margin waiting: the paragraph before's, an <hr>'s
+    lines = 0.0
+    on_purpose = False
+    for b in blocks:
+        kind = b.get("type")
+        if kind == "space":
+            above = max(above, b["margin"])
+            lines += b["line"]
+            on_purpose = True
+            continue
+        top, bottom = margins.get(id(b), (0.0, 0.0))
+        if kind is None:
+            gap = max(above, top) + lines
+            if out and gap > 0:
+                b["space_above"] = round(gap, 4)
+                if on_purpose:
+                    b["space_break"] = True
+            above = bottom
+        else:
+            above = 0.0
+        lines = 0.0
+        on_purpose = False
+        out.append(b)
+    return out
+
+
 def extract_blocks_from_html(
     element,
     style_resolver=None,
@@ -2349,6 +2424,8 @@ def extract_blocks_from_html(
         "tbody",
         "tfoot",
         "tr",
+        # A scene break: a rule, or space when it draws nothing (#230).
+        "hr",
     ):
         block_tags.add(tag)
         block_tags.add(ns + tag)
@@ -2374,6 +2451,11 @@ def extract_blocks_from_html(
     # is (marker, ordinal or None).
     pending_markers = []
     list_ordinals = {}  # list element -> {li: ordinal}
+    # Space between paragraphs (#230): each block's own margin-top and
+    # -bottom, in ems, with its containers' added at its edges. A spacer
+    # paragraph or an <hr> that draws nothing is a {"type": "space"} block
+    # until the end, where the space goes above the next paragraph.
+    margins = {}  # id(block) -> [top, bottom]
 
     def _take_marker(text, spans, mark_offsets):
         """Prefix the pending list marker, if any, to a text block."""
@@ -2639,6 +2721,10 @@ def extract_blocks_from_html(
             )
             return
 
+        if _local_tag(elem.tag) == "hr":
+            _emit_rule(elem)
+            return
+
         native = (
             native_tables and _local_tag(elem.tag) == "table" and _table_is_native(elem)
         )
@@ -2742,11 +2828,14 @@ def extract_blocks_from_html(
                         },
                     }
                 )
+                _note_margins(elem, len(blocks) - 1)
                 # Text written straight in a bordered or filled <div> is a
                 # box around that one paragraph (#310).
                 _make_box(elem, len(blocks) - 1, leaf=True)
             else:
                 pending_ids.extend(ids)  # empty anchor block: carry ids forward
+                if _is_spacer(elem):
+                    _emit_space(line=_LINE_SPACE_EM)
             return
 
         # No `parent_is_block` guard. It used to be here to avoid emitting an
@@ -2770,6 +2859,56 @@ def extract_blocks_from_html(
         _walk_container(elem)
         if not _make_box(elem, start):
             _carry_container_margins(elem, start)
+            _note_margins(elem, start)
+
+    def _emit_space(margin=0.0, line=0.0):
+        """Space for the next paragraph to take: a spacer's blank line, or an
+        <hr> that draws nothing, whose margins collapse with the paragraphs'
+        around it. A cell keeps only blocks with text, so in a cell it is
+        dropped, as before."""
+        blocks.append({**_EMPTY_BLOCK, "type": "space", "margin": margin, "line": line})
+
+    def _emit_rule(elem):
+        """An <hr>: a rule, as Kindle Previewer writes it ($596), with its
+        margins as space above and below, or just space when its CSS draws
+        no border (#230). Its ids name the paragraph after it."""
+        pending_ids.extend(_own_anchor_ids(elem))
+        css = style_resolver(elem) if style_resolver is not None else None
+        if css is not None and _css_border(css) is None:
+            # An empty block's own margins collapse into one, the larger.
+            _emit_space(margin=max(_margin_em(css, "top"), _margin_em(css, "bottom")))
+            return
+
+        def space(side):
+            if not (css or {}).get(f"margin-{side}"):
+                return _RULE_SPACE_EM
+            return _margin_em(css, side)
+
+        blocks.append(
+            {
+                **_EMPTY_BLOCK,
+                "type": "rule",
+                "rule": {"space_above": space("top"), "space_below": space("bottom")},
+            }
+        )
+
+    def _note_margins(elem, start):
+        """Record `elem`'s margin-top on the first paragraph it produced and
+        its margin-bottom on the last, keeping a larger one already there:
+        margins that touch collapse to the larger, as in a browser (#230)."""
+        if style_resolver is None:
+            return
+        css = style_resolver(elem)
+        top, bottom = _margin_em(css, "top"), _margin_em(css, "bottom")
+        if not (top or bottom):
+            return
+        mine = [b for b in blocks[start:] if b.get("type") not in ("space", "rule")]
+        if not mine:
+            return
+        first = margins.setdefault(id(mine[0]), [0.0, 0.0])
+        first[0] = max(first[0], top)
+        last = margins.setdefault(id(mine[-1]), [0.0, 0.0])
+        last[1] = max(last[1], bottom)
 
     def _make_box(elem, start, leaf=False):
         """Replace the blocks a bordered or filled container produced with
@@ -2806,7 +2945,7 @@ def extract_blocks_from_html(
         blocks[start:] = [
             {
                 "type": "box",
-                "text": "\n\n".join(b["text"] for b in kids),
+                "text": "\n\n".join(b["text"] for b in kids if b["text"]),
                 "spans": [],
                 "block_style": None,
                 "blocks": kids,
@@ -2980,11 +3119,16 @@ def extract_blocks_from_html(
         for child in body:
             _walk(child)
 
+    blocks[:] = _space_between(blocks, margins)
+
     # Trailing anchors (e.g. <a id="eof"/> after the last leaf block) never
     # reach a subsequent block to flush to; snap them onto the last emitted
-    # block instead of dropping them silently.
+    # block instead of dropping them silently. Not onto a rule, which holds
+    # no anchor (#230).
     if pending_ids and blocks:
-        last_block = blocks[-1]
+        last_block = next(
+            (b for b in reversed(blocks) if b.get("type") != "rule"), blocks[-1]
+        )
         last_block["anchor_ids"] = _dedupe_keep_order(
             last_block["anchor_ids"] + pending_ids
         )
@@ -3039,7 +3183,9 @@ def extract_blocks_from_html(
 def extract_text_from_html(element):
     """Plain-text extraction (IMG tokens preserved). Now derived from
     extract_blocks_from_html so the two never diverge."""
-    return "\n\n".join(b["text"] for b in extract_blocks_from_html(element))
+    return "\n\n".join(
+        b["text"] for b in extract_blocks_from_html(element) if b["text"]
+    )
 
 
 def extract_metadata(oeb_book, log):
@@ -3599,7 +3745,7 @@ def extract_chapters_from_oeb(
                 )
                 - note_ids,
             )
-            text = "\n\n".join(b["text"] for b in blocks)
+            text = "\n\n".join(b["text"] for b in blocks if b.get("text"))
             svg_text_files += any(
                 _svg_text_paragraphs(e)
                 for e in item.data.iter()

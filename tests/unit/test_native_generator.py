@@ -4967,3 +4967,137 @@ def test_a_short_label_does_not_cut_a_tables_first_word(tmp_path):
     table = _table_block([["It was", "a cold morning."]])
     chapters = [{"title": "I", "text": table["text"], "blocks": [table]}]
     assert _printed(tmp_path, chapters) == ["I", "It was", "a cold morning."]
+
+
+# ── #230: scene breaks ───────────────────────────────────────────────────────
+
+
+def _rule(above=0.5, below=0.5):
+    return {
+        "type": "rule",
+        "text": "",
+        "spans": [],
+        "anchor_keys": [],
+        "rule": {"space_above": above, "space_below": below},
+    }
+
+
+def _spaced(para, em):
+    return dict(para, space_above=em)
+
+
+def _lh(style, key):
+    v = {str(k): x for k, x in style.items()}.get(key)
+    return None if v is None else str(v["$307"]) + str(v["$306"])
+
+
+@pytest.mark.unit
+def test_a_rule_is_a_596_between_its_paragraphs(tmp_path):
+    chapters = [
+        {
+            "title": "One",
+            "text": "x",
+            "blocks": [_para("Before."), _rule(2.0, 1.0), _para("After.")],
+        }
+    ]
+    entries, styles, text, _ = _book(tmp_path, chapters)
+    kinds = [str(e["$159"]) if text(e) is None else text(e) for e in entries]
+    assert kinds == ["One", "Before.", "$596", "After."]
+    (rule,) = [e for e in entries if str(e["$159"]) == "$596"]
+    assert "$145" not in {str(k) for k in rule}
+    st = styles[str(rule["$157"])]
+    assert (_lh(st, "$47"), _lh(st, "$49")) == ("1.66667$310", "0.833333$310")
+
+
+@pytest.mark.unit
+def test_a_rule_at_a_chapters_start_or_end_is_not_written(tmp_path):
+    """A page break separates chapters already; Gutenberg puts an <hr>
+    before each chapter heading."""
+    chapters = [
+        {"title": "One", "text": "x", "blocks": [_rule(), _para("A."), _rule()]},
+        {"title": "Two", "text": "x", "blocks": [_para("B."), _rule()]},
+    ]
+    entries, _, _, _ = _book(tmp_path, chapters)
+    assert not [e for e in entries if str(e["$159"]) == "$596"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "para, em, expected",
+    [
+        # Unindented: a line (1.2em) of space already; more is written.
+        (_para("B."), 2.0, "1.66667$310"),
+        (_para("B."), 1.2, "1$310"),
+        (_para("B."), 0.5, "1$310"),
+        # Indented: no space; more than 1em is written.
+        (_indented("B."), 1.5, "1.25$310"),
+        (_indented("B."), 1.0, None),
+        (_indented("B."), 0.6, None),
+    ],
+)
+def test_space_above_beyond_kfxgens_own_spacing_is_written(
+    tmp_path, para, em, expected
+):
+    """1em, calibre's own paragraph margin, is not a break; more is."""
+    chapters = [
+        {"title": "One", "text": "x", "blocks": [_para("A."), _spaced(para, em)]}
+    ]
+    entries, styles, text, _ = _book(tmp_path, chapters)
+    (b,) = [e for e in entries if text(e) == "B."]
+    assert _lh(styles[str(b["$157"])], "$47") == expected
+
+
+@pytest.mark.unit
+def test_space_above_goes_on_a_long_paragraphs_first_entry_only(tmp_path):
+    long = "word " * 600
+    chapters = [
+        {
+            "title": "One",
+            "text": "x",
+            "blocks": [_para("A."), _spaced(_para(long.strip()), 2.4)],
+        }
+    ]
+    entries, styles, text, _ = _book(tmp_path, chapters)
+    pieces = [e for e in entries if (text(e) or "").startswith("word")]
+    assert len(pieces) == 2
+    assert [_lh(styles[str(e["$157"])], "$47") for e in pieces] == [
+        "2$310",
+        "1$310",
+    ]
+
+
+@pytest.mark.unit
+def test_a_rule_takes_one_position_like_a_picture(tmp_path):
+    from tests._kfx_introspect import by_type, load_fragments, val
+
+    out = tmp_path / "r.kfx"
+    NativeKFXGenerator().generate_full_book(
+        title="T",
+        author="A",
+        chapters=[
+            {
+                "title": "One",
+                "text": "x",
+                "blocks": [_para("Before."), _rule(), _para("After.")],
+            }
+        ],
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    (story,) = by_type(frags, "$259")
+    eids = [int(e["$155"]) for e in val(story)["$146"]]
+    rule_eid = eids[2]
+    pos = {int(p["$185"]): int(p["$184"]) for p in val(by_type(frags, "$265")[0])}
+    after = pos[eids[3]]
+    assert after - pos[rule_eid] == 1
+
+
+@pytest.mark.unit
+def test_a_break_the_book_put_in_counts_beyond_kfxgens_own_spacing(tmp_path):
+    """A spacer or an <hr> drawing nothing, 1em: written above an indented
+    paragraph, where a 1em margin alone is not."""
+    para = dict(_spaced(_indented("B."), 1.0), space_break=True)
+    chapters = [{"title": "One", "text": "x", "blocks": [_para("A."), para]}]
+    entries, styles, text, _ = _book(tmp_path, chapters)
+    (b,) = [e for e in entries if text(e) == "B."]
+    assert _lh(styles[str(b["$157"])], "$47") == "0.833333$310"
