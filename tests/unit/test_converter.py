@@ -1614,6 +1614,101 @@ def test_hidden_does_not_swallow_normal_content():
     assert [b["text"] for b in blocks] == ["kept"]
 
 
+_MATHML_CASE = '<epub:case required-namespace="http://www.w3.org/1998/Math/MathML">'
+
+
+@pytest.mark.unit
+def test_epub_switch_renders_only_its_default():
+    """#234: a reading system shows one branch of an epub:switch. kfxgen
+    supports none of the cases, so the default is the one."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            "<epub:switch>"
+            f"{_MATHML_CASE}M</epub:case>"
+            "<epub:default><p>Default</p></epub:default>"
+            "</epub:switch>"
+        )
+    )
+    assert [b["text"] for b in blocks] == ["Default"]
+
+
+@pytest.mark.unit
+def test_epub_switch_inside_a_paragraph_renders_only_its_default():
+    """#234: an equation set in running text is the common shape."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            "<p>So <epub:switch>"
+            f"{_MATHML_CASE}<m:math xmlns:m='http://www.w3.org/1998/Math/MathML'>"
+            "<m:mi>x</m:mi></m:math></epub:case>"
+            "<epub:default>x squared</epub:default>"
+            "</epub:switch> holds.</p>"
+        )
+    )
+    assert [b["text"] for b in blocks] == ["So x squared holds."]
+
+
+@pytest.mark.unit
+def test_epub_switch_image_fallback_survives():
+    """#234: the default is usually a picture of the equation."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            "<epub:switch>"
+            f"{_MATHML_CASE}M</epub:case>"
+            '<epub:default><img src="eq1.png" alt="E = mc2"/></epub:default>'
+            "</epub:switch>"
+        )
+    )
+    assert len(blocks) == 1
+    assert IMG_TOKEN_RE.fullmatch(blocks[0]["text"].strip())
+
+
+@pytest.mark.unit
+def test_epub_switch_ids_in_dropped_cases_land_on_the_default():
+    """#234: a link aimed at the MathML (or at a case after the default)
+    still lands on the equation."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<p>Before.</p><epub:switch id="sw">'
+            f'{_MATHML_CASE}<span id="eq1">M</span></epub:case>'
+            '<epub:default><p id="d">Default</p></epub:default>'
+            '<epub:case required-namespace="urn:x"><span id="late">L</span></epub:case>'
+            "</epub:switch>"
+        )
+    )
+    assert [b["text"] for b in blocks] == ["Before.", "Default"]
+    assert set(blocks[1]["anchor_ids"]) == {"sw", "eq1", "late", "d"}
+
+
+@pytest.mark.parametrize("before", ["<p>Before.</p>", ""])
+@pytest.mark.unit
+def test_epub_switch_default_paragraphs_stay_apart_inside_a_div(before):
+    """#234 review: a switch inside a <div> was walked as inline text, so a
+    default of two paragraphs came out as one."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            f"<div>{before}<epub:switch>"
+            f"{_MATHML_CASE}M</epub:case>"
+            "<epub:default><p>Default one.</p><p>Default two.</p></epub:default>"
+            "</epub:switch></div>"
+        )
+    )
+    want = ["Default one.", "Default two."]
+    assert [b["text"] for b in blocks] == (["Before."] if before else []) + want
+
+
+@pytest.mark.unit
+def test_epub_switch_without_a_default_shows_nothing():
+    """#234: no branch kfxgen supports, so nothing is drawn; ids carry on."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<epub:switch>{0}<span id="eq1">M</span></epub:case></epub:switch>'
+            "<p>After.</p>".format(_MATHML_CASE)
+        )
+    )
+    assert [b["text"] for b in blocks] == ["After."]
+    assert "eq1" in blocks[0]["anchor_ids"]
+
+
 @pytest.mark.unit
 def test_first_block_carries_bare_filename_anchor_key():
     """#62: a TOC entry may link to a whole file with no fragment. If that file
