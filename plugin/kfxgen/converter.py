@@ -674,6 +674,22 @@ def _walk_inline(
         return [make_anchor_mark(aid) for aid in _own_anchor_ids(elem)] + [
             (HARD_BREAK, frozenset(flags) - _WS_FLAGS)
         ]
+    switch = _epub_switch_branch(elem)
+    if switch is not None:
+        ids, default = switch
+        parts = [make_anchor_mark(aid) for aid in ids]
+        if default is not None:
+            parts.extend(
+                _walk_inline(
+                    default,
+                    flags,
+                    style_resolver,
+                    is_root=False,
+                    base_href=base_href,
+                    split_tables=split_tables,
+                )
+            )
+        return parts
     cur = (set(flags) - _WS_FLAGS) | _white_space_flags(elem, style_resolver, flags)
     if local in _ITALIC_TAGS:
         cur.add(FLAG_ITALIC)
@@ -1837,6 +1853,32 @@ def _is_non_rendered(elem):
     return any(part in _NON_RENDERED_EPUB_TYPES for part in raw.lower().split())
 
 
+_EPUB_NS = "{http://www.idpf.org/2007/ops}"
+
+
+def _epub_switch_branch(elem):
+    """For an <epub:switch>: (ids, default), else None.
+
+    A reading system shows one branch of a switch. kfxgen supports none of
+    the `required-namespace` cases (MathML, mostly), so it shows the
+    <epub:default>, or nothing when there is none. `ids` are the switch's own
+    and those in its cases, so a link aimed at a dropped case still lands on
+    the equation the default draws. (#234)"""
+    if elem.tag not in (_EPUB_NS + "switch", "epub:switch"):
+        return None
+    ids = _own_anchor_ids(elem)
+    default = None
+    for child in elem:
+        if not isinstance(child.tag, str):
+            continue
+        if child.tag in (_EPUB_NS + "default", "epub:default"):
+            if default is None:
+                default = child
+        else:
+            ids.extend(_subtree_anchor_ids(child))
+    return ids, default
+
+
 #: Marks a contents listing the book printed itself: a `class` token, an
 #: `epub:type`, or the ARIA role. Gutenberg overwhelmingly uses `class="toc"`,
 #: on the listing container in some books and on each entry paragraph in
@@ -2488,6 +2530,13 @@ def extract_blocks_from_html(
             # calibre tree never holds.
             return
         if _is_non_rendered(elem):
+            return
+        switch = _epub_switch_branch(elem)
+        if switch is not None:
+            ids, default = switch
+            pending_ids.extend(ids)
+            if default is not None:
+                _walk(default)
             return
         if _is_nav_listing(elem):
             if nav_listing_at is not None:
