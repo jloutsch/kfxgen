@@ -8104,3 +8104,14 @@ def test_a_spacer_beside_a_heading_is_not_a_break():
         _doc(_LEAD + "<p>a</p><p><br/></p><h3>Head</h3><p><br/></p><p>b</p>")
     )
     assert all("space_above" not in b for b in blocks)
+
+
+@pytest.mark.unit
+def test_an_id_on_a_files_last_hr_goes_to_the_paragraph_before():
+    """A rule at a chapter's end is not written; an id left on it would
+    take every link to it down with it."""
+    blocks = extract_blocks_from_html(_doc('<p>Last.</p><hr id="hend"/>'))
+    assert [(b.get("type") or b["text"], b["anchor_ids"]) for b in blocks] == [
+        ("Last.", ["hend"]),
+        ("rule", []),
+    ]
