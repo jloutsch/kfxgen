@@ -2352,7 +2352,11 @@ def _mark_tight_runs(blocks, gap_of):
     def line(b):
         style = b.get("block_style") or {}
         return (
-            b.get("type") is None and not b.get("heading") and not style.get("indent")
+            b.get("type") is None
+            and not b.get("heading")
+            # A table's rows written as paragraphs keep their space (#219).
+            and not b.get("row")
+            and not style.get("indent")
         )
 
     run = []
@@ -2740,6 +2744,7 @@ def extract_blocks_from_html(
                     "preformatted": preformatted,
                     "anchor_ids": block_ids,
                     "heading": False,
+                    "row": True,
                     "anchor_offsets": {
                         aid: mark_offsets.get(aid, 0) for aid in block_ids
                     },
@@ -2944,6 +2949,8 @@ def extract_blocks_from_html(
                         # A chapter with no TOC entry takes its title from
                         # its file's first heading (#304).
                         "heading": _local_tag(elem.tag) in _HEADING_TAGS,
+                        # A table row written as a paragraph (#219).
+                        "row": _local_tag(elem.tag) == "tr",
                         # Ids inherited from an enclosing container point at
                         # this block's start; only ids declared inside it have
                         # a position of their own.

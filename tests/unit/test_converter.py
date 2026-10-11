@@ -8400,3 +8400,42 @@ def test_epub_type_and_role_still_mark_a_listing_after_calibre():
         '<div role="doc-toc"><p><a href="c2.xhtml">Two</a></p></div><p>Text.</p>'
     )
     assert [b["text"] for b in extract_blocks_from_html(root)] == ["Text."]
+
+
+@pytest.mark.unit
+def test_rows_written_as_paragraphs_are_not_tight_lines():
+    """A table that isn't laid out keeps one paragraph per row, spaced like
+    any paragraph (#219); its short rows with no gap are not verse (#331)."""
+    blocks = extract_blocks_from_html(
+        _doc(
+            "<table>"
+            + "".join(f"<tr><td>r{n}</td></tr>" for n in range(4))
+            + "</table>"
+        ),
+        style_resolver=lambda e: {},
+    )
+    assert [b["text"] for b in blocks] == ["r0", "r1", "r2", "r3"]
+    assert _tight(blocks) == []
+
+
+@pytest.mark.unit
+def test_rows_split_around_a_nested_table_are_not_tight_lines():
+    """Two rows that each hold a nested table (#263): the text after the
+    first table and before the second are rows too."""
+    inner = (
+        "<table><tr><td>i1</td><td>i2</td></tr><tr><td>i3</td><td>i4</td></tr></table>"
+    )
+    blocks = extract_blocks_from_html(
+        _doc(f"<table><tr><td>a{inner}b</td></tr><tr><td>c{inner}d</td></tr></table>"),
+        style_resolver=lambda e: {},
+        native_tables=True,
+    )
+    assert [b.get("type") or b["text"] for b in blocks] == [
+        "a",
+        "table",
+        "b",
+        "c",
+        "table",
+        "d",
+    ]
+    assert _tight(blocks) == []
