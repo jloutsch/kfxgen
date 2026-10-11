@@ -3912,7 +3912,9 @@ class NativeKFXGenerator:
                     # the book doesn't hold) wait for the next block's first
                     # chunk, so a link to one still lands (#291).
                     pending = []
-                    para_iter = list(para_iter)
+                    # Again after the title cut: a rule under the book's own
+                    # heading opens the chapter once the heading is cut.
+                    para_iter = _drop_edge_rules(para_iter)
                     for b_idx, block in enumerate(para_iter):
                         first = len(all_chunks)
                         if block.get("type") == "table":

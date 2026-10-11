@@ -5103,3 +5103,18 @@ def test_a_chapters_first_paragraph_takes_no_break_space(tmp_path):
     entries, styles, text, _ = _book(tmp_path, chapters)
     (a,) = [e for e in entries if text(e) == "A."]
     assert _lh(styles[str(a["$157"])], "$47") == "1$310"
+
+
+@pytest.mark.unit
+def test_a_rule_under_the_chapter_heading_is_not_written(tmp_path):
+    """The book's own heading is cut as the chapter title; a rule after it
+    then opens the chapter."""
+    chapters = [
+        {
+            "title": "One",
+            "text": "One\n\nA.",
+            "blocks": [_para("One"), _rule(), _para("A."), _rule()],
+        }
+    ]
+    entries, _, _, _ = _book(tmp_path, chapters)
+    assert not [e for e in entries if str(e["$159"]) == "$596"]
