@@ -7820,3 +7820,92 @@ def test_a_link_inside_a_link_takes_the_inner_target():
         "word": [str(make_link_flag("n.xhtml#note"))],
         " here": [str(make_link_flag("c.xhtml#sec"))],
     }
+
+
+# ── #233: a span drawn as a block is a line of its own ───────────────────────
+
+
+def _class_display(**displays):
+    """A resolver giving each class its `display`; other elements none."""
+    return lambda e: (
+        {"display": displays[e.get("class")]} if e.get("class") in displays else None
+    )
+
+
+@pytest.mark.unit
+def test_display_block_spans_in_a_paragraph_are_lines_of_it():
+    texts = _texts(
+        '<p><span class="line">A</span><span class="line">B</span></p>',
+        style_resolver=_class_display(line="block"),
+    )
+    assert texts == ["A\nB"]
+
+
+@pytest.mark.unit
+def test_text_around_a_display_block_span_goes_on_lines_of_its_own():
+    texts = _texts(
+        '<p>lead <span class="line">mid</span> tail</p>',
+        style_resolver=_class_display(line="block"),
+    )
+    assert texts == ["lead\nmid\ntail"]
+
+
+@pytest.mark.unit
+def test_a_br_before_a_display_block_span_gives_one_line_break_not_two():
+    texts = _texts(
+        '<p>A<br/><span class="line">B</span><br/>C</p>',
+        style_resolver=_class_display(line="block"),
+    )
+    assert texts == ["A\nB\nC"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("display", ["list-item", "table-row", "flex", "grid"])
+def test_other_block_level_displays_break_the_line(display):
+    texts = _texts(
+        '<p><span class="x">A</span><span class="x">B</span></p>',
+        style_resolver=_class_display(x=display),
+    )
+    assert texts == ["A\nB"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("display", ["inline", "inline-block", "table-cell", None])
+def test_inline_displays_keep_the_spans_in_one_line(display):
+    texts = _texts(
+        '<p><span class="x">A</span> <span class="x">B</span></p>',
+        style_resolver=_class_display(x=display),
+    )
+    assert texts == ["A B"]
+
+
+@pytest.mark.unit
+def test_a_display_block_span_keeps_its_emphasis():
+    blocks = extract_blocks_from_html(
+        _doc('<p>a <em class="line">b</em> c</p>'),
+        style_resolver=_class_display(line="block"),
+    )
+    assert blocks[0]["text"] == "a\nb\nc"
+    assert [(s, n) for s, n, f in blocks[0]["spans"] if I in f] == [(2, 1)]
+
+
+@pytest.mark.unit
+def test_a_paragraph_walked_inline_in_a_cell_is_not_made_a_line():
+    """calibre's own sheet gives <p> `display: block`; on the rows path a
+    cell's paragraphs are kept apart by a space, as before (#279)."""
+    texts = _texts(
+        "<table><tr><td><p>one</p><p>two</p></td><td>x</td></tr></table>",
+        style_resolver=lambda e: {"display": "block"} if e.tag.endswith("}p") else None,
+    )
+    assert texts == ["one two x"]
+
+
+@pytest.mark.unit
+def test_standard_ebooks_verse_with_a_br_after_each_span_is_single_spaced():
+    """Standard Ebooks hides the <br> after each verse span with CSS that
+    kfxgen does not read (#232); it must not add a blank line."""
+    texts = _texts(
+        '<p><span class="line">A</span>\n<br/>\n<span class="line">B</span></p>',
+        style_resolver=_class_display(line="block"),
+    )
+    assert texts == ["A\nB"]

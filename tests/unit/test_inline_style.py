@@ -242,3 +242,51 @@ def test_anchor_mark_after_collapsed_trailing_space_clamps_to_text_end():
     )
     assert text == "word"
     assert anchors == {"tail": 4}
+
+
+_LS = ("", frozenset({ist.LINE_START}))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "segments, text",
+    [
+        ([_LS, ("A", frozenset()), _LS], "A"),
+        ([("A", frozenset()), _LS, _LS, ("B", frozenset())], "A\nB"),
+        ([("A ", frozenset()), _LS, (" B", frozenset())], "A\nB"),
+        (
+            [
+                ("A", frozenset()),
+                (ist.HARD_BREAK, frozenset()),
+                _LS,
+                ("B", frozenset()),
+            ],
+            "A\nB",
+        ),
+        (
+            [
+                ("A", frozenset()),
+                _LS,
+                (" \n", frozenset()),
+                (ist.HARD_BREAK, frozenset()),
+                ("B", frozenset()),
+            ],
+            "A\nB",
+        ),
+        (
+            [
+                ("A", frozenset()),
+                _LS,
+                ("B", frozenset()),
+                (ist.HARD_BREAK, frozenset()),
+                (ist.HARD_BREAK, frozenset()),
+                ("C", frozenset()),
+            ],
+            "A\nB\n\nC",
+        ),
+    ],
+)
+def test_line_start_breaks_the_line_once(segments, text):
+    """#233: a block's edge starts a line, never an empty one, and swallows
+    a <br> straight after it; later <br>s count as before."""
+    assert ist.normalize_runs(segments)[0] == text

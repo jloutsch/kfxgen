@@ -31,6 +31,12 @@ _WS_FLAGS = frozenset({FLAG_PRE, FLAG_PRE_LINE})
 #: KFX Input turns it back into <br>. (#202)
 HARD_BREAK = "\u2028"
 
+#: An element drawn as a block (a `display: block` span) inside a paragraph:
+#: what follows it, and what follows the text before it, starts a new line. A
+#: segment of its own, ("", {LINE_START}). Unlike HARD_BREAK it never makes an
+#: empty line: a <br> next to it gives one break, not two. (#233)
+LINE_START = "line-start"
+
 NBSP = "\u00a0"
 _TAB_STOP = 8
 
@@ -97,6 +103,7 @@ def normalize_runs_with_anchors(
     anchors = {}
     pre_spaces = []  # indexes of spaces kept in preformatted text
     prev_space = True  # strip leading whitespace
+    line_started = False  # just past a LINE_START, no text since
 
     def _drop_last():
         chars.pop()
@@ -123,13 +130,23 @@ def normalize_runs_with_anchors(
         if marked is not None:
             anchors.setdefault(marked, len(chars))
             continue
+        if LINE_START in flags:
+            if chars and chars[-1] != "\n":
+                _break(frozenset())
+            prev_space = True
+            # A <br> straight after a block's edge adds no line: Standard
+            # Ebooks puts one after each verse span and hides it with CSS.
+            line_started = True
+            continue
         pre = FLAG_PRE in flags
         pre_line = FLAG_PRE_LINE in flags
         if pre or pre_line:
             flags = flags - _WS_FLAGS
         for ch in text:
             if ch == HARD_BREAK or ((pre or pre_line) and ch == "\n"):
-                _break(flags)
+                if not line_started:
+                    _break(flags)
+                line_started = False
                 prev_space = True
             elif pre and ch in " \t":
                 if ch == "\t":
@@ -157,6 +174,7 @@ def normalize_runs_with_anchors(
                 chars.append(ch)
                 flags_per_char.append(flags)
                 prev_space = False
+                line_started = False
     # strip trailing space and line breaks
     while chars and chars[-1] in (" ", "\n"):
         _drop_last()

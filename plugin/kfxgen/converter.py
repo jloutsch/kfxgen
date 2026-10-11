@@ -27,6 +27,7 @@ from .inline_style import (
     FLAG_SUB,
     FLAG_SUPER,
     HARD_BREAK,
+    LINE_START,
     compute_block_style,
     make_anchor_mark,
     make_link_flag,
@@ -651,6 +652,26 @@ def _is_link_flag(flag):
     return isinstance(flag, tuple) and flag[:1] == make_link_flag("")[:1]
 
 
+#: `display` values that draw an element as a block of its own (#233).
+_BLOCK_DISPLAYS = frozenset(
+    {"block", "list-item", "table", "table-row", "table-caption", "flex", "grid"}
+    | {"flow-root"}
+)
+
+
+def _draws_as_block(local, css):
+    """Whether an element HTML treats as inline (a <span>, an <a>, an <em>)
+    is drawn as a block by its CSS. A tag that is a block already keeps its
+    own handling: calibre's sheet gives every <p> `display: block`, and a
+    paragraph walked inline in a cell stays apart by a space (#279)."""
+    if local in _CELL_BLOCK_TAGS or local in _CELL_TAGS or local in _BODY_BLOCK_TAGS:
+        return False
+    if local in _TABLE_PART_TAGS or local == "table":
+        return False
+    display = str((css or {}).get("display") or "").strip().lower()
+    return display in _BLOCK_DISPLAYS
+
+
 def _walk_inline(
     elem,
     flags=frozenset(),
@@ -716,6 +737,7 @@ def _walk_inline(
             # hash order, so it changed between runs (#317).
             cur = {f for f in cur if not _is_link_flag(f)}
             cur.add(make_link_flag(target))
+    css = None
     if style_resolver is not None and not is_root:
         css = style_resolver(elem)
         if css:
@@ -726,6 +748,14 @@ def _walk_inline(
                 cur.add(FLAG_SUB)
     cur = frozenset(cur)
     parts = []
+    # A <span> drawn as a block, one per line of verse, an address, a
+    # letter's closing: its lines used to run together ("AB"). It is a line
+    # of the paragraph, not a paragraph of its own: kfxgen puts a line of
+    # space above an unindented paragraph, which would double-space the verse.
+    # (#233)
+    line = _draws_as_block(local, css)
+    if line:
+        parts.append(("", frozenset({LINE_START})))
     # Open a cell with a boundary as well as closing one, so a cell cannot fuse
     # onto whatever preceded it. Closing alone leaves the case where a cell
     # follows ordinary text rather than another cell — a nested table inside a
@@ -821,6 +851,8 @@ def _walk_inline(
     # with plain `etree.fromstring`, which does not. (#128)
     if local in _CELL_TAGS and not is_root:
         parts.append((" ", frozenset()))
+    if line:
+        parts.append(("", frozenset({LINE_START})))
     return parts
 
 
