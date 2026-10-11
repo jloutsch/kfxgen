@@ -2315,6 +2315,7 @@ def _space_between(blocks, margins):
     paragraphs in the Gutenberg 90 and 28,221 in 186 of 200 library books:
     space after headings, before chapter summaries, around list items.
 
+    A spacer next to a heading is layout, not a break, and is not written.
     A file's first paragraph starts a page or follows one in the same
     chapter, and takes none. Tables, boxes and rules keep their own spacing;
     a break before one is dropped."""
@@ -2333,7 +2334,16 @@ def _space_between(blocks, margins):
         top, bottom = margins.get(id(b), (0.0, 0.0))
         if kind is None:
             if out:
-                gaps.append((b, round(max(above, top) + lines, 4), on_purpose))
+                # A blank line under a heading or above one is layout, not a
+                # break: pg245 puts a spacer after each chapter heading.
+                beside_heading = b.get("heading") or out[-1].get("heading")
+                gaps.append(
+                    (
+                        b,
+                        round(max(above, top) + lines, 4),
+                        on_purpose and not beside_heading,
+                    )
+                )
             above = bottom
         else:
             above = 0.0

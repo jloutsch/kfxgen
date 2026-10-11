@@ -5089,3 +5089,17 @@ def test_a_rule_takes_one_position_like_a_picture(tmp_path):
     pos = {int(p["$185"]): int(p["$184"]) for p in val(by_type(frags, "$265")[0])}
     after = pos[eids[3]]
     assert after - pos[rule_eid] == 1
+
+
+@pytest.mark.unit
+def test_a_chapters_first_paragraph_takes_no_break_space(tmp_path):
+    chapters = [
+        {
+            "title": "One",
+            "text": "x",
+            "blocks": [_spaced(_para("A."), 2.4), _para("B.")],
+        }
+    ]
+    entries, styles, text, _ = _book(tmp_path, chapters)
+    (a,) = [e for e in entries if text(e) == "A."]
+    assert _lh(styles[str(a["$157"])], "$47") == "1$310"

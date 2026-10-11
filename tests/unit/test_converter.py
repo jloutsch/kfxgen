@@ -8095,3 +8095,12 @@ def test_a_spacer_between_every_paragraph_is_the_files_spacing_not_a_break():
 def test_with_no_usual_gap_the_smaller_is_the_spacing():
     blocks = extract_blocks_from_html(_doc("<p>a</p><p>&#160;</p><p>b</p><p>c</p>"))
     assert _gaps(blocks) == [("a", None), ("b", 1.2), ("c", None)]
+
+
+@pytest.mark.unit
+def test_a_spacer_beside_a_heading_is_not_a_break():
+    """pg245 puts `<p><br/></p>` under each chapter heading."""
+    blocks = extract_blocks_from_html(
+        _doc(_LEAD + "<p>a</p><p><br/></p><h3>Head</h3><p><br/></p><p>b</p>")
+    )
+    assert all("space_above" not in b for b in blocks)

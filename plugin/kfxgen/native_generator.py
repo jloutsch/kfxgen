@@ -3929,6 +3929,12 @@ class NativeKFXGenerator:
                             )
                             unplaced = _emit_box_chunks(block, following)
                         else:
+                            if b_idx == 0 and block.get("space_above"):
+                                # A chapter's first paragraph opens a page or
+                                # sits under its heading (#230).
+                                block = {
+                                    k: v for k, v in block.items() if k != "space_above"
+                                }
                             unplaced = _emit_paragraph(block)
                         if pending and len(all_chunks) > first:
                             _attach_keys(first, pending)
