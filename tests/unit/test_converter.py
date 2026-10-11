@@ -8039,24 +8039,6 @@ def test_a_contents_listing_after_spacers_keeps_its_place():
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    "rules",
-    [
-        {"brk": {"margin-top": "2em"}},
-        {"end": {"margin-bottom": "3em"}},
-    ],
-)
-def test_a_margin_alone_is_not_a_break(rules):
-    """Read as breaks, margins gave new space to 28,221 paragraphs in 186
-    of 200 library books: after headings, before summaries, around lists."""
-    blocks = extract_blocks_from_html(
-        _doc(_LEAD + '<p class="end">a</p><p class="brk">b</p>'),
-        style_resolver=_css_for_class(**rules),
-    )
-    assert all("space_above" not in b for b in blocks)
-
-
-@pytest.mark.unit
 def test_a_breaks_margins_collapse_with_the_paragraphs_around_it():
     blocks = extract_blocks_from_html(
         _doc(_LEAD + '<p class="end">a</p><hr class="r"/><p class="brk">b</p>'),
@@ -8115,3 +8097,105 @@ def test_an_id_on_a_files_last_hr_goes_to_the_paragraph_before():
         ("Last.", ["hend"]),
         ("rule", []),
     ]
+
+
+# ── #326: a scene break set by a margin alone ────────────────────────────────
+
+
+def _p_classes(*classes):
+    return "".join(
+        f'<p class="{c}">{c}{i}</p>' if c else f"<p>p{i}</p>"
+        for i, c in enumerate(classes)
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "rules",
+    [{"brk": {"margin-top": "2em"}}, {"end": {"margin-bottom": "2em"}}],
+    ids=["margin-top", "margin-bottom before"],
+)
+def test_an_isolated_margin_gap_between_paragraphs_is_a_break(rules):
+    blocks = extract_blocks_from_html(
+        _doc(_p_classes("", "", "end", "brk", "", "")),
+        style_resolver=_css_for_class(**rules),
+    )
+    assert [b.get("space_above") for b in blocks] == [None, None, None, 2.0, None, None]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "body, rules",
+    [
+        # Under 1.5em: calibre's 1em paragraph margin, a stanza's gap.
+        (_p_classes("", "", "brk", "", ""), {"brk": {"margin-top": "1.2em"}}),
+        # Under twice the usual gap.
+        (
+            _p_classes("p", "p", "brk", "p", "p"),
+            {"p": {"margin-top": "1em"}, "brk": {"margin-top": "1.8em"}},
+        ),
+        # Two in a row: a list, a run of block quotations.
+        (_p_classes("", "", "brk", "brk", "", ""), {"brk": {"margin-top": "2em"}}),
+        # Right before a heading.
+        (
+            _p_classes("", "", "brk") + "<h3>H</h3><p>z</p>",
+            {"brk": {"margin-top": "2em"}},
+        ),
+    ],
+    ids=["under 1.5em", "under twice the usual", "not isolated", "before a heading"],
+)
+def test_a_margin_gap_that_does_not_stand_out_is_not_a_break(body, rules):
+    blocks = extract_blocks_from_html(
+        _doc(body), style_resolver=_css_for_class(**rules)
+    )
+    assert all("space_above" not in b for b in blocks)
+
+
+@pytest.mark.unit
+def test_twice_the_usual_gap_is_a_break_in_a_spaced_book():
+    blocks = extract_blocks_from_html(
+        _doc(_p_classes("p", "p", "p", "brk", "p", "p")),
+        style_resolver=_css_for_class(
+            p={"margin-top": "1em"}, brk={"margin-top": "2em"}
+        ),
+    )
+    assert [b.get("space_above") for b in blocks] == [None, None, None, 2.0, None, None]
+
+
+@pytest.mark.unit
+def test_a_margin_gap_beside_a_heading_is_not_a_break():
+    blocks = extract_blocks_from_html(
+        _doc(
+            _p_classes("", "", "")
+            + '<h3 class="brk">H</h3>'
+            + _p_classes("brk", "", "")
+        ),
+        style_resolver=_css_for_class(brk={"margin-top": "2em"}),
+    )
+    assert all("space_above" not in b for b in blocks)
+
+
+@pytest.mark.unit
+def test_a_sections_margin_is_a_break_above_its_first_paragraph():
+    blocks = extract_blocks_from_html(
+        _doc(
+            _p_classes("", "", "")
+            + '<div class="sec"><p>s0</p><p>s1</p></div>'
+            + _p_classes("", "")
+        ),
+        style_resolver=_css_for_class(sec={"margin-top": "3em"}),
+    )
+    assert [(b["text"], b.get("space_above")) for b in blocks][3:5] == [
+        ("s0", 3.0),
+        ("s1", None),
+    ]
+
+
+@pytest.mark.unit
+def test_a_margin_gap_after_a_rule_is_the_rules_to_space():
+    """The rule has its own space below; a margin there is not a break."""
+    blocks = extract_blocks_from_html(
+        _doc(_p_classes("", "", "") + "<hr/>" + _p_classes("brk", "", "")),
+        style_resolver=_css_for_class(brk={"margin-top": "2em"}),
+    )
+    assert all("space_above" not in b for b in blocks)

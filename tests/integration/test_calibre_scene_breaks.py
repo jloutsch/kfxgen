@@ -5,8 +5,8 @@ A break inside a chapter is an `<hr>`, a gap set by `margin-top` or
 three left no trace, so a change of scene read as a continuation. An `<hr>`
 is now a rule ($596), as Kindle Previewer writes it; one whose CSS draws no
 border, or a spacer, is space ($47) above the next paragraph, its size taken
-from the margins around it. A margin alone is not a break, and stays
-unwritten. The unit tests use a fake resolver; this checks what calibre's
+from the margins around it. A margin alone is a break when it stands out
+from the file's usual paragraph spacing (#326). The unit tests use a fake resolver; this checks what calibre's
 own sheet and computed CSS give the plugin.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
@@ -62,13 +62,13 @@ CASES = [
         "c1",
         "MARGINTOP",
         '<p>{c} lead</p><p class="break">after</p>',
-        [("after", None)],
+        [("after", "1.66667")],
     ),
     (
         "c1",
         "MARGINBOTTOM",
         '<p class="gapbelow">{c} lead</p><p>after</p>',
-        [("after", None)],
+        [("after", "1.66667")],
     ),
     (
         "c1",
@@ -81,7 +81,7 @@ CASES = [
         "c1",
         "SECTION",
         '<p>{c} lead</p><div class="sec"><p>after</p><p>more</p></div>',
-        [("after", None), ("more", None)],
+        [("after", "2.5"), ("more", None)],
     ),
     (
         "c1",

@@ -2288,6 +2288,10 @@ def _prefix_marker(marker, text, spans, mark_offsets):
     return marker + text, spans, mark_offsets
 
 
+#: The least a gap set by margins alone must be to count as a scene break:
+#: 1em is calibre's own paragraph margin, and a stanza's (#326).
+_MARGIN_BREAK_EM = 1.5
+
 #: The fields every block carries, for a rule or a space that holds no
 #: text (#230).
 _EMPTY_BLOCK = {
@@ -2301,26 +2305,28 @@ _EMPTY_BLOCK = {
 
 def _space_between(blocks, margins):
     """`blocks` with the space a scene break puts above a paragraph, in ems,
-    as "space_above" (#230). A break is a spacer paragraph or an <hr> that
-    draws nothing; the space blocks standing for them are taken out.
+    as "space_above" (#230, #326). The space blocks standing for spacers and
+    invisible <hr>s are taken out.
 
     A paragraph's gap is the larger of its own margin-top, the margin-bottom
     before it and the margins of an invisible <hr> between, as margins
-    collapse in a browser, plus a line for each spacer paragraph. Only a
-    break's gap is written, and only when it is larger than the file's most
-    common gap: a book with a spacer between every paragraph keeps kfxgen's
-    spacing.
+    collapse in a browser, plus a line for each spacer paragraph. The file's
+    most common gap is its paragraph spacing, which kfxgen draws its own way.
+    A gap is a break, and is written, when it is larger than that and:
+    - a spacer or an invisible <hr> made it (#230); or
+    - margins alone made it, and it stands out (#326): at least 1.5em and
+      twice the usual gap, with usual gaps on both sides. Copying every
+      margin changed 28,221 paragraphs in 186 of 200 library books; isolated
+      gaps are 2,843 in 112, among them the `section-break`, `space-break`
+      and `noindent` paragraphs that open a scene.
 
-    Margins alone are not a break. Read as one, they gave new space to 9,274
-    paragraphs in the Gutenberg 90 and 28,221 in 186 of 200 library books:
-    space after headings, before chapter summaries, around list items.
-
-    A spacer next to a heading is layout, not a break, and is not written.
-    A file's first paragraph starts a page or follows one in the same
-    chapter, and takes none. Tables, boxes and rules keep their own spacing;
-    a break before one is dropped."""
+    A gap next to a heading is layout, not a break, and is not written
+    (pg245 puts a spacer under each chapter heading). A file's first
+    paragraph starts a page or follows one in the same chapter, and takes
+    none. Tables, boxes and rules keep their own spacing; a break before one
+    is dropped."""
     out = []
-    gaps = []  # (block, gap, on purpose)
+    gaps = []  # (block, gap, how: "spacer", "margin" or None beside a heading)
     above = 0.0  # the larger margin waiting: the paragraph before's, an <hr>'s
     lines = 0.0
     on_purpose = False
@@ -2334,16 +2340,13 @@ def _space_between(blocks, margins):
         top, bottom = margins.get(id(b), (0.0, 0.0))
         if kind is None:
             if out:
-                # A blank line under a heading or above one is layout, not a
-                # break: pg245 puts a spacer after each chapter heading.
-                beside_heading = b.get("heading") or out[-1].get("heading")
-                gaps.append(
-                    (
-                        b,
-                        round(max(above, top) + lines, 4),
-                        on_purpose and not beside_heading,
-                    )
-                )
+                beside = b.get("heading") or out[-1].get("heading")
+                how = None if beside else "spacer" if on_purpose else "margin"
+                if out[-1].get("type") is not None:
+                    # After a table, a box or a rule: a margin there is
+                    # theirs to space.
+                    how = how if how == "spacer" else None
+                gaps.append((b, round(max(above, top) + lines, 4), how))
             above = bottom
         else:
             above = 0.0
@@ -2354,9 +2357,35 @@ def _space_between(blocks, margins):
         counts = collections.Counter(g for _, g, _ in gaps)
         # The most common; of two as common, the smaller.
         usual = max(counts, key=lambda g: (counts[g], -g))
-        for b, gap, on_purpose in gaps:
-            if on_purpose and gap > usual + 0.01:
-                b["space_above"] = gap
+        gap_of = {id(b): gap for b, gap, _ in gaps}
+
+        def ordinary(i):
+            """No more than the usual gap above the paragraph at out[i], or
+            nothing there to compare (the file's edge, a table, a box)."""
+            if not 0 <= i < len(out):
+                return True
+            return gap_of.get(id(out[i]), usual) <= usual + 0.01
+
+        index = {id(b): i for i, b in enumerate(out)}
+        for b, gap, how in gaps:
+            if how is None or gap <= usual + 0.01:
+                continue
+            i = index[id(b)]
+            following = out[i + 1] if i + 1 < len(out) else None
+            if how == "margin" and not (
+                gap >= _MARGIN_BREAK_EM
+                and gap >= 2 * usual
+                and ordinary(i - 1)
+                and ordinary(i + 1)
+                # Followed by a paragraph, not a heading or a table: a
+                # margin before those is how they are set apart.
+                and (
+                    following is None
+                    or (following.get("type") is None and not following.get("heading"))
+                )
+            ):
+                continue
+            b["space_above"] = gap
     return out
 
 
