@@ -2471,6 +2471,7 @@ def extract_blocks_from_html(
     toc_targets=None,
     link_targets=None,
     notes_seen=None,
+    keep_nav_listings=False,
 ):
     """Like extract_text_from_html but returns structured blocks:
     [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None,
@@ -2503,6 +2504,9 @@ def extract_blocks_from_html(
     pointing past a table's start (its own id, an anchor just before it, its
     first row or first cell) cannot start a chapter there. Such a table falls
     back to rows, which keeps 5.8.8's chapters. (#219)
+
+    `keep_nav_listings`: print contents listings as the book has them, for
+    a book that gets no Contents page of kfxgen's (#335).
 
     `base_href` is the spine file this markup came from. It qualifies both
     sides of an in-book link: `anchor_keys` are the block's ids as
@@ -2826,7 +2830,7 @@ def extract_blocks_from_html(
             if default is not None:
                 _walk(default)
             return
-        if _is_nav_listing(elem):
+        if not keep_nav_listings and _is_nav_listing(elem):
             if nav_listing_at is not None:
                 # The listing's own ids travel with its position: a TOC entry
                 # aimed at one of them is what makes the chapter starting
@@ -3788,7 +3792,12 @@ def _assemble_chapters_by_coordinate(
 
 
 def extract_chapters_from_oeb(
-    oeb_book, log, metadata=None, cover_href=None, native_tables=False
+    oeb_book,
+    log,
+    metadata=None,
+    cover_href=None,
+    native_tables=False,
+    keep_nav_listings=False,
 ):
     """
     Extract structured chapters from OEB book by mapping TOC to spine items.
@@ -3802,6 +3811,8 @@ def extract_chapters_from_oeb(
         metadata: Optional dict with 'title' and 'author' for title page replacement
         cover_href: Manifest href of the cover image, when one was found
         native_tables: Write eligible tables as one table block each (#219)
+        keep_nav_listings: Print contents listings rather than drop them;
+            set when a first pass finds the book gets no Contents page (#335)
 
     Returns:
         list: List of chapter dicts with 'title' and 'text' keys
@@ -3877,6 +3888,7 @@ def extract_chapters_from_oeb(
                 native_tables=native_tables,
                 link_targets=link_targets,
                 notes_seen=notes_seen,
+                keep_nav_listings=keep_nav_listings,
                 # Assembly skips entries naming a footnote; so does this.
                 toc_targets=toc_targets.get(
                     _normalize_href(getattr(item, "href", "") or ""), set()
@@ -3963,6 +3975,10 @@ def extract_chapters_from_oeb(
         )
         if chapters:
             log.info(f"Assembled {len(chapters)} chapters from TOC coordinates")
+            if _listing_without_contents(chapters, keep_nav_listings):
+                return _with_listings_kept(
+                    oeb_book, log, metadata, cover_href, native_tables
+                )
             _replace_title_page(chapters, metadata, log)
             _warn_flattened_tables(
                 chapters, table_blocks, log, native_tables, notes_blocks
@@ -3993,9 +4009,39 @@ def extract_chapters_from_oeb(
         chapters.append(chapter)
 
     log.info(f"Using {len(chapters)} spine items as chapters (no TOC mapping)")
+    if _listing_without_contents(chapters, keep_nav_listings):
+        return _with_listings_kept(oeb_book, log, metadata, cover_href, native_tables)
     _replace_title_page(chapters, metadata, log)
     _warn_flattened_tables(chapters, table_blocks, log, native_tables, notes_blocks)
     return chapters
+
+
+def _listing_without_contents(chapters, kept):
+    """Whether the book dropped a contents listing but will get no Contents
+    page: none titled so, and no page left heading-sized to be rebuilt as
+    one (#335). pg2701 prints its listing on the title page with the title
+    and byline; dropping it left the book with no contents in the text."""
+    if kept or not any(ch.get("_had_nav_listing") for ch in chapters):
+        return False
+    titled = any(
+        _normalize_title(c["title"]) in _CONTENTS_TITLES and not c.get("_from_spine")
+        for c in chapters
+    )
+    return not titled and _nav_listing_contents_chapter(chapters) is None
+
+
+def _with_listings_kept(oeb_book, log, metadata, cover_href, native_tables):
+    """The chapters again, with the book's own contents listings printed and
+    their links working, for a book that gets no Contents page (#335)."""
+    log.info("  No Contents page to rebuild: keeping the book's own listing")
+    return extract_chapters_from_oeb(
+        oeb_book,
+        log,
+        metadata=metadata,
+        cover_href=cover_href,
+        native_tables=native_tables,
+        keep_nav_listings=True,
+    )
 
 
 def _warn_flattened_tables(chapters, table_blocks, log, native_tables, notes_blocks=()):

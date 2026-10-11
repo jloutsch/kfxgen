@@ -3636,6 +3636,46 @@ class TestDiscardedListingBecomesGeneratedContents:
             "the rebuilt contents page would render with no heading at all"
         )
 
+    def test_a_listing_with_no_contents_page_to_become_is_kept(self):
+        """#335: pg2701's shape. The listing sits on the title page with the
+        title and byline, so no page is rebuilt as the Contents page, and
+        dropping the listing left the book with no in-text contents. It is
+        printed as the book has it, its links working."""
+        title_page = (
+            "<h1>THE BOOK</h1><p>By Its Author</p>"
+            '<p class="toc"><a href="c1.xhtml">Chapter I</a></p>'
+            '<p class="toc"><a href="c2.xhtml">Chapter II</a></p>'
+        )
+        chapters = self._chapters(
+            [_RawSpineItem("title.xhtml", title_page)] + self._body_chapters(),
+            [
+                ("The Book", "title.xhtml"),
+                ("Chapter I", "c1.xhtml"),
+                ("Chapter II", "c2.xhtml"),
+            ],
+        )
+        front = chapters[0]
+        texts = [b["text"] for b in front["blocks"]]
+        assert texts == ["THE BOOK", "By Its Author", "Chapter I", "Chapter II"]
+        links = [
+            str(f) for b in front["blocks"] for _, _, flags in b["spans"] for f in flags
+        ]
+        assert any("c1.xhtml" in f for f in links) and any(
+            "c2.xhtml" in f for f in links
+        )
+        assert not any(ch.get("toc_links") for ch in chapters)
+
+    def test_a_listing_is_still_dropped_when_its_page_becomes_contents(self):
+        chapters = self._chapters(
+            [_RawSpineItem("nav.xhtml", _NAV_LISTING)] + self._body_chapters(),
+            [
+                ("Navigation", "nav.xhtml"),
+                ("Chapter I", "c1.xhtml"),
+                ("Chapter II", "c2.xhtml"),
+            ],
+        )
+        assert chapters[0].get("toc_links") and "blocks" not in chapters[0]
+
     def test_book_does_not_get_two_contents_pages(self):
         """pg64317's shape: an inline listing in the front matter *and* a real
         Contents chapter. The rebuild belongs to the Contents chapter; the
@@ -3700,7 +3740,9 @@ class TestDiscardedListingBecomesGeneratedContents:
 
     def test_listing_beside_real_prose_does_not_replace_that_prose(self):
         """A page that carries a listing *and* substantial content is not a
-        contents page. Drop the listing; never overwrite the content."""
+        contents page: never overwrite the content. With no Contents page
+        anywhere in the book, the listing is kept rather than dropped (#335),
+        so the reader still has one in the text."""
         front = (
             '<div class="toc"><p><a href="c1.xhtml">Chapter I</a></p></div>'
             "<p>A long stretch of genuine front matter prose that the reader "
@@ -3717,7 +3759,7 @@ class TestDiscardedListingBecomesGeneratedContents:
         front_ch = chapters[0]
         assert not front_ch.get("toc_links")
         assert "genuine front matter prose" in front_ch["text"]
-        assert "Chapter I" not in front_ch["text"]
+        assert "Chapter I" in front_ch["text"]
 
 
 @pytest.mark.unit
