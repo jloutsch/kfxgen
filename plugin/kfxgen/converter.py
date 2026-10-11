@@ -2300,20 +2300,24 @@ _EMPTY_BLOCK = {
 
 
 def _space_between(blocks, margins):
-    """`blocks` with the space above each paragraph that stands out, in ems,
-    as "space_above" (#230).
+    """`blocks` with the space a scene break puts above a paragraph, in ems,
+    as "space_above" (#230). A break is a spacer paragraph or an <hr> that
+    draws nothing; the space blocks standing for them are taken out.
 
     A paragraph's gap is the larger of its own margin-top, the margin-bottom
     before it and the margins of an invisible <hr> between, as margins
-    collapse in a browser, plus a line for each spacer paragraph. The file's
-    most common gap is its paragraph spacing, which kfxgen draws its own
-    way; only a larger gap is a break. A book with 2em between all its
-    paragraphs keeps kfxgen's spacing; one 2em gap among 1em gaps is kept.
-    Space the book put in on purpose, a spacer or an <hr>, is marked
-    "space_break". The space blocks are taken out. A file's first paragraph
-    starts a page or follows one in the same chapter, and takes none.
-    Tables, boxes and rules keep their own spacing; space before one is
-    dropped."""
+    collapse in a browser, plus a line for each spacer paragraph. Only a
+    break's gap is written, and only when it is larger than the file's most
+    common gap: a book with a spacer between every paragraph keeps kfxgen's
+    spacing.
+
+    Margins alone are not a break. Read as one, they gave new space to 9,274
+    paragraphs in the Gutenberg 90 and 28,221 in 186 of 200 library books:
+    space after headings, before chapter summaries, around list items.
+
+    A file's first paragraph starts a page or follows one in the same
+    chapter, and takes none. Tables, boxes and rules keep their own spacing;
+    a break before one is dropped."""
     out = []
     gaps = []  # (block, gap, on purpose)
     above = 0.0  # the larger margin waiting: the paragraph before's, an <hr>'s
@@ -2341,10 +2345,8 @@ def _space_between(blocks, margins):
         # The most common; of two as common, the smaller.
         usual = max(counts, key=lambda g: (counts[g], -g))
         for b, gap, on_purpose in gaps:
-            if gap > usual + 0.01:
+            if on_purpose and gap > usual + 0.01:
                 b["space_above"] = gap
-                if on_purpose:
-                    b["space_break"] = True
     return out
 
 

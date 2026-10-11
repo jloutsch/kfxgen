@@ -5029,10 +5029,9 @@ def test_a_rule_at_a_chapters_start_or_end_is_not_written(tmp_path):
         (_para("B."), 2.0, "1.66667$310"),
         (_para("B."), 1.2, "1$310"),
         (_para("B."), 0.5, "1$310"),
-        # Indented: no space; more than 1em is written.
+        # Indented: no space of its own; any is written.
         (_indented("B."), 1.5, "1.25$310"),
-        (_indented("B."), 1.0, None),
-        (_indented("B."), 0.6, None),
+        (_indented("B."), 0.6, "0.5$310"),
     ],
 )
 def test_space_above_beyond_kfxgens_own_spacing_is_written(
@@ -5090,14 +5089,3 @@ def test_a_rule_takes_one_position_like_a_picture(tmp_path):
     pos = {int(p["$185"]): int(p["$184"]) for p in val(by_type(frags, "$265")[0])}
     after = pos[eids[3]]
     assert after - pos[rule_eid] == 1
-
-
-@pytest.mark.unit
-def test_a_break_the_book_put_in_counts_beyond_kfxgens_own_spacing(tmp_path):
-    """A spacer or an <hr> drawing nothing, 1em: written above an indented
-    paragraph, where a 1em margin alone is not."""
-    para = dict(_spaced(_indented("B."), 1.0), space_break=True)
-    chapters = [{"title": "One", "text": "x", "blocks": [_para("A."), para]}]
-    entries, styles, text, _ = _book(tmp_path, chapters)
-    (b,) = [e for e in entries if text(e) == "B."]
-    assert _lh(styles[str(b["$157"])], "$47") == "0.833333$310"

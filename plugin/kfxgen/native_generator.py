@@ -361,17 +361,14 @@ def _has_space_above(block):
 
 
 def _space_to_write(block):
-    """The space above a paragraph to write, in ems, or None to keep
-    kfxgen's own: a line (1.2em) above an unindented paragraph, none above
-    an indented one. Margins count only beyond that and beyond 1em, calibre's
-    own paragraph margin; a spacer or an <hr> the book put in counts beyond
-    kfxgen's own alone (#230)."""
+    """The space a scene break puts above a paragraph, in ems, or None to
+    keep kfxgen's own when that is as much: a line (1.2em) above an
+    unindented paragraph, none above an indented one (#230)."""
     em = block.get("space_above")
     if not em:
         return None
     own = 0.0 if (block.get("block_style") or {}).get("indent") else _LINE_EM
-    least = own if block.get("space_break") else max(own, 1.0)
-    return em if em > least + 0.01 else None
+    return em if em > own + 0.01 else None
 
 
 def _drop_edge_rules(blocks):

@@ -4,9 +4,10 @@ A break inside a chapter is an `<hr>`, a gap set by `margin-top` or
 `margin-bottom`, or a spacer paragraph holding a non-breaking space. All
 three left no trace, so a change of scene read as a continuation. An `<hr>`
 is now a rule ($596), as Kindle Previewer writes it; one whose CSS draws no
-border, a spacer, or a margin beyond kfxgen's own paragraph spacing is space
-($47) above the next paragraph. The unit tests use a fake resolver; this
-checks what calibre's own sheet and computed CSS give the plugin.
+border, or a spacer, is space ($47) above the next paragraph, its size taken
+from the margins around it. A margin alone is not a break, and stays
+unwritten. The unit tests use a fake resolver; this checks what calibre's
+own sheet and computed CSS give the plugin.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found. CI has no calibre, so this is
@@ -61,13 +62,13 @@ CASES = [
         "c1",
         "MARGINTOP",
         '<p>{c} lead</p><p class="break">after</p>',
-        [("after", "1.66667")],
+        [("after", None)],
     ),
     (
         "c1",
         "MARGINBOTTOM",
         '<p class="gapbelow">{c} lead</p><p>after</p>',
-        [("after", "1.66667")],
+        [("after", None)],
     ),
     (
         "c1",
@@ -80,7 +81,13 @@ CASES = [
         "c1",
         "SECTION",
         '<p>{c} lead</p><div class="sec"><p>after</p><p>more</p></div>',
-        [("after", "2.5"), ("more", None)],
+        [("after", None), ("more", None)],
+    ),
+    (
+        "c1",
+        "SPACERMARGIN",
+        '<p>{c} lead</p><p>&#160;</p><p class="break">after</p>',
+        [("after", "2.66667")],
     ),
 ]
 
