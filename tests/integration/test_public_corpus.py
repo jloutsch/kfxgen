@@ -196,7 +196,9 @@ def _body_blocks(chapter):
 
 
 def _listing_leak(epub):
-    """(run, fused, entries) for the worst-leaking chapter in one book.
+    """(run, fused, entries, leaking, generated) for one book: the worst
+    run and fusion in any chapter, the number of chapters that hold a
+    listing, and whether kfxgen generated a contents page.
 
     Measures the source against the output instead of pattern-matching output
     text, which is what `NAV_MARKERS` was doing and could not do (#136).
@@ -208,18 +210,22 @@ def _listing_leak(epub):
     """
     labels = set(_toc_labels(epub))
     if not labels:
-        return 0, 0, 0
+        return 0, 0, 0, 0, False
     log = _silent_log()
     oeb = EpubAsOeb(str(epub))
     chapters = conv.extract_chapters_from_oeb(oeb, log, conv.extract_metadata(oeb, log))
-    best_run = best_fused = 0
+    best_run = best_fused = leaking = 0
+    generated = any(ch.get("toc_links") for ch in chapters)
+    fused_limit = max(MIN_LISTING_RUN, FUSED_FRACTION * len(labels))
     for chapter in chapters:
         if chapter.get("toc_links"):
             continue
         body = _body_blocks(chapter)
-        best_run = max(best_run, _longest_run(body, labels))
-        best_fused = max(best_fused, _most_fused(body, labels))
-    return best_run, best_fused, len(labels)
+        run, fused = _longest_run(body, labels), _most_fused(body, labels)
+        leaking += run >= MIN_LISTING_RUN or fused >= fused_limit
+        best_run = max(best_run, run)
+        best_fused = max(best_fused, fused)
+    return best_run, best_fused, len(labels), leaking, generated
 
 
 def _corpus_files():
@@ -390,19 +396,27 @@ def _metrics(kfx_path):
 @pytest.mark.skipif(not _corpus_files(), reason=f"{CORPUS_ENV} not set or empty")
 @pytest.mark.parametrize("epub", _corpus_files(), ids=lambda p: p.stem[:40])
 def test_corpus_no_duplicate_contents_listing(epub):
-    """A book's own contents listing must not print in the body (#132/#135).
+    """A book's own contents listing must not print beside kfxgen's (#132/#135).
 
     kfxgen builds a contents page from the real chapter titles, so a listing
     carried over from the source is a second one printed in front of the
     reader. Nine of the 77 books shipped one; `nav_junk` saw one of them, and
-    that one was its own false positive (#136).
+    that one was its own false positive (#136). A book that gets no
+    contents page of kfxgen's keeps its own listing instead (#335): pg2701,
+    pg2160, pg3296, pg6593 and pg19771 print theirs, once.
 
     The two signals are the two shapes a surviving listing takes. `run` is a
     stretch of consecutive blocks that are each a source toc label — a listing
     of paragraphs. `fused` is many labels inside one block, which is what a
     table listing collapses to and what no run-based check can see.
     """
-    run, fused, entries = _listing_leak(epub)
+    run, fused, entries, leaking, generated = _listing_leak(epub)
+    if not generated:
+        assert leaking <= 1, (
+            f"{leaking} chapters print the book's own contents listing; with no "
+            "contents page of kfxgen's it is kept once (#335)"
+        )
+        return
     assert run < MIN_LISTING_RUN, (
         f"{run} consecutive body blocks are source contents entries — "
         "the book's own listing survived into the text"
