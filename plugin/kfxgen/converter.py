@@ -70,6 +70,8 @@ _CELL_BLOCK_TAGS = {
     "ol",
     "li",
     "dl",
+    "dt",
+    "dd",
     "section",
     "article",
     "figure",
@@ -759,10 +761,8 @@ def _walk_inline(
             # mixing text and a block): its edges are a word boundary even
             # when the HTML puts no whitespace there.
             # <td>cellone<p>celltwo</p></td> read "cellonecelltwo" before.
-            # Text inside one block is unchanged. Outside tables this also
-            # reaches a <dl>, which the block walker doesn't treat as a block:
-            # its outer edges get a space, but its dt/dd still join (#229).
-            # (#279)
+            # Text inside one block is unchanged. A <dl>'s terms and
+            # definitions are blocks too (#229). (#279)
             parts.append((" ", frozenset()))
             parts.extend(
                 _walk_inline(
@@ -2151,10 +2151,7 @@ _BODY_BLOCK_TAGS = frozenset(
         "address",
         "aside",
         "center",
-        "dd",
         "details",
-        "dl",
-        "dt",
         "fieldset",
         "figcaption",
         "footer",
@@ -2271,6 +2268,11 @@ def extract_blocks_from_html(
         # paragraph — a Part heading and all its chapters on one line. (#58)
         "ol",
         "ul",
+        # A term and its definition are paragraphs of their own, as a
+        # browser draws them; they ran together as "TermDefinition" (#229).
+        "dl",
+        "dt",
+        "dd",
         "section",
         "article",
         "figure",

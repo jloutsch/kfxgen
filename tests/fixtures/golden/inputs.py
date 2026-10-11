@@ -503,7 +503,13 @@ def make_publisher_structure(out_dir: Path) -> Path:
         '<h1>Front Notes</h1>\n<p id="n1">A different n1, in text/notes.xhtml.</p>',
     )
     # Heading equal to the chapter title — the elision case.
-    afterword = _xhtml_page("Afterword", "<h1>Afterword</h1>\n<p>Closing remarks.</p>")
+    # A definition list, as a glossary prints one: the term and its
+    # definition are paragraphs of their own, not "TermDefinition" (#229).
+    afterword = _xhtml_page(
+        "Afterword",
+        "<h1>Afterword</h1>\n<p>Closing remarks.</p>\n"
+        "<dl><dt>Glossary term</dt><dd>Its definition.</dd></dl>",
+    )
     # A chapter whose nav title is "3. Split Opener" while the page prints the
     # numeral and the title as separate blocks. The synthesized heading used to
     # land on top of the book's own opener and the name rendered twice (#64);
