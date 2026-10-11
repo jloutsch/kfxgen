@@ -4,6 +4,8 @@ KFX Converter - Extract content from OEB and generate KFX
 Uses NativeKFXGenerator to produce KFX with working TOC navigation.
 """
 
+import bisect
+import collections
 import copy
 import logging
 import os
@@ -2298,15 +2300,22 @@ _EMPTY_BLOCK = {
 
 
 def _space_between(blocks, margins):
-    """`blocks` with each paragraph's space above it, in ems, as
-    "space_above" (#230): the larger of its own margin-top, the margin-bottom
+    """`blocks` with the space above each paragraph that stands out, in ems,
+    as "space_above" (#230).
+
+    A paragraph's gap is the larger of its own margin-top, the margin-bottom
     before it and the margins of an invisible <hr> between, as margins
-    collapse in a browser, plus a line for each spacer paragraph. Space the
-    book put in on purpose, a spacer or an <hr>, is marked "space_break".
-    The space blocks are taken out. A file's first paragraph starts a page
-    or follows one in the same chapter, and takes none. Tables, boxes and
-    rules keep their own spacing; space before one is dropped."""
+    collapse in a browser, plus a line for each spacer paragraph. The file's
+    most common gap is its paragraph spacing, which kfxgen draws its own
+    way; only a larger gap is a break. A book with 2em between all its
+    paragraphs keeps kfxgen's spacing; one 2em gap among 1em gaps is kept.
+    Space the book put in on purpose, a spacer or an <hr>, is marked
+    "space_break". The space blocks are taken out. A file's first paragraph
+    starts a page or follows one in the same chapter, and takes none.
+    Tables, boxes and rules keep their own spacing; space before one is
+    dropped."""
     out = []
+    gaps = []  # (block, gap, on purpose)
     above = 0.0  # the larger margin waiting: the paragraph before's, an <hr>'s
     lines = 0.0
     on_purpose = False
@@ -2319,17 +2328,23 @@ def _space_between(blocks, margins):
             continue
         top, bottom = margins.get(id(b), (0.0, 0.0))
         if kind is None:
-            gap = max(above, top) + lines
-            if out and gap > 0:
-                b["space_above"] = round(gap, 4)
-                if on_purpose:
-                    b["space_break"] = True
+            if out:
+                gaps.append((b, round(max(above, top) + lines, 4), on_purpose))
             above = bottom
         else:
             above = 0.0
         lines = 0.0
         on_purpose = False
         out.append(b)
+    if gaps:
+        counts = collections.Counter(g for _, g, _ in gaps)
+        # The most common; of two as common, the smaller.
+        usual = max(counts, key=lambda g: (counts[g], -g))
+        for b, gap, on_purpose in gaps:
+            if gap > usual + 0.01:
+                b["space_above"] = gap
+                if on_purpose:
+                    b["space_break"] = True
     return out
 
 
@@ -3119,6 +3134,13 @@ def extract_blocks_from_html(
         for child in body:
             _walk(child)
 
+    if nav_listing_at:
+        # Each listing's index counts the space blocks before it, which
+        # `_space_between` takes out.
+        spaces = [i for i, b in enumerate(blocks) if b.get("type") == "space"]
+        nav_listing_at[:] = [
+            (at - bisect.bisect_left(spaces, at), ids) for at, ids in nav_listing_at
+        ]
     blocks[:] = _space_between(blocks, margins)
 
     # Trailing anchors (e.g. <a id="eof"/> after the last leaf block) never
