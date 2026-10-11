@@ -4,6 +4,7 @@ KFX Converter - Extract content from OEB and generate KFX
 Uses NativeKFXGenerator to produce KFX with working TOC navigation.
 """
 
+import copy
 import logging
 import os
 import posixpath
@@ -1082,7 +1083,10 @@ def _table_is_native(table):
     it; native would lose it). Likewise a hidden caption, which native would
     show, or a second caption, which native would drop. And a table wider
     than `_MAX_NATIVE_COLUMNS`, whose text would be too small to read.
+
+    An <epub:switch>'s cases are not drawn, so they count for nothing (#315).
     """
+    table = _shown_tree(table)
     rows = 0
     cells = 0
     captions = 0
@@ -1597,8 +1601,10 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
         built = None
         # A cell with a picture is walked as the body is, so the picture is a
         # paragraph of its own, which the generator writes as an image (#262).
-        has_picture = any(_local_tag(d.tag) == "img" for d in cell.iter())
-        if walk_cell is not None and (_cell_paragraph_count(cell) >= 2 or has_picture):
+        # Only what an <epub:switch> draws counts (#315).
+        shown = _shown_tree(cell)
+        has_picture = any(_local_tag(d.tag) == "img" for d in shown.iter())
+        if walk_cell is not None and (_cell_paragraph_count(shown) >= 2 or has_picture):
             built = _paragraph_cell(cell, style_resolver, walk_cell)
         if built is None:
             built = _table_cell(cell, style_resolver, base_href)
@@ -1877,6 +1883,25 @@ def _epub_switch_branch(elem):
         else:
             ids.extend(_subtree_anchor_ids(child))
     return ids, default
+
+
+def _shown_tree(elem):
+    """`elem`, or a copy of it holding only the <epub:switch> branches the
+    walkers draw: each switch keeps its default and none of its cases, nor
+    the text between them. Checks that count a subtree's tags, blocks or
+    text read this, so a dropped MathML case can't rule a table out. (#315)"""
+    if not any(_epub_switch_branch(d) for d in elem.iter()):
+        return elem
+    elem = copy.deepcopy(elem)
+    for switch in [d for d in elem.iter() if _epub_switch_branch(d)]:
+        default = _epub_switch_branch(switch)[1]
+        switch.text = None
+        for child in list(switch):
+            if child is not default:
+                switch.remove(child)
+        if default is not None:
+            default.tail = None
+    return elem
 
 
 #: Marks a contents listing the book printed itself: a `class` token, an

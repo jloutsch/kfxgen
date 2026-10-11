@@ -1709,6 +1709,63 @@ def test_epub_switch_without_a_default_shows_nothing():
     assert "eq1" in blocks[0]["anchor_ids"]
 
 
+def _switch_table(case, default):
+    return (
+        "<table><tr><td>a <epub:switch>"
+        f"{_MATHML_CASE}{case}</epub:case>"
+        f"<epub:default>{default}</epub:default>"
+        "</epub:switch> b</td><td>c</td></tr></table>"
+    )
+
+
+def _native_cells(html):
+    blocks = _conv.extract_blocks_from_html(_doc(html), native_tables=True)
+    tables = [b for b in blocks if b.get("type") == "table"]
+    assert len(tables) == 1, [b.get("text") for b in blocks]
+    return [
+        [p["text"] for p in c["paragraphs"]] if c.get("paragraphs") else c["text"]
+        for r in tables[0]["table"]["rows"]
+        for c in r["cells"]
+    ]
+
+
+@pytest.mark.unit
+def test_a_table_with_an_epub_switch_in_a_cell_stays_native():
+    """#315: the dropped MathML case ruled the table out, so it was written
+    one paragraph per row."""
+    html = _switch_table("<math><mi>x</mi></math>", "DEF")
+    assert _conv._table_is_native(_first_table(html))
+    assert _native_cells(html) == ["a DEF b", "c"]
+
+
+@pytest.mark.unit
+def test_a_dropped_case_counts_no_blocks_in_a_native_cell():
+    """#315: two paragraphs in the dropped case made the cell a container
+    of paragraphs; only the default is drawn."""
+    html = _switch_table("<p>M1</p><p>M2</p>", "DEF")
+    assert _conv._cell_paragraph_count(_conv._shown_tree(_first_table(html))) == 0
+    assert _native_cells(html) == ["a DEF b", "c"]
+
+
+@pytest.mark.unit
+def test_a_default_of_two_paragraphs_still_makes_a_paragraph_cell():
+    html = _switch_table("M", "<p>D1</p><p>D2</p>")
+    assert _native_cells(html) == [["a", "D1", "D2", "b"], "c"]
+
+
+@pytest.mark.unit
+def test_a_long_dropped_case_does_not_rule_a_table_out():
+    """#315: the dropped case's text counted toward the 2,000-character cut."""
+    html = _switch_table("x" * (_conv._MAX_NATIVE_CELL_CHARS + 1), "DEF")
+    assert _conv._table_is_native(_first_table(html))
+
+
+@pytest.mark.unit
+def test_a_picture_in_a_dropped_case_leaves_a_text_cell():
+    html = _switch_table('<img src="eq.png" alt="eq"/>', "DEF")
+    assert _native_cells(html) == ["a DEF b", "c"]
+
+
 @pytest.mark.unit
 def test_definition_list_terms_and_definitions_are_paragraphs():
     """#229: a <dl> was one paragraph, "TermDefinition one.Term2Def two."."""
