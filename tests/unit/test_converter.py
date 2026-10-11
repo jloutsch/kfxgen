@@ -8275,3 +8275,16 @@ def test_a_run_of_short_lines_may_hold_a_few_long_ones():
         _doc(body), style_resolver=_css_for_class(l=_NO_MARGIN)
     )
     assert len(_tight(blocks)) == 10
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("length, tight", [(50, True), (70, False)])
+def test_a_line_is_short_at_60_characters(length, tight):
+    """At 80, a library book of short prose paragraphs (median 67) had
+    4,870 lines set tight; at 60, 178."""
+    lines = [f"{n}" + "w" * (length - 1) for n in range(6)]
+    body = "".join(f'<p class="l">{t}</p>' for t in lines)
+    blocks = extract_blocks_from_html(
+        _doc(body), style_resolver=_css_for_class(l=_NO_MARGIN)
+    )
+    assert len(_tight(blocks)) == (5 if tight else 0)
