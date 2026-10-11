@@ -5106,9 +5106,10 @@ def test_a_chapters_first_paragraph_takes_no_break_space(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_rule_under_the_chapter_heading_is_not_written(tmp_path):
-    """The book's own heading is cut as the chapter title; a rule after it
-    then opens the chapter."""
+def test_a_rule_under_the_chapter_heading_is_written(tmp_path):
+    """The book's own heading is cut as the chapter title; a rule under it
+    stays under kfxgen's heading, where a browser draws it. The rule at the
+    chapter's end is not written."""
     chapters = [
         {
             "title": "One",
@@ -5116,5 +5117,6 @@ def test_a_rule_under_the_chapter_heading_is_not_written(tmp_path):
             "blocks": [_para("One"), _rule(), _para("A."), _rule()],
         }
     ]
-    entries, _, _, _ = _book(tmp_path, chapters)
-    assert not [e for e in entries if str(e["$159"]) == "$596"]
+    entries, _, text, _ = _book(tmp_path, chapters)
+    kinds = [str(e["$159"]) if text(e) is None else text(e) for e in entries]
+    assert kinds == ["One", "$596", "A."]

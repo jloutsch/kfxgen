@@ -23,8 +23,9 @@ each entry from the TOC:
   1. "1. A rule": New: a thin horizontal line between "Above the rule."
      and "Below the rule.", with a little space above and below it. Old: no
      line; the two paragraphs follow each other.
-  2. "2. No rule at the edges": New and Old: no line at the top of the
-     chapter, none after "The last paragraph." at its end.
+  2. "2. Rules at the edges": New: a line under the chapter heading, as a
+     browser draws it, and none after "The last paragraph." at the end of
+     the chapter. Old: no line anywhere.
   3. "3. Blank lines": New: about one empty line above "After one blank
      line.", about two above "After two blank lines.". Old: no gap.
   4. "4. Space with no line": New: a gap of about two lines, and no line,
@@ -109,7 +110,7 @@ PAGES = [
         + _ordinary(3),
     ),
     (
-        "2. No rule at the edges",
+        "2. Rules at the edges",
         "<hr/>" + _ordinary(4) + _paras("The last paragraph.") + "<hr/>",
     ),
     (

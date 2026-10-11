@@ -374,7 +374,9 @@ def _space_to_write(block):
 def _drop_edge_rules(blocks):
     """A chapter's blocks without the rules at its start or end: the page
     break already separates chapters, and Gutenberg puts an <hr> before
-    each chapter heading (#230)."""
+    each chapter heading (#230). Run before the chapter title is cut, so a
+    rule under the book's own heading stays under kfxgen's, where a browser
+    and Kindle Previewer draw it."""
     blocks = list(blocks)
     while blocks and blocks[0].get("type") == "rule":
         blocks.pop(0)
@@ -3912,9 +3914,7 @@ class NativeKFXGenerator:
                     # the book doesn't hold) wait for the next block's first
                     # chunk, so a link to one still lands (#291).
                     pending = []
-                    # Again after the title cut: a rule under the book's own
-                    # heading opens the chapter once the heading is cut.
-                    para_iter = _drop_edge_rules(para_iter)
+                    para_iter = list(para_iter)
                     for b_idx, block in enumerate(para_iter):
                         first = len(all_chunks)
                         if block.get("type") == "table":
