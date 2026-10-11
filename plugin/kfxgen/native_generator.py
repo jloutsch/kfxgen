@@ -1898,7 +1898,7 @@ class NativeKFXGenerator:
                          Default None omits $50.
             space_above: Space above the paragraph in ems, from the book's
                         margins (#230). Written as $47 in place of the 1lh
-                        default, indented or not.
+                        default, indented or not; 0 writes none (#331).
             baseline_style: Symbol emitted as $44 — `$370` raises
                         (superscript), `$371` lowers (subscript). Reference
                         noteref styles pair it with a reduced $16 font-size.
@@ -1968,12 +1968,14 @@ class NativeKFXGenerator:
         # param). A non-zero first-line indent replaces inter-paragraph spacing
         # (print convention), so suppress this top margin when indented.
         if space_above is not None:
-            value[IS("$47")] = IonStruct(
-                IS("$307"),
-                IonDecimal(f"{space_above / _LINE_EM:.6g}"),
-                IS("$306"),
-                IS("$310"),
-            )
+            # 0: a line of verse set tight under the one before (#331).
+            if space_above:
+                value[IS("$47")] = IonStruct(
+                    IS("$307"),
+                    IonDecimal(f"{space_above / _LINE_EM:.6g}"),
+                    IS("$306"),
+                    IS("$310"),
+                )
         elif not is_heading and text_indent is None:
             value[IS("$47")] = IonStruct(
                 IS("$307"), IonDecimal("1"), IS("$306"), IS("$310")
@@ -3503,7 +3505,7 @@ class NativeKFXGenerator:
             block_anchor_keys = block.get("anchor_keys") or []
             block_offsets = block.get("anchor_offsets") or {}
             block_first_chunk = len(all_chunks)
-            space = _space_to_write(block)
+            space = 0.0 if block.get("tight") else _space_to_write(block)
             for chunk in _emit_text_chunks(para, preformatted):
                 if chunk["type"] == "image":
                     # Figure ids live on image blocks; without this
@@ -3540,7 +3542,7 @@ class NativeKFXGenerator:
                 first.setdefault("anchor_offsets", {}).update(
                     dict.fromkeys(block_anchor_keys, 0)
                 )
-            if space and len(all_chunks) > block_first_chunk:
+            if space is not None and len(all_chunks) > block_first_chunk:
                 # On the first piece only: the rest continue the paragraph.
                 first = all_chunks[block_first_chunk]
                 if first["type"] == "text":
@@ -4570,7 +4572,7 @@ class NativeKFXGenerator:
                         attrs["margin_left"] = bs["margin_left"]
                     if bs.get("margin_right"):
                         attrs["margin_right"] = bs["margin_right"]
-                    if chunk.get("space_above"):
+                    if chunk.get("space_above") is not None:
                         attrs["space_above"] = chunk["space_above"]
                     # Body run: match the block's font-family, honouring any
                     # block-level CSS bold/italic (only when fonts are embedded,

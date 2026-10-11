@@ -2303,7 +2303,46 @@ _EMPTY_BLOCK = {
 }
 
 
-def _space_between(blocks, margins):
+#: A line of verse, an index entry, a cast list's name: at most this many
+#: characters (#331). Real verse kept 89 % of its lines at 60, and a
+#: library book of short prose paragraphs fell from 4,870 lines to 178.
+_SHORT_LINE = 60
+#: The share of a run's paragraphs that must be short lines (#331).
+_SHORT_SHARE = 0.9
+
+
+def _mark_tight_runs(blocks, gap_of):
+    """Mark as "tight" the lines of each run of short, unindented paragraphs
+    the book sets with no gap between them: verse one <p> per line, an
+    index, a cast list (#331). kfxgen puts a line of space above every
+    unindented paragraph, which double-spaced them; a browser draws them
+    with none. A run's first line keeps its space, so a stanza break shows.
+
+    A run is a paragraph followed by paragraphs with no gap above them, none
+    a heading or indented. It is tight when nine in ten of its lines are
+    short. Prose a book sets the same way, unindented with
+    no gap, holds long paragraphs and keeps kfxgen's spacing: there the line
+    of space is all that separates its paragraphs."""
+
+    def line(b):
+        style = b.get("block_style") or {}
+        return (
+            b.get("type") is None and not b.get("heading") and not style.get("indent")
+        )
+
+    run = []
+    for b in [*blocks, None]:
+        if b is not None and line(b) and run and gap_of.get(id(b)) == 0.0:
+            run.append(b)
+            continue
+        short = sum(1 for r in run if len(r.get("text") or "") <= _SHORT_LINE)
+        if run and short >= _SHORT_SHARE * len(run):
+            for r in run[1:]:
+                r["tight"] = True
+        run = [b] if b is not None and line(b) else []
+
+
+def _space_between(blocks, margins, measured=True):
     """`blocks` with the space a scene break puts above a paragraph, in ems,
     as "space_above" (#230, #326). The space blocks standing for spacers and
     invisible <hr>s are taken out.
@@ -2321,7 +2360,9 @@ def _space_between(blocks, margins):
       and `noindent` paragraphs that open a scene.
 
     A gap next to a heading is layout, not a break, and is not written
-    (pg245 puts a spacer under each chapter heading). A file's first
+    (pg245 puts a spacer under each chapter heading). With `measured`, the
+    margins are calibre's, and a run of short lines with no gap between them
+    is marked tight (#331); without calibre's CSS no gap is known. A file's first
     paragraph starts a page or follows one in the same chapter, and takes
     none. Tables, boxes and rules keep their own spacing; a break before one
     is dropped."""
@@ -2366,6 +2407,8 @@ def _space_between(blocks, margins):
                 return True
             return gap_of.get(id(out[i]), usual) <= usual + 0.01
 
+        if measured:
+            _mark_tight_runs(out, gap_of)
         index = {id(b): i for i, b in enumerate(out)}
         for b, gap, how in gaps:
             if how is None or gap <= usual + 0.01:
@@ -3182,7 +3225,7 @@ def extract_blocks_from_html(
         nav_listing_at[:] = [
             (at - bisect.bisect_left(spaces, at), ids) for at, ids in nav_listing_at
         ]
-    blocks[:] = _space_between(blocks, margins)
+    blocks[:] = _space_between(blocks, margins, measured=style_resolver is not None)
 
     # Trailing anchors (e.g. <a id="eof"/> after the last leaf block) never
     # reach a subsequent block to flush to; snap them onto the last emitted

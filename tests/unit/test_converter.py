@@ -8199,3 +8199,79 @@ def test_a_margin_gap_after_a_rule_is_the_rules_to_space():
         style_resolver=_css_for_class(brk={"margin-top": "2em"}),
     )
     assert all("space_above" not in b for b in blocks)
+
+
+# ── #331: lines set as paragraphs with no gap ────────────────────────────────
+
+
+def _tight(blocks):
+    return [b["text"] for b in blocks if b.get("tight")]
+
+
+_NO_MARGIN = {"margin-top": "0", "margin-bottom": "0"}
+_STANZAS = (
+    '<div class="st"><p class="l">Line a1</p><p class="l">Line a2</p>'
+    '<p class="l">Line a3</p></div>'
+    '<div class="st"><p class="l">Line b1</p><p class="l">Line b2</p></div>'
+    # calibre's own sheet gives a <p> 1em above and below.
+    '<p class="pr">Prose after the poem.</p>'
+)
+
+
+@pytest.mark.unit
+def test_lines_of_a_stanza_set_as_paragraphs_with_no_gap_are_tight():
+    """The stanza's first line keeps its space, so the stanza break shows;
+    the lines after it sit under it, as in a browser."""
+    blocks = extract_blocks_from_html(
+        _doc(_STANZAS),
+        style_resolver=_css_for_class(
+            l=_NO_MARGIN,
+            st={"margin-top": "1em"},
+            pr={"margin-top": "1em", "margin-bottom": "1em"},
+        ),
+    )
+    assert _tight(blocks) == ["Line a2", "Line a3", "Line b2"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "lines, rules",
+    [
+        # Prose: long paragraphs among the short ones.
+        (
+            ["Short.", "x" * 200, "Short too.", "y" * 200],
+            {"l": _NO_MARGIN},
+        ),
+        # A gap between the lines: the book spaces them.
+        (["a", "b", "c"], {"l": {"margin-top": "0.5em", "margin-bottom": "0"}}),
+        # Indented: kfxgen puts no space above them already.
+        (["a", "b", "c"], {"l": {**_NO_MARGIN, "text-indent": "1em"}}),
+        # One line alone.
+        (["a"], {"l": _NO_MARGIN}),
+    ],
+    ids=["prose", "spaced", "indented", "one line"],
+)
+def test_paragraphs_that_are_not_a_run_of_short_lines_keep_their_space(lines, rules):
+    body = "".join(f'<p class="l">{t}</p>' for t in lines)
+    blocks = extract_blocks_from_html(
+        _doc(body), style_resolver=_css_for_class(**rules)
+    )
+    assert _tight(blocks) == []
+
+
+@pytest.mark.unit
+def test_without_calibres_css_no_line_is_tight():
+    """No resolver, no margins known: a gap of 0 means nothing."""
+    blocks = extract_blocks_from_html(_doc(_STANZAS))
+    assert _tight(blocks) == []
+
+
+@pytest.mark.unit
+def test_a_run_of_short_lines_may_hold_a_few_long_ones():
+    """A long verse line or index entry among many: under a tenth."""
+    lines = [f"Entry {n}" for n in range(10)] + ["z" * 120]
+    body = "".join(f'<p class="l">{t}</p>' for t in lines)
+    blocks = extract_blocks_from_html(
+        _doc(body), style_resolver=_css_for_class(l=_NO_MARGIN)
+    )
+    assert len(_tight(blocks)) == 10

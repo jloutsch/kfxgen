@@ -5120,3 +5120,25 @@ def test_a_rule_under_the_chapter_heading_is_written(tmp_path):
     entries, _, text, _ = _book(tmp_path, chapters)
     kinds = [str(e["$159"]) if text(e) is None else text(e) for e in entries]
     assert kinds == ["One", "$596", "A."]
+
+
+# ── #331: tight lines ────────────────────────────────────────────────────────
+
+
+@pytest.mark.unit
+def test_a_tight_line_has_no_space_above(tmp_path):
+    chapters = [
+        {
+            "title": "One",
+            "text": "x",
+            "blocks": [
+                _para("Before."),
+                _para("Line 1"),
+                dict(_para("Line 2"), tight=True),
+            ],
+        }
+    ]
+    entries, styles, text, _ = _book(tmp_path, chapters)
+    above = {text(e): _lh(styles[str(e["$157"])], "$47") for e in entries if text(e)}
+    assert above["Line 1"] == "1$310"
+    assert above["Line 2"] is None
