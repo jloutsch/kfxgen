@@ -1,5 +1,47 @@
 # Changelog
 
+## 5.10.0 — Boxes, links and text that went missing
+
+Seventeen changes since 5.9.0, each reviewed and converted through real
+calibre. Boxes, indents and nested tables (#238, #310, #263), and four of the
+link and text fixes (#278, #277, #280, #231), were also checked on a Kindle;
+nested boxes on the Voyage (5.13.6), whose firmware is the oldest.
+
+**Boxed sidebars and callouts (#238, #310).** A sidebar, tip or callout with
+a border or a background is drawn as a box, as Kindle Previewer draws it:
+the border, the fill, padding and side margins, with the spacing kfxgen's
+paragraphs use above and below. A box can hold a table, a picture or another
+box, and text written straight in a bordered `<div>` is boxed too. In a
+sample of 200 library books, 2,082 boxes in 68 books; in the Gutenberg 90,
+181 in 30.
+
+**Indents from containers (#238).** An indented `<div>`, `<blockquote>` or
+sidebar indents its paragraphs, nested indents add up, and the indent is a
+share of the page as Previewer writes it, so it doesn't grow with the text
+size.
+
+**Links that land (#278, #291, #277, #317).** Links to a percent-encoded id
+(`#fn%3A1`) or into a page with no text land; ids of a picture the book
+doesn't hold still take links; a note's return link lands on its marker
+after the chapter title is cut from the paragraph; and a link inside a link
+(which the WordDumb plugin writes) takes the inner target, the same on every
+conversion.
+
+**Text no longer lost (#280, #231, #229, #234).** Text written straight
+into `<body>` is kept; words an SVG draws over a picture follow it;
+definition lists are one paragraph per term and definition instead of run
+together; and an `epub:switch` shows only its default branch, so a maths
+book no longer prints each equation twice.
+
+**Chapters and contents (#225, #304, #318, #319).** In a book with no table
+of contents of its own, notes no longer become chapters, and chapters take
+their file's heading as their title instead of "Section N"; the chapter
+title is cut from the text only between words; and a boxed part page holding
+a contents listing keeps its heading.
+
+**Tables (#263, #315).** A table inside a table, and a table with an
+`epub:switch` in a cell, are written as native tables.
+
 ## 5.9.0 — Tables finished
 
 This release completes the native Kindle tables first shipped in 5.8.9 (#219).
