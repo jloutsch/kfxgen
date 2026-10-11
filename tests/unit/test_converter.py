@@ -1710,6 +1710,63 @@ def test_epub_switch_without_a_default_shows_nothing():
 
 
 @pytest.mark.unit
+def test_definition_list_terms_and_definitions_are_paragraphs():
+    """#229: a <dl> was one paragraph, "TermDefinition one.Term2Def two."."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            "<dl><dt>Term</dt><dd>Definition one.</dd>"
+            "<dt>Term2</dt><dd>Def two.</dd></dl>"
+        )
+    )
+    assert [b["text"] for b in blocks] == [
+        "Term",
+        "Definition one.",
+        "Term2",
+        "Def two.",
+    ]
+
+
+@pytest.mark.unit
+def test_definition_list_term_keeps_its_anchor():
+    """#229: a link into a glossary lands on the term, not the definition."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<p>Before.</p><dl id="gloss"><dt id="t1">Term</dt><dd id="d1">Def.</dd>'
+            '<dt id="t2">Term2</dt><dd>Def two.</dd></dl>'
+        )
+    )
+    assert [(b["text"], b["anchor_ids"]) for b in blocks] == [
+        ("Before.", []),
+        ("Term", ["gloss", "t1"]),
+        ("Def.", ["d1"]),
+        ("Term2", ["t2"]),
+        ("Def two.", []),
+    ]
+
+
+@pytest.mark.unit
+def test_definition_holding_paragraphs_keeps_them_apart():
+    """#229: a <dd> of several paragraphs, inside a <div> with text around."""
+    assert _texts(
+        "<div><p>Intro.</p><dl><dt>Term</dt>"
+        "<dd><p>First.</p><p>Second.</p></dd></dl></div>"
+    ) == ["Intro.", "Term", "First.", "Second."]
+
+
+@pytest.mark.unit
+def test_definition_takes_its_own_indent():
+    """#229: calibre's default sheet gives `dd { margin-left: 40px }`; the
+    definition is indented under its term, in the unit the CSS gives, as any
+    paragraph's own margin is."""
+    rules = {"dd": {"margin-left": "40px"}}
+    body = '<dl><dt>Term</dt><dd class="dd">Def.</dd></dl>'
+    assert _margins(body, rules) == [
+        ("Term", None, None),
+        ("Def.", ("40", "$319"), None),
+    ]
+
+
+@pytest.mark.unit
 def test_first_block_carries_bare_filename_anchor_key():
     """#62: a TOC entry may link to a whole file with no fragment. If that file
     declares no ids anywhere, nothing anchors it and the link is dropped."""
@@ -5715,6 +5772,9 @@ def _cell_texts(body, native):
             [["[img]"], ["one", "two"]],
         ),
         ("<td>cellone<p>celltwo</p></td>", False, ["cellone celltwo"]),
+        # A definition list: "TD" before #229.
+        ("<td><dl><dt>T</dt><dd>D</dd></dl></td>", False, ["T D"]),
+        ("<td><dl><dt>T</dt><dd>D</dd></dl></td>", True, [["T", "D"]]),
     ],
     ids=[
         "rows-two-p",
@@ -5724,6 +5784,8 @@ def _cell_texts(body, native):
         "image-same-cell",
         "image-other-cell",
         "rows-lead-text",
+        "rows-dl",
+        "native-dl",
     ],
 )
 def test_blocks_inside_a_cell_do_not_run_together(cells, native, expected):

@@ -714,6 +714,11 @@ def test_fixture_publisher_structure_shape(tmp_path):
         f"split chapter opener duplicated below the heading: {texts}"
     )
     assert "3. Split Opener" in [t.strip() for t in texts], "heading missing"
+    # #229: a <dl>'s term and definition are separate paragraphs.
+    assert "Glossary term" in [t.strip() for t in texts], (
+        f"definition list term not its own paragraph: {texts}"
+    )
+    assert "Its definition." in [t.strip() for t in texts]
     # #60: a `hidden` nav is markup, not reading content. Pinned from the body
     # page, so the assertion survives #132 discarding the nav document.
     assert not any(t.strip() in ("Page List", "Begin Reading") for t in texts), (
