@@ -5573,11 +5573,13 @@ def test_a_comment_in_a_paragraph_cell_is_not_a_paragraph():
 # (`<div id="toc" class="toc">`).
 
 
-def _listing_chapters(files, toc):
+def _listing_chapters(files, toc, style_resolver=None):
     spine = []
     for href, body in files:
         at = []
-        blocks = extract_blocks_from_html(_doc(body), base_href=href, nav_listing_at=at)
+        blocks = extract_blocks_from_html(
+            _doc(body), base_href=href, nav_listing_at=at, style_resolver=style_resolver
+        )
         spine.append(
             {
                 "href": href,
@@ -5726,6 +5728,59 @@ def test_a_listing_page_with_just_its_heading_becomes_the_contents_page():
         {"title": "Part One", "text": "Part text."},
     ]
     assert _conv._nav_listing_contents_chapter(chapters) is chapters[0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "wrap", ["{}", '<div class="shade">{}</div>', '<div class="box">{}</div>']
+)
+def test_a_boxed_part_page_holding_a_listing_is_not_replaced(wrap):
+    # #319: a part page's heading, subtitle and listing in one shaded or
+    # bordered box. Since #309 the box was one block, so the page passed the
+    # one-block guard and the rebuild replaced "Part One" with "Contents".
+    part = wrap.format(
+        "<h1>Part One</h1><p>Beginnings</p>"
+        '<ul class="toc"><li><a href="c1.xhtml">The Harbour</a></li>'
+        '<li><a href="c2.xhtml">The Storm</a></li></ul>'
+    )
+    chapters = _listing_chapters(
+        [
+            ("part1.xhtml", part),
+            ("c1.xhtml", "<h1>The Harbour</h1><p>Harbour text.</p>"),
+            ("c2.xhtml", "<h1>The Storm</h1><p>Storm text.</p>"),
+        ],
+        [
+            ("Part One", "part1.xhtml"),
+            ("The Harbour", "c1.xhtml"),
+            ("The Storm", "c2.xhtml"),
+        ],
+        style_resolver=_css_by_class(_BOX_CSS),
+    )
+    assert chapters[0]["_had_nav_listing"]
+    assert [b.get("type") for b in chapters[0]["blocks"]] == (
+        [None, None] if wrap == "{}" else ["box"]
+    )
+    assert _conv._nav_listing_contents_chapter(chapters) is None
+
+
+@pytest.mark.unit
+def test_a_boxed_listing_heading_alone_still_becomes_the_contents_page():
+    # The count looks inside the box, nested ones too; a box holding only the
+    # page's heading is still one block.
+    heading = {"text": "Navigation"}
+    inner = {"type": "box", "text": "Navigation", "blocks": [heading]}
+    chapters = [
+        {
+            "title": "Navigation",
+            "text": "Navigation",
+            "blocks": [{"type": "box", "text": "Navigation", "blocks": [inner]}],
+            "_had_nav_listing": True,
+        },
+        {"title": "Part One", "text": "Part text."},
+    ]
+    assert _conv._nav_listing_contents_chapter(chapters) is chapters[0]
+    inner["blocks"] = [heading, {"text": "by Someone"}]
+    assert _conv._nav_listing_contents_chapter(chapters) is None
 
 
 # --- blocks inside a cell are separated (#279) -------------------------------

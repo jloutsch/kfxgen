@@ -3792,15 +3792,22 @@ def _nav_listing_contents_chapter(chapters):
         # At most one block of its own, its heading. A short page of two or
         # more is something else that also carried the listing: pg2160 and
         # pg2701 print theirs on the title page, whose title and byline the
-        # rebuild would replace (#252/#276 review).
-        texts = [
-            b
-            for b in ch.get("blocks") or ()
-            if _IMG_TOKEN_RE.sub("", b.get("text") or "").strip()
-        ]
-        if len(texts) <= 1:
+        # rebuild would replace (#252/#276 review). A box counts its own
+        # paragraphs: a part page's heading and subtitle in one shaded box
+        # are still two (#319).
+        if _count_text_blocks(ch.get("blocks") or ()) <= 1:
             return ch
     return None
+
+
+def _count_text_blocks(blocks):
+    """Blocks with text, counting each paragraph inside a box (#319)."""
+    return sum(
+        _count_text_blocks(b["blocks"])
+        if b.get("type") == "box"
+        else bool(_IMG_TOKEN_RE.sub("", b.get("text") or "").strip())
+        for b in blocks
+    )
 
 
 def _keep_illustrations(ch):
