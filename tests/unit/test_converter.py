@@ -5630,12 +5630,16 @@ def test_a_comment_in_a_paragraph_cell_is_not_a_paragraph():
 # (`<div id="toc" class="toc">`).
 
 
-def _listing_chapters(files, toc, style_resolver=None):
+def _listing_chapters(files, toc, style_resolver=None, native_tables=False):
     spine = []
     for href, body in files:
         at = []
         blocks = extract_blocks_from_html(
-            _doc(body), base_href=href, nav_listing_at=at, style_resolver=style_resolver
+            _doc(body),
+            base_href=href,
+            nav_listing_at=at,
+            style_resolver=style_resolver,
+            native_tables=native_tables,
         )
         spine.append(
             {
@@ -5818,6 +5822,62 @@ def test_a_boxed_part_page_holding_a_listing_is_not_replaced(wrap):
         [None, None] if wrap == "{}" else ["box"]
     )
     assert _conv._nav_listing_contents_chapter(chapters) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "layout",
+    [
+        "<table><tr><td><h1>Part One</h1><p>Beginnings</p></td></tr></table>",
+        "<table><tr><td><h1>Part One</h1></td></tr>"
+        "<tr><td><p>Beginnings</p></td></tr></table>",
+    ],
+    ids=["one cell", "two rows"],
+)
+def test_a_part_page_laid_out_in_a_table_is_not_replaced(layout):
+    # #330: #319's shape with a native table in place of the box. The table
+    # was one block, so the page passed the one-block guard and "Part One"
+    # and "Beginnings" were replaced by the rebuilt Contents page.
+    part = (
+        layout + '<ul class="toc"><li><a href="c1.xhtml">The Harbour</a></li>'
+        '<li><a href="c2.xhtml">The Storm</a></li></ul>'
+    )
+    chapters = _listing_chapters(
+        [
+            ("part1.xhtml", part),
+            ("c1.xhtml", "<h1>The Harbour</h1><p>Harbour text.</p>"),
+            ("c2.xhtml", "<h1>The Storm</h1><p>Storm text.</p>"),
+        ],
+        [
+            ("Part One", "part1.xhtml"),
+            ("The Harbour", "c1.xhtml"),
+            ("The Storm", "c2.xhtml"),
+        ],
+        native_tables=True,
+    )
+    assert chapters[0]["_had_nav_listing"]
+    assert [b.get("type") for b in chapters[0]["blocks"]] == ["table"]
+    assert _conv._nav_listing_contents_chapter(chapters) is None
+
+
+@pytest.mark.unit
+def test_a_table_holding_only_the_listing_heading_still_becomes_the_contents_page():
+    """One paragraph with text in the table: the page's heading."""
+    table = {
+        "type": "table",
+        "text": "Navigation",
+        "table": {"rows": [{"cells": [{"text": "Navigation"}, {"text": " "}]}]},
+    }
+    chapters = [
+        {
+            "title": "Navigation",
+            "text": "Navigation",
+            "blocks": [table],
+            "_had_nav_listing": True,
+        },
+        {"title": "Part One", "text": "Part text."},
+    ]
+    assert _conv._nav_listing_contents_chapter(chapters) is chapters[0]
 
 
 @pytest.mark.unit

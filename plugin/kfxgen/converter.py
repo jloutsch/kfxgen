@@ -4120,13 +4120,21 @@ def _nav_listing_contents_chapter(chapters):
 
 
 def _count_text_blocks(blocks):
-    """Blocks with text, counting each paragraph inside a box (#319)."""
-    return sum(
-        _count_text_blocks(b["blocks"])
-        if b.get("type") == "box"
-        else bool(_IMG_TOKEN_RE.sub("", b.get("text") or "").strip())
-        for b in blocks
-    )
+    """Blocks with text, counting each paragraph inside a box (#319) and
+    each paragraph in a native table's cells (#330)."""
+
+    def count(b):
+        if b.get("type") == "box":
+            return _count_text_blocks(b["blocks"])
+        if b.get("type") == "table":
+            return sum(
+                _count_text_blocks(cell.get("paragraphs") or [cell])
+                for row in b["table"]["rows"]
+                for cell in row["cells"]
+            )
+        return bool(_IMG_TOKEN_RE.sub("", b.get("text") or "").strip())
+
+    return sum(count(b) for b in blocks)
 
 
 def _keep_illustrations(ch):
