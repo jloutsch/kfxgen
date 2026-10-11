@@ -1679,6 +1679,23 @@ def test_epub_switch_ids_in_dropped_cases_land_on_the_default():
     assert set(blocks[1]["anchor_ids"]) == {"sw", "eq1", "late", "d"}
 
 
+@pytest.mark.parametrize("before", ["<p>Before.</p>", ""])
+@pytest.mark.unit
+def test_epub_switch_default_paragraphs_stay_apart_inside_a_div(before):
+    """#234 review: a switch inside a <div> was walked as inline text, so a
+    default of two paragraphs came out as one."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            f"<div>{before}<epub:switch>"
+            f"{_MATHML_CASE}M</epub:case>"
+            "<epub:default><p>Default one.</p><p>Default two.</p></epub:default>"
+            "</epub:switch></div>"
+        )
+    )
+    want = ["Default one.", "Default two."]
+    assert [b["text"] for b in blocks] == (["Before."] if before else []) + want
+
+
 @pytest.mark.unit
 def test_epub_switch_without_a_default_shows_nothing():
     """#234: no branch kfxgen supports, so nothing is drawn; ids carry on."""

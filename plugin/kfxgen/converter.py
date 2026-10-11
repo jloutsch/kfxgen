@@ -2288,6 +2288,18 @@ def extract_blocks_from_html(
         block_tags.add(tag)
         block_tags.add(ns + tag)
 
+    def _holds_blocks(elem):
+        """A block child: one in `block_tags`, or an <epub:switch> whose
+        default holds one, so the default's paragraphs stay apart (#234)."""
+        if elem.tag in block_tags:
+            return True
+        switch = _epub_switch_branch(elem)
+        return (
+            switch is not None
+            and switch[1] is not None
+            and any(d.tag in block_tags for d in switch[1].iter())
+        )
+
     blocks = []
     notes_tables = set()  # ids of tables written as notes paragraphs (#268)
     native_made = set()  # ids of tables written as native tables
@@ -2614,7 +2626,7 @@ def extract_blocks_from_html(
             return
 
         is_block = elem.tag in block_tags
-        has_block_child = any(child.tag in block_tags for child in elem)
+        has_block_child = any(_holds_blocks(child) for child in elem)
 
         if (
             native_tables
@@ -2858,7 +2870,7 @@ def extract_blocks_from_html(
             elif (
                 is_block(child)
                 if is_block is not None
-                else child.tag in block_tags or _local_tag(child.tag) in ("img", "svg")
+                else _holds_blocks(child) or _local_tag(child.tag) in ("img", "svg")
             ):
                 _flush_inline()
                 start = len(blocks)
