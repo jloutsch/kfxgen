@@ -5783,6 +5783,29 @@ def test_a_boxed_listing_heading_alone_still_becomes_the_contents_page():
     assert _conv._nav_listing_contents_chapter(chapters) is None
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("wrap", ["{}", '<div class="shade">{}</div>'])
+def test_a_picture_beside_the_listing_heading_is_not_counted(wrap):
+    # A picture is kept by the rebuild (#117), so it is not a block of text;
+    # in a box or out of one, the page is still the contents page (#320 QA).
+    page = wrap.format(
+        '<div><img src="orn.png" alt="ornament"/></div><h1>Navigation</h1>'
+        '<ul class="toc"><li><a href="c1.xhtml">The Harbour</a></li></ul>'
+    )
+    chapters = _listing_chapters(
+        [
+            ("nav.xhtml", page),
+            ("c1.xhtml", "<h1>The Harbour</h1><p>Harbour text.</p>"),
+        ],
+        [("Navigation", "nav.xhtml"), ("The Harbour", "c1.xhtml")],
+        style_resolver=_css_by_class(_BOX_CSS),
+    )
+    assert [b.get("type") for b in chapters[0]["blocks"]] == (
+        [None, None] if wrap == "{}" else ["box"]
+    )
+    assert _conv._nav_listing_contents_chapter(chapters) is chapters[0]
+
+
 # --- blocks inside a cell are separated (#279) -------------------------------
 #
 # A cell's blocks were joined with nothing between them when the HTML had no
