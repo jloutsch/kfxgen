@@ -383,6 +383,25 @@ def _is_text_block(block):
     )
 
 
+def _opens_with_title(text, title):
+    """Whether `text`, already stripped on the left, opens with the chapter
+    title as whole words, so cutting it leaves no part of a word: "A" opens
+    "A storm" but not "After", "I" not "It" or "I'm", "1" not "12" or
+    "1st" (#318)."""
+    if text[: len(title)].lower() != title.lower():
+        return False
+    rest = text[len(title) :]
+    if not title or not rest:
+        return True
+    last, nxt = title[-1], rest[0]
+    if nxt.isalpha() and last.isalnum():
+        return False
+    if nxt.isdigit() and last.isdigit():
+        return False
+    # A contraction or possessive: "I" + "I'm here", "John" + "John's".
+    return not (last.isalpha() and nxt in "'\u2019" and rest[1:2].isalpha())
+
+
 def _cut_title_from_box(box, title):
     """(box, carried anchor keys) with `title` cut from the box's first
     paragraph, as the chapter title cut does for a paragraph (#238), or None
@@ -401,7 +420,7 @@ def _cut_title_from_box(box, title):
         return None
     else:
         stripped = first["text"].lstrip()
-        if stripped[: len(title)].lower() != title.lower():
+        if not _opens_with_title(stripped, title):
             return None
         remainder = stripped[len(title) :].lstrip()
         if remainder:
@@ -469,7 +488,7 @@ def _cut_title_from_table(block, title):
         return block, False
     text = _row_text(rows[j])
     stripped = text.lstrip()
-    if stripped[: len(title)].lower() != title.lower():
+    if not _opens_with_title(stripped, title):
         return block, False
     remainder = stripped[len(title) :].lstrip()
     row = _cut_row_text(rows[j], len(text) - len(remainder))
@@ -3720,7 +3739,7 @@ class NativeKFXGenerator:
             #   as awkward standalone text on top of the image (#33).
             body_text = chapter.get("text", "") or ""
             stripped = body_text.lstrip()
-            if stripped[: len(title)].lower() == title.lower():
+            if _opens_with_title(stripped, title):
                 body_after_title = stripped[len(title) :].lstrip()
             else:
                 body_after_title = stripped
@@ -3751,7 +3770,7 @@ class NativeKFXGenerator:
                 cut_title = not chapter.get("_omit_title_heading")
                 text = chapter["text"]
                 stripped = text.lstrip()
-                if cut_title and stripped[: len(title)].lower() == title.lower():
+                if cut_title and _opens_with_title(stripped, title):
                     text = stripped[len(title) :].lstrip()
                 if text:
                     blocks = chapter.get("blocks")
@@ -3787,7 +3806,7 @@ class NativeKFXGenerator:
                                 iter_blocks = (
                                     [kept_box] if kept_box else []
                                 ) + iter_blocks[1:]
-                            elif first_stripped[: len(title)].lower() == title.lower():
+                            elif _opens_with_title(first_stripped, title):
                                 remainder = first_stripped[len(title) :].lstrip()
                                 removed = len(first["text"]) - len(remainder)
                                 if remainder:

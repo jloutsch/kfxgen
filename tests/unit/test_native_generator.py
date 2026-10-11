@@ -4893,3 +4893,75 @@ def test_a_title_inside_a_nested_box_is_cut(tmp_path, title, inner_kids):
     entries, _, text, _ = _book(tmp_path, chapters)
     # The heading prints the title once; the box keeps what follows it.
     assert [text(e) for e in entries if text(e)] == [title, "The day began."]
+
+
+# ── #318: the title cut stops only between words ─────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text, title, cut",
+    [
+        ("After the storm.", "A", False),
+        ("It was a cold morning.", "I", False),
+        ("12 March. The wind dropped.", "1", False),
+        ("1st of May.", "1", False),
+        ("I'm here.", "I", False),
+        ("I’m here.", "I", False),
+        ("Notes's end.", "Notes", False),
+        ("A storm.", "A", True),
+        ("I. It was cold.", "I", True),
+        ("1 March.", "1", True),
+        ("Notes. A first note.", "Notes", True),
+        ("Notes", "Notes", True),
+        ("CHAPTER ONE", "Chapter One", True),
+        ("Part1", "Part", True),
+        ("Other text.", "Notes", False),
+    ],
+)
+def test_the_title_is_cut_only_as_whole_words(text, title, cut):
+    from kfxgen.native_generator import _opens_with_title
+
+    assert _opens_with_title(text, title) is cut
+
+
+def _printed(tmp_path, chapters):
+    entries, _, text, _ = _book(tmp_path, chapters)
+    return [text(e) for e in entries if text(e)]
+
+
+@pytest.mark.unit
+def test_a_short_label_does_not_cut_the_first_word(tmp_path):
+    # The issue's three chapters: no heading in the file, and the contents
+    # label is the first letters of the first paragraph.
+    rows = [
+        ("A", "After the storm the harbour was quiet.", "The boats were in."),
+        ("I", "It was a cold morning.", "The boats went out."),
+        ("1", "12 March. The wind dropped.", "The boats came back."),
+    ]
+    chapters = [
+        {"title": t, "text": f"{a}\n\n{b}", "blocks": [_para(a), _para(b)]}
+        for t, a, b in rows
+    ]
+    assert _printed(tmp_path, chapters) == [x for r in rows for x in r]
+
+
+@pytest.mark.unit
+def test_a_short_label_does_not_cut_the_first_word_of_text_alone(tmp_path):
+    # A chapter with no blocks prints its text whole too.
+    chapters = [{"title": "I", "text": "It was a cold morning."}]
+    assert _printed(tmp_path, chapters) == ["I", "It was a cold morning."]
+
+
+@pytest.mark.unit
+def test_a_short_label_does_not_cut_a_boxs_first_word(tmp_path):
+    box = _box_block([_para("It was a cold morning."), _para("Then rain.")])
+    chapters = [{"title": "I", "text": box["text"], "blocks": [box]}]
+    assert _printed(tmp_path, chapters) == ["I", "It was a cold morning.", "Then rain."]
+
+
+@pytest.mark.unit
+def test_a_short_label_does_not_cut_a_tables_first_word(tmp_path):
+    table = _table_block([["It was", "a cold morning."]])
+    chapters = [{"title": "I", "text": table["text"], "blocks": [table]}]
+    assert _printed(tmp_path, chapters) == ["I", "It was", "a cold morning."]
