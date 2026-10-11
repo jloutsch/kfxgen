@@ -2,10 +2,12 @@
 
 ## 5.10.0 — Boxes, links and text that went missing
 
-Seventeen changes since 5.9.0, each reviewed and converted through real
-calibre. Boxes, indents and nested tables (#238, #310, #263), and four of the
-link and text fixes (#278, #277, #280, #231), were also checked on a Kindle;
-nested boxes on the Voyage (5.13.6), whose firmware is the oldest.
+The changes since 5.9.0, each reviewed and converted through real calibre.
+Boxes, indents and nested tables (#238, #310, #263), definition lists and
+tables with an `epub:switch` (#229, #315), and four of the link and text fixes
+(#278, #277, #280, #231) were also checked on a Kindle; nested boxes,
+definition lists and the switch tables on the Voyage (5.13.6), whose firmware
+is the oldest.
 
 **Boxed sidebars and callouts (#238, #310).** A sidebar, tip or callout with
 a border or a background is drawn as a box, as Kindle Previewer draws it:
@@ -13,7 +15,7 @@ the border, the fill, padding and side margins, with the spacing kfxgen's
 paragraphs use above and below. A box can hold a table, a picture or another
 box, and text written straight in a bordered `<div>` is boxed too. In a
 sample of 200 library books, 2,082 boxes in 68 books; in the Gutenberg 90,
-181 in 30.
+181 boxes.
 
 **Indents from containers (#238).** An indented `<div>`, `<blockquote>` or
 sidebar indents its paragraphs, nested indents add up, and the indent is a
@@ -30,14 +32,16 @@ conversion.
 **Text no longer lost (#280, #231, #229, #234).** Text written straight
 into `<body>` is kept; words an SVG draws over a picture follow it;
 definition lists are one paragraph per term and definition instead of run
-together; and an `epub:switch` shows only its default branch, so a maths
-book no longer prints each equation twice.
+together, with bullets and numbers inside a definition kept; and an
+`epub:switch` shows only its default branch, so a maths book no longer prints
+each equation twice.
 
-**Chapters and contents (#225, #304, #318, #319).** In a book with no table
-of contents of its own, notes no longer become chapters, and chapters take
-their file's heading as their title instead of "Section N"; the chapter
-title is cut from the text only between words; and a boxed part page holding
-a contents listing keeps its heading.
+**Chapters and contents (#225, #304, #318).** In a book with no table of
+contents of its own, notes no longer become chapters, and chapters take their
+file's heading as their title instead of "Section N"; and the chapter title is
+cut from the text only between words, so a short title can't cut into the
+first word (in Chinese and Japanese, which put no spaces between words, the
+cut works as before).
 
 **Tables (#263, #315).** A table inside a table, and a table with an
 `epub:switch` in a cell, are written as native tables.
