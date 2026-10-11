@@ -8288,3 +8288,55 @@ def test_a_line_is_short_at_60_characters(length, tight):
         _doc(body), style_resolver=_css_for_class(l=_NO_MARGIN)
     )
     assert len(_tight(blocks)) == (5 if tight else 0)
+
+
+# ── #329: a contents listing by the book's own class, not calibre's ─────────
+
+
+def _marked(body):
+    """A file as kfxgen receives it from calibre: `mark_source_classes` ran
+    on the book's own classes, then calibre renamed them."""
+    root = _doc(body)
+    _conv.mark_source_classes(root)
+    return root
+
+
+@pytest.mark.unit
+def test_paragraphs_calibre_renamed_toc_keep_their_text():
+    """calibre names a class after the first element with that style, so
+    plain paragraphs styled like an unstyled `p.toc` entry arrive as
+    `class="toc"`. Their text was dropped as a contents listing."""
+    root = _marked("<p>One.</p><p>Two.</p>")
+    for p in root.iter("{http://www.w3.org/1999/xhtml}p"):
+        p.set("class", "toc")
+    assert [b["text"] for b in extract_blocks_from_html(root)] == ["One.", "Two."]
+
+
+@pytest.mark.unit
+def test_a_listing_calibre_renamed_away_from_toc_is_still_a_listing():
+    root = _marked('<p class="toc"><a href="c1.xhtml">One</a></p><p>Text.</p>')
+    root.find(".//{http://www.w3.org/1999/xhtml}p").set("class", "calibre5")
+    at = []
+    blocks = extract_blocks_from_html(root, nav_listing_at=at)
+    assert [b["text"] for b in blocks] == ["Text."]
+    assert len(at) == 1
+
+
+@pytest.mark.unit
+def test_without_calibres_marks_the_class_is_read_as_it_is():
+    """The test shim and any caller that never flattens CSS."""
+    at = []
+    blocks = extract_blocks_from_html(
+        _doc('<p class="toc"><a href="c1.xhtml">One</a></p><p>Text.</p>'),
+        nav_listing_at=at,
+    )
+    assert [b["text"] for b in blocks] == ["Text."]
+
+
+@pytest.mark.unit
+def test_epub_type_and_role_still_mark_a_listing_after_calibre():
+    root = _marked(
+        '<nav epub:type="toc"><p><a href="c1.xhtml">One</a></p></nav>'
+        '<div role="doc-toc"><p><a href="c2.xhtml">Two</a></p></div><p>Text.</p>'
+    )
+    assert [b["text"] for b in extract_blocks_from_html(root)] == ["Text."]

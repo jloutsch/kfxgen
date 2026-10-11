@@ -110,6 +110,18 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
         except Exception as e:
             log.warn("Could not read kfxgen plugin settings ({})".format(e))
 
+    def specialize_css_for_output(self, log, opts, item, stylizer):
+        """Called by calibre on each file just before it flattens the CSS
+        and renames the classes: note which elements the book itself
+        classes `toc`, a printed contents listing (#329)."""
+        try:
+            from .kfxgen.converter import mark_source_classes
+
+            if hasattr(item.data, "iter"):
+                mark_source_classes(item.data)
+        except Exception as e:
+            log.warn("kfxgen: could not record the book's classes ({})".format(e))
+
     def convert(self, oeb_book, output_path, input_plugin, opts, log):
         """
         Main conversion method called by Calibre.

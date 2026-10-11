@@ -1982,6 +1982,27 @@ def _shown_tree(elem):
 #: others; EPUB 3 producers use `epub:type="toc"` / `role="doc-toc"`.
 _TOC_CLASS_TOKEN = "toc"
 _TOC_DOC_ROLE = "doc-toc"
+#: Set on a file's root by `mark_source_classes`, and on each element whose
+#: own class holds the `toc` token (#329).
+_SOURCE_MARKED = "data-kfxgen-source"
+_SOURCE_TOC = "data-kfxgen-toc"
+
+
+def mark_source_classes(root):
+    """Record which elements the book itself classes `toc`, before calibre
+    renames the classes.
+
+    calibre flattens the CSS before kfxgen sees the book, naming each class
+    after the first element with that style: plain paragraphs styled like an
+    unstyled `<p class="toc">` entry arrive as `class="toc"` and were
+    dropped as a contents listing, and listing entries can be renamed away
+    from it. calibre runs the output plugin's `specialize_css_for_output`
+    on each file just before flattening it, which calls this (#329)."""
+    root.set(_SOURCE_MARKED, "1")
+    for elem in root.iter():
+        if isinstance(elem.tag, str):
+            if _TOC_CLASS_TOKEN in (elem.get("class") or "").split():
+                elem.set(_SOURCE_TOC, "1")
 
 
 def _is_nav_listing(elem):
@@ -1998,7 +2019,11 @@ def _is_nav_listing(elem):
     Class matching is by whitespace-separated token, never substring: "tocsin"
     is a word, and `class="toc-entry"` is a different name.
     """
-    if _TOC_CLASS_TOKEN in (elem.get("class") or "").split():
+    if elem.getroottree().getroot().get(_SOURCE_MARKED):
+        # The book's own class, as it was before calibre renamed it (#329).
+        if elem.get(_SOURCE_TOC):
+            return True
+    elif _TOC_CLASS_TOKEN in (elem.get("class") or "").split():
         return True
     raw = elem.get(_EPUB_TYPE_ATTR) or elem.get("epub:type") or ""
     if _TOC_CLASS_TOKEN in raw.lower().split():
