@@ -7797,3 +7797,26 @@ def test_a_box_has_space_above():
         _doc('<div class="wide"><p>One.</p></div>'), style_resolver=_css_by_class(rules)
     )
     assert (wide["box"]["space_above"], wide["box"]["space_below"]) == (2.0, 1.0)
+
+
+@pytest.mark.unit
+def test_a_link_inside_a_link_takes_the_inner_target():
+    """Nested links are invalid XHTML, but the WordDumb plugin writes them: a
+    run carried both targets and the hash order picked one (#317). The inner
+    link wins, as a tap lands on the innermost element; text of the outer
+    link outside the inner one keeps the outer target."""
+    from kfxgen.inline_style import make_link_flag
+
+    body = (
+        '<p>See <a href="c.xhtml#sec">the <a href="n.xhtml#note">word</a> here</a>.</p>'
+    )
+    (block,) = extract_blocks_from_html(_doc(body), base_href="c.xhtml")
+    links = {
+        block["text"][s : s + n]: sorted(str(f) for f in flags if isinstance(f, tuple))
+        for s, n, flags in block["spans"]
+    }
+    assert links == {
+        "the ": [str(make_link_flag("c.xhtml#sec"))],
+        "word": [str(make_link_flag("n.xhtml#note"))],
+        " here": [str(make_link_flag("c.xhtml#sec"))],
+    }

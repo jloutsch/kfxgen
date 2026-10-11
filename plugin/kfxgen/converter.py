@@ -646,6 +646,11 @@ def _is_preformatted(elem, style_resolver):
 _TABLE_SPLIT = object()
 
 
+def _is_link_flag(flag):
+    """Whether a run flag is a link target (`make_link_flag`)."""
+    return isinstance(flag, tuple) and flag[:1] == make_link_flag("")[:1]
+
+
 def _walk_inline(
     elem,
     flags=frozenset(),
@@ -705,6 +710,11 @@ def _walk_inline(
     if local == "a":
         target = _resolve_link_target(elem.get("href"), base_href)
         if target:
+            # A link inside a link (invalid, but the WordDumb plugin writes
+            # it): the inner one wins, as a tap lands on the innermost
+            # element. Keeping both left the run's target to the frozenset's
+            # hash order, so it changed between runs (#317).
+            cur = {f for f in cur if not _is_link_flag(f)}
             cur.add(make_link_flag(target))
     if style_resolver is not None and not is_root:
         css = style_resolver(elem)

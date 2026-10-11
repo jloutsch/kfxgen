@@ -105,3 +105,66 @@ def test_same_book_converts_to_identical_bytes_across_processes(tmp_path):
     assert len(set(digests.values())) == 1, (
         f"Conversion is not reproducible across processes: {digests}"
     )
+
+
+#: Six cross-references, each word wrapped again in a note link: invalid
+#: XHTML that the WordDumb plugin writes (#317). Each run used to carry both
+#: link flags, and which one won followed the frozenset's hash order.
+_NESTED_SCRIPT = textwrap.dedent(
+    """
+    import sys, hashlib
+    from pathlib import Path
+    root = Path(sys.argv[1])
+    sys.path.insert(0, str(root))
+    sys.path.insert(0, str(root / "plugin"))
+    from kfxgen import converter
+    from tests._helpers import NullLog
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    out = Path(sys.argv[2])
+    ns = 'xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"'
+    def page(title, body):
+        return ('<?xml version="1.0" encoding="utf-8"?>\\n<html ' + ns + '><head><title>'
+                + title + '</title></head><body>' + body + '</body></html>').encode()
+    refs = "".join(
+        f'<p>Para {k}: see <a href="chapter_1.xhtml#sec{k}"><a epub:type="noteref" '
+        f'href="chapter_2.xhtml#n{k}">nest{k}</a></a>.</p>'
+        for k in range(6)
+    )
+    sections = "".join(f'<p id="sec{k}">Section {k} text.</p>' for k in range(6))
+    notes = "".join(
+        f'<aside id="n{k}" epub:type="footnote"><p>Note {k} body.</p></aside>' for k in range(6)
+    )
+    epub = (
+        EpubBuilder()
+        .set_metadata(title="Nested", author="Repro Author")
+        .add_chapter("One", page("One", refs + sections))
+        .add_chapter("Notes", page("Notes", notes))
+        .build(out, "nested")
+    )
+    kfx = out / "nested.kfx"
+    converter.convert_oeb_to_kfx(EpubAsOeb(epub), str(kfx), opts=None, log=NullLog())
+    print(hashlib.sha256(kfx.read_bytes()).hexdigest())
+    """
+)
+
+
+@pytest.mark.integration
+def test_nested_links_convert_to_identical_bytes_across_processes(tmp_path):
+    """A link inside a link gives each run one target, the same in every
+    process (#317)."""
+    digests = {}
+    for seed in ("0", "1", "2", "3", "4", "5"):
+        out = tmp_path / f"seed{seed}"
+        out.mkdir()
+        proc = subprocess.run(
+            [sys.executable, "-c", _NESTED_SCRIPT, str(_ROOT), str(out)],
+            capture_output=True,
+            text=True,
+            env=dict(os.environ, PYTHONHASHSEED=seed),
+            cwd=str(_ROOT),
+        )
+        assert proc.returncode == 0, f"conversion failed:\n{proc.stderr[-2000:]}"
+        digests[seed] = proc.stdout.strip().splitlines()[-1]
+    assert len(set(digests.values())) == 1, digests
