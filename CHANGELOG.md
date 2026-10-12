@@ -1,5 +1,59 @@
 # Changelog
 
+## 5.11.0 — Scene breaks, verse and text that printed wrong
+
+The changes since 5.10.0, each reviewed and converted through real calibre,
+with the Gutenberg 90 and a 200-book library sample compared before and after
+each change. Scene breaks drawn as rules (#230) were checked on the Voyage
+(5.13.6), and non-breaking spaces (#244) on the Paperwhite (5.19.2), search
+included.
+
+**Scene breaks (#230, #326).** An `<hr>` is drawn as a horizontal rule, as
+Kindle Previewer draws it, with its margins above and below; a rule at a
+chapter's start or end is left out, since the page break already separates
+chapters, and one under a chapter's heading is kept. An `<hr>` that draws
+nothing, a blank-line paragraph (`<p>&nbsp;</p>`, `<p><br/></p>`) and a gap
+set only by CSS margins become space above the next paragraph. A margin
+counts as a break only where it stands out: at least 1.5em and twice the
+book's usual gap between paragraphs, with ordinary gaps on both sides and no
+heading beside it, so a book that spaces every paragraph keeps kfxgen's
+spacing. In the Gutenberg 90, 688 rules in 54 books; Sherlock Holmes
+(pg1661) gets its eight scene breaks back.
+
+**Verse and lines (#233, #331, #244).** A line of verse written as a
+`display: block` span starts its own line instead of running into the next
+("AB"). Verse, indexes, cast lists and numbered lists written one `<p>` per
+line with no gap between are no longer double-spaced, while a stanza's first
+line keeps its space, so stanza breaks show; prose written the same way
+keeps kfxgen's spacing, apart from the odd run of short lines of dialogue. Non-breaking spaces are kept as written: the indent a book
+sets with them (verse, letters, stage directions) shows, and one between
+words keeps them on one line; a Kindle search for "Mr. Smith" still finds
+"Mr.&nbsp;Smith".
+
+**Hidden content stays hidden (#232, #256).** Content the book hides with
+the `hidden` attribute or `display: none` is no longer printed: page markers
+that read "harbour12" mid-sentence, screen-reader text, hidden duplicates of
+footnotes, transcriber's notes about hovering a mouse cursor, and page
+numbers a book hides on Kindles (`@media amzn-kf8`). Links into hidden
+content still land where it was. Text a book shows only through a
+width-based media query stays hidden, since calibre doesn't evaluate those
+(one sentence in the Gutenberg 90).
+
+**Contents and links (#329, #335, #338).** calibre renames classes when it
+prepares a book, and plain paragraphs could arrive as `class="toc"` and be
+dropped as a contents listing; kfxgen now tells a listing by the book's own
+class, and two library books regain 146,392 and 35,141 characters of text. A book that
+gets no Contents page of kfxgen's keeps its own printed contents with working
+links (Moby-Dick's 135). A link to an id at the very end of a file lands at
+the start of the next file, where the chapter it names begins, instead of one
+page early; in the Gutenberg 90, 411 more links work and none are lost.
+
+**Chapter titles (#330, #285).** A part page whose heading and subtitle sit
+in a table is no longer replaced by the Contents page. A table of contents
+that labels each entry with a generated file name (`split_003`) no longer
+prints it as the chapter's heading; the chapter takes its own heading as its
+title instead.
+
 ## 5.10.0 — Boxes, links and text that went missing
 
 The changes since 5.9.0, each reviewed and converted through real calibre.
