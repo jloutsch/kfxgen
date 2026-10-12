@@ -3385,7 +3385,9 @@ class NativeKFXGenerator:
             for m in IMG_TOKEN_RE.finditer(para_text):
                 if m.start() > last:
                     seg = _trim(para_text[last : m.start()])
-                    if seg:
+                    # Only spaces, a non-breaking one beside a picture: no
+                    # entry (#244).
+                    if seg.strip():
                         chunks.append({"type": "text", "text": seg})
                 href = m.group(1)
                 alt = m.group(2).replace("\x02", " ")
@@ -3409,7 +3411,7 @@ class NativeKFXGenerator:
                 last = m.end()
             if last < len(para_text):
                 seg = _trim(para_text[last:])
-                if seg:
+                if seg.strip():
                     chunks.append({"type": "text", "text": seg})
             return chunks
 

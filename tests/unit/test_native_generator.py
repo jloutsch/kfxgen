@@ -5182,3 +5182,24 @@ def test_a_paragraphs_leading_nbsps_reach_the_kfx(tmp_path):
     ]
     entries, _, text, _ = _book(tmp_path, chapters)
     assert "    Indented" in [text(e) for e in entries]
+
+
+@pytest.mark.unit
+def test_a_nbsp_beside_a_picture_is_not_an_entry_of_its_own(tmp_path):
+    """#244 A/B: pg120 had 41 entries of a lone non-breaking space, the
+    text between a picture and the paragraph's end."""
+    gen = NativeKFXGenerator()
+    gen._resolved_image_refs = set()
+    gen.image_resources = {"p.png": ("img1", "p.png")}
+    gen._image_dims = {}
+    ch = gen._build_chapter_content(
+        [
+            {
+                "title": "One",
+                "text": "x",
+                "blocks": [_para("A."), _para(" \x00IMG\x01p.png\x01\x00 ")],
+            }
+        ]
+    )
+    texts = [c["text"] for c in ch["all_chunks"] if c.get("type") == "text"]
+    assert all(t.strip() for t in texts)
