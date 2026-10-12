@@ -19,9 +19,10 @@ lands where it did, and one that crossed a cut is one link again.
 followed the number of paragraphs passed, not the amount of text, so a
 section of many short paragraphs (notes, tables, lists) read far too early
 or too late: a notes section at 83% of the text showed 59%. Reading
-locations now fall every 110 characters, as Kindle Previewer's books have
-them, and the percentage follows the text. Location numbers in Go To change
-with it.
+locations now fall every 110 positions (about 110 characters of text; a
+picture or a chapter start counts as one), as KFX Input builds them for a
+Kindle Previewer book, and the percentage follows the text. Location
+numbers in Go To change with it.
 
 **Long table cells (#348).** A one-column table whose cell runs over 2,000
 characters is now a table, and the cell pages through like a paragraph. A
