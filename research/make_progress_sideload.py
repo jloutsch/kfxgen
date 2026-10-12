@@ -33,7 +33,7 @@ On each device (the Paperwhite first: its progress % counts locations),
   4. In "1. Long paragraphs", page forward a few pages: New's % rises
      steadily; Old's barely moves.
   5. Menu, Go To, Location: the highest location is about 900 in New and
-     about 1,045 in Old. Go to a location in the middle of New's range: it
+     about 1,050 in Old. Go to a location in the middle of New's range: it
      lands near 50% of the book.
 The facts printed below give each chapter's exact share for both builds.
 """
@@ -110,16 +110,18 @@ def facts(kfx):
         start.setdefault(eid, pid)
     total = pm[-1][0]
     sections = [int(val(f)["$141"][0]["$155"]) for f in by_type(frags, "$260")]
-    locations = [
-        int(loc["$155"])
+    # Where each location sits; main lists every section start first, so the
+    # count is by position, not by place in the list.
+    located = [
+        start[int(loc["$155"])] + int(loc["$143"])
         for f in by_type(frags, "$550")
         for group in val(f)
         for loc in group["$182"]
     ]
-    out = {"locations": len(locations)}
+    out = {"locations": len(located)}
     for (title, _), eid in zip(PAGES, sections):
         by_position = 100 * start[eid] / total
-        by_location = 100 * locations.index(eid) / len(locations)
+        by_location = 100 * sum(pid < start[eid] for pid in located) / len(located)
         out[title] = f"text {by_position:.0f}%, locations {by_location:.0f}%"
     return out
 
