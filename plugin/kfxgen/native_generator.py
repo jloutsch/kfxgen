@@ -481,8 +481,10 @@ def _cut_title_from_box(box, title):
 def _box_title_lines(box, path=()):
     """([(path, text)], whole) for the paragraphs a box opens with, through
     the boxes it opens with, as the split-title cut reads them: they read as
-    lines before they were boxed (#238, #310). `whole` is False when a table
-    or a picture stops the run."""
+    lines before they were boxed (#238, #310). A native table's rows with
+    text are lines too, each `path + (j, ("row", r))`, as the cut reads a
+    table on its own (#219, #344). `whole` is False when a picture stops the
+    run."""
     out = []
     for j, kid in enumerate(box["blocks"]):
         if kid.get("type") == "box":
@@ -490,6 +492,13 @@ def _box_title_lines(box, path=()):
             out += inner
             if not whole:
                 return out, False
+        elif kid.get("type") == "table":
+            rows = kid["table"]["rows"]
+            out += [
+                (path + (j, ("row", r)), _row_text(rows[r]))
+                for r in _source_order(rows)
+                if _row_text(rows[r])
+            ]
         elif _is_text_block(kid):
             out.append((path + (j,), kid.get("text", "")))
         else:
@@ -499,13 +508,22 @@ def _box_title_lines(box, path=()):
 
 def _drop_box_lines(box, path):
     """(box or None, carried keys): `box` with every block up to and
-    including the paragraph at `path` taken out (#310)."""
+    including the paragraph at `path` taken out (#310), or a table's rows up
+    to and including the row at `path`, as for a table on its own; a table
+    left with none goes (#344)."""
     kids = box["blocks"]
     j = path[0]
     carried = [k for kid in kids[:j] for k in _block_keys(kid)]
     if len(path) == 1:
         carried += list(kids[j].get("anchor_keys") or [])
         rest = kids[j + 1 :]
+    elif isinstance(path[1], tuple):
+        table = kids[j]
+        order = _source_order(table["table"]["rows"])
+        kept = _drop_table_rows(table, set(order[: order.index(path[1][1]) + 1]))
+        if kept is None:
+            carried += list(table.get("anchor_keys") or [])
+        rest = ([kept] if kept else []) + kids[j + 1 :]
     else:
         inner, more = _drop_box_lines(kids[j], path[1:])
         carried += more
@@ -3898,6 +3916,16 @@ class NativeKFXGenerator:
                                 iter_blocks = (
                                     [kept_box] if kept_box else []
                                 ) + iter_blocks[1:]
+                            elif first.get("type") == "box":
+                                # Not the paragraph cut: a box is written from
+                                # its blocks, so trimming its joined text
+                                # removed nothing, and the title printed twice
+                                # (#344). A title split over its lines or a
+                                # table's rows is eaten from them.
+                                iter_blocks, eaten_keys = _eat_split_title(
+                                    iter_blocks, title
+                                )
+                                carried_anchor_keys.extend(eaten_keys)
                             elif _opens_with_title(first_stripped, title):
                                 remainder = first_stripped[len(title) :].lstrip()
                                 removed = len(first["text"]) - len(remainder)

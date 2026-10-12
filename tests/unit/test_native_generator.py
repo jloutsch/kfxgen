@@ -4834,12 +4834,28 @@ def test_a_box_opening_with_a_picture_keeps_its_bottom_padding(tmp_path):
 
 
 @pytest.mark.unit
-def test_the_split_title_cut_never_takes_a_table_out_of_a_box(tmp_path):
-    """The title split over a paragraph and a table: the split cut stops at
-    the table (#310)."""
+def test_a_title_split_over_a_paragraph_and_a_boxed_table_is_cut_as_without_the_box(
+    tmp_path,
+):
+    """The split cut reads a boxed table's rows as lines, as a table's on its
+    own (#219): the title's row goes, and with it the table it emptied
+    (#344, QA review). It used to stop at the table and keep the row."""
     box = _box_block([_para("IV"), _tiny_table([["Dawn"]]), _para("Text.")])
     chapters = [{"title": "IV—Dawn", "text": box["text"], "blocks": [box]}]
-    entries, _, _, _ = _book(tmp_path, chapters)
+    entries, _, text, _ = _book(tmp_path, chapters)
+    texts = [text(e) for e in entries if text(e)]
+    assert texts == ["IV—Dawn", "Text."]
+
+
+@pytest.mark.unit
+def test_a_title_split_over_a_boxed_tables_rows_prints_once(tmp_path):
+    """QA review of #344: "The" / "Harbour" in two rows of a table inside a
+    box printed twice; in a plain table it was cut once."""
+    box = _box_block([_tiny_table([["The"], ["Harbour"], ["A quiet morning."]])])
+    chapters = [{"title": "The Harbour", "text": box["text"], "blocks": [box]}]
+    entries, _, text, _ = _book(tmp_path, chapters)
+    texts = [text(e) for e in entries if text(e)]
+    assert texts == ["The Harbour", "A quiet morning."]
     assert [e for e in entries if str(e.get("$159")) == "$278"]
 
 
