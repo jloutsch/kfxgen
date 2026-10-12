@@ -1,5 +1,39 @@
 # Changelog
 
+## 5.11.1 — Long paragraphs, reading progress and chapter titles
+
+The changes since 5.11.0, each reviewed and converted through real calibre,
+with the Gutenberg 90 and a 200-book library sample compared before and
+after each change. Long paragraphs (#226), a picture before a chapter's
+title (#346) and long table cells (#348) were checked on the Voyage
+(5.13.6), and reading progress (#227) on the Paperwhite (5.19.2).
+
+**Long paragraphs stay whole (#226).** A paragraph over 2,000 characters was
+cut every 2,000 characters, often inside a word, and the Kindle drew each
+piece as a new paragraph ("some clot", then "hes, and all my shoes"). It is
+now one paragraph, as Kindle Previewer writes it. In the Gutenberg 90, 4,096
+cuts are gone, 2,515 of them inside a word. A link into a long paragraph
+lands where it did, and one that crossed a cut is one link again.
+
+**Reading progress follows the text (#227).** The progress percentage
+followed the number of paragraphs passed, not the amount of text, so a
+section of many short paragraphs (notes, tables, lists) read far too early
+or too late: a notes section at 83% of the text showed 59%. Reading
+locations now fall every 110 characters, as Kindle Previewer's books have
+them, and the percentage follows the text. Location numbers in Go To change
+with it.
+
+**Long table cells (#348).** A one-column table whose cell runs over 2,000
+characters is now a table, and the cell pages through like a paragraph. A
+table of two or more columns with such a cell is still laid out as
+paragraphs, because the Kindle's table zoom fits the whole table on one
+screen, where a long cell can't be read.
+
+**Chapter titles (#344, #346).** A chapter title in a table inside a box
+prints once instead of twice. A chapter that opens with a picture and then
+its title prints the title once, under the picture, as the book and Kindle
+Previewer have it, instead of once above the picture and again below it.
+
 ## 5.11.0 — Scene breaks, verse and text that printed wrong
 
 The changes since 5.10.0, each reviewed and converted through real calibre,
