@@ -3635,15 +3635,18 @@ def _leading_chapter_title(head_blocks):
 
 
 def _is_file_name_label(label, href):
-    """Whether a TOC label is only its target file's name, with digits in
-    it: "split_003" for split_003.xhtml, left by a conversion that had no
-    titles (#285). A word such as "Copyright" on Copyright.xhtml is a real
-    name and is not."""
+    """Whether a TOC label is only its target file's name, letters and
+    digits both: "split_003" for split_003.xhtml, left by a conversion that
+    had no titles (#285). A word such as "Copyright" on Copyright.xhtml is a
+    real name, and so is a number: "12" on 12.xhtml is chapter 12."""
     name = posixpath.basename(_normalize_href(href) or "")
     stem = name.rsplit(".", 1)[0] if "." in name else name
     label = (label or "").strip()
     return (
-        bool(stem) and label.lower() == stem.lower() and any(c.isdigit() for c in label)
+        bool(stem)
+        and label.lower() == stem.lower()
+        and any(c.isdigit() for c in label)
+        and any(c.isalpha() for c in label)
     )
 
 

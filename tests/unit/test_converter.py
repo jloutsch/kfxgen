@@ -8628,6 +8628,7 @@ def _two_files(end_of_a):
         _RawSpineItem("b.xhtml", "<h2>Chapter 1</h2><p>Call me Ishmael.</p>"),
     ]
     toc = [_TOCNode("Extracts", "a.xhtml"), _TOCNode("Chapter 1", "b.xhtml")]
+    return _conv.extract_chapters_from_oeb(_OEBBook(spine, toc), _silent_log())
 
 
 # ── #285: a TOC label that is only the file's name ───────────────────────────
@@ -8757,6 +8758,7 @@ def test_a_file_name_label_with_no_heading_names_the_entry_but_does_not_print():
         ("Copyright.xhtml", "Copyright"),  # a real section name, no digits
         ("ch01.xhtml", "Chapter 1"),  # a real title, not the file's name
         ("ch01.xhtml", "1"),  # digits, but not the file's name
+        ("12.xhtml", "12"),  # the file's name, but a chapter number
     ],
 )
 def test_a_real_label_keeps_its_heading(href, label):
