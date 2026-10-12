@@ -4806,13 +4806,16 @@ def test_a_box_nests_a_table_and_a_box(tmp_path):
 
 
 @pytest.mark.unit
-def test_the_title_cut_does_not_reach_into_a_boxs_table(tmp_path):
-    """A box opening with a table: its text joins the rows, and a title that
-    matches it isn't cut from the table (#310)."""
+def test_the_title_is_cut_from_a_boxs_table_as_from_a_table(tmp_path):
+    """A box opening with a table: the title is cut from the table's first
+    row, as from a table on its own (#219), and prints once. It used to
+    stay in the table and print twice (#344)."""
     box = _box_block([_tiny_table([["One", "x"]]), _para("Text.")])
     chapters = [{"title": "One", "text": box["text"], "blocks": [box]}]
     entries, _, text, _ = _book(tmp_path, chapters)
-    assert "One" in [text(e) for e in entries if str(e.get("$159")) == "$269"][1:]
+    texts = [text(e) for e in entries if text(e)]
+    assert texts.count("One") == 1
+    assert "x" in texts and "Text." in texts
 
 
 @pytest.mark.unit
@@ -4831,20 +4834,65 @@ def test_a_box_opening_with_a_picture_keeps_its_bottom_padding(tmp_path):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    "title, kids",
-    [
-        # The table's text is the whole title.
-        ("One", lambda: [_tiny_table([["One"]]), _para("Text.")]),
-        # The title split over a paragraph and the table.
-        ("IV—Dawn", lambda: [_para("IV"), _tiny_table([["Dawn"]]), _para("Text.")]),
-    ],
-)
-def test_the_title_cuts_never_take_a_table_out_of_a_box(tmp_path, title, kids):
-    box = _box_block(kids())
-    chapters = [{"title": title, "text": box["text"], "blocks": [box]}]
+def test_the_split_title_cut_never_takes_a_table_out_of_a_box(tmp_path):
+    """The title split over a paragraph and a table: the split cut stops at
+    the table (#310)."""
+    box = _box_block([_para("IV"), _tiny_table([["Dawn"]]), _para("Text.")])
+    chapters = [{"title": "IV—Dawn", "text": box["text"], "blocks": [box]}]
     entries, _, _, _ = _book(tmp_path, chapters)
     assert [e for e in entries if str(e.get("$159")) == "$278"]
+
+
+@pytest.mark.unit
+def test_a_boxed_table_holding_only_the_title_goes_as_a_table_alone_does(tmp_path):
+    """#344: the cut leaves the table empty, and it goes, as a table on its
+    own does (#219); the box keeps the rest."""
+    box = _box_block([_tiny_table([["One"]]), _para("Text.")])
+    chapters = [{"title": "One", "text": box["text"], "blocks": [box]}]
+    entries, _, text, _ = _book(tmp_path, chapters)
+    assert not [e for e in entries if str(e.get("$159")) == "$278"]
+    texts = [text(e) for e in entries if text(e)]
+    assert texts.count("One") == 1 and "Text." in texts
+
+
+_SHADE = {"background-color": "#eeeeee"}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "opening",
+    [
+        "<table><tr><td><h1>The Harbour</h1><p>A quiet morning.</p></td></tr></table>",
+        "<table><tr><td><h1>The Harbour</h1></td></tr>"
+        "<tr><td><p>A quiet morning.</p></td></tr></table>",
+    ],
+    ids=["one cell", "two rows"],
+)
+def test_a_title_in_a_table_in_a_box_prints_once(tmp_path, opening):
+    """#344's books, through the converter: a heading and subtitle in a
+    table inside a shaded box printed "The Harbour" twice."""
+    from lxml import etree
+
+    from kfxgen.converter import extract_blocks_from_html
+
+    doc = etree.fromstring(
+        (
+            '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+            f'<div class="shade">{opening}</div><p>Harbour text.</p></body></html>'
+        ).encode()
+    )
+    blocks = extract_blocks_from_html(
+        doc,
+        style_resolver=lambda e: _SHADE if e.get("class") == "shade" else {},
+        native_tables=True,
+        base_href="c1.xhtml",
+    )
+    assert blocks[0].get("type") == "box"
+    text_all = "\n\n".join(b["text"] for b in blocks)
+    chapters = [{"title": "The Harbour", "text": text_all, "blocks": blocks}]
+    entries, _, text, _ = _book(tmp_path, chapters)
+    texts = [text(e) for e in entries if text(e)]
+    assert texts == ["The Harbour", "A quiet morning.", "Harbour text."]
 
 
 @pytest.mark.unit
@@ -5203,3 +5251,19 @@ def test_a_nbsp_beside_a_picture_is_not_an_entry_of_its_own(tmp_path):
     )
     texts = [c["text"] for c in ch["all_chunks"] if c.get("type") == "text"]
     assert all(t.strip() for t in texts)
+
+
+@pytest.mark.unit
+def test_a_boxed_table_dropped_by_the_title_cut_keeps_its_keys():
+    """Links to the dropped table land at the chapter's start (#344)."""
+    table = _tiny_table([["One"]])
+    table["anchor_keys"] = ["c.xhtml#t"]
+    box = _box_block([table, _para("Text.")])
+    gen = NativeKFXGenerator()
+    gen._resolved_image_refs = set()
+    gen.image_resources = {}
+    ch = gen._build_chapter_content(
+        [{"title": "One", "text": box["text"], "blocks": [box]}]
+    )
+    keys = [k for c in ch["all_chunks"] for k in c.get("anchor_keys") or []]
+    assert "c.xhtml#t" in keys

@@ -441,8 +441,10 @@ def _cut_title_from_box(box, title):
     """(box, carried anchor keys) with `title` cut from the box's first
     paragraph, as the chapter title cut does for a paragraph (#238), or None
     when the box doesn't open with it. A box opening with a box is followed
-    into it (#310). The box is None when nothing is left in it; its own keys
-    are then carried too."""
+    into it (#310), and one opening with a native table has the title cut
+    from the table as a table on its own does (#219): left in it, the title
+    printed twice (#344). The box is None when nothing is left in it; its own
+    keys are then carried too."""
     kids = box["blocks"]
     first = kids[0]
     if first.get("type") == "box":
@@ -451,6 +453,12 @@ def _cut_title_from_box(box, title):
             return None
         inner, carried = cut
         kids = ([inner] if inner else []) + kids[1:]
+    elif first.get("type") == "table":
+        table, matched = _cut_title_from_table(first, title)
+        if not matched:
+            return None
+        kids = ([table] if table else []) + kids[1:]
+        carried = [] if table else list(first.get("anchor_keys") or [])
     elif not _is_text_block(first):
         return None
     else:
