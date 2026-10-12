@@ -5339,6 +5339,14 @@ def test_a_chapter_opening_with_a_picture_then_its_title_prints_it_once(
 
 
 @pytest.mark.unit
+def test_a_title_in_other_case_and_spacing_after_a_picture_prints_once(tmp_path):
+    """The book's heading set in capitals, or with a line break, is still
+    the title: it prints, and kfxgen's heading is left out (#346)."""
+    blocks = [_para(_pic("p.png")), _para("THE\n HARBOUR"), _para("Text.")]
+    assert _chapter_texts(tmp_path, blocks) == ["[picture]", "THE\n HARBOUR", "Text."]
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "blocks, expected",
     [
@@ -5352,10 +5360,20 @@ def test_a_chapter_opening_with_a_picture_then_its_title_prints_it_once(
             lambda: [_para(_pic("p.png")), _para("Morning came.")],
             ["H:The Harbour", "[picture]", "Morning came."],
         ),
+        # A picture, then a sentence that only starts with the title's
+        # words: it is prose, not the book's heading, and kfxgen's heading
+        # prints (#347 QA).
+        (
+            lambda: [
+                _para(_pic("p.png")),
+                _para("The Harbour lay quiet that morning."),
+            ],
+            ["H:The Harbour", "[picture]", "The Harbour lay quiet that morning."],
+        ),
         # Only a picture: no heading over it, as before (#33).
         (lambda: [_para(_pic("p.png"))], ["[picture]"]),
     ],
-    ids=["title first", "no title after", "picture only"],
+    ids=["title first", "no title after", "sentence after", "picture only"],
 )
 def test_other_openings_keep_their_heading(tmp_path, blocks, expected):
     assert _chapter_texts(tmp_path, blocks()) == expected

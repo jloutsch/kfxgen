@@ -423,6 +423,11 @@ def _leading_blocks(blocks):
             yield block
 
 
+def _same_words(text, title):
+    """`text` and `title` as the same words, ignoring case and spacing."""
+    return " ".join(text.split()).lower() == " ".join(title.split()).lower()
+
+
 def _title_after_pictures(blocks, title):
     """Whether the chapter opens with one or more pictures and then its
     title, as in a book that puts a chapter's art above its heading (#346).
@@ -432,7 +437,10 @@ def _title_after_pictures(blocks, title):
         if block.get("type") == "rule":
             continue
         if _is_text_block(block):
-            return seen_picture and _opens_with_title(block["text"].strip(), title)
+            # The whole paragraph is the title: a sentence that only starts
+            # with the title's words is prose, and kfxgen's heading prints
+            # (#347 QA).
+            return seen_picture and _same_words(block["text"], title)
         if block.get("type") == "table" or not IMG_TOKEN_RE.search(
             block.get("text") or ""
         ):
