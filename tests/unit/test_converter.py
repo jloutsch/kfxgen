@@ -8666,3 +8666,55 @@ def test_moving_an_end_id_leaves_the_chapters_as_they_were():
     before = _two_files('<p><a id="ch1"></a></p>')
     assert [c["title"] for c in before] == ["Extracts", "Chapter 1"]
     assert [b["text"] for b in before[0]["blocks"]][-1] == "Whale Song."
+
+
+@pytest.mark.unit
+def test_an_end_id_after_a_native_table_names_the_next_files_start():
+    """QA review: the key was on the table's last row too."""
+    spine = [
+        _RawSpineItem(
+            "a.xhtml",
+            "<h1>Extracts</h1><table><tr><td>x</td><td>y</td></tr></table>"
+            '<p><a id="link2HCH0001"></a></p>',
+        ),
+        _RawSpineItem("b.xhtml", "<h2>Chapter 1</h2><p>Call me Ishmael.</p>"),
+    ]
+    toc = [_TOCNode("Extracts", "a.xhtml"), _TOCNode("Chapter 1", "b.xhtml")]
+    chapters = _conv.extract_chapters_from_oeb(
+        _OEBBook(spine, toc), _silent_log(), native_tables=True
+    )
+    (table,) = [b for b in chapters[0]["blocks"] if b.get("type") == "table"]
+    parts = [table, table["table"], *table["table"]["rows"]]
+    parts += [c for r in table["table"]["rows"] for c in r["cells"]]
+    assert all(
+        "a.xhtml#link2HCH0001" not in (p.get("anchor_keys") or []) for p in parts
+    )
+    assert _keys_by_text(chapters)["Chapter 1"][0] == "a.xhtml#link2HCH0001"
+
+
+@pytest.mark.unit
+def test_an_end_id_after_a_box_names_the_next_files_start():
+    """QA review: the key was on the box's last paragraph."""
+    spine = [
+        _RawSpineItem(
+            "a.xhtml",
+            '<h1>Extracts</h1><div class="box"><p>Boxed.</p></div>'
+            '<p><a id="link2HCH0001"></a></p>',
+        ),
+        _RawSpineItem("b.xhtml", "<h2>Chapter 1</h2><p>Call me Ishmael.</p>"),
+    ]
+    toc = [_TOCNode("Extracts", "a.xhtml"), _TOCNode("Chapter 1", "b.xhtml")]
+    box_css = {"border-sides": (("solid", "0.75", "black"),) * 4}
+    oeb = _OEBBook(spine, toc)
+    with patch.object(
+        _conv,
+        "_build_style_resolver",
+        lambda *a, **k: lambda e: box_css if e.get("class") == "box" else {},
+    ):
+        chapters = _conv.extract_chapters_from_oeb(oeb, _silent_log())
+    (box,) = [b for b in chapters[0]["blocks"] if b.get("type") == "box"]
+    assert all(
+        "a.xhtml#link2HCH0001" not in (k.get("anchor_keys") or [])
+        for k in box["blocks"]
+    )
+    assert _keys_by_text(chapters)["Chapter 1"][0] == "a.xhtml#link2HCH0001"
