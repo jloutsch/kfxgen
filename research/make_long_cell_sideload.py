@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """Build a sideload A/B pair for table cells over 2,000 characters (#348).
 
-One invented source book, and pg12082 (Color Images from Mars Rovers, public
-domain), each converted twice through the real `ebook-convert`, each plugin
-in its own isolated calibre config under the output directory:
+One invented source book, converted twice through the real `ebook-convert`,
+each plugin in its own isolated calibre config under the output directory:
 
-    "Long Cells New"   this checkout's plugin: the tables are native tables
+    "Long Cells New"   this checkout's plugin: a one-column table with a long
+                       cell is a native table
     "Long Cells Old"   an earlier plugin zip given with --old-plugin (for
                        example a build of main): a cell over 2,000
-                       characters keeps its table out of the native format
-    "Mars Cells New" / "Mars Cells Old"   pg12082 the same way
+                       characters keeps any table out of the native format
 
-The titles differ so the files get different ASINs and none replaces another
-on the device.
+The titles differ so the files get different ASINs and neither replaces the
+other on the device.
 
     .venv/bin/python research/make_long_cell_sideload.py \\
         --old-plugin main.zip [out_dir]
@@ -22,26 +21,19 @@ Output (default `test_books/long_cells/`) is gitignored. Do not commit it.
 Every long cell is made of numbered sentences, "Sentence 1." to "Sentence
 100.", so a missing or cut-off part shows as a gap in the numbers.
 
-On each device (the Voyage first, then the Paperwhite), "Long Cells New"
-first, then "Long Cells Old". Open each entry from the TOC:
-  1. "1. One column": a one-column table whose single cell runs over
-     several pages. Page forward: Sentence 1 to Sentence 100 with no
-     number missing or repeated, and nothing cut off at the bottom of a
-     page.
+On each device (the Voyage first), "Long Cells New" first, then "Long Cells
+Old". Open each entry from the TOC:
+  1. "1. One column": New: a one-column table whose single cell runs over
+     several pages, with no zoom button. Page forward: Sentence 1 to
+     Sentence 100 with no number missing or repeated, and nothing cut off
+     at the bottom of a page. Old: the same text as a paragraph.
   2. Page backward through the same cell, from Sentence 100 to Sentence 1.
-  3. "2. Two columns" and "3. Three columns": the row with the long cell.
-     Does it continue onto the next page (every sentence number shows), or
-     is it cut off at the bottom of the screen? Note which.
-  4. In each table, tap and hold, then open the table viewer: it scrolls
-     through the whole long cell, Sentence 1 to 100.
-  5. "4. A link into a cell": tap "Sentence 60". You land on the page
+  3. "2. Two columns" and "3. Three columns": New and Old the same. The
+     tables are laid out as paragraphs, one per row, because in two or more
+     columns the table viewer fits the table on one screen, where a long
+     cell can't be read.
+  4. "4. A link into a cell": tap "Sentence 60". You land on the page
      showing Sentence 60 of the one-column cell.
-In "Mars Cells New", open "Mars in Color, from “Spirit”" from the TOC and
-search for "rock abrasion tool and science team members": the cell, about
-2,070 characters, starts "NASA's Mars Exploration Rover Spirit took this
-panoramic camera image" and ends "...science team members. 3/23/2004". It
-shows inside the table and reads whole, and the table viewer opens on it.
-"Old" lays the same table out as paragraphs, one per row.
 """
 
 import argparse
@@ -65,8 +57,6 @@ from make_table_sideload import (  # noqa: E402
 
 from tests._kfx_introspect import by_type, iter_entries, load_fragments, val  # noqa: E402
 from tests.fixtures.epub_builder import EpubBuilder  # noqa: E402
-
-_MARS = ROOT / "research/gutenberg-top-90/pg12082.epub"
 
 
 def _long_cell(anchor_at=None):
@@ -169,8 +159,6 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     (out / ".gitignore").write_text("*\n")
     books = [(build_source(out), "long-cells", "Long Cells")]
-    if _MARS.exists():
-        books.append((_MARS, "mars-cells", "Mars Cells"))
     envs = [("new", "New", install_plugin(out))]
     if args.old_plugin:
         envs.append(("old", "Old", install_zip(out, args.old_plugin)))
