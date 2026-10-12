@@ -151,3 +151,7 @@ research/gutenberg-top-90/
 research/gutenberg-top-90-baseline/*/
 
 research/gutenberg-top-90-baseline-calibre/*/
+
+# macOS Finder files, everywhere. Repeated last because the re-includes
+# above (!tests/fixtures/golden/** and others) would otherwise un-ignore them.
+.DS_Store
