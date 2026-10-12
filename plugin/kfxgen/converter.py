@@ -3634,6 +3634,35 @@ def _leading_chapter_title(head_blocks):
     return LEADING_TITLE_FALLBACK
 
 
+def _is_file_name_label(label, href):
+    """Whether a TOC label is only its target file's name, with digits in
+    it: "split_003" for split_003.xhtml, left by a conversion that had no
+    titles (#285). A word such as "Copyright" on Copyright.xhtml is a real
+    name and is not."""
+    name = posixpath.basename(_normalize_href(href) or "")
+    stem = name.rsplit(".", 1)[0] if "." in name else name
+    label = (label or "").strip()
+    return (
+        bool(stem) and label.lower() == stem.lower() and any(c.isdigit() for c in label)
+    )
+
+
+def _retitle_from_heading(ch):
+    """A chapter whose TOC label is only a file name (#285): never print the
+    label; name the chapter after its first heading when it opens with one,
+    as a chapter with no TOC entry is (#304), else keep the label for the
+    navigation pane, since an entry with a poor name still beats none
+    (#143)."""
+    ch["_omit_title_heading"] = True
+    first = (ch.get("blocks") or [{}])[0]
+    heading = first.get("heading") and " ".join((first.get("text") or "").split())
+    if heading:
+        ch["title"] = heading
+        # The title is the file's: front-matter rules keyed on titles don't
+        # apply to it.
+        ch["_from_spine"] = True
+
+
 def _assemble_chapters_by_coordinate(
     spine_items_ordered, toc_entries, log, cover_href=None
 ):
@@ -3814,6 +3843,8 @@ def _assemble_chapters_by_coordinate(
         start = 0 if (k == 0 and head_has_toc_anchor) else fi
         ch = _flag_nav(_mk(title, flat[start:end]), start, end)
         if ch:
+            if _is_file_name_label(title, spine_items_ordered[si]["href"]):
+                _retitle_from_heading(ch)
             chapters.append(ch)
 
     last_si = coords[-1][1]

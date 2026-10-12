@@ -8628,6 +8628,15 @@ def _two_files(end_of_a):
         _RawSpineItem("b.xhtml", "<h2>Chapter 1</h2><p>Call me Ishmael.</p>"),
     ]
     toc = [_TOCNode("Extracts", "a.xhtml"), _TOCNode("Chapter 1", "b.xhtml")]
+
+
+# ── #285: a TOC label that is only the file's name ───────────────────────────
+
+
+def _labelled(entries):
+    """A book of (href, label, body) files, its TOC labelled `label`."""
+    spine = [_RawSpineItem(h, body) for h, _, body in entries]
+    toc = [_TOCNode(label, h) for h, label, _ in entries]
     return _conv.extract_chapters_from_oeb(_OEBBook(spine, toc), _silent_log())
 
 
@@ -8718,3 +8727,39 @@ def test_an_end_id_after_a_box_names_the_next_files_start():
         for k in box["blocks"]
     )
     assert _keys_by_text(chapters)["Chapter 1"][0] == "a.xhtml#link2HCH0001"
+
+
+def test_a_file_name_label_is_replaced_by_the_chapters_own_heading():
+    """Two library books label every TOC entry with its file name
+    ("split_003"); it printed as each chapter's heading (295 of them)."""
+    chapters = _labelled(
+        [
+            ("split_001.xhtml", "split_001", "<h1>The Harbour</h1><p>Boats.</p>"),
+            ("split_002.xhtml", "split_002", "<h2>The Storm</h2><p>Wind.</p>"),
+        ]
+    )
+    assert [c["title"] for c in chapters] == ["The Harbour", "The Storm"]
+    assert all(c.get("_omit_title_heading") for c in chapters)
+
+
+@pytest.mark.unit
+def test_a_file_name_label_with_no_heading_names_the_entry_but_does_not_print():
+    """An entry with a poor name still beats no entry (#143)."""
+    (chapter,) = _labelled([("part0007.html", "part0007", "<p>Just text.</p>")])
+    assert chapter["title"] == "part0007"
+    assert chapter.get("_omit_title_heading")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "href, label",
+    [
+        ("Copyright.xhtml", "Copyright"),  # a real section name, no digits
+        ("ch01.xhtml", "Chapter 1"),  # a real title, not the file's name
+        ("ch01.xhtml", "1"),  # digits, but not the file's name
+    ],
+)
+def test_a_real_label_keeps_its_heading(href, label):
+    (chapter,) = _labelled([(href, label, "<p>Text of the section.</p>")])
+    assert chapter["title"] == label
+    assert not chapter.get("_omit_title_heading")
