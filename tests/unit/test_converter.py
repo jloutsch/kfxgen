@@ -8814,3 +8814,10 @@ def test_an_nbsp_only_paragraph_is_still_a_spacer():
     blocks = extract_blocks_from_html(_doc("<p>a</p><p>&#160;</p><p>b</p><p>c</p>"))
     assert [b["text"] for b in blocks] == ["a", "b", "c"]
     assert blocks[1].get("space_above") == 1.2
+
+
+@pytest.mark.unit
+def test_a_loose_nbsp_between_blocks_is_not_a_paragraph():
+    """QA review: inline text between two blocks that is only a
+    non-breaking space gives no block of its own."""
+    assert _texts("<div><p>A</p>&#160;<p>B</p></div>") == ["A", "B"]
