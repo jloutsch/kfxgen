@@ -8585,3 +8585,27 @@ def test_a_clipped_visually_hidden_heading_stays():
         ),
     )
     assert [b["text"] for b in blocks] == ["Chapter 1", "Text."]
+
+
+@pytest.mark.unit
+def test_a_list_item_hidden_by_css_takes_no_number():
+    """QA review: it vanished but kept its number, "1. one / 3. three"."""
+    texts = _texts(
+        '<ol><li>one</li><li class="hide">two</li><li>three</li></ol>',
+        style_resolver=_hide_class,
+    )
+    assert texts == ["1. one", "2. three"]
+
+
+@pytest.mark.unit
+def test_a_table_with_a_row_hidden_by_css_is_written_as_rows_without_it():
+    """QA review: native tables kept it; the row path drops it."""
+    blocks = extract_blocks_from_html(
+        _doc(
+            "<table><tr><td>a</td><td>b</td></tr>"
+            '<tr class="hide"><td>s</td><td>t</td></tr></table>'
+        ),
+        style_resolver=_hide_class,
+        native_tables=True,
+    )
+    assert [b.get("type") or b["text"] for b in blocks] == ["a b"]

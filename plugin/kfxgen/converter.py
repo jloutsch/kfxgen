@@ -1116,7 +1116,7 @@ def _note_pair_ids(oeb_book):
     return found
 
 
-def _table_is_native(table):
+def _table_is_native(table, style_resolver=None):
     """True when `table` can be written as a real KFX table (#219).
 
     Anything else keeps rows as paragraphs: a nested table, an object other
@@ -1135,6 +1135,7 @@ def _table_is_native(table):
     than `_MAX_NATIVE_COLUMNS`, whose text would be too small to read.
 
     An <epub:switch>'s cases are not drawn, so they count for nothing (#315).
+    Hidden means `_is_hidden`, CSS included, with `style_resolver` (#232).
     """
     table = _shown_tree(table)
     rows = 0
@@ -1145,7 +1146,7 @@ def _table_is_native(table):
         if tag is None:
             continue
         if tag in _ROW_GROUP_TAGS or tag == "tr" or tag in _CELL_TAGS:
-            if e is not table and (_is_non_rendered(e) or _is_nav_listing(e)):
+            if e is not table and (_is_hidden(e, style_resolver) or _is_nav_listing(e)):
                 return False
         if tag in _ROW_GROUP_TAGS or tag == "tr":
             if (e.text or "").strip() or any((c.tail or "").strip() for c in e):
@@ -1159,7 +1160,7 @@ def _table_is_native(table):
             return False
         if tag == "caption":
             # A hidden caption would be shown; only the first is kept.
-            if _is_non_rendered(e):
+            if _is_hidden(e, style_resolver):
                 return False
             captions += 1
             if captions > 1:
@@ -2214,13 +2215,14 @@ def _parse_int(value):
         return None
 
 
-def _list_ordinals(list_elem):
+def _list_ordinals(list_elem, style_resolver=None):
     """{li: ordinal} for the items of one list, honouring `start`, `reversed`
-    and `<li value>`. Hidden items take no number, as in a browser."""
+    and `<li value>`. Hidden items take no number, as in a browser, CSS
+    included (#232)."""
     items = [
         child
         for child in list_elem
-        if _local_tag(child.tag) == "li" and not _is_non_rendered(child)
+        if _local_tag(child.tag) == "li" and not _is_hidden(child, style_resolver)
     ]
     is_reversed = list_elem.get("reversed") is not None
     start = _parse_int(list_elem.get("start"))
@@ -2821,7 +2823,7 @@ def extract_blocks_from_html(
             return
         parent = elem.getparent()
         if parent not in list_ordinals:
-            list_ordinals[parent] = _list_ordinals(parent)
+            list_ordinals[parent] = _list_ordinals(parent, style_resolver)
         css = style_resolver(elem) if style_resolver is not None else None
         entry = _list_marker(elem, css, list_ordinals[parent])
         if entry is None:
@@ -2884,7 +2886,9 @@ def extract_blocks_from_html(
             return
 
         native = (
-            native_tables and _local_tag(elem.tag) == "table" and _table_is_native(elem)
+            native_tables
+            and _local_tag(elem.tag) == "table"
+            and _table_is_native(elem, style_resolver)
         )
         if native and _is_notes_table(elem, base_href, link_targets):
             # A notes section reads better as paragraphs, one per note (#268).
