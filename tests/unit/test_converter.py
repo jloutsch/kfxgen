@@ -8765,3 +8765,30 @@ def test_a_real_label_keeps_its_heading(href, label):
     (chapter,) = _labelled([(href, label, "<p>Text of the section.</p>")])
     assert chapter["title"] == label
     assert not chapter.get("_omit_title_heading")
+
+
+@pytest.mark.unit
+def test_a_file_name_chapter_headed_contents_is_not_the_books_contents_page():
+    """QA review: its title comes from the file's heading, so title-keyed
+    front-matter rules don't apply; the page is not rebuilt as Contents."""
+    entries = [
+        ("split_001.xhtml", "split_001", "<h1>The Harbour</h1><p>Boats.</p>"),
+        ("split_002.xhtml", "split_002", "<h1>Contents</h1><p>A page of prose.</p>"),
+    ]
+    spine = [_RawSpineItem(h, body) for h, _, body in entries]
+    toc = [_TOCNode(label, h) for h, label, _ in entries]
+    chapters = _conv.extract_chapters_from_oeb(
+        _OEBBook(spine, toc), _silent_log(), {"title": "T", "author": "A"}
+    )
+    page = chapters[1]
+    assert page["title"] == "Contents"
+    assert not page.get("toc_links")
+    assert "A page of prose." in page["text"]
+
+
+@pytest.mark.unit
+def test_a_file_name_label_with_its_extension_is_a_file_name_too():
+    (chapter,) = _labelled(
+        [("split_000.xhtml", "split_000.xhtml", "<h1>The Harbour</h1><p>Boats.</p>")]
+    )
+    assert chapter["title"] == "The Harbour"
