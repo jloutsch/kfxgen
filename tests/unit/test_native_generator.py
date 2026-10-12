@@ -2344,29 +2344,6 @@ def test_anchor_at_paragraph_start_omits_the_offset_field(tmp_path):
 
 
 @pytest.mark.unit
-def test_anchor_offset_rebases_when_the_paragraph_splits(tmp_path):
-    """A paragraph longer than CHUNK_SIZE becomes several chunks. The anchor
-    belongs to the chunk holding the marker, with the offset rebased into it."""
-    body = "x" * 2500 + "M"
-    offset = len(body) - 1
-    gen = NativeKFXGenerator()
-    gen.generate_full_book(
-        title="T",
-        author="A",
-        chapters=_round_trip_chapters(body, offset),
-        output_path=str(tmp_path / "o.kfx"),
-    )
-    found = dict(_anchor_named_by_return_link(gen))
-    assert found, "No body anchor was reachable from the endnote's return link"
-    offsets = {off for _pos, off in found.values()}
-    # The endnote's own anchor sits at a paragraph start and carries no $143,
-    # so it shows up as None alongside the rebased marker offset.
-    assert offset - NativeKFXGenerator.CHUNK_SIZE in offsets, (
-        f"Offset should rebase into the second chunk, got {offsets}"
-    )
-
-
-@pytest.mark.unit
 def test_return_links_are_reciprocal_with_their_markers(tmp_path):
     """The invariant the #79 bug broke: wherever a return link lands must be
     exactly where the marker that points at that note sits — same position AND
@@ -5111,7 +5088,8 @@ def test_space_above_beyond_kfxgens_own_spacing_is_written(
 
 
 @pytest.mark.unit
-def test_space_above_goes_on_a_long_paragraphs_first_entry_only(tmp_path):
+def test_space_above_goes_on_a_long_paragraphs_one_entry(tmp_path):
+    """A long paragraph is one entry (#226), and it carries the space."""
     long = "word " * 600
     chapters = [
         {
@@ -5122,11 +5100,7 @@ def test_space_above_goes_on_a_long_paragraphs_first_entry_only(tmp_path):
     ]
     entries, styles, text, _ = _book(tmp_path, chapters)
     pieces = [e for e in entries if (text(e) or "").startswith("word")]
-    assert len(pieces) == 2
-    assert [_lh(styles[str(e["$157"])], "$47") for e in pieces] == [
-        "2$310",
-        "1$310",
-    ]
+    assert [_lh(styles[str(e["$157"])], "$47") for e in pieces] == ["2$310"]
 
 
 @pytest.mark.unit
@@ -5377,3 +5351,105 @@ def test_a_title_in_other_case_and_spacing_after_a_picture_prints_once(tmp_path)
 )
 def test_other_openings_keep_their_heading(tmp_path, blocks, expected):
     assert _chapter_texts(tmp_path, blocks()) == expected
+
+
+# ── #226: a paragraph over 2,000 characters stays one paragraph ─────────────
+
+
+def _long_paragraph_book(tmp_path, block):
+    gen = NativeKFXGenerator()
+    out = tmp_path / "t.kfx"
+    gen.generate_full_book(
+        "T",
+        "A",
+        [{"title": "Chapter", "text": block["text"], "blocks": [block]}],
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    content = {
+        str(val(f)["name"]): list(val(f)["$146"]) for f in by_type(frags, "$145")
+    }
+    entries = [
+        e
+        for st in by_type(frags, "$259")
+        for e in iter_entries(val(st)["$146"])
+        if "$145" in e
+    ]
+    texts = [
+        str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])]) for e in entries
+    ]
+    locations = [
+        (int(loc["$155"]), int(loc["$143"]))
+        for f in by_type(frags, "$550")
+        for group in val(f)
+        for loc in group["$182"]
+    ]
+    return entries, texts, locations
+
+
+_WORDS = "The load contained all my provisions, some clothes, and all my shoes. "
+
+
+@pytest.mark.unit
+def test_a_paragraph_over_2000_characters_is_one_entry(tmp_path):
+    """#226: the paragraph was cut every 2,000 characters, often inside a
+    word, and the Kindle drew each piece as a new paragraph. Kindle
+    Previewer writes it as one entry (23,250 characters in pg22210)."""
+    text = _WORDS * 70  # 4,970 characters
+    _, texts, _ = _long_paragraph_book(tmp_path, _para(text))
+    assert texts == ["Chapter", text.strip()]
+
+
+@pytest.mark.unit
+def test_a_long_paragraph_keeps_a_location_every_2000_characters(tmp_path):
+    """The Paperwhite's progress % counts location entries (#227); the cuts
+    gave a long paragraph one every 2,000 characters. They stay, inside the
+    one entry, so progress reads as before."""
+    text = (_WORDS * 70).strip()
+    entries, _, locations = _long_paragraph_book(tmp_path, _para(text))
+    pid = int(entries[1]["$155"])
+    assert [off for p, off in locations if p == pid] == [0, 2000, 4000]
+
+
+@pytest.mark.unit
+def test_a_span_across_2000_characters_stays_one_span(tmp_path):
+    from kfxgen.inline_style import FLAG_ITALIC
+
+    text = (_WORDS * 40).strip()
+    block = {**_para(text), "spans": [(1990, 30, frozenset({FLAG_ITALIC}))]}
+    entries, _, _ = _long_paragraph_book(tmp_path, block)
+    spans = [(int(s["$143"]), int(s["$144"])) for s in entries[1].get("$142") or []]
+    assert spans == [(1990, 30)]
+
+
+@pytest.mark.unit
+def test_an_anchor_past_2000_characters_keeps_its_offset(tmp_path):
+    """The anchor sits in the one entry at its own offset; it was rebased
+    into the piece holding it while the paragraph was cut (#53, #79)."""
+    text = (_WORDS * 40).strip()
+    gen = NativeKFXGenerator()
+    gen.generate_full_book(
+        title="T",
+        author="A",
+        chapters=_round_trip_chapters(text, 2500),
+        output_path=str(tmp_path / "o.kfx"),
+    )
+    offsets = {off for _pos, off in dict(_anchor_named_by_return_link(gen)).values()}
+    assert 2500 in offsets
+
+
+@pytest.mark.unit
+def test_an_anchor_at_a_long_paragraphs_end_stays_at_the_end(tmp_path):
+    """An id clamped to the paragraph's very end has no character after it.
+    It belongs at the end of the one entry, not at its start, which would
+    land a link 2,000 or more characters early."""
+    text = (_WORDS * 40).strip()
+    gen = NativeKFXGenerator()
+    gen.generate_full_book(
+        title="T",
+        author="A",
+        chapters=_round_trip_chapters(text, len(text)),
+        output_path=str(tmp_path / "o.kfx"),
+    )
+    offsets = {off for _pos, off in dict(_anchor_named_by_return_link(gen)).values()}
+    assert len(text) in offsets

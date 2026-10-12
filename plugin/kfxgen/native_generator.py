@@ -1695,6 +1695,8 @@ class NativeKFXGenerator:
                 'position_entries_265': List of (char_offset, position_id) for $265
                 'section_positions_264': Dict of section_name -> [position_ids] for $264
                 'all_position_ids': List of all position IDs for $550
+                'locations': [(position_id, offset)] for $550: one at each
+                    position's start, and more inside a long paragraph
         """
         section_positions = ch_data["section_positions"]
         chunk_positions = ch_data["chunk_positions"]
@@ -1785,11 +1787,21 @@ class NativeKFXGenerator:
         # All position IDs for $550 (section + every chunk in reading order)
         all_position_ids = list(section_positions)
         all_position_ids.extend(p for p in chunk_positions if p is not None)
+        # A paragraph over CHUNK_SIZE is one entry, with a location every
+        # CHUNK_SIZE characters inside it, where it used to be cut (#226).
+        # The Paperwhite's progress % counts locations (#227), so it reads
+        # as it did.
+        locations = [(p, 0) for p in section_positions]
+        for chunk, p in zip(all_chunks, chunk_positions):
+            if p is not None:
+                locations.append((p, 0))
+                locations.extend((p, off) for off in chunk.get("locations", ()))
 
         return {
             "position_entries_265": entries_265_raw,
             "section_positions_264": section_positions_264,
             "all_position_ids": all_position_ids,
+            "locations": locations,
         }
 
     def build_ion_symbol_table_fragment(self):
@@ -3143,8 +3155,8 @@ class NativeKFXGenerator:
 
         # 13. Build Fragment $550 (Page Break Positions)
         page_positions = [
-            IonStruct(IS("$155"), p, IS("$143"), 0)
-            for p in pos_data["all_position_ids"]
+            IonStruct(IS("$155"), p, IS("$143"), off)
+            for p, off in pos_data["locations"]
         ]
         self.fragments.append(
             YJFragment(
@@ -3297,7 +3309,7 @@ class NativeKFXGenerator:
     #     range Kindle has been observed to handle"; future code that
     #     needs more positions should investigate Kindle's actual limit
     #     on a real device, not assume one based on the constants.
-    CHUNK_SIZE = 2000  # chars per content chunk in $145.$146
+    CHUNK_SIZE = 2000  # chars between locations in a long paragraph (#226)
     CONTENT_POS_BASE = 1000  # Position ID base for $259 entries
     CONTENT_POS_STEP = 2  # Position ID step for $259 entries
     SECTION_POS_BASE = 10000  # Position ID base for $260 sections (v5.2.0 known-good)
@@ -3375,7 +3387,8 @@ class NativeKFXGenerator:
         Build content fragments for multi-chapter books.
 
         Uses the Z3 pattern for working TOC navigation:
-        - Content split into ~2000 char chunks stored in $145.$146
+        - One chunk per paragraph (or per piece between pictures), stored
+          in $145.$146; a long paragraph is not cut (#226)
         - Multi-entry $259 storylines (one entry per chunk, not one per chapter)
         - Separate position ID ranges: content (1000+) for $259, section (10000+) for $260
         - All position IDs properly defined in $265
@@ -3384,7 +3397,7 @@ class NativeKFXGenerator:
         The title is stripped from the body text start to avoid duplication.
 
         Chapters with 'toc_links' get special handling:
-        - Each link entry becomes its own chunk (not ~2000 char split)
+        - Each link entry becomes its own chunk
         - Link entries use underlined style and $179 references to $266 anchors
 
         Args:
@@ -3476,18 +3489,6 @@ class NativeKFXGenerator:
                     chunks.append({"type": "text", "text": seg})
             return chunks
 
-        def _split_long_text(text):
-            if len(text) <= self.CHUNK_SIZE:
-                return [{"type": "text", "text": text}]
-            chunks = []
-            pos = 0
-            while pos < len(text):
-                chunks.append(
-                    {"type": "text", "text": text[pos : pos + self.CHUNK_SIZE]}
-                )
-                pos += self.CHUNK_SIZE
-            return chunks
-
         def _append_text_with_spans(
             chunk_text,
             para_text,
@@ -3496,15 +3497,15 @@ class NativeKFXGenerator:
             anchor_keys=None,
             anchor_offsets=None,
         ):
-            """Split chunk_text by CHUNK_SIZE and attach the slice of
-            para_spans covering each piece, offsets rebased to the piece.
-            The chunk_text is a (stripped) substring of para_text; find its
-            offset once, then translate spans.
+            """Append chunk_text as one chunk, with the part of para_spans
+            covering it, offsets rebased to it. The chunk_text is a
+            (stripped) substring of para_text; find its offset once, then
+            translate spans.
 
-            The CHUNK_SIZE loop below is NOT redundant: chunk_text is a whole
-            paragraph segment from _emit_text_chunks (split only on image
-            tokens, not length), so a long paragraph arrives > CHUNK_SIZE and
-            must be split here — this absorbs the old _split_long_text path.
+            A long paragraph stays one chunk, as Kindle Previewer writes it:
+            cutting it every CHUNK_SIZE characters drew a paragraph break
+            there, often inside a word (#226). It carries a location every
+            CHUNK_SIZE characters instead.
             """
             # find() returns the FIRST occurrence. In the rare case of two
             # identical text segments around an inline image in one paragraph,
@@ -3516,48 +3517,33 @@ class NativeKFXGenerator:
             if base < 0:
                 base = 0
             offsets = anchor_offsets or {}
-            assigned = set()
-            pos = 0
-            while pos < len(chunk_text):
-                piece = chunk_text[pos : pos + self.CHUNK_SIZE]
-                p_start = base + pos
-                p_end = p_start + len(piece)
-                is_last = pos + self.CHUNK_SIZE >= len(chunk_text)
-                pspans = []
-                for s, length, flags in para_spans:
-                    a = max(s, p_start)
-                    b = min(s + length, p_end)
-                    if b > a:
-                        pspans.append((a - p_start, b - a, flags))
-                chunk = {
-                    "type": "text",
-                    "text": piece,
-                    "spans": pspans,
-                    "block_style": block_style,
-                }
-                # An anchor belongs to the piece that actually contains it,
-                # with its offset rebased into that piece — a marker 2,400
-                # characters into a paragraph lives in the second chunk, not
-                # the first. Anchors with no offset of their own (ids inherited
-                # from a container, or a whole-file key) sit at 0 and so land
-                # on the first piece, which is the old behaviour. (#53, #79)
-                mine = [
-                    k
-                    for k in anchor_keys or ()
-                    if p_start <= offsets.get(k, 0) < p_end
-                    # An anchor clamped to the paragraph's very end has no
-                    # character to sit before; it belongs to the last piece.
-                    or (is_last and offsets.get(k, 0) == p_end)
-                ]
-                if mine:
-                    chunk["anchor_keys"] = mine
-                    chunk["anchor_offsets"] = {
-                        k: offsets.get(k, 0) - p_start for k in mine
-                    }
-                    assigned.update(mine)
-                all_chunks.append(chunk)
-                pos += self.CHUNK_SIZE
-            return assigned
+            end = base + len(chunk_text)
+            pspans = []
+            for s, length, flags in para_spans:
+                a = max(s, base)
+                b = min(s + length, end)
+                if b > a:
+                    pspans.append((a - base, b - a, flags))
+            chunk = {
+                "type": "text",
+                "text": chunk_text,
+                "spans": pspans,
+                "block_style": block_style,
+            }
+            if len(chunk_text) > self.CHUNK_SIZE:
+                chunk["locations"] = list(
+                    range(self.CHUNK_SIZE, len(chunk_text), self.CHUNK_SIZE)
+                )
+            # An anchor belongs to the chunk that contains it, with its offset
+            # rebased into that chunk. Anchors with no offset of their own (ids
+            # inherited from a container, or a whole-file key) sit at 0.
+            # (#53, #79)
+            mine = [k for k in anchor_keys or () if base <= offsets.get(k, 0) <= end]
+            if mine:
+                chunk["anchor_keys"] = mine
+                chunk["anchor_offsets"] = {k: offsets.get(k, 0) - base for k in mine}
+            all_chunks.append(chunk)
+            return set(mine)
 
         def _emit_paragraph(block):
             """A paragraph's chunks: its text, cut at each picture into text
@@ -3620,7 +3606,8 @@ class NativeKFXGenerator:
                     dict.fromkeys(block_anchor_keys, 0)
                 )
             if space is not None and len(all_chunks) > block_first_chunk:
-                # On the first piece only: the rest continue the paragraph.
+                # On the first piece only: the pieces after a picture
+                # continue the paragraph.
                 first = all_chunks[block_first_chunk]
                 if first["type"] == "text":
                     first["space_above"] = space

@@ -94,8 +94,9 @@ _NON_TEXT_TAGS = {
     "embed",
     "iframe",
 }
-#: `NativeKFXGenerator.CHUNK_SIZE`. Longer text is cut into two storyline
-#: entries, which inside a row would be two cells (#226).
+#: The longest cell entry a native table takes. It was the generator's
+#: 2,000-character cut, which would have split a cell in two; the cut is gone
+#: (#226), and lifting the limit is #348.
 _MAX_NATIVE_CELL_CHARS = 2000
 #: The widest table checked on a device (#254). With the table-viewer
 #: properties the Voyage (5.13.6) and the Oasis (5.18.2.1.1) read every table
@@ -1233,9 +1234,9 @@ def _longest_cell_run(cell):
 
     A cell of plain text, or one block, is one entry. A cell of several blocks
     is one entry per block with no block inside it, plus its loose text; that
-    is counted as one run, which can only overstate. The generator cuts an
-    entry at 2,000 characters, which inside a table would split a cell or a
-    paragraph in two (#226, #261)."""
+    is counted as one run, which can only overstate. A cell over
+    `_MAX_NATIVE_CELL_CHARS` keeps the table out of the native format (#261,
+    #348)."""
     if _cell_paragraph_count(cell) < 2:
         return _text_length(cell)
     leaves = [

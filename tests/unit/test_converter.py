@@ -2684,19 +2684,12 @@ def test_tables_that_fall_back_to_rows(html):
 
 @pytest.mark.unit
 def test_a_cell_over_the_chunk_size_falls_back():
-    # The generator cuts text at CHUNK_SIZE (2,000); inside a table that cut
-    # would turn one cell into two and shift every later column (#226).
+    # Kept from the generator's old 2,000-character cut (#226); #348 is
+    # whether to lift it.
     long_cell = "x" * (_conv._MAX_NATIVE_CELL_CHARS + 1)
     assert not _conv._table_is_native(
         _first_table(f"<table><tr><td>{long_cell}</td></tr></table>")
     )
-
-
-@pytest.mark.unit
-def test_max_native_cell_chars_matches_the_generator_chunk_size():
-    from kfxgen.native_generator import NativeKFXGenerator
-
-    assert _conv._MAX_NATIVE_CELL_CHARS == NativeKFXGenerator.CHUNK_SIZE
 
 
 @pytest.mark.unit
@@ -2744,8 +2737,8 @@ def test_a_cell_with_line_breaks_counts_them_in_length():
 )
 def test_a_cell_holding_several_blocks_stays_native(cell, native):
     # #261: 131 Gutenberg tables fell back for this alone, and the rows build
-    # ran each poem in them into one paragraph. The generator's 2,000-character
-    # cut applies to each paragraph of such a cell, not to the whole cell.
+    # ran each poem in them into one paragraph. The 2,000-character cell
+    # limit applies to each paragraph of such a cell, not to the whole cell.
     html = f"<table><tr>{cell}<td>z</td></tr></table>"
     assert _conv._table_is_native(_first_table(html)) is native
 
