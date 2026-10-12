@@ -5401,17 +5401,6 @@ def test_a_paragraph_over_2000_characters_is_one_entry(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_long_paragraph_keeps_a_location_every_2000_characters(tmp_path):
-    """The Paperwhite's progress % counts location entries (#227); the cuts
-    gave a long paragraph one every 2,000 characters. They stay, inside the
-    one entry, so progress reads as before."""
-    text = (_WORDS * 70).strip()
-    entries, _, locations = _long_paragraph_book(tmp_path, _para(text))
-    pid = int(entries[1]["$155"])
-    assert [off for p, off in locations if p == pid] == [0, 2000, 4000]
-
-
-@pytest.mark.unit
 def test_a_span_across_2000_characters_stays_one_span(tmp_path):
     from kfxgen.inline_style import FLAG_ITALIC
 
@@ -5453,3 +5442,89 @@ def test_an_anchor_at_a_long_paragraphs_end_stays_at_the_end(tmp_path):
     )
     offsets = {off for _pos, off in dict(_anchor_named_by_return_link(gen)).values()}
     assert len(text) in offsets
+
+
+# ── #227: a location every 110 positions, so progress follows the text ──────
+
+
+def _location_book(tmp_path, chapters):
+    """(locations as (entry index or "section N", offset), text entries)."""
+    out = tmp_path / "loc.kfx"
+    NativeKFXGenerator().generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(out)
+    )
+    frags = load_fragments(out)
+    sections = {
+        int(val(f)["$141"][0]["$155"]): f"section {i}"
+        for i, f in enumerate(by_type(frags, "$260"))
+    }
+    entries = [
+        e for st in by_type(frags, "$259") for e in iter_entries(val(st)["$146"])
+    ]
+    names = {int(e["$155"]): i for i, e in enumerate(entries)}
+    names.update(sections)
+    return [
+        (names[int(loc["$155"])], int(loc["$143"]))
+        for f in by_type(frags, "$550")
+        for group in val(f)
+        for loc in group["$182"]
+    ]
+
+
+def _plain_chapter(*lengths):
+    blocks = [_para("x" * n) for n in lengths]
+    return {
+        "title": "C",
+        "text": "\n\n".join(b["text"] for b in blocks),
+        "blocks": blocks,
+        "_omit_title_heading": True,
+    }
+
+
+@pytest.mark.unit
+def test_locations_fall_every_110_positions_through_the_text(tmp_path):
+    """#227: one location per paragraph made the Paperwhite's progress %
+    count paragraphs, not text. A location every 110 positions, as kfxlib
+    writes one for a Kindle Previewer book, makes it follow the text.
+
+    The section takes position 0, so the paragraphs start at 1: the first
+    (50) holds 1-50, the second (300) 51-350, the third (50) 351-400."""
+    locations = _location_book(tmp_path, [_plain_chapter(50, 300, 50)])
+    assert locations == [("section 0", 0), (1, 59), (1, 169), (1, 279)]
+
+
+@pytest.mark.unit
+def test_each_section_starts_a_location(tmp_path):
+    """The count starts again at each section, as in kfxlib."""
+    locations = _location_book(tmp_path, [_plain_chapter(150), _plain_chapter(20)])
+    assert locations == [("section 0", 0), (0, 109), ("section 1", 0)]
+
+
+@pytest.mark.unit
+def test_a_picture_takes_one_position_between_locations(tmp_path):
+    chapter = _plain_chapter(108)
+    chapter["blocks"] = [*chapter["blocks"], _para(_pic("a.png")), _para("y" * 50)]
+    gen_images = {"a.png": MINIMAL_JPEG}
+    out = tmp_path / "pic.kfx"
+    NativeKFXGenerator().generate_full_book(
+        title="T",
+        author="A",
+        chapters=[chapter],
+        output_path=str(out),
+        images=gen_images,
+    )
+    frags = load_fragments(out)
+    entries = [
+        e for st in by_type(frags, "$259") for e in iter_entries(val(st)["$146"])
+    ]
+    kinds = [str(e["$159"]) for e in entries]
+    locs = [
+        (int(loc["$155"]), int(loc["$143"]))
+        for f in by_type(frags, "$550")
+        for group in val(f)
+        for loc in group["$182"]
+    ]
+    # Section at 0, text 1-108, picture 109, text from 110: the second
+    # location is the last paragraph's first character.
+    assert kinds == ["$269", "$271", "$269"]
+    assert locs[1] == (int(entries[2]["$155"]), 0)

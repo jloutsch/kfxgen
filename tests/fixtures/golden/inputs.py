@@ -294,8 +294,9 @@ def make_marker_offsets(out_dir: Path) -> Path:
     offset is 0 and the fixture passes whether or not anchors carry `$143`.
     Here the id is on the marker's own `<a>`, hundreds of characters into the
     paragraph, which is where a return link used to land on the first line
-    instead of the marker. One paragraph also runs past CHUNK_SIZE so the
-    offset has to rebase into a later chunk. (#79)
+    instead of the marker. One paragraph also runs past 2,000 characters,
+    where the generator used to cut it, so its offset is past that (#79,
+    #226).
     """
     prose = "Sentence that carries the argument forward. " * 12  # ~530 chars
     long_prose = "Filler that pushes this paragraph past the chunk size. " * 45

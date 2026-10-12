@@ -207,14 +207,18 @@ def test_golden_byte_identical(name, builder, tmp_path):
 
 @pytest.mark.tier3_strict
 @pytest.mark.integration
-def test_native_tables_opt_out_is_byte_identical_to_5_8_8(tmp_path):
-    """With `kfxgen_disable_native_tables`, `table_cells` must come out
-    byte-for-byte as v5.8.8 wrote it (#219). `table_cells_rows.kfx` is
-    v5.8.8's own `table_cells.kfx`, copied from the v5.8.8 tag, and
-    regenerate.py never writes it: it pins the opt-out to the release,
-    not to whatever this branch last produced."""
-    import hashlib
+def test_native_tables_opt_out_matches_5_8_8(tmp_path):
+    """With `kfxgen_disable_native_tables`, `table_cells` must come out as
+    v5.8.8 wrote it (#219). `table_cells_rows.kfx` is v5.8.8's own
+    `table_cells.kfx`, copied from the v5.8.8 tag, and regenerate.py never
+    writes it: it pins the opt-out to the release, not to whatever this
+    branch last produced.
+
+    Every fragment matches but the `$550` location map, which every book
+    now writes with a location every 110 positions (#227)."""
     from types import SimpleNamespace
+
+    from tests._kfx_introspect import load_fragments, val
 
     from tests.fixtures.golden.inputs import make_table_cells
 
@@ -224,8 +228,17 @@ def test_native_tables_opt_out_is_byte_identical_to_5_8_8(tmp_path):
         tmp_path,
         opts=SimpleNamespace(kfxgen_disable_native_tables=True),
     )
-    pinned = (EXPECTED_DIR / "table_cells_rows.kfx").read_bytes()
-    assert hashlib.sha256(fresh).hexdigest() == hashlib.sha256(pinned).hexdigest()
+    fresh_path = tmp_path / "fresh.kfx"
+    fresh_path.write_bytes(fresh)
+
+    def fragments(path):
+        return {
+            (str(f.ftype), str(f.fid)): repr(val(f))
+            for f in load_fragments(path)
+            if str(f.ftype) != "$550"
+        }
+
+    assert fragments(fresh_path) == fragments(EXPECTED_DIR / "table_cells_rows.kfx")
 
 
 # ---------------------------------------------------------------------------

@@ -657,6 +657,31 @@ def _dedupe_keys(keys):
 #: exactly this is already a violation.
 MAX_CONTENT_FRAGMENT_SIZE = 8192
 
+#: Positions between reading locations, as kfxlib places them for a Kindle
+#: Previewer book (`KFX_POSITIONS_PER_LOCATION`). The Paperwhite's progress %
+#: is the share of locations passed, so evenly spaced locations make it follow
+#: the text (#227).
+POSITIONS_PER_LOCATION = 110
+
+
+def place_locations(sections):
+    """[(eid, offset)] for `$550`: a location every POSITIONS_PER_LOCATION
+    positions, counted again from each section's start, with the offset into
+    the entry it falls in. `sections` is one list per section of (eid,
+    length) in reading order, the section's own eid first. This is kfxlib's
+    `generate_approximate_locations`."""
+    locations = []
+    for entries in sections:
+        pid = next_location = 0
+        for eid, length in entries:
+            if length <= 0:
+                continue
+            while next_location < pid + length:
+                locations.append((eid, next_location - pid))
+                next_location += POSITIONS_PER_LOCATION
+            pid += length
+    return locations
+
 
 def pack_content_fragments(text_strings, start_index, limit=MAX_CONTENT_FRAGMENT_SIZE):
     """Group a chapter's chunk strings into `$145` fragments under the cap (#37).
@@ -1695,8 +1720,8 @@ class NativeKFXGenerator:
                 'position_entries_265': List of (char_offset, position_id) for $265
                 'section_positions_264': Dict of section_name -> [position_ids] for $264
                 'all_position_ids': List of all position IDs for $550
-                'locations': [(position_id, offset)] for $550: one at each
-                    position's start, and more inside a long paragraph
+                'locations': [(position_id, offset)] for $550, one every
+                    POSITIONS_PER_LOCATION positions (#227)
         """
         section_positions = ch_data["section_positions"]
         chunk_positions = ch_data["chunk_positions"]
@@ -1734,6 +1759,7 @@ class NativeKFXGenerator:
         # is the conformant shape.
         entries_265_raw = []
         char_offset = 0
+        location_sections = []
 
         for ch_idx in range(len(chapters)):
             start, end = chapter_chunk_ranges[ch_idx]
@@ -1741,6 +1767,8 @@ class NativeKFXGenerator:
             # Section element: length 1, at the section's starting pid.
             entries_265_raw.append((char_offset, section_positions[ch_idx]))
             char_offset += 1
+            located = [(section_positions[ch_idx], 1)]
+            location_sections.append(located)
 
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
@@ -1757,6 +1785,8 @@ class NativeKFXGenerator:
                     chunk_text_len = len(chunk)  # legacy: bare string
                 entries_265_raw.append((char_offset, chunk_positions[chunk_idx]))
                 char_offset += chunk_text_len
+                if chunk_positions[chunk_idx] is not None:
+                    located.append((chunk_positions[chunk_idx], chunk_text_len))
 
         entries_265_raw.sort(key=lambda x: x[0])
         # Deduplicate entries with same $184 char-offset (rare with text-
@@ -1787,15 +1817,7 @@ class NativeKFXGenerator:
         # All position IDs for $550 (section + every chunk in reading order)
         all_position_ids = list(section_positions)
         all_position_ids.extend(p for p in chunk_positions if p is not None)
-        # A paragraph over CHUNK_SIZE is one entry, with a location every
-        # CHUNK_SIZE characters inside it, where it used to be cut (#226).
-        # The Paperwhite's progress % counts locations (#227), so it reads
-        # as it did.
-        locations = [(p, 0) for p in section_positions]
-        for chunk, p in zip(all_chunks, chunk_positions):
-            if p is not None:
-                locations.append((p, 0))
-                locations.extend((p, off) for off in chunk.get("locations", ()))
+        locations = place_locations(location_sections)
 
         return {
             "position_entries_265": entries_265_raw,
@@ -3309,7 +3331,6 @@ class NativeKFXGenerator:
     #     range Kindle has been observed to handle"; future code that
     #     needs more positions should investigate Kindle's actual limit
     #     on a real device, not assume one based on the constants.
-    CHUNK_SIZE = 2000  # chars between locations in a long paragraph (#226)
     CONTENT_POS_BASE = 1000  # Position ID base for $259 entries
     CONTENT_POS_STEP = 2  # Position ID step for $259 entries
     SECTION_POS_BASE = 10000  # Position ID base for $260 sections (v5.2.0 known-good)
@@ -3503,9 +3524,8 @@ class NativeKFXGenerator:
             translate spans.
 
             A long paragraph stays one chunk, as Kindle Previewer writes it:
-            cutting it every CHUNK_SIZE characters drew a paragraph break
-            there, often inside a word (#226). It carries a location every
-            CHUNK_SIZE characters instead.
+            cutting it every 2,000 characters drew a paragraph break there,
+            often inside a word (#226).
             """
             # find() returns the FIRST occurrence. In the rare case of two
             # identical text segments around an inline image in one paragraph,
@@ -3530,10 +3550,6 @@ class NativeKFXGenerator:
                 "spans": pspans,
                 "block_style": block_style,
             }
-            if len(chunk_text) > self.CHUNK_SIZE:
-                chunk["locations"] = list(
-                    range(self.CHUNK_SIZE, len(chunk_text), self.CHUNK_SIZE)
-                )
             # An anchor belongs to the chunk that contains it, with its offset
             # rebased into that chunk. Anchors with no offset of their own (ids
             # inherited from a container, or a whole-file key) sit at 0.

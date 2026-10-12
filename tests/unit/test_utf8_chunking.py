@@ -200,13 +200,12 @@ class TestMultibyteChunking:
             os.unlink(path)
 
     def test_emoji_at_chunk_boundary_round_trips(self):
-        """Construct text whose CHUNK_SIZE-th character is an emoji.
-        Even though Python 3 slicing is code-point safe, this pins
-        the invariant explicitly — if anyone ever rewrites the chunker
-        in bytes, this test fires."""
-        # CHUNK_SIZE - 1 ASCII chars + emoji + filler = boundary lands
-        # on the emoji.
-        chunk_size = NativeKFXGenerator.CHUNK_SIZE
+        """Construct text whose 2,000th character is an emoji, where the
+        generator used to cut a paragraph (#226). The paragraph is no
+        longer cut; this pins that a long text holding an emoji still
+        round-trips whole."""
+        # 1,999 ASCII chars + emoji + filler: the old cut lands on the emoji.
+        chunk_size = 2000
         ascii_run = "a" * (chunk_size - 1)
         text = ascii_run + "😀" + "b" * 100  # boundary cuts *after* emoji
         chapters = [{"title": "Boundary", "text": f"Boundary\n\n{text}"}]
