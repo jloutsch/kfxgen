@@ -414,6 +414,33 @@ def _is_text_block(block):
     )
 
 
+def _leading_blocks(blocks):
+    """A chapter's blocks in reading order, with boxes opened."""
+    for block in blocks:
+        if block.get("type") == "box":
+            yield from _leading_blocks(block.get("blocks") or [])
+        else:
+            yield block
+
+
+def _title_after_pictures(blocks, title):
+    """Whether the chapter opens with one or more pictures and then its
+    title, as in a book that puts a chapter's art above its heading (#346).
+    Rules are passed over; any other block before the title says no."""
+    seen_picture = False
+    for block in _leading_blocks(blocks):
+        if block.get("type") == "rule":
+            continue
+        if _is_text_block(block):
+            return seen_picture and _opens_with_title(block["text"].strip(), title)
+        if block.get("type") == "table" or not IMG_TOKEN_RE.search(
+            block.get("text") or ""
+        ):
+            return False
+        seen_picture = True
+    return False
+
+
 def _opens_with_title(text, title):
     """Whether `text`, already stripped on the left, opens with the chapter
     title as whole words, so cutting it leaves no part of a word: "A" opens
@@ -3857,10 +3884,17 @@ class NativeKFXGenerator:
             body_is_image_only = (
                 bool(body_after_title.strip()) and not text_after_imgs and not toc_links
             )
+            # A picture and then the book's own heading: that heading prints
+            # and kfxgen's is left out, so the page reads picture, then
+            # title, as the book and Kindle Previewer have it (#346).
+            title_after_pictures = not toc_links and _title_after_pictures(
+                chapter.get("blocks") or [], title
+            )
             omit_heading = (
                 chapter.get("_is_cover")
                 or chapter.get("_omit_title_heading")
                 or body_is_image_only
+                or title_after_pictures
             )
             if not omit_heading:
                 # First chunk: chapter title (heading)

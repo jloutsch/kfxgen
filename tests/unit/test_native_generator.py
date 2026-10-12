@@ -5283,3 +5283,79 @@ def test_a_boxed_table_dropped_by_the_title_cut_keeps_its_keys():
     )
     keys = [k for c in ch["all_chunks"] for k in c.get("anchor_keys") or []]
     assert "c.xhtml#t" in keys
+
+
+# ── #346: a chapter opening with a picture and then its title ────────────────
+
+
+def _chapter_texts(tmp_path, blocks, title="The Harbour"):
+    gen = NativeKFXGenerator()
+    gen._resolved_image_refs = set()
+    gen.image_resources = {"p.png": ("img1", "p.png"), "q.png": ("img2", "q.png")}
+    gen._image_dims = {}
+    text_all = "\n\n".join(b["text"] for b in blocks)
+    ch = gen._build_chapter_content(
+        [{"title": title, "text": text_all, "blocks": blocks}]
+    )
+    # kfxgen's own heading is the one text chunk built without the book's
+    # block style; it is marked "H:".
+    return [
+        "[picture]"
+        if c.get("type") == "image"
+        else ("" if "block_style" in c else "H:") + c["text"]
+        for c in ch["all_chunks"]
+        if c.get("type") in ("image", "text")
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "blocks",
+    [
+        lambda: [_para(_pic("p.png")), _para("The Harbour"), _para("A quiet morning.")],
+        lambda: [
+            _box_block(
+                [_para(_pic("p.png")), _para("The Harbour"), _para("A quiet morning.")]
+            )
+        ],
+        lambda: [
+            _para(_pic("p.png")),
+            _para(_pic("q.png")),
+            _para("The Harbour"),
+            _para("A quiet morning."),
+        ],
+    ],
+    ids=["picture", "in a box", "two pictures"],
+)
+def test_a_chapter_opening_with_a_picture_then_its_title_prints_it_once(
+    tmp_path, blocks
+):
+    """#346: kfxgen printed its heading, then the picture, then the book's
+    own heading. Its heading is left out, and the page reads as the book
+    and Kindle Previewer have it: picture, then title."""
+    texts = _chapter_texts(tmp_path, blocks())
+    assert [t for t in texts if "Harbour" in t] == ["The Harbour"]
+    assert texts.index("[picture]") < texts.index("The Harbour")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "blocks, expected",
+    [
+        # The title first: kfxgen's heading prints and the title is cut.
+        (
+            lambda: [_para("The Harbour"), _para(_pic("p.png")), _para("Text.")],
+            ["H:The Harbour", "[picture]", "Text."],
+        ),
+        # A picture, then text that isn't the title: kfxgen's heading prints.
+        (
+            lambda: [_para(_pic("p.png")), _para("Morning came.")],
+            ["H:The Harbour", "[picture]", "Morning came."],
+        ),
+        # Only a picture: no heading over it, as before (#33).
+        (lambda: [_para(_pic("p.png"))], ["[picture]"]),
+    ],
+    ids=["title first", "no title after", "picture only"],
+)
+def test_other_openings_keep_their_heading(tmp_path, blocks, expected):
+    assert _chapter_texts(tmp_path, blocks()) == expected
