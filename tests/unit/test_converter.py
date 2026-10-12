@@ -1756,7 +1756,7 @@ def test_a_default_of_two_paragraphs_still_makes_a_paragraph_cell():
 @pytest.mark.unit
 def test_a_long_dropped_case_does_not_rule_a_table_out():
     """#315: the dropped case's text counted toward the 2,000-character cut."""
-    html = _switch_table("x" * (_conv._MAX_NATIVE_CELL_CHARS + 1), "DEF")
+    html = _switch_table("x" * 2001, "DEF")
     assert _conv._table_is_native(_first_table(html))
 
 
@@ -2683,34 +2683,23 @@ def test_tables_that_fall_back_to_rows(html):
 
 
 @pytest.mark.unit
-def test_a_cell_over_the_chunk_size_falls_back():
-    # Kept from the generator's old 2,000-character cut (#226); #348 is
-    # whether to lift it.
-    long_cell = "x" * (_conv._MAX_NATIVE_CELL_CHARS + 1)
-    assert not _conv._table_is_native(
-        _first_table(f"<table><tr><td>{long_cell}</td></tr></table>")
-    )
-
-
-@pytest.mark.unit
-def test_a_cell_at_exactly_the_chunk_size_stays_native():
-    # Boundary case: exactly at the limit stays native.
-    cell_at_limit = "x" * _conv._MAX_NATIVE_CELL_CHARS
-    assert _conv._table_is_native(
-        _first_table(f"<table><tr><td>{cell_at_limit}</td></tr></table>")
-    )
-
-
-@pytest.mark.unit
-def test_a_cell_with_line_breaks_counts_them_in_length():
-    # itertext() doesn't include <br/>, but the converter turns each into a
-    # newline. A cell of (MAX - 10) chars + 20 <br/> would normalize to 2010
-    # chars and must fall back (#226).
-    text = "x" * (_conv._MAX_NATIVE_CELL_CHARS - 10)
-    br_tags = "".join("<br/>" for _ in range(20))
-    assert not _conv._table_is_native(
-        _first_table(f"<table><tr><td>{text}{br_tags}</td></tr></table>")
-    )
+@pytest.mark.parametrize(
+    "cell",
+    [
+        "x" * 6000,
+        "<p>" + "x" * 6000 + "</p><p>b</p>",
+        "<p>a</p>" + "x" * 6000,
+        "x" * 1990 + "<br/>" * 20,
+    ],
+    ids=["plain", "long-p", "long-loose", "line-breaks"],
+)
+def test_a_long_cell_stays_native(cell):
+    """#348: a cell over 2,000 characters kept its table out of the native
+    format, because the generator cut text at 2,000 (#226). The cut is gone,
+    and Kindle Previewer 4.0.3 writes a 6,119-character cell as one entry
+    of a native table."""
+    html = f"<table><tr><td>{cell}</td><td>z</td></tr></table>"
+    assert _conv._table_is_native(_first_table(html))
 
 
 @pytest.mark.unit
@@ -2721,8 +2710,6 @@ def test_a_cell_with_line_breaks_counts_them_in_length():
         ("<td><h5>1</h5><p>a</p><span>5</span><p>b</p></td>", True),
         ("<td><div><p>a</p></div></td>", True),
         ("<td><ul><li>a</li><li>b</li></ul></td>", True),
-        (f"<td><p>{'x' * 2001}</p><p>b</p></td>", False),
-        (f"<td><p>a</p>{'x' * 2001}</td>", False),
         (f"<td><p>{'x' * 1500}</p><p>{'y' * 1500}</p></td>", True),
     ],
     ids=[
@@ -2730,15 +2717,12 @@ def test_a_cell_with_line_breaks_counts_them_in_length():
         "heading-loose",
         "wrapped-p",
         "list",
-        "long-p",
-        "long-loose",
         "long-cell-short-p",
     ],
 )
 def test_a_cell_holding_several_blocks_stays_native(cell, native):
     # #261: 131 Gutenberg tables fell back for this alone, and the rows build
-    # ran each poem in them into one paragraph. The 2,000-character cell
-    # limit applies to each paragraph of such a cell, not to the whole cell.
+    # ran each poem in them into one paragraph.
     html = f"<table><tr>{cell}<td>z</td></tr></table>"
     assert _conv._table_is_native(_first_table(html)) is native
 
@@ -8814,3 +8798,11 @@ def test_a_loose_nbsp_between_blocks_is_not_a_paragraph():
     """QA review: inline text between two blocks that is only a
     non-breaking space gives no block of its own."""
     assert _texts("<div><p>A</p>&#160;<p>B</p></div>") == ["A", "B"]
+
+
+@pytest.mark.unit
+def test_a_long_cell_is_one_paragraph_of_its_cell():
+    """#348: the long cell's text reaches the generator whole, in its cell."""
+    long = "The tide went out over the flats. " * 180
+    table, _ = _native_table(f"<table><tr><td>Harbour</td><td>{long}</td></tr></table>")
+    assert _cell(table, 0, 1)["text"].strip() == long.strip()
