@@ -3959,6 +3959,14 @@ class NativeKFXGenerator:
                             _attach_keys(last, pending)
                         else:
                             carried_anchor_keys.extend(pending)
+                elif chapter.get("blocks"):
+                    # Only its title: the heading prints it, and the cut
+                    # leaves no block. The blocks' keys still name this
+                    # chapter, or every link to them went dead: 15 of
+                    # pg2160's letter links once their ids moved onto such
+                    # a heading (#338).
+                    for b in chapter["blocks"]:
+                        carried_anchor_keys.extend(_block_keys(b))
 
             # Illustrations the source printed in a contents section that was
             # replaced. They arrive as their own key rather than inside

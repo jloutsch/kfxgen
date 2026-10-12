@@ -5142,3 +5142,29 @@ def test_a_tight_line_has_no_space_above(tmp_path):
     above = {text(e): _lh(styles[str(e["$157"])], "$47") for e in entries if text(e)}
     assert above["Line 1"] == "1$310"
     assert above["Line 2"] is None
+
+
+@pytest.mark.unit
+def test_a_chapter_that_is_only_its_title_keeps_its_blocks_keys():
+    """The title cut takes the chapter's only block; its keys, such as an
+    id at the previous file's end moved onto it (#338), must still name
+    the chapter, or every link to them goes dead."""
+    gen = NativeKFXGenerator()
+    gen._resolved_image_refs = set()
+    gen.image_resources = {}
+    ch = gen._build_chapter_content(
+        [
+            {
+                "title": "One",
+                "text": "One\n\nA.",
+                "blocks": [_para("One"), _para("A.")],
+            },
+            {
+                "title": "To Dr LEWIS.",
+                "text": "To Dr LEWIS.",
+                "blocks": [_para("To Dr LEWIS.", keys=["a.xhtml#link2H_4_0022"])],
+            },
+        ]
+    )
+    keys = [k for c in ch["all_chunks"] for k in c.get("anchor_keys") or []]
+    assert "a.xhtml#link2H_4_0022" in keys
