@@ -698,6 +698,12 @@ def _walk_inline(
         # An unresolved entity node lands here too; calibre resolves entities
         # before the plugin sees the tree, so a conversion never meets one.
         return []
+    if not is_root and _is_hidden(elem, style_resolver):
+        # Hidden text inside a paragraph, a heading or a row: mostly page
+        # markers (<a id="page12" hidden>12</a>), printed as "harbour12".
+        # Its ids keep their place, since page lists and links point at
+        # them; the caller keeps its tail, which is visible (#256).
+        return [make_anchor_mark(aid) for aid in _subtree_anchor_ids(elem)]
     local = _local_tag(elem.tag)
     if local == "br":
         # A forced line break, which the normalizer turns into a newline. It
@@ -1931,6 +1937,22 @@ def _is_non_rendered(elem):
     return any(part in _NON_RENDERED_EPUB_TYPES for part in raw.lower().split())
 
 
+_INLINE_DISPLAY_NONE = re.compile(r"(?:^|;)\s*display\s*:\s*none\s*(?:;|$|!)", re.I)
+
+
+def _is_hidden(elem, style_resolver):
+    """`_is_non_rendered`, or hidden by CSS: `display: none`, computed by
+    calibre's Stylizer when it is there, else read from the element's own
+    `style` attribute (#232, #256). An element hidden by position and clip,
+    a heading kept for navigation, is not hidden here."""
+    if _is_non_rendered(elem):
+        return True
+    if style_resolver is not None:
+        css = style_resolver(elem) or {}
+        return str(css.get("display") or "").strip().lower() == "none"
+    return bool(_INLINE_DISPLAY_NONE.search(elem.get("style") or ""))
+
+
 _EPUB_NS = "{http://www.idpf.org/2007/ops}"
 
 
@@ -2779,7 +2801,7 @@ def extract_blocks_from_html(
         )
 
     def _walk(elem):
-        if _local_tag(elem.tag) != "li" or _is_non_rendered(elem):
+        if _local_tag(elem.tag) != "li" or _is_hidden(elem, style_resolver):
             start = len(blocks)
             _walk_element(elem)
             if (
@@ -2821,7 +2843,10 @@ def extract_blocks_from_html(
             # not a paragraph (#252). Also an unresolved entity node, which a
             # calibre tree never holds.
             return
-        if _is_non_rendered(elem):
+        if _is_hidden(elem, style_resolver):
+            # Not printed, but links into it still land: its ids name the
+            # next block shown (#232).
+            pending_ids.extend(_subtree_anchor_ids(elem))
             return
         switch = _epub_switch_branch(elem)
         if switch is not None:
@@ -3221,7 +3246,8 @@ def extract_blocks_from_html(
                 _walk(child)
                 if follow and _local_tag(child.tag) == "tr":
                     row_block = blocks[start] if len(blocks) > start else None
-            elif not _is_non_rendered(child):
+            else:
+                # A hidden child gives only its ids (#256).
                 inline_parts.extend(
                     _walk_inline(
                         child,
