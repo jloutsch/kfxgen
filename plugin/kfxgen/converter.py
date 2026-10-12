@@ -2782,7 +2782,7 @@ def extract_blocks_from_html(
             ids = pending_ids[:]
             pending_ids.clear()
             ids.extend(mark_offsets)
-            if not text:
+            if not text.strip():
                 # Ids with no text of their own name what follows: the next
                 # piece, or the table's start.
                 pending_ids.extend(ids)
@@ -2985,7 +2985,8 @@ def extract_blocks_from_html(
             ids = pending_ids[:]
             pending_ids.clear()
             ids.extend(_subtree_anchor_ids(elem))
-            if text:
+            # Only non-breaking spaces is a spacer, not a paragraph (#230, #244).
+            if text.strip():
                 text, spans, mark_offsets = _take_marker(text, spans, mark_offsets)
                 bstyle = None
                 if style_resolver is not None:
@@ -3218,7 +3219,7 @@ def extract_blocks_from_html(
             # but a cell with no `<tr>` around it still arrives here.
             text, spans, mark_offsets = normalize_runs_with_anchors(inline_parts)
             inline_parts.clear()
-            if not text:
+            if not text.strip():
                 # An anchor contributing no visible text carries forward to the
                 # next block, exactly as an empty leaf block already does.
                 pending_ids.extend(mark_offsets)

@@ -290,3 +290,26 @@ def test_line_start_breaks_the_line_once(segments, text):
     """#233: a block's edge starts a line, never an empty one, and swallows
     a <br> straight after it; later <br>s count as before."""
     assert ist.normalize_runs(segments)[0] == text
+
+
+_NB = " "
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # Leading and trailing NBSPs are the book's own indent; kept (#244).
+        (f"{_NB * 4}Indented", f"{_NB * 4}Indented"),
+        (f"End{_NB}", f"End{_NB}"),
+        # Runs don't collapse, and a space next to them still does.
+        (f"a{_NB}{_NB}b", f"a{_NB}{_NB}b"),
+        (f"a  {_NB} b", f"a {_NB} b"),
+        # Other fixed-width spaces: en, em, ideographic.
+        ("  x　", "  x　"),
+        # ASCII whitespace still collapses and trims.
+        ("  a \t\n b  ", "a b"),
+    ],
+)
+def test_only_ascii_whitespace_collapses(text, expected):
+    assert ist.normalize_runs([(text, frozenset())])[0] == expected

@@ -5168,3 +5168,17 @@ def test_a_chapter_that_is_only_its_title_keeps_its_blocks_keys():
     )
     keys = [k for c in ch["all_chunks"] for k in c.get("anchor_keys") or []]
     assert "a.xhtml#link2H_4_0022" in keys
+
+
+@pytest.mark.unit
+def test_a_paragraphs_leading_nbsps_reach_the_kfx(tmp_path):
+    """#244: the book's own indent, set with non-breaking spaces."""
+    chapters = [
+        {
+            "title": "One",
+            "text": "x",
+            "blocks": [_para("A."), _para("    Indented")],
+        }
+    ]
+    entries, _, text, _ = _book(tmp_path, chapters)
+    assert "    Indented" in [text(e) for e in entries]

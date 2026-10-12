@@ -38,6 +38,10 @@ HARD_BREAK = "\u2028"
 LINE_START = "line-start"
 
 NBSP = "\u00a0"
+#: The whitespace HTML collapses: ASCII only. A non-breaking space, an em
+#: space or an ideographic space is the book's own and is kept, indentation
+#: included (#244).
+_COLLAPSIBLE = frozenset(" \t\n\r\f")
 _TAB_STOP = 8
 
 #: CSS length unit -> KFX $306 unit symbol.
@@ -163,7 +167,7 @@ def normalize_runs_with_anchors(
                 prev_space = False
             elif pre and ch == "\r":
                 continue
-            elif ch.isspace():
+            elif ch in _COLLAPSIBLE:
                 if not prev_space:
                     chars.append(" ")
                     # a collapsed space carries its own segment's flags so
