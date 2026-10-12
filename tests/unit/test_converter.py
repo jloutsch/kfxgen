@@ -8609,3 +8609,60 @@ def test_a_table_with_a_row_hidden_by_css_is_written_as_rows_without_it():
         native_tables=True,
     )
     assert [b.get("type") or b["text"] for b in blocks] == ["a b"]
+
+
+# ── #338: an id at a file's very end names the next file's start ────────────
+
+
+def _keys_by_text(chapters):
+    out = {}
+    for ch in chapters:
+        for b in ch.get("blocks") or ():
+            out[b["text"]] = list(b.get("anchor_keys") or [])
+    return out
+
+
+def _two_files(end_of_a):
+    spine = [
+        _RawSpineItem("a.xhtml", f"<h1>Extracts</h1><p>Whale Song.</p>{end_of_a}"),
+        _RawSpineItem("b.xhtml", "<h2>Chapter 1</h2><p>Call me Ishmael.</p>"),
+    ]
+    toc = [_TOCNode("Extracts", "a.xhtml"), _TOCNode("Chapter 1", "b.xhtml")]
+    return _conv.extract_chapters_from_oeb(_OEBBook(spine, toc), _silent_log())
+
+
+@pytest.mark.unit
+def test_an_id_at_a_files_very_end_names_the_next_files_start():
+    """Gutenberg's split files end with the next chapter's target:
+    <p><a id="link2HCH0001"></a></p>. Its link opened the last lines of
+    EXTRACTS, one page before Chapter 1."""
+    keys = _keys_by_text(_two_files('<p><a id="link2HCH0001"></a></p>'))
+    assert "a.xhtml#link2HCH0001" not in keys["Whale Song."]
+    assert keys["Chapter 1"][0] == "a.xhtml#link2HCH0001"
+
+
+@pytest.mark.unit
+def test_an_id_with_text_after_it_in_its_file_stays():
+    keys = _keys_by_text(_two_files('<p><a id="mid"></a></p><p>A last line of A.</p>'))
+    assert "a.xhtml#mid" in keys["A last line of A."]
+    assert all(
+        "a.xhtml#mid" not in k for t, k in keys.items() if t != "A last line of A."
+    )
+
+
+@pytest.mark.unit
+def test_an_id_at_the_books_very_end_stays_on_its_last_paragraph():
+    spine = [_RawSpineItem("a.xhtml", '<p>The end.</p><p><a id="fin"></a></p>')]
+    chapters = _conv.extract_chapters_from_oeb(
+        _OEBBook(spine, [_TOCNode("A", "a.xhtml")]), _silent_log()
+    )
+    assert "a.xhtml#fin" in _keys_by_text(chapters)["The end."]
+
+
+@pytest.mark.unit
+def test_moving_an_end_id_leaves_the_chapters_as_they_were():
+    """The id stays in its file for chapter assembly; only the link key
+    moves."""
+    before = _two_files('<p><a id="ch1"></a></p>')
+    assert [c["title"] for c in before] == ["Extracts", "Chapter 1"]
+    assert [b["text"] for b in before[0]["blocks"]][-1] == "Whale Song."

@@ -567,6 +567,26 @@ def _key_doc(base_href, href):
     return unquote(_resolve_doc_path(base_href, href))
 
 
+def _drop_keys(blocks, keys):
+    """Take `keys` off every block, box paragraph and table part holding
+    them (#338)."""
+    keys = set(keys)
+    for b in blocks:
+        parts = [b]
+        tbl = b.get("table")
+        if tbl:
+            cells = [c for r in tbl["rows"] for c in r["cells"]]
+            parts += [tbl, *tbl["rows"], *cells]
+            parts += [p for c in cells for p in c.get("paragraphs") or ()]
+        for part in parts:
+            if part.get("anchor_keys"):
+                part["anchor_keys"] = [k for k in part["anchor_keys"] if k not in keys]
+            for k in keys & set(part.get("anchor_offsets") or ()):
+                del part["anchor_offsets"][k]
+        if b.get("type") == "box":
+            _drop_keys(b["blocks"], keys)
+
+
 def _prepend_keys(block, keys):
     """Put `keys` at the start of `block`, as a file's own key goes on its
     first block. A native table needs them on its own keys too, which its
@@ -2496,6 +2516,7 @@ def extract_blocks_from_html(
     link_targets=None,
     notes_seen=None,
     keep_nav_listings=False,
+    trailing_ids=None,
 ):
     """Like extract_text_from_html but returns structured blocks:
     [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None,
@@ -2531,6 +2552,10 @@ def extract_blocks_from_html(
 
     `keep_nav_listings`: print contents listings as the book has them, for
     a book that gets no Contents page of kfxgen's (#335).
+
+    `trailing_ids`, when given, collects the ids at the file's very end with
+    no block after them. They still go on the last block, for chapter
+    assembly; the caller moves their link keys to the next file (#338).
 
     `base_href` is the spine file this markup came from. It qualifies both
     sides of an in-book link: `anchor_keys` are the block's ids as
@@ -3297,6 +3322,8 @@ def extract_blocks_from_html(
     # reach a subsequent block to flush to; snap them onto the last emitted
     # block instead of dropping them silently. Not onto a rule, which holds
     # no anchor (#230).
+    if trailing_ids is not None and blocks:
+        trailing_ids.extend(pending_ids)
     if pending_ids and blocks:
         last_block = next(
             (b for b in reversed(blocks) if b.get("type") != "rule"), blocks[-1]
@@ -3905,6 +3932,7 @@ def extract_chapters_from_oeb(
             nav_listing_at = []
             tables_seen = []
             notes_seen = []
+            trailing = []
             item_href = getattr(item, "href", "") or ""
             note_ids = _note_target_ids(item.data) | note_pairs.get(
                 _key_doc(item_href, "") if item_href else "", set()
@@ -3919,6 +3947,7 @@ def extract_chapters_from_oeb(
                 link_targets=link_targets,
                 notes_seen=notes_seen,
                 keep_nav_listings=keep_nav_listings,
+                trailing_ids=trailing,
                 # Assembly skips entries naming a footnote; so does this.
                 toc_targets=toc_targets.get(
                     _normalize_href(getattr(item, "href", "") or ""), set()
@@ -3971,6 +4000,16 @@ def extract_chapters_from_oeb(
         table_blocks.extend((href, b) for b in tables_seen)
         notes_blocks.extend((href, b) for b in notes_seen)
         log.info(f"  Spine item {i + 1}: {len(text)} chars ({norm_href})")
+        if trailing and href:
+            # Ids at the file's very end name what follows: Gutenberg ends a
+            # file with the next chapter's <p><a id="link2HCH0001"></a></p>,
+            # and its link opened the end of the chapter before (#338). Their
+            # link keys go to the next shown block, as an empty file's do;
+            # the ids stay here for chapter assembly. With nothing after,
+            # the book's last block takes them back.
+            moved = [f"{_key_doc(href, '')}#{aid}" for aid in trailing]
+            _drop_keys(blocks, moved)
+            orphan_keys.extend(moved)
 
     if svg_text_files:
         log.warn(
