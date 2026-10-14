@@ -2041,6 +2041,7 @@ class NativeKFXGenerator:
         no_align=False,
         space_above=None,
         explicit_size=False,
+        drop_cap=None,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -2167,6 +2168,11 @@ class NativeKFXGenerator:
             value[IS("$16")] = IonStruct(
                 IS("$307"), IonDecimal(str(font_size)), IS("$306"), IS("$505")
             )  # rem
+
+        # A drop cap: the lines its initial drops through ($125) and the
+        # initial's characters ($126), as Kindle Previewer writes them (#240).
+        if drop_cap:
+            value[IS("$125")], value[IS("$126")] = drop_cap
 
         # $23: $328 = text-decoration: underline
         if underline:
@@ -4698,6 +4704,24 @@ class NativeKFXGenerator:
                 return _rem(next(iter(counts)))
             return _rem((chunk.get("block_style") or {}).get("font_size"))
 
+        def _drop_cap(chunk):
+            # (lines, characters) for a paragraph opening on a drop cap, or
+            # None (#240). Kindle Previewer's lines follow the initial's size
+            # against the main text: 1.5 and 1.8 drop 2, 2 to 3.5 drop 3, 3.8
+            # to 5 drop 4, 6 5, 8 6, 10 7. Below 1.5 it makes none.
+            n = (chunk.get("block_style") or {}).get("drop_cap")
+            text = chunk.get("text") or ""
+            if not n or not text[n:].strip():
+                return None
+            px = None
+            for s, length, flags in chunk.get("spans") or []:
+                if s <= n - 1 < s + length:
+                    px = run_font_size(flags)
+            size = _rem(px) if px else 0
+            if size < 1.5:
+                return None
+            return int(2 + 0.55 * size), n
+
         def _family(family_list, bold, italic):
             # An embedded face wins; with none, monospace text is written
             # "monospace", as Kindle Previewer writes it (#242).
@@ -4930,6 +4954,7 @@ class NativeKFXGenerator:
                     continue
                 entry_kinds.append("text")
                 entry_image_specs.append(None)
+                drop = None
                 if chunk_idx in heading_chunk_indices:
                     entry_styles.append(heading_style_names[ch_idx])
                     entry_link_targets.append(None)
@@ -4992,6 +5017,9 @@ class NativeKFXGenerator:
                     if cell is not None:
                         entry_styles.append(_cell_style(cell, bs, attrs["font_size"]))
                     else:
+                        drop = _drop_cap(chunk)
+                        if drop:
+                            attrs["drop_cap"] = drop
                         entry_styles.append(_allocate_style("", **attrs))
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
@@ -5019,6 +5047,14 @@ class NativeKFXGenerator:
                 spans_out = []
                 blk_fs = _block_font_size(ch_idx, chunk)
                 for s, length, flags in chunk_spans:
+                    if drop and s + length <= drop[1]:
+                        # The Kindle sizes a drop cap to its lines: Previewer
+                        # gives the initial no size of its own (#240).
+                        flags = frozenset(
+                            f for f in flags if run_font_size((f,)) is None
+                        )
+                        if not flags:
+                            continue
                     target = _link_target(flags)
                     anchor = body_anchor_map.get(target) if target else None
                     has_emphasis = any(

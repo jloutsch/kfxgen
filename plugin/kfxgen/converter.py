@@ -12,6 +12,7 @@ import os
 import posixpath
 import re
 import string
+import unicodedata
 from urllib.parse import unquote
 
 from ._img_tokens import (
@@ -186,36 +187,70 @@ def _font_size_px(stylizer, elem, cache):
         return _FONT_PX
     if elem in cache:
         return cache[elem]
-    parent = elem.getparent()
-    inherited = _font_size_px(stylizer, parent, cache)
-    value = str(stylizer.style(elem).get("font-size") or "").strip().lower()
-    size = inherited
-    if value in _FONT_KEYWORD_PX:
-        size = _FONT_KEYWORD_PX[value]
-    elif value == "smaller":
-        # Previewer's step: <small> is 0.833333, <big> 1.2.
-        size = inherited / 1.2
-    elif value == "larger":
-        size = inherited * 1.2
-    else:
-        m = _FONT_SIZE_RE.match(value.replace(" ", ""))
-        if m and float(m.group(1)) > 0:
-            n, unit = float(m.group(1)), m.group(2)
-            if unit == "em":
-                size = n * inherited
-            elif unit in ("ex", "ch"):
-                size = n * inherited / 2
-            elif unit == "%":
-                size = n * inherited / 100
-            elif unit == "rem":
-                root = elem.getroottree().getroot()
-                size = n * (
-                    _FONT_PX if root is elem else _font_size_px(stylizer, root, cache)
-                )
-            elif unit in _FONT_UNIT_PX:
-                size = n * _FONT_UNIT_PX[unit]
+    inherited = _font_size_px(stylizer, elem.getparent(), cache)
+    size = _css_size_px(
+        stylizer.style(elem).get("font-size"),
+        inherited,
+        lambda: _root_size_px(stylizer, elem, cache),
+    )
     cache[elem] = size
     return size
+
+
+def _root_size_px(stylizer, elem, cache):
+    """The root element's font size in CSS px, which `rem` is measured by."""
+    root = elem.getroottree().getroot()
+    return _FONT_PX if root is elem else _font_size_px(stylizer, root, cache)
+
+
+def _css_size_px(value, inherited, root_px):
+    """A font-size value in CSS px, against the `inherited` size, or the
+    inherited size when there is none or kfxgen can't read it. `root_px()`
+    gives the root's size, for rem."""
+    value = str(value or "").strip().lower()
+    if value in _FONT_KEYWORD_PX:
+        return _FONT_KEYWORD_PX[value]
+    if value == "smaller":
+        # Previewer's step: <small> is 0.833333, <big> 1.2.
+        return inherited / 1.2
+    if value == "larger":
+        return inherited * 1.2
+    m = _FONT_SIZE_RE.match(value.replace(" ", ""))
+    if not m or float(m.group(1)) <= 0:
+        return inherited
+    n, unit = float(m.group(1)), m.group(2)
+    if unit == "em":
+        return n * inherited
+    if unit in ("ex", "ch"):
+        return n * inherited / 2
+    if unit == "%":
+        return n * inherited / 100
+    if unit == "rem":
+        return n * root_px()
+    if unit in _FONT_UNIT_PX:
+        return n * _FONT_UNIT_PX[unit]
+    return inherited
+
+
+def _first_letter_css(stylizer, elem, cache):
+    """The paragraph's `::first-letter` CSS, its font size in CSS px, or None.
+    calibre keeps the rule on the paragraph's style for KFX; it makes a span
+    of the letter only for MOBI and DOCX (#240)."""
+    # calibre's is a method: `pseudo_classes(filter_css)` copies the rules
+    # without the properties named in `filter_css`.
+    pseudo = getattr(stylizer.style(elem), "pseudo_classes", None)
+    rule = pseudo(()).get("first-letter") if pseudo is not None else None
+    if not rule:
+        return None
+    css = dict(rule)
+    if css.get("font-size"):
+        size = _css_size_px(
+            css["font-size"],
+            _font_size_px(stylizer, elem, cache),
+            lambda: _root_size_px(stylizer, elem, cache),
+        )
+        css["font-size"] = round(size, 3)
+    return css
 
 
 _DECORATION_LINES = {"underline", "line-through"}
@@ -259,6 +294,11 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # A number, in CSS px; the generator measures it
                     # against the book's main text size (#241).
                     "font-size": round(_font_size_px(stylizer, elem, sizes), 3),
+                    # A drop cap: the paragraph's `::first-letter`, and a
+                    # floated span's float (#240). Declared: neither
+                    # inherits.
+                    "first-letter": _first_letter_css(stylizer, elem, sizes),
+                    "float": st.get("float"),
                     # text-align is INHERITED (set on <body> or a wrapper
                     # <div>), so read it inheritance-aware like font-family:
                     # Style.get() returns None when inherited; Style[prop]
@@ -827,6 +867,108 @@ def _css_emphasis(css):
     families = tuple(_parse_font_family(css.get("font-family")))
     mono = families if is_monospace(families) else None
     return bold, parse_style(css.get("font-style")), mono, css_font_size(css)
+
+
+def _first_letter_length(text):
+    """How many characters `::first-letter` takes: any punctuation before
+    the first letter, then the letter, as calibre and Previewer count it
+    (a quote and its letter are 2). 0 when the text opens on no letter."""
+    i = 0
+    while i < len(text) and unicodedata.category(text[i])[0] in "PZ":
+        i += 1
+    if i == len(text) or unicodedata.category(text[i])[0] not in "LN":
+        return 0
+    return i + 1
+
+
+def _with_initial(spans, n, add):
+    """`spans` with the flags in `add` on the first `n` characters. A size in
+    `add` replaces the characters' own."""
+    head = [frozenset()] * n
+    rest = []
+    for s, length, flags in spans:
+        for i in range(s, min(s + length, n)):
+            head[i] = flags
+        if s + length > n:
+            start = max(s, n)
+            rest.append((start, s + length - start, flags))
+    if run_font_size(add) is not None:
+        head = [frozenset(f for f in fl if run_font_size((f,)) is None) for fl in head]
+    out = []
+    for i, flags in enumerate(head):
+        flags = flags | add
+        if not flags:
+            continue
+        if out and out[-1][0] + out[-1][1] == i and out[-1][2] == flags:
+            out[-1] = (out[-1][0], out[-1][1] + 1, flags)
+        else:
+            out.append((i, 1, flags))
+    if (
+        rest
+        and out
+        and out[-1][0] + out[-1][1] == rest[0][0]
+        and out[-1][2] == rest[0][2]
+    ):
+        out[-1] = (out[-1][0], out[-1][1] + rest[0][1], out[-1][2])
+        rest = rest[1:]
+    return out + rest
+
+
+def _is_float_left(css):
+    return str((css or {}).get("float") or "").strip().lower() == "left"
+
+
+def _leading_float(node, style_resolver):
+    """(the floated element `node`'s text opens on, whether the search is
+    over): an element floated left with no text before it."""
+    if (node.text or "").strip():
+        return None, True
+    for child in node:
+        if isinstance(child.tag, str):
+            if _local_tag(child.tag) in ("img", "svg"):
+                return None, True
+            if _is_float_left(style_resolver(child)):
+                return child, True
+            found, over = _leading_float(child, style_resolver)
+            if over:
+                return found, True
+        if (child.tail or "").strip():
+            return None, True
+    return None, False
+
+
+def _initial(elem, text, spans, style_resolver):
+    """A paragraph's initial (#240): its spans with the `::first-letter` CSS
+    on the letter, and how many characters a drop cap takes, or None.
+
+    A drop cap is an initial floated left: the paragraph's `::first-letter`,
+    or an element its text opens on (`<span class="dropcap">O</span>nce`),
+    whose run size the walker already gave it. The generator decides from
+    the initial's size whether it drops. Not floated, an initial is only
+    larger: a raised initial."""
+    first = (style_resolver(elem) or {}).get("first-letter")
+    if first:
+        n = _first_letter_length(text)
+        if not n:
+            return spans, None
+        bold, italic, _mono, size = _css_emphasis(first)
+        add = set()
+        if size is not None:
+            add.add(make_size_flag(size))
+        if bold:
+            add.add(FLAG_BOLD)
+        if italic:
+            add.add(FLAG_ITALIC)
+        if add:
+            spans = _with_initial(spans, n, frozenset(add))
+        return spans, n if _is_float_left(first) else None
+    found, _over = _leading_float(elem, style_resolver)
+    if found is None:
+        return spans, None
+    letters = " ".join("".join(found.itertext()).split())
+    if letters and text.startswith(letters):
+        return spans, len(letters)
+    return spans, None
 
 
 #: In `_walk_inline(split_tables=True)`, stands in for a table nested in the
@@ -3283,6 +3425,10 @@ def extract_blocks_from_html(
                         bstyle["align"] = _row_align(
                             elem, bstyle["align"], style_resolver
                         )
+                    if bstyle is not None and _local_tag(elem.tag) == "p":
+                        spans, drop = _initial(elem, text, spans, style_resolver)
+                        if drop:
+                            bstyle["drop_cap"] = drop
                 block_ids = _dedupe_keep_order(ids)
                 blocks.append(
                     {
