@@ -296,8 +296,13 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     "font-size": round(_font_size_px(stylizer, elem, sizes), 3),
                     # A drop cap: the paragraph's `::first-letter`, and a
                     # floated span's float (#240). Declared: neither
-                    # inherits.
-                    "first-letter": _first_letter_css(stylizer, elem, sizes),
+                    # inherits. Only a <p> is read for an initial, and
+                    # calibre copies the rules on each call (#376 review).
+                    "first-letter": (
+                        _first_letter_css(stylizer, elem, sizes)
+                        if _local_tag(elem.tag) == "p"
+                        else None
+                    ),
                     "float": st.get("float"),
                     # text-align is INHERITED (set on <body> or a wrapper
                     # <div>), so read it inheritance-aware like font-family:
@@ -937,16 +942,17 @@ def _leading_float(node, style_resolver):
     return None, False
 
 
-def _initial(elem, text, spans, style_resolver):
-    """A paragraph's initial (#240): its spans with the `::first-letter` CSS
-    on the letter, and how many characters a drop cap takes, or None.
+def _initial(elem, css, text, spans, style_resolver):
+    """A paragraph's initial (#240), from its resolved `css`: its spans with
+    the `::first-letter` CSS on the letter, and how many characters a drop
+    cap takes, or None.
 
     A drop cap is an initial floated left: the paragraph's `::first-letter`,
     or an element its text opens on (`<span class="dropcap">O</span>nce`),
     whose run size the walker already gave it. The generator decides from
     the initial's size whether it drops. Not floated, an initial is only
     larger: a raised initial."""
-    first = (style_resolver(elem) or {}).get("first-letter")
+    first = (css or {}).get("first-letter")
     if first:
         n = _first_letter_length(text)
         if not n:
@@ -3426,7 +3432,7 @@ def extract_blocks_from_html(
                             elem, bstyle["align"], style_resolver
                         )
                     if bstyle is not None and _local_tag(elem.tag) == "p":
-                        spans, drop = _initial(elem, text, spans, style_resolver)
+                        spans, drop = _initial(elem, css, text, spans, style_resolver)
                         if drop:
                             bstyle["drop_cap"] = drop
                 block_ids = _dedupe_keep_order(ids)

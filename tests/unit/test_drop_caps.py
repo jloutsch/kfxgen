@@ -281,12 +281,14 @@ def test_the_lines_follow_previewer(tmp_path, size, lines):
 
 
 @pytest.mark.unit
-def test_a_small_floated_initial_is_not_dropped(tmp_path):
+@pytest.mark.parametrize("size", [1.2, 1.3, 1.4])
+def test_a_small_floated_initial_is_not_dropped(tmp_path, size):
+    """Previewer makes no drop cap at 1.2, 1.3 or 1.4em (#376 review)."""
     body = FILLER + '<p class="x">O' + REST + "</p>"
-    resolver = _resolver(first={"x": _first_letter("1.2em")})
+    resolver = _resolver(first={"x": _first_letter(f"{size}em")})
     style, runs = _found(_book(tmp_path, body, resolver))["O" + REST]
     assert _drop(style) is None
-    assert [(t, _fs(s)) for t, s in runs] == [("O", pytest.approx(1.2))]
+    assert [(t, _fs(s)) for t, s in runs] == [("O", pytest.approx(size))]
 
 
 @pytest.mark.unit
