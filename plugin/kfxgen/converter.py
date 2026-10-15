@@ -3643,12 +3643,13 @@ def extract_blocks_from_html(
             m = _IMG_TOKEN_RE.fullmatch(kids[0].get("text") or "")
             if m and m.group(4):
                 width = None
+        if width is not None and _holds_linked_picture(elem):
+            # The Voyage drops the link of a picture inside a container,
+            # floated or not, in Previewer's book too (#384 device checks):
+            # the wrapper gets no box for its width, so the link stays on top.
+            width = None
         if border is None and fill is None and width is None:
             return False
-        if side and _holds_linked_picture(elem):
-            # The Voyage drops the link of a picture in a floated box, as it
-            # does a floated picture's (#243): the box keeps its width only.
-            side = None
         if not kids or not any(
             b.get("type") in ("table", "box") or (b.get("text") or "").strip()
             for b in kids

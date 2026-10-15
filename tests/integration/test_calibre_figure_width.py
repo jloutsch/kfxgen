@@ -43,6 +43,7 @@ CASES = [
     ("div", f'<div class="w40"><img src="i.jpg" alt="div"/><p>Cap div.</p></div><p>{WORDS}</p>'),
     ("figure", f'<figure class="w40"><img src="i.jpg" alt="figure"/><figcaption>Cap fig.</figcaption></figure><p>{WORDS}</p>'),
     ("float", f'<div class="f40"><img src="i.jpg" alt="float"/><p>Cap float.</p></div><p>{WORDS}</p>'),
+    ("link", f'<div class="w40"><a href="c.xhtml#end"><img src="i.jpg" alt="link"/></a><p>Cap link.</p></div><p>{WORDS}</p>'),
     ("linkfloat", f'<div class="f40"><a href="c.xhtml#end"><img src="i.jpg" alt="linkfloat"/></a><p>Cap link.</p></div><p id="end">{WORDS}</p>'),
     ("centre", f'<div class="c40"><img src="i.jpg" alt="centre"/><p>Cap centre.</p></div><p>{WORDS}</p>'),
     ("px", f'<div class="w300"><img src="i.jpg" alt="px"/><p>Cap px.</p></div><p>{WORDS}</p>'),
@@ -94,8 +95,6 @@ def _pct(style):
         ("div", "$269", 40.0, None, False),
         ("figure", "$269", 40.0, None, False),
         ("float", "$270", 40.0, "$59", False),
-        # The Voyage drops a link in a floated box (#384 device check).
-        ("linkfloat", "$269", 40.0, None, False),
         ("centre", "$269", 40.0, None, True),
         ("px", "$269", 35.156, None, False),
     ],
@@ -109,6 +108,17 @@ def test_a_sized_wrapper_is_a_container_at_its_width(
     assert _pct(style) == width, f"calibre {version}"
     assert style.get("$140") == side, f"calibre {version}"
     assert ("$580" in style) == centred, f"calibre {version}"
+    assert _pct(picture) == 100.0, f"calibre {version}"
+
+
+@pytest.mark.parametrize("alt", ["link", "linkfloat"])
+def test_a_wrapper_holding_a_linked_picture_is_not_a_container(converted, alt):
+    """The Voyage drops a picture's link inside a container (#384 device
+    checks), so the wrapper is left as on main."""
+    by_alt, version = converted
+    _link, style, picture = by_alt[alt]
+    # Its nearest container is the link's own, with no width.
+    assert "$56" not in style and "$140" not in style, f"calibre {version}"
     assert _pct(picture) == 100.0, f"calibre {version}"
 
 
