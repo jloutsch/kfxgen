@@ -1099,8 +1099,6 @@ def _walk_inline(
             # hash order, so it changed between runs (#317).
             cur = {f for f in cur if not _is_link_flag(f)}
             cur.add(make_link_flag(target))
-            # Its text takes no colour of a run's (#239).
-            cur = {f for f in cur if flag_value((f,), COLOUR_FLAG) is None}
     css = None
     own_css = None
     emphasis = None
@@ -1793,8 +1791,6 @@ _PREVIEWER_PT_PER_CALIBRE_PT = 0.625
 _BORDER_KEYWORD_PX = {"thin": 1, "medium": 3, "thick": 5}
 
 
-#: The basic CSS colour names. Any other name writes no colour, so the device
-#: draws its default (black), as for `currentColor`.
 def _border_colour(value):
     """A CSS colour as the ARGB integer Previewer writes, or None for black and
     for anything it can't read, which the device draws as its default black

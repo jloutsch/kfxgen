@@ -507,3 +507,14 @@ def test_a_small_caps_link_keeps_its_small_caps(tmp_path):
     body = FILLER + '<p id="t">See <a class="sc" href="#t">Here</a> now.</p>'
     _style, runs = _found(_book(tmp_path, body, css))["See Here now."]
     assert runs["Here"]["$583"] == "$369"
+
+
+@pytest.mark.unit
+def test_a_link_inside_a_coloured_span_keeps_the_spans_colour():
+    """Previewer drops only a link's own colour: a link in a red span is red
+    (`0xffee0000` on the link, #377 review)."""
+    css = {"r": {"color": "#e00"}}
+    b = _one(
+        '<p id="t">a <span class="r">red <a href="#t">link</a> red</span></p>', css
+    )
+    assert _run(b, "link", COLOUR_FLAG) == 0xFFEE0000
