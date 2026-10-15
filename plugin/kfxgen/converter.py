@@ -1930,16 +1930,6 @@ def _box_width(css):
     return share if 0 < share < 100 else None
 
 
-def _holds_linked_picture(elem):
-    """Whether `elem` holds an <img> or <svg> inside an <a href>."""
-    for a in elem.iter():
-        if isinstance(a.tag, str) and _local_tag(a.tag) == "a" and a.get("href"):
-            for d in a.iter():
-                if isinstance(d.tag, str) and _local_tag(d.tag) in ("img", "svg"):
-                    return True
-    return False
-
-
 #: CSS px per unit, for a wrapper's width in a length (#384 review).
 _CSS_PX = {"$319": 1.0, "$308": 16.0, "$505": 16.0, "$318": 4 / 3, "$316": 96 / 25.4}
 
@@ -3643,11 +3633,6 @@ def extract_blocks_from_html(
             m = _IMG_TOKEN_RE.fullmatch(kids[0].get("text") or "")
             if m and m.group(4):
                 width = None
-        if width is not None and _holds_linked_picture(elem):
-            # The Voyage drops the link of a picture inside a container,
-            # floated or not, in Previewer's book too (#384 device checks):
-            # the wrapper gets no box for its width, so the link stays on top.
-            width = None
         if border is None and fill is None and width is None:
             return False
         if not kids or not any(

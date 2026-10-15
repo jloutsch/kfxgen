@@ -43,8 +43,6 @@ CASES = [
     ("div", f'<div class="w40"><img src="i.jpg" alt="div"/><p>Cap div.</p></div><p>{WORDS}</p>'),
     ("figure", f'<figure class="w40"><img src="i.jpg" alt="figure"/><figcaption>Cap fig.</figcaption></figure><p>{WORDS}</p>'),
     ("float", f'<div class="f40"><img src="i.jpg" alt="float"/><p>Cap float.</p></div><p>{WORDS}</p>'),
-    ("link", f'<div class="w40"><a href="c.xhtml#end"><img src="i.jpg" alt="link"/></a><p>Cap link.</p></div><p>{WORDS}</p>'),
-    ("linkfloat", f'<div class="f40"><a href="c.xhtml#end"><img src="i.jpg" alt="linkfloat"/></a><p>Cap link.</p></div><p id="end">{WORDS}</p>'),
     ("centre", f'<div class="c40"><img src="i.jpg" alt="centre"/><p>Cap centre.</p></div><p>{WORDS}</p>'),
     ("px", f'<div class="w300"><img src="i.jpg" alt="px"/><p>Cap px.</p></div><p>{WORDS}</p>'),
     ("nowidth", f'<div class="open"><img src="i.jpg" alt="nowidth"/><p>Cap open.</p></div><p>{WORDS}</p>'),
@@ -54,8 +52,8 @@ CASES = [
 
 @pytest.fixture(scope="module")
 def converted(calibre):  # noqa: F811
-    """{alt: (the nearest container type, its style, picture style)}, and
-    calibre's version."""
+    """{alt: (container type, container style, picture style)}, and calibre's
+    version."""
     tmp, _env, version = calibre
     epub, kfx = tmp / "figures.epub", tmp / "figures.kfx"
     _build_floats(epub, CASES, CSS)
@@ -75,10 +73,7 @@ def converted(calibre):  # noqa: F811
                     styles.get(str(p.get("$157")), {}),
                     styles.get(str(e.get("$157")), {}),
                 )
-            # The nearest container with a width: a linked picture's own
-            # parent is its link's container.
-            sized = "$56" in styles.get(str(e.get("$157")), {})
-            walk(e.get("$146") or [], e if sized or parent is None else parent)
+            walk(e.get("$146") or [], e)
 
     for st in by_type(frags, "$259"):
         walk(val(st)["$146"], None)
@@ -108,17 +103,6 @@ def test_a_sized_wrapper_is_a_container_at_its_width(
     assert _pct(style) == width, f"calibre {version}"
     assert style.get("$140") == side, f"calibre {version}"
     assert ("$580" in style) == centred, f"calibre {version}"
-    assert _pct(picture) == 100.0, f"calibre {version}"
-
-
-@pytest.mark.parametrize("alt", ["link", "linkfloat"])
-def test_a_wrapper_holding_a_linked_picture_is_not_a_container(converted, alt):
-    """The Voyage drops a picture's link inside a container (#384 device
-    checks), so the wrapper is left as on main."""
-    by_alt, version = converted
-    _link, style, picture = by_alt[alt]
-    # Its nearest container is the link's own, with no width.
-    assert "$56" not in style and "$140" not in style, f"calibre {version}"
     assert _pct(picture) == 100.0, f"calibre {version}"
 
 

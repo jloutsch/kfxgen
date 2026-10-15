@@ -303,27 +303,3 @@ def test_a_px_picture_is_a_share_of_its_box(tmp_path, box, img_px, share):
 def test_auto_on_one_side_only_does_not_centre():
     css = dict(CSS, r40={"width": "40%", "margin-right": "auto"})
     assert not _box(_blocks(_figure("r40"), css))["box"]["centred"]
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize("cls", ["w40", "f40"])
-def test_a_sized_wrapper_holding_a_linked_picture_is_not_a_box(cls):
-    """The Voyage (5.13.6) drops the link of a picture inside a container,
-    floated or not, in kfxgen's book and Previewer's: tapping it turned the
-    page (#384 device checks). A text link in the same container works. The
-    wrapper is left as on main, so the picture's link is at the top level."""
-    body = (
-        f'<div class="{cls}"><a href="c.xhtml#t"><img class="full" src="i.jpg" alt="a"/>'
-        f'</a><p>{CAPTION}</p></div><p>{WORDS}</p><p id="t">Target.</p>'
-    )
-    assert not [b for b in _blocks(body, CSS) if b.get("type") == "box"]
-
-
-@pytest.mark.unit
-def test_an_anchor_without_a_link_keeps_the_box_floated():
-    """`<a id>` around a picture is a target, not a link (#384 re-check)."""
-    body = (
-        '<div class="f40"><a id="p1"><img class="full" src="i.jpg" alt="a"/></a>'
-        f"<p>{CAPTION}</p></div><p>{WORDS}</p>"
-    )
-    assert _box(_blocks(body, CSS))["box"]["float"] == "left"
