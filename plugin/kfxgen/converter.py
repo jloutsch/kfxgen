@@ -312,6 +312,8 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                         else None
                     ),
                     "float": st.get("float"),
+                    # Declared: it doesn't inherit (#381).
+                    "clear": st.get("clear"),
                     # text-align is INHERITED (set on <body> or a wrapper
                     # <div>), so read it inheritance-aware like font-family:
                     # Style.get() returns None when inherited; Style[prop]
@@ -565,6 +567,13 @@ def _float_side(css):
     """ "left" or "right" for an element floated to that side, else None."""
     side = str((css or {}).get("float") or "").strip().lower()
     return side if side in ("left", "right") else None
+
+
+def _clear_side(css):
+    """ "left", "right" or "both" for an element set to clear floats on that
+    side, else None (#381)."""
+    side = str((css or {}).get("clear") or "").strip().lower()
+    return side if side in ("left", "right", "both") else None
 
 
 def _img_float(img, parent, size, style_resolver):
@@ -3110,6 +3119,10 @@ def extract_blocks_from_html(
     # The index from which the next block shown follows a page break, set by
     # an element's `page-break-before` or the one before it's `-after` (#363).
     break_at = []
+    # (index, side): the next block shown from that index starts below the
+    # floats on that side, set by an element's `clear`. An empty clearing
+    # element passes it on, as Kindle Previewer does (#381).
+    clear_at = []
 
     def _take_marker(text, spans, mark_offsets):
         """Prefix the pending list marker, if any, to a text block."""
@@ -3211,10 +3224,11 @@ def extract_blocks_from_html(
         so nothing carries into the cell or out of it. Ids left pending at
         the cell's end go on its last block."""
         saved_ids, saved_markers = pending_ids[:], pending_markers[:]
-        saved_break = break_at[:]
+        saved_break, saved_clear = break_at[:], clear_at[:]
         pending_ids.clear()
         pending_markers.clear()
         break_at.clear()
+        clear_at.clear()
         start = len(blocks)
         listings = len(nav_listing_at) if nav_listing_at is not None else 0
         _walk_element(cell)
@@ -3236,6 +3250,7 @@ def extract_blocks_from_html(
         pending_ids[:] = saved_ids
         pending_markers[:] = saved_markers
         break_at[:] = saved_break
+        clear_at[:] = saved_clear
         return out
 
     def _walk_split_row(row):
@@ -3316,6 +3331,11 @@ def extract_blocks_from_html(
         before, after = _page_breaks(css)
         if before and not break_at:
             break_at.append(len(blocks))
+        # A <br> is inline and never walked here: its clear is nothing, as
+        # in Previewer's book.
+        side = _clear_side(css)
+        if side and not clear_at:
+            clear_at.append((len(blocks), side))
         _walk_flow(elem)
         if after and not break_at:
             break_at.append(len(blocks))
@@ -3324,6 +3344,12 @@ def extract_blocks_from_html(
                 if b.get("type") != "space":
                     b["break_before"] = True
                     break_at.clear()
+                    break
+        if clear_at:
+            for b in blocks[clear_at[0][0] :]:
+                if b.get("type") != "space":
+                    b.setdefault("clear", clear_at[0][1])
+                    clear_at.clear()
                     break
 
     def _walk_flow(elem):
@@ -3651,10 +3677,15 @@ def extract_blocks_from_html(
         right = parse_css_length(css.get("margin-right") or "")
         framed = border is not None or fill is not None
         ids = _dedupe_keep_order([a for b in kids for a in b.get("anchor_ids") or ()])
+        # A clear set on the container reached its first block; it is the
+        # box's (#381).
+        first = next((b for b in kids if b.get("type") != "space"), {})
+        clear = first.pop("clear", None)
         blocks[start:] = [
             {
                 "type": "box",
                 "break_before": any(b.get("break_before") for b in kids),
+                **({"clear": clear} if clear else {}),
                 "text": "\n\n".join(b["text"] for b in kids if b["text"]),
                 "spans": [],
                 "block_style": None,

@@ -427,6 +427,16 @@ def _has_space_above(block):
 _ASCII_SPACE = " \t\n\r\f"
 
 
+#: CSS `clear` as Kindle Previewer writes it, `$628`: the side as written
+#: (#381).
+_CLEAR_SYMBOLS = {"both": "$421", "left": "$59", "right": "$61"}
+
+
+def _write_clear(value, clear):
+    if clear:
+        value[IS("$628")] = IS(_CLEAR_SYMBOLS[clear])
+
+
 def _space_to_write(block):
     """The space a scene break puts above a paragraph, in ems, or None to
     keep kfxgen's own when that is as much: a line (1.2em) above an
@@ -2104,6 +2114,7 @@ class NativeKFXGenerator:
         text_transform=None,
         letter_spacing=None,
         colour=None,
+        clear=None,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -2237,6 +2248,8 @@ class NativeKFXGenerator:
             value[IS("$125")], value[IS("$126")] = drop_cap
 
         _write_typography(value, small_caps, text_transform, letter_spacing, colour)
+        # The paragraph starts below the floats on that side (#381).
+        _write_clear(value, clear)
 
         # $23: $328 = text-decoration: underline
         if underline:
@@ -2323,6 +2336,7 @@ class NativeKFXGenerator:
         width=None,
         float_side=None,
         centred=False,
+        clear=None,
     ):
         """$157 for a box (#238), as Kindle Previewer 4.0.1 writes a bordered
         or filled container: border as for a table part, fill $70 (ARGB),
@@ -2356,6 +2370,8 @@ class NativeKFXGenerator:
             value[IS("$140")] = IS("$59" if float_side == "left" else "$61")
         if centred:
             value[IS("$580")] = IS("$320")
+        # A box or rule set to clear floats (#381).
+        _write_clear(value, clear)
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_part_style_157(self, entity_name, border=None):
@@ -2440,6 +2456,7 @@ class NativeKFXGenerator:
         width_pct=None,
         height_pct=None,
         float_side=None,
+        clear=None,
     ):
         """Builds a $157 style for inline image entries.
 
@@ -2539,6 +2556,8 @@ class NativeKFXGenerator:
             # centred, as Kindle Previewer writes it (#243).
             value.pop(IS("$580"), None)
             value[IS("$140")] = IS("$59" if float_side == "left" else "$61")
+        # A picture set to clear floats (#381).
+        _write_clear(value, clear)
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_fragment_266(self, anchor_name, position_id, offset=0):
@@ -3855,6 +3874,19 @@ class NativeKFXGenerator:
                 first = all_chunks[block_first_chunk]
                 if first["type"] == "text":
                     first["space_above"] = space
+            if block.get("clear"):
+                # Its first entry starts below the floats (#381): the pieces
+                # after a picture continue the paragraph.
+                first = next(
+                    (
+                        c
+                        for c in all_chunks[block_first_chunk:]
+                        if c["type"] in ("text", "image")
+                    ),
+                    None,
+                )
+                if first is not None:
+                    first["clear"] = block["clear"]
             return block_anchor_keys if len(all_chunks) == block_first_chunk else []
 
         def _attach_keys(index, keys):
@@ -3892,6 +3924,8 @@ class NativeKFXGenerator:
             when its first paragraph has space above inside the border, its
             bottom padding grows by the same, so the text sits evenly."""
             box = dict(block["box"])
+            if block.get("clear"):
+                box["clear"] = block["clear"]  # (#381)
             if not _is_frame(box) and _has_space_above(block["blocks"][0]):
                 pad = dict(box.get("padding") or dict.fromkeys(_SIDES, 0.0))
                 if not isinstance(pad["bottom"], tuple):
@@ -4279,7 +4313,15 @@ class NativeKFXGenerator:
                             _emit_table_chunks(block)
                             unplaced = []
                         elif block.get("type") == "rule":
-                            all_chunks.append({"type": "rule", "rule": block["rule"]})
+                            all_chunks.append(
+                                {
+                                    "type": "rule",
+                                    "rule": {
+                                        **block["rule"],
+                                        "clear": block.get("clear"),
+                                    },
+                                }
+                            )
                             unplaced = list(block.get("anchor_keys") or ())
                         elif block.get("type") == "box":
                             following = (
@@ -4710,10 +4752,19 @@ class NativeKFXGenerator:
             ]
             # A floated image's style is its own, allocated after the
             # others, so a book's unfloated images keep their names (#243).
-            keys_used = {_image_size_key(c) for c in styled if not c.get("float")}
+            # A cleared one too (#381).
+            keys_used = {
+                _image_size_key(c)
+                for c in styled
+                if not (c.get("float") or c.get("clear"))
+            }
             floated = sorted(
-                {(_image_size_key(c), c["float"]) for c in styled if c.get("float")},
-                key=lambda k: (k[0][0], k[0][1] or 0, k[1]),
+                {
+                    (_image_size_key(c), c.get("float"), c.get("clear"))
+                    for c in styled
+                    if c.get("float") or c.get("clear")
+                },
+                key=lambda k: (k[0][0], k[0][1] or 0, k[1] or "", k[2] or ""),
             )
             kinds_used = {axis for axis, _ in keys_used}
             widths_used = {pct for axis, pct in keys_used if axis == "w"}
@@ -4757,7 +4808,7 @@ class NativeKFXGenerator:
                 extra_style_names.append(name)
                 height_style_names[pct] = name
 
-            for idx, ((axis, pct), side) in enumerate(floated):
+            for idx, ((axis, pct), side, clear) in enumerate(floated):
                 name = f"s_img_f{idx}"
                 self.fragments.append(
                     self.build_fragment_157_image(
@@ -4766,14 +4817,17 @@ class NativeKFXGenerator:
                         width_pct=pct if axis == "w" else None,
                         height_pct=pct if axis == "h" else None,
                         float_side=side,
+                        clear=clear,
                     )
                 )
                 extra_style_names.append(name)
-                float_style_names[((axis, pct), side)] = name
+                float_style_names[((axis, pct), side, clear)] = name
 
         def _image_style_for(chunk):
-            if chunk.get("float"):
-                return float_style_names.get((_image_size_key(chunk), chunk["float"]))
+            if chunk.get("float") or chunk.get("clear"):
+                return float_style_names.get(
+                    (_image_size_key(chunk), chunk.get("float"), chunk.get("clear"))
+                )
             axis, pct = _image_size_key(chunk)
             if axis == "small":
                 return image_style_names.get("small")
@@ -5057,6 +5111,7 @@ class NativeKFXGenerator:
                                 width=box.get("width"),
                                 float_side=box.get("float"),
                                 centred=bool(box.get("centred")),
+                                **({"clear": box["clear"]} if box.get("clear") else {}),
                             )
                         )
                     if node in ("row", "head", "body", "foot") and chunk.get("border"):
@@ -5080,6 +5135,7 @@ class NativeKFXGenerator:
                             builder=self.build_box_style_157,
                             space_above=rule["space_above"],
                             space_below=rule["space_below"],
+                            **({"clear": rule["clear"]} if rule.get("clear") else {}),
                         )
                     )
                     entry_link_targets.append(None)
@@ -5156,6 +5212,8 @@ class NativeKFXGenerator:
                         attrs["margin_right"] = bs["margin_right"]
                     if chunk.get("space_above") is not None:
                         attrs["space_above"] = chunk["space_above"]
+                    if chunk.get("clear"):
+                        attrs["clear"] = chunk["clear"]  # (#381)
                     # Body run: match the block's font-family, honouring any
                     # block-level CSS bold/italic. The entry $157 carries the
                     # block's own weight/style ($13/$12) so it matches the $262
