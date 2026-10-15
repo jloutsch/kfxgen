@@ -37,8 +37,16 @@ from .inline_style import (
     HARD_BREAK,
     LINE_START,
     _parse_font_family,
+    BLACK,
+    COLOUR_FLAG,
+    SPACING_NORMAL,
+    TYPOGRAPHY_FLAGS,
     compute_block_style,
     css_font_size,
+    css_rgb,
+    css_typography,
+    flag_value,
+    is_transparent,
     is_monospace,
     make_anchor_mark,
     make_link_flag,
@@ -330,11 +338,20 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # sets it, and calibre's `.get()` is the element's own
                     # (#237).
                     "text-decoration": _decoration_lines(stylizer, elem),
-                    # The element's own: what a <b> or <i> set to normal
-                    # draws instead, which kfxgen can't yet (#239, #362).
-                    "letter-spacing": st.get("letter-spacing"),
-                    "font-variant": st.get("font-variant"),
-                    "text-transform": st.get("text-transform"),
+                    # Inherited, so read up the ancestors as written:
+                    # calibre's computed letter-spacing is in points, and
+                    # its computed value converts units on every lookup,
+                    # 4 seconds on pg100 for these four (#239).
+                    "letter-spacing": _specified_inherited(
+                        stylizer, elem, "letter-spacing"
+                    ),
+                    "font-variant": _specified_inherited(
+                        stylizer, elem, "font-variant"
+                    ),
+                    "text-transform": _specified_inherited(
+                        stylizer, elem, "text-transform"
+                    ),
+                    "color": _specified_inherited(stylizer, elem, "color"),
                     "font-style": _computed_value(st, "font-style"),
                     # vertical-align does NOT inherit, so .get() is right here:
                     # it returns the declared value, or None when the element
@@ -846,23 +863,10 @@ def _is_preformatted(elem, style_resolver):
     return FLAG_PRE in _white_space_flags(elem, style_resolver, frozenset())
 
 
-def _swaps_emphasis(css):
-    """Whether an element's own CSS draws emphasis kfxgen can't yet: letter-
-    spacing, small caps or a text-transform (#239). A <b> or <i> set to
-    normal with one of these keeps the tag's style, so its words still look
-    emphasised (#362)."""
-    # Widened only: `normal`, 0 and a tightening (negative) read as None.
-    if parse_css_length(str(css.get("letter-spacing") or "")) is not None:
-        return True
-    if "small-caps" in str(css.get("font-variant") or "").lower():
-        return True
-    transform = str(css.get("text-transform") or "").strip().lower()
-    return transform in ("uppercase", "lowercase", "capitalize")
-
-
 def _css_emphasis(css):
-    """(bold, italic, monospace families or None, font size or None) from an
-    element's computed CSS, or None without it.
+    """(bold, italic, monospace families or None, font size or None,
+    typography) from an element's computed CSS, or None without it. The
+    typography is `css_typography`'s (#239).
     `bolder` is relative, but from any weight a book uses it lands on bold
     (`lighter` reads as normal already)."""
     if not css:
@@ -871,7 +875,13 @@ def _css_emphasis(css):
     bold = weight == "bolder" or parse_weight(weight) >= BOLD_WEIGHT_THRESHOLD
     families = tuple(_parse_font_family(css.get("font-family")))
     mono = families if is_monospace(families) else None
-    return bold, parse_style(css.get("font-style")), mono, css_font_size(css)
+    return (
+        bold,
+        parse_style(css.get("font-style")),
+        mono,
+        css_font_size(css),
+        css_typography(css),
+    )
 
 
 def _first_letter_length(text):
@@ -957,10 +967,15 @@ def _initial(elem, css, text, spans, style_resolver):
         n = _first_letter_length(text)
         if not n:
             return spans, None
-        bold, italic, _mono, size = _css_emphasis(first)
+        bold, italic, _mono, size, typography = _css_emphasis(first)
         add = set()
         if size is not None:
             add.add(make_size_flag(size))
+        # Its colour, and the rest, as a run of its own (#239). Black, the
+        # reader's own, isn't.
+        for kind, value in zip(TYPOGRAPHY_FLAGS, typography):
+            if value is not None and value != BLACK:
+                add.add((kind, value))
         if bold:
             add.add(FLAG_BOLD)
         if italic:
@@ -1084,6 +1099,8 @@ def _walk_inline(
             # hash order, so it changed between runs (#317).
             cur = {f for f in cur if not _is_link_flag(f)}
             cur.add(make_link_flag(target))
+            # Its text takes no colour of a run's (#239).
+            cur = {f for f in cur if flag_value((f,), COLOUR_FLAG) is None}
     css = None
     own_css = None
     emphasis = None
@@ -1133,10 +1150,6 @@ def _walk_inline(
                     # leaves tags alone. Bold the element shares with its
                     # parent stays the tag's: a no-font book writes no block
                     # bold (#34).
-                    if local in tags and _swaps_emphasis(own_css):
-                        # Swapped for an effect kfxgen can't draw yet: the
-                        # tag's style keeps the words emphasised.
-                        continue
                     if flag in cur:
                         cur.discard(flag)
                     elif before:
@@ -1153,6 +1166,23 @@ def _walk_inline(
                 cur = {f for f in cur if run_font_size((f,)) is None}
                 if emphasis[3] is not None:
                     cur.add(make_size_flag(emphasis[3]))
+            # Small caps, text-transform, letter-spacing and colour: its own
+            # when they differ from its parent's, "normal", "none" or 0
+            # inside a paragraph that sets them, as Previewer writes them
+            # (#239). A link's own colour is no run's: Previewer writes it
+            # in the link's styles.
+            for kind, now, before, unset in zip(
+                TYPOGRAPHY_FLAGS,
+                emphasis[4],
+                parent_emphasis[4],
+                ("normal", "none", SPACING_NORMAL, None),
+            ):
+                if now == before or (kind == COLOUR_FLAG and now is None):
+                    continue
+                if kind == COLOUR_FLAG and any(_is_link_flag(f) for f in cur):
+                    continue
+                cur = {f for f in cur if flag_value((f,), kind) is None}
+                cur.add((kind, now if now is not None else unset))
     if local in _MONO_TAGS and "font-family" not in (own_css or {}):
         cur.add(make_mono_flag(("monospace",)))
     cur = frozenset(cur)
@@ -1761,50 +1791,23 @@ _BORDER_SIDES = ("top", "right", "bottom", "left")
 #: thick 5px. (#264)
 _PREVIEWER_PT_PER_CALIBRE_PT = 0.625
 _BORDER_KEYWORD_PX = {"thin": 1, "medium": 3, "thick": 5}
+
+
 #: The basic CSS colour names. Any other name writes no colour, so the device
 #: draws its default (black), as for `currentColor`.
-_CSS_COLOURS = {
-    "black": 0x000000, "silver": 0xC0C0C0, "gray": 0x808080, "grey": 0x808080,
-    "white": 0xFFFFFF, "maroon": 0x800000, "red": 0xFF0000, "purple": 0x800080,
-    "fuchsia": 0xFF00FF, "green": 0x008000, "lime": 0x00FF00, "olive": 0x808000,
-    "yellow": 0xFFFF00, "navy": 0x000080, "blue": 0x0000FF, "teal": 0x008080,
-    "aqua": 0x00FFFF,
-}  # fmt: skip
-
-
 def _border_colour(value):
     """A CSS colour as the ARGB integer Previewer writes, or None for black and
     for anything it can't read, which the device draws as its default black
     (#264)."""
-    v = str(value or "").strip().lower()
-    rgb = None
-    if v in _CSS_COLOURS:
-        rgb = _CSS_COLOURS[v]
-    elif re.fullmatch(r"#[0-9a-f]{3}", v):
-        rgb = int("".join(c * 2 for c in v[1:]), 16)
-    elif re.fullmatch(r"#[0-9a-f]{6}", v):
-        rgb = int(v[1:], 16)
-    else:
-        m = re.fullmatch(
-            r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*[\d.]+\s*)?\)", v
-        )
-        if m:
-            r, g, b = (min(int(x), 255) for x in m.groups())
-            rgb = (r << 16) | (g << 8) | b
+    rgb = css_rgb(value)
     if not rgb:
         return None
     return 0xFF000000 | rgb
 
 
-def _is_transparent(value):
-    """True for a colour that draws nothing: `transparent`, or rgba() with an
-    alpha of 0. Read as unreadable it would become the default black (#292
-    review)."""
-    v = str(value or "").strip().lower()
-    if v == "transparent":
-        return True
-    m = re.fullmatch(r"rgba\(.*,\s*([\d.]+)\s*\)", v)
-    return bool(m) and float(m.group(1)) == 0
+#: True for a colour that draws nothing: read as unreadable it would become
+#: the default black (#292 review).
+_is_transparent = is_transparent
 
 
 def _css_border(css):

@@ -5,6 +5,7 @@ into whitespace-normalized text plus character spans, ready to become KFX $142
 spans. See docs/superpowers/specs/2026-06-28-inline-emphasis-css-typography-design.md.
 """
 
+import functools
 import re
 
 from .font_table import BOLD_WEIGHT_THRESHOLD, parse_style, parse_weight
@@ -346,6 +347,151 @@ def run_font_size(flags):
     return None
 
 
+#: Small caps, text-transform, letter-spacing and colour (#239): each a run's
+#: own when it differs from its parent's, carried as (flag, value). The
+#: value of the first two is the CSS keyword ("normal" and "none" inside a
+#: paragraph that sets them); of letter-spacing a KFX length (mag, unit),
+#: ("0", "$308") for `normal`; of colour the ARGB integer.
+SMALL_CAPS_FLAG = "small-caps"
+TRANSFORM_FLAG = "transform"
+SPACING_FLAG = "spacing"
+COLOUR_FLAG = "colour"
+TYPOGRAPHY_FLAGS = (SMALL_CAPS_FLAG, TRANSFORM_FLAG, SPACING_FLAG, COLOUR_FLAG)
+#: Their block_style keys, in the same order.
+TYPOGRAPHY_KEYS = ("small_caps", "text_transform", "letter_spacing", "colour")
+SPACING_NORMAL = ("0", "$308")
+_TRANSFORMS = frozenset({"uppercase", "lowercase", "capitalize"})
+
+
+def flag_value(flags, kind):
+    """The value a run's (kind, value) flag carries, or None."""
+    for flag in flags:
+        if isinstance(flag, tuple) and len(flag) == 2 and flag[0] == kind:
+            return flag[1]
+    return None
+
+
+def css_small_caps(value):
+    """ "small-caps" for a `font-variant` naming it, else None. Previewer
+    reads `font-variant` only, not `font-variant-caps` (#239)."""
+    return "small-caps" if "small-caps" in str(value or "").lower().split() else None
+
+
+def css_text_transform(value):
+    """An uppercase, lowercase or capitalize `text-transform`, else None
+    (`full-width` too, which Previewer drops)."""
+    value = str(value or "").strip().lower()
+    return value if value in _TRANSFORMS else None
+
+
+def css_letter_spacing(value):
+    """A widening `letter-spacing` as the KFX length Previewer writes, or
+    None: em, rem and pt as written, a px as 0.45pt (#239). Previewer drops
+    a negative spacing and a percentage."""
+    parsed = parse_css_length(str(value or ""))
+    if parsed is None or parsed[1] == "$314" or parsed[1] == "$316":
+        return None
+    mag, unit = parsed
+    if unit == "$319":
+        mag, unit = f"{float(mag) * 0.45:.4g}", "$318"
+    return mag, unit
+
+
+_CSS_COLOURS = {
+    "black": 0x000000, "silver": 0xC0C0C0, "gray": 0x808080, "grey": 0x808080,
+    "white": 0xFFFFFF, "maroon": 0x800000, "red": 0xFF0000, "purple": 0x800080,
+    "fuchsia": 0xFF00FF, "green": 0x008000, "lime": 0x00FF00, "olive": 0x808000,
+    "yellow": 0xFFFF00, "navy": 0x000080, "blue": 0x0000FF, "teal": 0x008080,
+    "aqua": 0x00FFFF,
+    # Beyond the basic 16, the names the maintainer's library uses (#239).
+    "ghostwhite": 0xF8F8FF, "hotpink": 0xFF69B4, "darkblue": 0x00008B,
+    "orange": 0xFFA500, "steelblue": 0x4682B4, "orchid": 0xDA70D6,
+}  # fmt: skip
+
+
+def css_rgb(value):
+    """A CSS colour as a 0xRRGGBB integer, or None when it can't be read. An
+    rgba() colour's alpha is not read."""
+    v = str(value or "").strip().lower()
+    if v in _CSS_COLOURS:
+        return _CSS_COLOURS[v]
+    if re.fullmatch(r"#[0-9a-f]{3}", v):
+        return int("".join(c * 2 for c in v[1:]), 16)
+    if re.fullmatch(r"#[0-9a-f]{6}", v):
+        return int(v[1:], 16)
+    m = re.fullmatch(
+        r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*[\d.]+\s*)?\)", v
+    )
+    if m:
+        r, g, b = (min(int(x), 255) for x in m.groups())
+        return (r << 16) | (g << 8) | b
+    return None
+
+
+def is_transparent(value):
+    """True for a colour that draws nothing: `transparent`, or rgba() with an
+    alpha of 0."""
+    v = str(value or "").strip().lower()
+    if v == "transparent":
+        return True
+    m = re.fullmatch(r"rgba\(.*,\s*([\d.]+)\s*\)", v)
+    return bool(m) and float(m.group(1)) == 0
+
+
+def _luminance(rgb):
+    """WCAG relative luminance of (r, g, b) channels, 0 to 255."""
+
+    def lin(c):
+        c /= 255
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = rgb
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+
+
+BLACK = 0xFF000000
+
+#: The luminance of 4.5:1 contrast against white: (1 + 0.05) / 4.5 - 0.05.
+_MAX_LUMINANCE = 1.05 / 4.5 - 0.05
+
+
+@functools.lru_cache(maxsize=1024)
+def css_text_colour(value):
+    """A text colour as the ARGB integer Previewer writes, or None when it
+    draws nothing or can't be read (#239). Previewer darkens a colour with
+    less than 4.5:1 contrast against white until it has it, keeping its hue:
+    white is written 0xFF767676, yellow 0xFF7A7A00."""
+    if is_transparent(value):
+        return None
+    rgb = css_rgb(value)
+    if rgb is None:
+        return None
+    ch = ((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF)
+    if _luminance(ch) > _MAX_LUMINANCE:
+        lo, hi = 0.0, 1.0
+        for _ in range(30):
+            mid = (lo + hi) / 2
+            if _luminance(tuple(c * mid for c in ch)) > _MAX_LUMINANCE:
+                hi = mid
+            else:
+                lo = mid
+        ch = tuple(int(c * lo) for c in ch)
+    return 0xFF000000 | (ch[0] << 16) | (ch[1] << 8) | ch[2]
+
+
+def css_typography(css):
+    """(small caps, text-transform, letter-spacing, colour) from an element's
+    computed CSS, each as its run flag carries it, or None unset (#239)."""
+    css = css or {}
+    return (
+        css_small_caps(css.get("font-variant")),
+        css_text_transform(css.get("text-transform")),
+        css_letter_spacing(css.get("letter-spacing")),
+        # Unset is black. A string, for the cache.
+        css_text_colour(str(css.get("color") or "black")),
+    )
+
+
 def link_target(flags):
     """Return the link target carried by a run's flag set, or None."""
     for flag in flags:
@@ -444,4 +590,15 @@ def compute_block_style(css):
         # In CSS px; the generator measures it against the book's main
         # text size (#241).
         "font_size": css_font_size(css),
+        **_block_typography(css),
+    }
+
+
+def _block_typography(css):
+    """A paragraph's small caps, text-transform, letter-spacing and colour,
+    each only when set: black, the reader's own, isn't (#239)."""
+    return {
+        key: value
+        for key, value in zip(TYPOGRAPHY_KEYS, css_typography(css))
+        if value is not None and not (key == "colour" and value == BLACK)
     }

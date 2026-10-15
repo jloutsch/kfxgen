@@ -15,6 +15,12 @@ import pytest
 from lxml import etree
 
 from kfxgen import converter as _conv
+from kfxgen.inline_style import (
+    SMALL_CAPS_FLAG,
+    SPACING_FLAG,
+    TRANSFORM_FLAG,
+    flag_value,
+)
 
 #: The parts of calibre's UA sheet (templates/html.css) these tests use.
 UA = {
@@ -292,7 +298,7 @@ def test_a_resolver_that_reports_no_weight_leaves_a_tag_bold():
     assert _runs(text, spans, BOLD) == ["bold"]
 
 
-# --- ...unless the CSS swaps it for emphasis kfxgen can't draw yet (#239) --
+# --- ...and draws the effect its CSS swaps it for (#239) -------------------
 
 SWAP = dict(
     RESET,
@@ -305,21 +311,24 @@ SWAP = dict(
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("tag", "cls", "flag"),
+    ("tag", "cls", "flag", "kind", "value"),
     [
-        ("em", "sp", ITALIC),
-        ("i", "sp", ITALIC),
-        ("b", "sc", BOLD),
-        ("strong", "up", BOLD),
+        ("em", "sp", ITALIC, SPACING_FLAG, ("0.15", "$308")),
+        ("i", "sp", ITALIC, SPACING_FLAG, ("0.15", "$308")),
+        ("b", "sc", BOLD, SMALL_CAPS_FLAG, "small-caps"),
+        ("strong", "up", BOLD, TRANSFORM_FLAG, "uppercase"),
     ],
 )
-def test_a_tag_whose_css_swaps_its_emphasis_keeps_it(tag, cls, flag):
+def test_a_tag_whose_css_swaps_its_emphasis_draws_the_swap(tag, cls, flag, kind, value):
     """pg50285's `em { letter-spacing: 0.15em; font-style: normal }` and
-    pg64317's `b { font-variant: small-caps; font-weight: normal }`: kfxgen
-    can't draw those yet, so the tag's style keeps the words emphasised."""
+    pg64317's `b { font-variant: small-caps; font-weight: normal }`: #362
+    kept the tag's style while kfxgen couldn't draw those. Now it draws
+    them, as Previewer does, and the words are not emphasised (#239)."""
     body = f'<p>a <{tag} class="{cls}">word</{tag}> b</p>'
     text, spans = _reset_para(body, resolver=_resolver(SWAP))
-    assert _runs(text, spans, flag) == ["word"]
+    assert _runs(text, spans, flag) == []
+    (got,) = [flag_value(f, kind) for s, n, f in spans if text[s : s + n] == "word"]
+    assert got == value
 
 
 @pytest.mark.unit

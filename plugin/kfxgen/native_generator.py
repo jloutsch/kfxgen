@@ -9,7 +9,7 @@ import unicodedata
 from urllib.parse import unquote
 
 from ._img_tokens import IMG_TOKEN_RE
-from .inline_style import ALIGN_MAP, VALIGN_MAP
+from .inline_style import ALIGN_MAP, TYPOGRAPHY_KEYS, VALIGN_MAP
 from .kfxlib_minimal.kfx_container import KfxContainer
 from .kfxlib_minimal.standard_symbols import StandardSymbolTable
 from .kfxlib_minimal.ion import IonStruct, IonDecimal, IonAnnotation, IonBLOB, IS
@@ -342,6 +342,29 @@ def _cut_row_text(row, removed):
         else:
             cells.append(_trim_text(cell, cut))
     return {**row, "cells": cells}
+
+
+_SMALL_CAPS_SYMBOLS = {"small-caps": "$369", "normal": "$349"}
+_TRANSFORM_SYMBOLS = {
+    "uppercase": "$372",
+    "lowercase": "$373",
+    "capitalize": "$374",
+    "none": "$349",
+}
+
+
+def _write_typography(value, small_caps, text_transform, letter_spacing, colour):
+    """Small caps ($583), text-transform ($41), letter-spacing ($32) and
+    colour ($19) onto a $157 value, as Kindle Previewer writes them (#239)."""
+    if small_caps in _SMALL_CAPS_SYMBOLS:
+        value[IS("$583")] = IS(_SMALL_CAPS_SYMBOLS[small_caps])
+    if text_transform in _TRANSFORM_SYMBOLS:
+        value[IS("$41")] = IS(_TRANSFORM_SYMBOLS[text_transform])
+    if letter_spacing:
+        mag, unit = letter_spacing
+        value[IS("$32")] = IonStruct(IS("$307"), IonDecimal(mag), IS("$306"), IS(unit))
+    if colour is not None:
+        value[IS("$19")] = colour
 
 
 #: One line of space, in ems: what an unindented paragraph has above it
@@ -2042,6 +2065,10 @@ class NativeKFXGenerator:
         space_above=None,
         explicit_size=False,
         drop_cap=None,
+        small_caps=None,
+        text_transform=None,
+        letter_spacing=None,
+        colour=None,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -2174,6 +2201,8 @@ class NativeKFXGenerator:
         if drop_cap:
             value[IS("$125")], value[IS("$126")] = drop_cap
 
+        _write_typography(value, small_caps, text_transform, letter_spacing, colour)
+
         # $23: $328 = text-decoration: underline
         if underline:
             value[IS("$23")] = IS("$328")
@@ -2304,6 +2333,10 @@ class NativeKFXGenerator:
         border_box=False,
         padding=None,
         table_width=None,
+        small_caps=None,
+        text_transform=None,
+        letter_spacing=None,
+        colour=None,
     ):
         """$157 for a table cell: Previewer's padding, plus the cell's own
         alignment, header weight and spans (#219), its vertical alignment
@@ -2329,6 +2362,7 @@ class NativeKFXGenerator:
             value[IS("$13")] = IS("$361")
         if italic:
             value[IS("$12")] = IS("$382")
+        _write_typography(value, small_caps, text_transform, letter_spacing, colour)
         if colspan > 1:
             value[IS("$148")] = colspan
         if rowspan > 1:
@@ -4135,6 +4169,14 @@ class NativeKFXGenerator:
                                         heading_chunk["spans"] = _title_spans(
                                             first, len(title)
                                         )
+                                        # And its small caps, transform,
+                                        # spacing and colour (#239).
+                                        bs = first.get("block_style") or {}
+                                        heading_chunk["typography"] = {
+                                            k: bs[k]
+                                            for k in TYPOGRAPHY_KEYS
+                                            if bs.get(k) is not None
+                                        }
                             else:
                                 # Publishers routinely split the opener across
                                 # elements — the numeral in one, the title in
@@ -4459,6 +4501,7 @@ class NativeKFXGenerator:
         story_names = []  # body style per chapter
         extra_style_names = []  # heading and link styles (for entity registration)
         heading_style_names = {}  # ch_idx -> heading style name
+        heading_attrs = {}  # ch_idx -> its build_fragment_157 arguments
         toc_link_style_names = {}  # ch_idx -> underlined link style name
 
         style_cache = {}  # (kind, sorted-attrs-tuple) -> entity_name
@@ -4497,13 +4540,13 @@ class NativeKFXGenerator:
             if any(ch_start <= h < ch_end for h in heading_chunk_indices):
                 heading_fs = round(max(fs * self.HEADING_FONT_SIZE, 1.0), 4)
                 mt = 2.0 if i > 0 else None
-                heading_name = _allocate_style(
-                    "_h",
+                heading_attrs[i] = dict(
                     font_size=heading_fs,
                     bold=True,
                     margin_top=mt,
                     is_heading=True,
                 )
+                heading_name = _allocate_style("_h", **heading_attrs[i])
                 heading_style_names[i] = heading_name
                 if heading_name not in extra_style_names:
                     extra_style_names.append(heading_name)
@@ -4654,10 +4697,19 @@ class NativeKFXGenerator:
             FLAG_SUB,
             FLAG_SUPER,
             FLAG_UNDERLINE,
+            TYPOGRAPHY_FLAGS,
+            flag_value,
             is_monospace,
             mono_families,
             run_font_size,
         )
+
+        #: A block style's small caps, transform, spacing and colour as
+        #: build_fragment_157's arguments, by their run flags (#239).
+        typography_args = dict(zip(TYPOGRAPHY_FLAGS, TYPOGRAPHY_KEYS))
+
+        def _typography(bs):
+            return {k: bs[k] for k in TYPOGRAPHY_KEYS if bs.get(k) is not None}
 
         def _chars_by_px(chunk):
             # Each character at its run's size, or else its block's (#375
@@ -4781,6 +4833,10 @@ class NativeKFXGenerator:
                 attrs["underline"] = True
             if FLAG_STRIKE in flags:
                 attrs["strike"] = True
+            for kind, arg in typography_args.items():
+                value = flag_value(flags, kind)
+                if value is not None:
+                    attrs[arg] = value
             if in_cell:
                 attrs["no_align"] = True
             return _allocate_style("_em", **attrs)
@@ -4808,6 +4864,7 @@ class NativeKFXGenerator:
                 "border_box": bool(cell.get("width_set")),
                 "padding": _border_key(cell.get("padding")),
                 "table_width": cell.get("table_width") if cell.get("padding") else None,
+                **_typography(bs),
             }
             if cell_fam:
                 cattrs["font_family"] = cell_fam
@@ -4956,7 +5013,14 @@ class NativeKFXGenerator:
                 entry_image_specs.append(None)
                 drop = None
                 if chunk_idx in heading_chunk_indices:
-                    entry_styles.append(heading_style_names[ch_idx])
+                    # The book's heading's small caps, transform, spacing
+                    # and colour go on kfxgen's (#239).
+                    typo = chunk.get("typography")
+                    entry_styles.append(
+                        _allocate_style("_h", **heading_attrs[ch_idx], **typo)
+                        if typo
+                        else heading_style_names[ch_idx]
+                    )
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)
@@ -5013,6 +5077,7 @@ class NativeKFXGenerator:
                         attrs["bold"] = True
                     if blk_italic:
                         attrs["italic"] = True
+                    attrs.update(_typography(bs))
                     cell = chunk.get("cell")
                     if cell is not None:
                         entry_styles.append(_cell_style(cell, bs, attrs["font_size"]))
@@ -5069,7 +5134,8 @@ class NativeKFXGenerator:
                             FLAG_UNDERLINE,
                             FLAG_STRIKE,
                         )
-                    ) or bool(mono_families(flags))
+                    ) or any(flag_value(flags, k) is not None for k in TYPOGRAPHY_FLAGS)
+                    has_emphasis = has_emphasis or bool(mono_families(flags))
                     # kfxgen's chapter heading has its own size: a sized run
                     # in the book's heading doesn't change it (#241).
                     sized = chunk_idx not in heading_chunk_indices
