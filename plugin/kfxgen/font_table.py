@@ -259,6 +259,14 @@ def rule_field(rule, key):
     return None
 
 
+def _face_key(rule):
+    return (
+        normalize_family(rule_field(rule, "font-family")),
+        parse_weight(rule_field(rule, "font-weight")),
+        parse_style(rule_field(rule, "font-style")),
+    )
+
+
 def faces_from_rules(rules, manifest_lookup, log, max_font_bytes=MAX_FONT_BYTES):
     """Turn @font-face rule dicts + a manifest byte-lookup into Face objects.
 
@@ -271,6 +279,16 @@ def faces_from_rules(rules, manifest_lookup, log, max_font_bytes=MAX_FONT_BYTES)
     seen_hrefs = set()
     # Each chapter repeats the book's rules: unpack each WOFF once.
     unpacked = {}
+    # Faces some rule gives as TTF/OTF. A rule giving one of them only as
+    # WOFF adds nothing: as before #245, the TTF/OTF rule embeds it.
+    sfnt_faces = {
+        _face_key(rule)
+        for rule in rules
+        if any(
+            is_ttf_otf(manifest_lookup(href))
+            for href in extract_src_urls(rule_field(rule, "src"))
+        )
+    }
     idx = 0
     for rule in rules:
         family = normalize_family(rule_field(rule, "font-family"))
@@ -286,6 +304,8 @@ def faces_from_rules(rules, manifest_lookup, log, max_font_bytes=MAX_FONT_BYTES)
             for data in [manifest_lookup(href)]
             if is_ttf_otf(data) or is_woff(data)
         ]
+        if _face_key(rule) in sfnt_faces and not any(is_ttf_otf(d) for _, d in srcs):
+            continue
         # TTF/OTF first, in the author's order; a WOFF only when none fits.
         srcs.sort(key=lambda s: is_woff(s[1]))
         for href, data in srcs:

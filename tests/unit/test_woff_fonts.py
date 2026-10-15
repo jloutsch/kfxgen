@@ -113,6 +113,30 @@ def test_a_truetype_source_is_still_preferred_to_a_woff_listed_first():
     assert face.data == ttf
 
 
+@pytest.mark.parametrize("woff_first", [True, False], ids=["woff-first", "ttf-first"])
+def test_a_face_also_given_as_truetype_by_another_rule_is_embedded_once(
+    monkeypatch, woff_first
+):
+    """One library book declares each of its 21 faces twice, once as WOFF
+    (named .dat) and once as OTF/TTF, with the same family, weight and
+    style. Main embedded each once, from the OTF; so does this."""
+    import kfxgen.font_table as ft
+
+    monkeypatch.setattr(ft, "sfnt_from_woff", None)  # never needed here
+    ttf = _ttf()
+    rules = [
+        {"font-family": "Probe", "font-weight": "bold", "src": "url(f.dat)"},
+        {"font-family": "Probe", "font-weight": "bold", "src": "url(f.ttf)"},
+    ]
+    if not woff_first:
+        rules.reverse()
+    manifest = {"f.dat": _flavoured("woff", family="Other"), "f.ttf": ttf}
+    log = _Log()
+    (face,) = faces_from_rules(rules, manifest.get, log)
+    assert face.data == ttf
+    assert log.warns == []
+
+
 def test_a_font_repeated_in_every_chapter_is_unpacked_once(monkeypatch):
     """Rules gathered from each chapter repeat; one book had 168 for 5 fonts."""
     import kfxgen.font_table as ft
