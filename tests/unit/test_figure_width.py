@@ -316,3 +316,13 @@ def test_a_floated_box_holding_a_linked_picture_is_not_floated():
     )
     box = _box(_blocks(body, CSS))
     assert (box["box"]["width"], box["box"]["float"]) == (40.0, None)
+
+
+@pytest.mark.unit
+def test_an_anchor_without_a_link_keeps_the_box_floated():
+    """`<a id>` around a picture is a target, not a link (#384 re-check)."""
+    body = (
+        '<div class="f40"><a id="p1"><img class="full" src="i.jpg" alt="a"/></a>'
+        f"<p>{CAPTION}</p></div><p>{WORDS}</p>"
+    )
+    assert _box(_blocks(body, CSS))["box"]["float"] == "left"
