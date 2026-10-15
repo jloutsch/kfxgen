@@ -57,8 +57,9 @@ CASES = [
 ]  # fmt: skip
 
 
-def _build(path):
-    body = "".join(html for _, html in CASES)
+def _build(path, cases=None, css=None):
+    """An EPUB of `cases` (default: this file's) styled by `css`."""
+    body = "".join(html for _, html in (cases or CASES))
     xhtml = (
         '<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml">'
         '<head><title>F</title><link rel="stylesheet" type="text/css" href="s.css"/>'
@@ -85,7 +86,7 @@ def _build(path):
             '</manifest><spine><itemref idref="c"/></spine></package>',
         )
         z.writestr("c.xhtml", xhtml)
-        z.writestr("s.css", CSS)
+        z.writestr("s.css", css or CSS)
         z.writestr("i.jpg", jpeg_of(600, 400))
 
 

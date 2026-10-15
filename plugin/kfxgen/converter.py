@@ -1917,6 +1917,17 @@ def _cell_padding(css):
 
 #: Containers drawn as a box when they have a border or a fill (#238).
 _BOX_TAGS = frozenset({"div", "aside", "section", "blockquote", "article"})
+#: Containers drawn as a box at their width when they hold a picture (#382).
+_SIZED_BOX_TAGS = _BOX_TAGS | {"figure"}
+
+
+def _box_width(css):
+    """A wrapper's CSS width as a share of the page, in %, or None for none,
+    `auto`, the full width or anything unreadable (#382). A px width is
+    taken at Previewer's rate: 300px is 35.156 %."""
+    width = parse_css_length(str((css or {}).get("width") or ""))
+    share = _page_share(width) if width else 0.0
+    return share if 0 < share < 100 else None
 
 
 def _box_background(css):
@@ -3589,13 +3600,28 @@ def extract_blocks_from_html(
         `leaf`: the container is itself the one paragraph (text written
         straight in a bordered <div>); its margins move to the box.
         Returns whether it made a box."""
-        if style_resolver is None or _local_tag(elem.tag) not in _BOX_TAGS:
+        tag = _local_tag(elem.tag)
+        if style_resolver is None or tag not in _SIZED_BOX_TAGS:
             return False
         css = style_resolver(elem) or {}
         border, fill = _css_border(css), _box_background(css)
-        if border is None and fill is None:
-            return False
+        if tag not in _BOX_TAGS:
+            border = fill = None
         kids = blocks[start:]
+        # A wrapper around a picture is drawn at its width (#382); one of
+        # only a floated picture keeps #243's floated picture instead.
+        width = _box_width(css)
+        side = _float_side(css)
+        if width is not None and not any(
+            _IMG_TOKEN_RE.search(b.get("text") or "") for b in kids
+        ):
+            width = None
+        if width is not None and side and len(kids) == 1:
+            m = _IMG_TOKEN_RE.fullmatch(kids[0].get("text") or "")
+            if m and m.group(4):
+                width = None
+        if border is None and fill is None and width is None:
+            return False
         if not kids or not any(
             b.get("type") in ("table", "box") or (b.get("text") or "").strip()
             for b in kids
@@ -3610,6 +3636,7 @@ def extract_blocks_from_html(
             return False
         left = parse_css_length(css.get("margin-left") or "")
         right = parse_css_length(css.get("margin-right") or "")
+        framed = border is not None or fill is not None
         ids = _dedupe_keep_order([a for b in kids for a in b.get("anchor_ids") or ()])
         blocks[start:] = [
             {
@@ -3627,8 +3654,15 @@ def extract_blocks_from_html(
                     "padding": _box_padding(css),
                     "margin_left": _page_share(left) or None,
                     "margin_right": _page_share(right) or None,
-                    "space_above": _box_space(css.get("margin-top"), _BOX_SPACE_EM),
+                    "space_above": _box_space(
+                        css.get("margin-top"), _BOX_SPACE_EM if framed else 0.0
+                    ),
                     "space_below": _box_space(css.get("margin-bottom")),
+                    "width": width,
+                    "float": side if width is not None else None,
+                    "centred": width is not None
+                    and str(css.get("margin-left")).strip() == "auto"
+                    and str(css.get("margin-right")).strip() == "auto",
                 },
             }
         ]
