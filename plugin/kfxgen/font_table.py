@@ -7,7 +7,10 @@ without Calibre. Calibre only appears in build_font_table (Task 4).
 import hashlib
 import os
 import re
+import struct
+import zlib
 from dataclasses import dataclass
+from io import BytesIO
 
 
 def _int_env(name, default):
@@ -27,9 +30,14 @@ def _int_env(name, default):
 #: bounding the pathological case. Override via KFXGEN_MAX_FONT_BYTES.
 MAX_FONT_BYTES = _int_env("KFXGEN_MAX_FONT_BYTES", 50 * 1024 * 1024)
 
-# TrueType/OpenType magic bytes. WOFF (wOFF) / WOFF2 (wOF2) are intentionally
-# excluded — Kindle cannot embed them and decoding needs deps we don't carry.
+# TrueType/OpenType magic bytes. WOFF (wOFF) / WOFF2 (wOF2) are not embedded
+# as they are: they are unpacked to TrueType/OpenType first (#245).
 _TTF_OTF_MAGIC = (b"\x00\x01\x00\x00", b"OTTO", b"true", b"ttcf")
+_WOFF_MAGIC = (b"wOFF", b"wOF2")
+
+#: Bytes before a WOFF's table directory, and in each of its entries.
+_WOFF_HEADER_LEN = 44
+_WOFF_ENTRY_LEN = 20
 
 #: CSS font-weight at or above which a face counts as "bold". Shared by face
 #: matching, the $262 weight descriptor, and block-style capture so the cutoff
@@ -57,6 +65,112 @@ class Face:
 
 def is_ttf_otf(data):
     return bool(data) and data[:4] in _TTF_OTF_MAGIC
+
+
+def is_woff(data):
+    return bool(data) and data[:4] in _WOFF_MAGIC
+
+
+def _over_cap(size, max_bytes):
+    return ValueError(f"unpacks to {size} bytes, over the {max_bytes}-byte cap")
+
+
+def _check_woff(data, max_bytes):
+    """Inflate each compressed WOFF table no further than its declared length.
+
+    fontTools inflates a whole table before comparing it with its length, so
+    a small file could claim gigabytes; this bounds it first.
+    """
+    if len(data) < _WOFF_HEADER_LEN:
+        raise ValueError("its WOFF header is cut short")
+    (num_tables,) = struct.unpack_from(">H", data, 12)
+    (total,) = struct.unpack_from(">L", data, 16)
+    if total > max_bytes:
+        raise _over_cap(total, max_bytes)
+    declared = 0
+    for i in range(num_tables):
+        pos = _WOFF_HEADER_LEN + i * _WOFF_ENTRY_LEN
+        if pos + _WOFF_ENTRY_LEN > len(data):
+            raise ValueError("its WOFF table directory is cut short")
+        tag, offset, length, orig, _sum = struct.unpack_from(">4sLLLL", data, pos)
+        declared += orig
+        if declared > max_bytes:
+            raise _over_cap(declared, max_bytes)
+        if length > orig:
+            raise ValueError(f"its WOFF table {tag!r} is longer than its {orig} bytes")
+        if length < orig:
+            try:
+                out = zlib.decompressobj().decompress(
+                    data[offset : offset + length], orig + 1
+                )
+            except zlib.error as e:
+                raise ValueError(f"its WOFF table {tag!r} is damaged") from e
+            if len(out) != orig:
+                raise ValueError(
+                    f"its WOFF table {tag!r} does not inflate to its {orig} bytes"
+                )
+
+
+def _check_woff2(data, max_bytes):
+    """Inflate a WOFF2's Brotli stream no further than its tables' lengths."""
+    try:
+        import brotli  # noqa: PLC0415
+        from fontTools.ttLib.woff2 import (  # noqa: PLC0415
+            WOFF2DirectoryEntry,
+            woff2DirectorySize,
+        )
+    except ImportError as e:
+        raise ValueError(f"WOFF2 needs {e.name}, which is not available") from e
+    if len(data) < woff2DirectorySize:
+        raise ValueError("its WOFF2 header is cut short")
+    (num_tables,) = struct.unpack_from(">H", data, 12)
+    total, compressed = struct.unpack_from(">LL", data, 16)
+    if total > max_bytes:
+        raise _over_cap(total, max_bytes)
+    f = BytesIO(data)
+    f.seek(woff2DirectorySize)
+    expected = 0
+    try:
+        for _ in range(num_tables):
+            entry = WOFF2DirectoryEntry()
+            entry.fromFile(f)
+            expected += entry.length
+    except Exception as e:
+        raise ValueError("its WOFF2 table directory is damaged") from e
+    if expected > max_bytes:
+        raise _over_cap(expected, max_bytes)
+    start = f.tell()
+    inflater = brotli.Decompressor()
+    try:
+        out = inflater.process(
+            data[start : start + compressed], output_buffer_limit=expected + 1
+        )
+    except brotli.error as e:
+        raise ValueError("its WOFF2 data is damaged") from e
+    if len(out) != expected or not inflater.is_finished():
+        raise ValueError(f"its WOFF2 data does not inflate to its {expected} bytes")
+
+
+def sfnt_from_woff(data, max_bytes):
+    """A WOFF or WOFF2 font unpacked to TrueType/OpenType bytes (#245).
+
+    Raises ValueError, saying why, when the font is damaged, needs a module
+    calibre lacks, or would unpack past `max_bytes`.
+    """
+    if data[:4] == b"wOFF":
+        _check_woff(data, max_bytes)
+    else:
+        _check_woff2(data, max_bytes)
+    from fontTools.ttLib import TTFont  # noqa: PLC0415
+
+    try:
+        font = TTFont(BytesIO(data), recalcBBoxes=False, recalcTimestamp=False)
+        font.flavor = None
+        out = BytesIO()
+        font.save(out, reorderTables=None)  # no second pass
+    except Exception as e:
+        raise ValueError(f"it could not be unpacked ({type(e).__name__})") from e
+    return out.getvalue()
 
 
 def normalize_family(name):
@@ -143,6 +257,8 @@ def faces_from_rules(rules, manifest_lookup, log, max_font_bytes=MAX_FONT_BYTES)
     faces = []
     taken_names = set()
     seen_hrefs = set()
+    # Each chapter repeats the book's rules: unpack each WOFF once.
+    unpacked = {}
     idx = 0
     for rule in rules:
         family = normalize_family(rule_field(rule, "font-family"))
@@ -152,10 +268,25 @@ def faces_from_rules(rules, manifest_lookup, log, max_font_bytes=MAX_FONT_BYTES)
         italic = parse_style(rule_field(rule, "font-style"))
         chosen_href = None
         chosen_data = None
-        for href in extract_src_urls(rule_field(rule, "src")):
-            data = manifest_lookup(href)
-            if not (data and is_ttf_otf(data)):
-                continue
+        srcs = [
+            (href, data)
+            for href in extract_src_urls(rule_field(rule, "src"))
+            for data in [manifest_lookup(href)]
+            if is_ttf_otf(data) or is_woff(data)
+        ]
+        # TTF/OTF first, in the author's order; a WOFF only when none fits.
+        srcs.sort(key=lambda s: is_woff(s[1]))
+        for href, data in srcs:
+            if is_woff(data) and len(data) <= max_font_bytes:
+                if href not in unpacked:
+                    try:
+                        unpacked[href] = sfnt_from_woff(data, max_font_bytes)
+                    except ValueError as e:
+                        unpacked[href] = e
+                data = unpacked[href]
+                if isinstance(data, ValueError):
+                    log.warn(f"  Skipping @font-face {family!r} src {href!r}: {data}")
+                    continue
             if len(data) > max_font_bytes:
                 log.warn(
                     f"  Skipping @font-face {family!r} src {href!r}: "
@@ -167,8 +298,8 @@ def faces_from_rules(rules, manifest_lookup, log, max_font_bytes=MAX_FONT_BYTES)
             break
         if chosen_data is None:
             log.warn(
-                f"  Skipping @font-face {family!r}: no embeddable TTF/OTF src "
-                f"(WOFF/WOFF2/missing not supported)"
+                f"  Skipping @font-face {family!r}: no embeddable TTF, OTF, "
+                f"WOFF or WOFF2 src"
             )
             continue
         if chosen_href in seen_hrefs:

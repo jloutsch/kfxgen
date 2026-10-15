@@ -21,6 +21,8 @@ amazon-ion==0.13.0
 
 # Font manipulation
 fonttools==4.63.0
+# WOFF2 decompression for fontTools (#245); calibre bundles 1.2.0
+brotli==1.2.0
 
 # XML/HTML parsing
 lxml==6.0.2

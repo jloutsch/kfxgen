@@ -117,7 +117,8 @@ def test_faces_from_rules_emits_ttf_prefers_over_woff2():
     assert f.emitted_family == "foo-700i" and f.location == "resource/font0"
 
 
-def test_faces_from_rules_skips_when_only_woff_available():
+def test_faces_from_rules_skips_a_damaged_woff2():
+    """WOFF2 is unpacked since #245; a damaged one is still skipped."""
     log = _Log()
     rules = [{"font-family": "Foo", "src": "url(f.woff2)"}]
     manifest = _mk_manifest({"f.woff2": b"wOF2xx"})
