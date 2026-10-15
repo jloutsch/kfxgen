@@ -17,8 +17,8 @@ follows the reader's chosen size. In-chapter headings get their sizes too
 Calibre rescales font sizes to its own steps by default, which turned
 pg3011's 0.9em verse into 0.75. **For KFX, sizes are now kept by default,
 and `--disable-font-rescaling` turns calibre's rescaling back on** (the
-flag's help text is calibre's and still reads the other way). A book that
-already has saved conversion settings in calibre keeps them.
+flag's help text is calibre's and still reads the other way). A book whose
+saved conversion settings include font rescaling keeps that setting.
 
 **Drop caps (#240).** `p::first-letter { float: left; font-size: 3em }` and
 a floated, sized first-letter span came out as a plain or merely larger
@@ -32,15 +32,16 @@ were dropped. They are now carried on paragraphs, spans, table cells and
 chapter headings. A colour too light to read against white is darkened
 until it can be read, keeping its hue, as Previewer does. A `<b>` or `<i>`
 whose CSS swaps its emphasis for small caps, spacing or capitals now shows
-that effect instead of the bold or italic kept since 5.12.1. Links keep the
-reader's own link style.
+that effect instead of the bold or italic kept since 5.12.1. A link's own
+colour isn't written, as in Previewer; a link inside coloured text takes that
+colour.
 
 **Floated images (#243).** A picture floated left or right sat above its
 text. The text now wraps beside it, for a floated `<img>` and for a floated
 wrapper holding only the picture. Not floated: a floated figure with a
 caption (the picture and caption stay one above the other), and a linked
 picture, because the Voyage ignores the link on a floated picture, in
-Previewer's books too.
+Previewer's books too. `clear` isn't read yet.
 
 **WOFF and WOFF2 fonts (#245).** A font shipped only as WOFF or WOFF2 was
 skipped, and the text fell back to the Kindle's own font. It is now unpacked
