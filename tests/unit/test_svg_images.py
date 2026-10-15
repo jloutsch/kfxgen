@@ -20,7 +20,7 @@ def _doc(body):
 
 def _tokens(blocks):
     """(href, alt, size) of every image token, in document order."""
-    return [m.groups() for b in blocks for m in IMG_TOKEN_RE.finditer(b["text"])]
+    return [m.group(1, 2, 3) for b in blocks for m in IMG_TOKEN_RE.finditer(b["text"])]
 
 
 _SVG = (

@@ -26,7 +26,7 @@ def _doc(body):
 
 def _tokens(blocks):
     """(href, alt, size) of every image token, in document order."""
-    return [m.groups() for b in blocks for m in IMG_TOKEN_RE.finditer(b["text"])]
+    return [m.group(1, 2, 3) for b in blocks for m in IMG_TOKEN_RE.finditer(b["text"])]
 
 
 # ── converter: what the markup asks for ─────────────────────────────────────
@@ -72,7 +72,7 @@ class TestImageSizeHint:
 
     def test_two_field_token_still_matches(self):
         m = IMG_TOKEN_RE.fullmatch("\x00IMG\x01a.jpg\x01alt\x00")
-        assert m.groups() == ("a.jpg", "alt", None)
+        assert m.groups() == ("a.jpg", "alt", None, None)
 
 
 # ── generator: the $157 the size becomes ────────────────────────────────────
@@ -171,13 +171,13 @@ class TestTokenFieldInjection:
 
     def test_field_separator_in_alt_cannot_open_a_size(self):
         token = _conv._make_img_token("p.jpg", f"photo{_FIELD}w=100%")
-        href, alt, size = IMG_TOKEN_RE.fullmatch(token).groups()
+        href, alt, size = IMG_TOKEN_RE.fullmatch(token).group(1, 2, 3)
         assert (href, alt) == ("p.jpg", "photow=100%")
         assert size is None
 
     def test_field_separator_in_href_cannot_shift_the_fields(self):
         token = _conv._make_img_token(f"p.jpg{_FIELD}w=100%", "alt")
-        href, alt, size = IMG_TOKEN_RE.fullmatch(token).groups()
+        href, alt, size = IMG_TOKEN_RE.fullmatch(token).group(1, 2, 3)
         assert (href, alt, size) == ("p.jpgw=100%", "alt", None)
 
     def test_a_nul_cannot_end_the_token_early(self):
@@ -193,7 +193,7 @@ class TestTokenFieldInjection:
 
     def test_ordinary_alt_and_a_real_size_are_untouched(self):
         token = _conv._make_img_token("images/p.jpg", "a photo", "h=98%")
-        assert IMG_TOKEN_RE.fullmatch(token).groups() == (
+        assert IMG_TOKEN_RE.fullmatch(token).group(1, 2, 3) == (
             "images/p.jpg",
             f"a{_SPACE}photo",
             "h=98%",

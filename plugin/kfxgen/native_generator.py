@@ -2386,7 +2386,12 @@ class NativeKFXGenerator:
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_fragment_157_image(
-        self, entity_name, kind="inline", width_pct=None, height_pct=None
+        self,
+        entity_name,
+        kind="inline",
+        width_pct=None,
+        height_pct=None,
+        float_side=None,
     ):
         """Builds a $157 style for inline image entries.
 
@@ -2481,6 +2486,11 @@ class NativeKFXGenerator:
                 IS("$173"),
                 IS(entity_name),
             )
+        if float_side:
+            # Floated: the text after it wraps beside it, and it isn't
+            # centred, as Kindle Previewer writes it (#243).
+            value.pop(IS("$580"), None)
+            value[IS("$140")] = IS("$59" if float_side == "left" else "$61")
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_fragment_266(self, anchor_name, position_id, offset=0):
@@ -3655,6 +3665,8 @@ class NativeKFXGenerator:
                     }
                     if m.group(3):
                         chunk["size"] = m.group(3)  # the markup's own size
+                    if m.group(4):
+                        chunk["float"] = m.group(4)  # left or right (#243)
                     chunks.append(chunk)
                 # Unknown href: drop the token silently
                 last = m.end()
@@ -4608,6 +4620,7 @@ class NativeKFXGenerator:
         image_style_names = {"small": None}
         width_style_names = {}
         height_style_names = {}
+        float_style_names = {}  # ((axis, pct), side) -> name (#243)
         resource_to_dims = {}
 
         def _image_size_key(c):
@@ -4631,13 +4644,20 @@ class NativeKFXGenerator:
                 if resname:
                     resource_to_dims[resname] = dims
 
-            keys_used = {
-                _image_size_key(c)
+            styled = [
+                c
                 for c in all_chunks
                 if isinstance(c, dict)
                 and c.get("type") == "image"
                 and not c.get("in_cell")
-            }
+            ]
+            # A floated image's style is its own, allocated after the
+            # others, so a book's unfloated images keep their names (#243).
+            keys_used = {_image_size_key(c) for c in styled if not c.get("float")}
+            floated = sorted(
+                {(_image_size_key(c), c["float"]) for c in styled if c.get("float")},
+                key=lambda k: (k[0][0], k[0][1] or 0, k[1]),
+            )
             kinds_used = {axis for axis, _ in keys_used}
             widths_used = {pct for axis, pct in keys_used if axis == "w"}
             heights_used = {pct for axis, pct in keys_used if axis == "h"}
@@ -4680,7 +4700,23 @@ class NativeKFXGenerator:
                 extra_style_names.append(name)
                 height_style_names[pct] = name
 
+            for idx, ((axis, pct), side) in enumerate(floated):
+                name = f"s_img_f{idx}"
+                self.fragments.append(
+                    self.build_fragment_157_image(
+                        entity_name=name,
+                        kind="small" if axis == "small" else "sized",
+                        width_pct=pct if axis == "w" else None,
+                        height_pct=pct if axis == "h" else None,
+                        float_side=side,
+                    )
+                )
+                extra_style_names.append(name)
+                float_style_names[((axis, pct), side)] = name
+
         def _image_style_for(chunk):
+            if chunk.get("float"):
+                return float_style_names.get((_image_size_key(chunk), chunk["float"]))
             axis, pct = _image_size_key(chunk)
             if axis == "small":
                 return image_style_names.get("small")

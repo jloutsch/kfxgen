@@ -40,7 +40,7 @@ def _doc(body):
 
 
 def _tokens(blocks):
-    return [m.groups() for b in blocks for m in IMG_TOKEN_RE.finditer(b["text"])]
+    return [m.group(1, 2, 3) for b in blocks for m in IMG_TOKEN_RE.finditer(b["text"])]
 
 
 def _resolver(css_by_class):

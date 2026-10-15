@@ -516,16 +516,19 @@ def _strip_token_controls(value):
     return value
 
 
-def _make_img_token(href, alt, size=None):
+def _make_img_token(href, alt, size=None, float_side=None):
     """Encode an <img> reference as a placeholder token string.
 
     Spaces in alt text are escaped to a control char so str.split() doesn't
     fragment the token during whitespace normalization. `size` is the hint
-    from `_img_size_hint`, carried as an optional third field.
+    from `_img_size_hint`, carried as an optional third field, and
+    `float_side` ("left" or "right") as a fourth (#243).
     """
     safe_href = _strip_token_controls(href or "")
     escaped_alt = _strip_token_controls(alt or "").replace(" ", _IMG_TOKEN_SPACE)
-    size_field = f"{_IMG_TOKEN_FIELD}{size}" if size else ""
+    size_field = f"{_IMG_TOKEN_FIELD}{size or ''}" if size or float_side else ""
+    if float_side:
+        size_field += f"{_IMG_TOKEN_FIELD}{float_side}"
     return (
         f"{_IMG_TOKEN_DELIM}IMG{_IMG_TOKEN_FIELD}{safe_href}"
         f"{_IMG_TOKEN_FIELD}{escaped_alt}{size_field}{_IMG_TOKEN_DELIM}"
@@ -556,6 +559,36 @@ def _img_size_hint(elem, style_resolver=None):
         if raw and raw != "auto" and _IMG_SIZE_RE.match(raw):
             return f"{axis[0]}={raw}"
     return None
+
+
+def _float_side(css):
+    """ "left" or "right" for an element floated to that side, else None."""
+    side = str((css or {}).get("float") or "").strip().lower()
+    return side if side in ("left", "right") else None
+
+
+def _img_float(img, parent, size, style_resolver):
+    """(float side or None, size hint) for an <img> (#243). Its own float
+    wins; an image alone in a floated wrapper (`<p class="fl"><img/></p>`,
+    a <span>) floats at the wrapper's width, as Kindle Previewer writes it.
+    Previewer floats a wrapper of more as one container, which kfxgen
+    doesn't write: its images stay unfloated.
+    """
+    if style_resolver is None:
+        return None, size
+    side = _float_side(style_resolver(img))
+    if side or parent is None:
+        return side, size
+    pcss = style_resolver(parent) or {}
+    side = _float_side(pcss)
+    only_image = len(parent) == 1 and parent[0] is img
+    if not side or not only_image or "".join(parent.itertext()).strip():
+        return None, size
+    width = str(pcss.get("width") or "").strip()
+    if width and width != "auto" and _IMG_SIZE_RE.match(width):
+        if size in (None, "w=100%"):
+            size = f"w={width}"
+    return side, size
 
 
 #: Size hint for an image wrapped in <svg>. Amazon lays those out as a block
@@ -1228,9 +1261,10 @@ def _walk_inline(
             href = _resolve_img_src(base_href, child.get("src", "") or "")
             alt = child.get("alt", "") or ""
             size = _img_size_hint(child, style_resolver)
+            side, size = _img_float(child, elem, size, style_resolver)
             # Only a link carries over: tapping the picture follows it (#355).
             link = frozenset(f for f in cur if _is_link_flag(f))
-            parts.append((_make_img_token(href, alt, size), link))
+            parts.append((_make_img_token(href, alt, size, side), link))
         elif clocal == "svg":
             for aid in _own_anchor_ids(child):
                 parts.append(make_anchor_mark(aid))
@@ -3078,13 +3112,15 @@ def extract_blocks_from_html(
         pending_ids.clear()
         ids.extend(_own_anchor_ids(elem))
         block_ids = _dedupe_keep_order(ids)
+        side = None
         if href is None:
             href = _resolve_img_src(base_href, elem.get("src", "") or "")
             alt = elem.get("alt", "") or ""
             size = _img_size_hint(elem, style_resolver)
+            side, size = _img_float(elem, elem.getparent(), size, style_resolver)
         blocks.append(
             {
-                "text": _make_img_token(href, alt, size),
+                "text": _make_img_token(href, alt, size, side),
                 "spans": [],
                 "block_style": None,
                 "anchor_ids": block_ids,
