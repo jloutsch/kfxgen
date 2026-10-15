@@ -5,8 +5,9 @@ as declared; the unit tests' fake style can only assume both. This converts
 a book of floated images with calibre and checks each picture's `$140`.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
-skips when `ebook-convert` is not found. CI has no calibre, so this is
-local-only. Last run against calibre 9.16.0, where every case passes.
+skips when `ebook-convert` is not found. A linked picture is not floated: the
+Voyage drops a floated picture's link (#378 device check). CI has no calibre,
+so this is local-only. Last run against calibre 9.16.0, where every case passes.
 """
 
 import sys
@@ -41,11 +42,12 @@ WORDS = "words that wrap beside the floated picture. " * 4
 
 #: (alt, markup): each picture's alt names its case.
 CASES = [
-    ("left", f'<p><img class="fl" src="i.jpg" alt="left"/>Left {WORDS}</p>'),
+    ("left", f'<p id="lt"><img class="fl" src="i.jpg" alt="left"/>Left {WORDS}</p>'),
     ("right", f'<p><img class="fr" src="i.jpg" alt="right"/>Right {WORDS}</p>'),
     ("ownline", f'<div><img class="fl" src="i.jpg" alt="ownline"/></div><p>Own {WORDS}</p>'),
     ("wrapper", f'<p class="pfl"><img src="i.jpg" alt="wrapper"/></p><p>Wrap {WORDS}</p>'),
     ("attr", f'<p><img class="fl" src="i.jpg" alt="attr" width="200"/>Attr {WORDS}</p>'),
+    ("linked", f'<p><a href="c.xhtml#lt"><img class="fl" src="i.jpg" alt="linked"/></a>Linked {WORDS}</p>'),
     ("plain", f'<p><img class="w30" src="i.jpg" alt="plain"/>Plain {WORDS}</p>'),
     (
         "figure",
@@ -124,6 +126,7 @@ def converted(calibre):  # noqa: F811
         ("ownline", "$59", 30.0, "Own"),
         ("wrapper", "$59", 25.0, "Wrap"),
         ("attr", "$59", None, "Attr"),
+        ("linked", None, 30.0, "Linked"),
         ("plain", None, 30.0, "Plain"),
         ("figure", None, None, "A caption."),
     ],

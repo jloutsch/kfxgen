@@ -252,6 +252,43 @@ def test_an_image_among_blocks_is_floated(body):
 
 
 @pytest.mark.unit
+def test_a_linked_floated_image_is_not_floated_and_keeps_its_link(tmp_path):
+    """The Voyage (5.13.6) drops the link of a floated picture: the tap turns
+    the page, in kfxgen's container shape and in Previewer's `$179` on the
+    picture alike (#378 device check). The link matters more than the wrap,
+    so the picture is written unfloated in its link container, as on main."""
+    body = (
+        f'<p><a href="c.xhtml#t"><img class="fl" src="i.jpg" alt="a"/></a>{WORDS}</p>'
+        '<p id="t">Target.</p>'
+    )
+    blocks = _blocks(body)
+    out = tmp_path / "b.kfx"
+    NativeKFXGenerator().generate_full_book(
+        title="T",
+        author="A",
+        chapters=[
+            {
+                "title": "One",
+                "text": "\n\n".join(b["text"] for b in blocks),
+                "blocks": blocks,
+                "file": "c.xhtml",
+            }
+        ],
+        output_path=str(out),
+        images={"i.jpg": jpeg_of(600, 400)},
+    )
+    frags = load_fragments(out)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    entries = [
+        e for st in by_type(frags, "$259") for e in iter_entries(val(st)["$146"])
+    ]
+    (picture,) = [e for e in entries if str(e.get("$159")) == "$271"]
+    assert "$140" not in styles[str(picture["$157"])]
+    (wrapper,) = [e for e in entries if any(k is picture for k in e.get("$146") or [])]
+    assert [str(sp["$179"]) for sp in wrapper["$142"]] == ["body_anchor_0"]
+
+
+@pytest.mark.unit
 def test_a_full_width_image_in_a_floated_wrapper_takes_the_wrappers_width():
     """`p.fl { width: 30% } p.fl img { width: 100% }`: the image fills the
     wrapper, so it floats at 30%, not 100% (#378 review)."""

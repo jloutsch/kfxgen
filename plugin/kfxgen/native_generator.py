@@ -3771,6 +3771,10 @@ class NativeKFXGenerator:
                             {"type": "open", "node": "link", "spans": [(0, 1, link)]}
                         )
                         chunk["inline"] = True
+                        # The Voyage drops a floated picture's link, in this
+                        # shape and in Previewer's, so it stays unfloated
+                        # (#243).
+                        chunk.pop("float", None)
                     all_chunks.append(chunk)
                     if link:
                         all_chunks.append({"type": "close"})
