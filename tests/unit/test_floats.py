@@ -249,3 +249,11 @@ def test_an_image_among_blocks_is_floated(body):
     """Previewer's bare `<img class="fl">` before a paragraph: the image is a
     block of its own, through the container walk, not a paragraph's."""
     assert _tokens(_blocks(body)) == [("w=30%", "left")]
+
+
+@pytest.mark.unit
+def test_a_full_width_image_in_a_floated_wrapper_takes_the_wrappers_width():
+    """`p.fl { width: 30% } p.fl img { width: 100% }`: the image fills the
+    wrapper, so it floats at 30%, not 100% (#378 review)."""
+    body = f'<p class="pfl"><img class="full" src="i.jpg" alt="a"/></p><p>{WORDS}</p>'
+    assert _tokens(_blocks(body)) == [("w=30%", "left")]
