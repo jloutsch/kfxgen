@@ -143,7 +143,11 @@ def test_a_bordered_box_with_no_width_has_none():
 def _containers(body, tmp_path, image=(600, 400)):
     """[(container type, its style, [what is in it])] for each container
     holding a picture."""
-    blocks = _blocks(body, CSS)
+    return _containers_css(body, tmp_path, CSS, image)
+
+
+def _containers_css(body, tmp_path, css, image=(600, 400)):
+    blocks = _blocks(body, css)
     out = tmp_path / "b.kfx"
     NativeKFXGenerator().generate_full_book(
         title="T",
@@ -272,3 +276,30 @@ def test_a_caption_beside_an_unsized_picture_keeps_its_styling(tmp_path):
                 assert caps == [(0, 8)]
                 return
     raise AssertionError("no caption paragraph")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("box", "img_px", "share"),
+    [
+        ("w300", 300, 100.0),  # Previewer: 300px in 300px is 100
+        ("w300", 150, 50.0),
+        ("w40", 120, 60.484),  # 120px is 24.194 % of the page, of 40 %
+        ("w40", 400, 100.0),
+    ],
+)
+def test_a_px_picture_is_a_share_of_its_box(tmp_path, box, img_px, share):
+    """A picture's own px width inside a sized box is a share of the box, as
+    Previewer writes it, not of the page (#384 review: pg37106's 109
+    pictures drew at about 21 % of the page instead of 35 %)."""
+    css = dict(CSS, px={"width": f"{img_px}px"})
+    body = _figure(box, img="px")
+    ((_ftype, _style, kids),) = _containers_css(body, tmp_path, css)
+    (picture,) = [s for k, s in kids if k == "image"]
+    assert _pct(picture) == (pytest.approx(share, abs=0.01), "$314")
+
+
+@pytest.mark.unit
+def test_auto_on_one_side_only_does_not_centre():
+    css = dict(CSS, r40={"width": "40%", "margin-right": "auto"})
+    assert not _box(_blocks(_figure("r40"), css))["box"]["centred"]

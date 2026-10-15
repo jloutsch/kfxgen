@@ -1930,6 +1930,19 @@ def _box_width(css):
     return share if 0 < share < 100 else None
 
 
+#: CSS px per unit, for a wrapper's width in a length (#384 review).
+_CSS_PX = {"$319": 1.0, "$308": 16.0, "$505": 16.0, "$318": 4 / 3, "$316": 96 / 25.4}
+
+
+def _box_width_px(css):
+    """A wrapper's CSS width in CSS px when it is a length, else None: a
+    picture's own px width inside it is then a share of it."""
+    width = parse_css_length(str((css or {}).get("width") or ""))
+    if not width or width[1] not in _CSS_PX:
+        return None
+    return float(width[0]) * _CSS_PX[width[1]]
+
+
 def _box_background(css):
     """A box's fill as the ARGB integer Previewer writes ($70), or None for
     none, transparent, white (the page) or anything unreadable (#238)."""
@@ -3659,6 +3672,7 @@ def extract_blocks_from_html(
                     ),
                     "space_below": _box_space(css.get("margin-bottom")),
                     "width": width,
+                    "width_px": _box_width_px(css) if width is not None else None,
                     "float": side if width is not None else None,
                     "centred": width is not None
                     and str(css.get("margin-left")).strip() == "auto"

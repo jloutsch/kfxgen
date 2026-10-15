@@ -30,6 +30,29 @@ _log = logging.getLogger(__name__)
 #: A token size hint: axis, number, unit (bare = px).
 _SIZE_HINT_RE = re.compile(r"^([wh])=(\d+(?:\.\d+)?)(%|px|em|pt)?$")
 _CSS_PX_PER_UNIT = {"px": 1.0, "em": 16.0, "pt": 4.0 / 3.0}
+#: Text column width Amazon sizes against, in CSS pixels. Recovered by
+#: dividing each sub-100% width it emits by the image's pixel width: every
+#: one resolves to this, across seven books. (#145)
+_IMAGE_COLUMN_PX = 496.0
+
+
+def _size_in_box(hint, box):
+    """A picture's size hint inside a sized box (#382): none fills the box,
+    a % is already a share of it, and a width in a length becomes one: of a
+    box in a length, picture ÷ box; of a box in %, the picture's share of
+    the page ÷ the box's (#384 review). `_parse_size_hint` caps it at the
+    box, as it caps any size at the column."""
+    if not hint:
+        return "w=100%"
+    m = _SIZE_HINT_RE.match(hint)
+    if not m or m.group(1) != "w" or m.group(3) == "%":
+        return hint
+    px = float(m.group(2)) * _CSS_PX_PER_UNIT[m.group(3) or "px"]
+    if box.get("width_px"):
+        pct = px / box["width_px"] * 100.0
+    else:
+        pct = px / _IMAGE_COLUMN_PX * 100.0 / box["width"] * 100.0
+    return f"w={pct:.3f}%"
 
 
 def _parse_size_hint(hint, column_px):
@@ -3899,13 +3922,13 @@ class NativeKFXGenerator:
                 else:
                     unplaced = _emit_paragraph(kid)
                     if box.get("width"):
-                        # A picture with no size of its own fills a sized
-                        # box, as Previewer writes it (#382). Set here, not
-                        # in the token: a longer token would shift the
-                        # paragraph's runs.
+                        # A picture's size is a share of a sized box, as
+                        # Previewer writes it (#382). Set here, not in the
+                        # token: a longer token would shift the paragraph's
+                        # runs.
                         for ch in all_chunks[first:]:
-                            if ch.get("type") == "image" and not ch.get("size"):
-                                ch["size"] = "w=100%"
+                            if ch.get("type") == "image":
+                                ch["size"] = _size_in_box(ch.get("size"), box)
                 if pending and len(all_chunks) > first:
                     _attach_keys(first, pending)
                     pending = []
@@ -4619,10 +4642,7 @@ class NativeKFXGenerator:
         #   both dims >= 600px           -> page
         #   both dims <= 300px, ~square  -> small
         #   else                         -> inline
-        # Text column width Amazon sizes against, in CSS pixels. Recovered by
-        # dividing each sub-100% width it emits by the image's pixel width:
-        # every one resolves to this, across seven books. (#145)
-        IMAGE_COLUMN_PX = 496.0
+        IMAGE_COLUMN_PX = _IMAGE_COLUMN_PX
 
         def _image_width_pct(w):
             """CSS width for an image `w` pixels wide, as Amazon computes it.
