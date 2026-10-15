@@ -1,5 +1,54 @@
 # Changelog
 
+## 5.13.0 — Font sizes, drop caps, small caps, colour, floats and WOFF fonts
+
+The changes since 5.12.1, each reviewed and converted through real calibre,
+with the Gutenberg 90 and a library sample compared before and after each
+change. All five were checked on the Voyage (5.13.6); drop caps were also
+checked on the Paperwhite (5.19.2).
+
+**Font sizes (#241).** A paragraph's or a span's CSS `font-size` was
+dropped, so small print, large text, `<small>` and `<big>` all came out at
+the main text size. Sizes are now written as Kindle Previewer writes them,
+against the size most of the book's text has, so the main text still
+follows the reader's chosen size. In-chapter headings get their sizes too
+(h2 1.5, h3 1.17).
+
+Calibre rescales font sizes to its own steps by default, which turned
+pg3011's 0.9em verse into 0.75. **For KFX, sizes are now kept by default,
+and `--disable-font-rescaling` turns calibre's rescaling back on** (the
+flag's help text is calibre's and still reads the other way). A book that
+already has saved conversion settings in calibre keeps them.
+
+**Drop caps (#240).** `p::first-letter { float: left; font-size: 3em }` and
+a floated, sized first-letter span came out as a plain or merely larger
+letter. They are now Kindle drop caps, dropping through the same number of
+lines Kindle Previewer gives them. The Voyage draws at most 3 lines and the
+Paperwhite 4, in Previewer's own books too.
+
+**Small caps, capitals, letter-spacing and colour (#239).**
+`font-variant: small-caps`, `text-transform`, `letter-spacing` and `color`
+were dropped. They are now carried on paragraphs, spans, table cells and
+chapter headings. A colour too light to read against white is darkened
+until it can be read, keeping its hue, as Previewer does. A `<b>` or `<i>`
+whose CSS swaps its emphasis for small caps, spacing or capitals now shows
+that effect instead of the bold or italic kept since 5.12.1. Links keep the
+reader's own link style.
+
+**Floated images (#243).** A picture floated left or right sat above its
+text. The text now wraps beside it, for a floated `<img>` and for a floated
+wrapper holding only the picture. Not floated: a floated figure with a
+caption (the picture and caption stay one above the other), and a linked
+picture, because the Voyage ignores the link on a floated picture, in
+Previewer's books too.
+
+**WOFF and WOFF2 fonts (#245).** A font shipped only as WOFF or WOFF2 was
+skipped, and the text fell back to the Kindle's own font. It is now unpacked
+to TrueType/OpenType and embedded like any other; a TTF or OTF copy is still
+preferred. 22 of 1,375 library EPUBs ship their fonts this way. Kindle
+Previewer embeds no font for a WOFF source. Unpacking is capped, so a
+damaged or hostile font is skipped rather than exhausting memory.
+
 ## 5.12.1 — Contents nesting, page breaks and emphasis fixes
 
 The changes since 5.12.0, each reviewed and converted through real calibre,
