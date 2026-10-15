@@ -518,3 +518,17 @@ def test_a_link_inside_a_coloured_span_keeps_the_spans_colour():
         '<p id="t">a <span class="r">red <a href="#t">link</a> red</span></p>', css
     )
     assert _run(b, "link", COLOUR_FLAG) == 0xFFEE0000
+
+
+@pytest.mark.unit
+def test_a_link_with_its_own_colour_inside_a_coloured_span_has_none():
+    """Previewer writes no colour on a blue link in a red span: the reader's
+    own link colour (#377 re-check)."""
+    css = {"r": {"color": "#e00"}, "b": {"color": "#00f"}}
+    b = _one(
+        '<p id="t">a <span class="r">red <a class="b" href="#t">link <i>it</i></a> red</span></p>',
+        css,
+    )
+    assert _run(b, "link", COLOUR_FLAG) is None
+    assert _run(b, "it", COLOUR_FLAG) is None
+    assert _run(b, "red", COLOUR_FLAG) == 0xFFEE0000

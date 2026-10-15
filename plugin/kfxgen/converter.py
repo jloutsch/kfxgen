@@ -1168,7 +1168,8 @@ def _walk_inline(
             # when they differ from its parent's, "normal", "none" or 0
             # inside a paragraph that sets them, as Previewer writes them
             # (#239). A link's own colour is no run's: Previewer writes it
-            # in the link's styles.
+            # in the link's styles, and none in the run, not even the
+            # colour of a span around it (#377 re-check).
             for kind, now, before, unset in zip(
                 TYPOGRAPHY_FLAGS,
                 emphasis[4],
@@ -1178,6 +1179,7 @@ def _walk_inline(
                 if now == before or (kind == COLOUR_FLAG and now is None):
                     continue
                 if kind == COLOUR_FLAG and any(_is_link_flag(f) for f in cur):
+                    cur = {f for f in cur if flag_value((f,), kind) is None}
                     continue
                 cur = {f for f in cur if flag_value((f,), kind) is None}
                 cur.add((kind, now if now is not None else unset))
