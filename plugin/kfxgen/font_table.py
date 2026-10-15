@@ -39,6 +39,11 @@ _WOFF_MAGIC = (b"wOFF", b"wOF2")
 _WOFF_HEADER_LEN = 44
 _WOFF_ENTRY_LEN = 20
 
+#: Where a WOFF's and a WOFF2's header holds the offsets and lengths of its
+#: metadata and private blocks (metaOffset through privLength).
+_WOFF_META_FIELDS = slice(24, 44)
+_WOFF2_META_FIELDS = slice(28, 48)
+
 #: CSS font-weight at or above which a face counts as "bold". Shared by face
 #: matching, the $262 weight descriptor, and block-style capture so the cutoff
 #: is defined once.
@@ -157,10 +162,17 @@ def sfnt_from_woff(data, max_bytes):
     Raises ValueError, saying why, when the font is damaged, needs a module
     calibre lacks, or would unpack past `max_bytes`.
     """
-    if data[:4] == b"wOFF":
+    woff1 = data[:4] == b"wOFF"
+    if woff1:
         _check_woff(data, max_bytes)
     else:
         _check_woff2(data, max_bytes)
+    # fontTools inflates the metadata block, unbounded, while opening the
+    # font, and it is not embedded: blank its fields so it is never read.
+    fields = _WOFF_META_FIELDS if woff1 else _WOFF2_META_FIELDS
+    data = (
+        data[: fields.start] + bytes(fields.stop - fields.start) + data[fields.stop :]
+    )
     from fontTools.ttLib import TTFont  # noqa: PLC0415
 
     try:

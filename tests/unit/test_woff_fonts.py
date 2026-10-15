@@ -19,7 +19,12 @@ import pytest
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont
-from fontTools.ttLib.woff2 import WOFF2DirectoryEntry, woff2DirectorySize
+from fontTools.ttLib.sfnt import WOFFFlavorData
+from fontTools.ttLib.woff2 import (
+    WOFF2DirectoryEntry,
+    WOFF2FlavorData,
+    woff2DirectorySize,
+)
 
 from kfxgen.font_table import faces_from_rules, is_ttf_otf, sfnt_from_woff
 
@@ -188,6 +193,16 @@ def test_a_woff_table_inflating_past_its_length_is_rejected_unread(monkeypatch):
     assert max(inflated) <= 100_001
 
 
+def test_a_woff_table_declaring_more_than_the_cap_is_rejected_unread(monkeypatch):
+    """A small header total, but one table claiming more than the cap (#379
+    review): rejected before it is inflated."""
+    data = _woff_with_bomb_table(declared=2000, actual=2000)
+    data = data[:16] + struct.pack(">L", 100) + data[20:]
+    monkeypatch.setattr(zlib, "decompressobj", None)
+    with pytest.raises(ValueError, match="cap"):
+        sfnt_from_woff(data, 1000)
+
+
 def test_a_woff_declaring_more_than_the_cap_is_rejected_unread(monkeypatch):
     data = _woff_with_bomb_table(declared=2000, actual=2000)
     monkeypatch.setattr(zlib, "decompressobj", None)
@@ -217,6 +232,65 @@ def test_a_woff2_stream_inflating_past_its_tables_is_rejected_unread(monkeypatch
     def unbounded(*a, **k):
         raise AssertionError("an unbounded brotli.decompress ran")
 
+    inflated = []
+    real = brotli.Decompressor
+
+    class Measured:
+        def __init__(self):
+            self._d = real()
+
+        def process(self, *a, **k):
+            out = self._d.process(*a, **k)
+            inflated.append(len(out))
+            return out
+
+        def is_finished(self):
+            return self._d.is_finished()
+
     monkeypatch.setattr(brotli, "decompress", unbounded)
+    monkeypatch.setattr(brotli, "Decompressor", Measured)
     with pytest.raises(ValueError, match="WOFF2"):
         sfnt_from_woff(data, 50 * 1024 * 1024)
+    # The font's tables are a few KB; the stream would give 20 MB.
+    assert max(inflated) < 1024 * 1024
+
+
+# --- The metadata block is not inflated --------------------------------------
+
+
+def _with_metadata(flavor, size):
+    font = TTFont(BytesIO(_ttf()))
+    font.flavor = flavor
+    flavor_data = (WOFFFlavorData if flavor == "woff" else WOFF2FlavorData)()
+    flavor_data.metaData = b"\0" * size
+    font.flavorData = flavor_data
+    out = BytesIO()
+    font.save(out)
+    return out.getvalue()
+
+
+@pytest.mark.parametrize("flavor", ["woff", "woff2"])
+def test_a_metadata_block_is_never_inflated(monkeypatch, flavor):
+    """fontTools inflates a WOFF's optional metadata block while opening it,
+    with no bound: 512 MiB of zeros fit in a 50 KB WOFF2 (#379 review). The
+    block is not embedded, so it is never read."""
+    if flavor == "woff2":
+        pytest.importorskip("brotli")
+    data = _with_metadata(flavor, 4 * 1024 * 1024)
+    inflated = []
+    real_zlib = zlib.decompress
+    monkeypatch.setattr(
+        zlib, "decompress", lambda *a: inflated.append(len(r := real_zlib(*a))) or r
+    )
+    if flavor == "woff2":
+        import brotli
+
+        real_brotli = brotli.decompress
+        monkeypatch.setattr(
+            brotli,
+            "decompress",
+            lambda *a: inflated.append(len(r := real_brotli(*a))) or r,
+        )
+    out = sfnt_from_woff(data, 50 * 1024 * 1024)
+    assert _glyphs(out) == GLYPHS
+    assert max(inflated, default=0) < 1024 * 1024
