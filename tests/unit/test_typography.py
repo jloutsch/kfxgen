@@ -532,3 +532,16 @@ def test_a_link_with_its_own_colour_inside_a_coloured_span_has_none():
     assert _run(b, "link", COLOUR_FLAG) is None
     assert _run(b, "it", COLOUR_FLAG) is None
     assert _run(b, "red", COLOUR_FLAG) == 0xFFEE0000
+
+
+@pytest.mark.unit
+def test_a_coloured_span_inside_a_link_keeps_the_links_inherited_colour():
+    """Previewer: red on all three words of a link in a red span, the green
+    span inside it included; a footnote marker styled inside its link is
+    this shape (#377 re-check)."""
+    css = {"r": {"color": "#e00"}, "g": {"color": "#0a0"}}
+    b = _one(
+        '<p id="t">a <span class="r"><a href="#t">l <span class="g">green</span> m</a></span></p>',
+        css,
+    )
+    assert [_run(b, w, COLOUR_FLAG) for w in ("l", "green", "m")] == [0xFFEE0000] * 3

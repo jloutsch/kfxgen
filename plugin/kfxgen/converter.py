@@ -1090,9 +1090,11 @@ def _walk_inline(
         cur.add(FLAG_SUPER)
     if local in _SUB_TAGS:
         cur.add(FLAG_SUB)
+    starts_link = False
     if local == "a":
         target = _resolve_link_target(elem.get("href"), base_href)
         if target:
+            starts_link = True
             # A link inside a link (invalid, but the WordDumb plugin writes
             # it): the inner one wins, as a tap lands on the innermost
             # element. Keeping both left the run's target to the frozenset's
@@ -1169,7 +1171,8 @@ def _walk_inline(
             # inside a paragraph that sets them, as Previewer writes them
             # (#239). A link's own colour is no run's: Previewer writes it
             # in the link's styles, and none in the run, not even the
-            # colour of a span around it (#377 re-check).
+            # colour of a span around it. Inside a link, a colour of its
+            # own changes nothing either (#377 re-check).
             for kind, now, before, unset in zip(
                 TYPOGRAPHY_FLAGS,
                 emphasis[4],
@@ -1179,7 +1182,8 @@ def _walk_inline(
                 if now == before or (kind == COLOUR_FLAG and now is None):
                     continue
                 if kind == COLOUR_FLAG and any(_is_link_flag(f) for f in cur):
-                    cur = {f for f in cur if flag_value((f,), kind) is None}
+                    if starts_link:
+                        cur = {f for f in cur if flag_value((f,), kind) is None}
                     continue
                 cur = {f for f in cur if flag_value((f,), kind) is None}
                 cur.add((kind, now if now is not None else unset))
