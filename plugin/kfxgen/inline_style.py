@@ -6,6 +6,7 @@ spans. See docs/superpowers/specs/2026-06-28-inline-emphasis-css-typography-desi
 """
 
 import functools
+import math
 import re
 
 from .font_table import BOLD_WEIGHT_THRESHOLD, parse_style, parse_weight
@@ -455,27 +456,64 @@ BLACK = 0xFF000000
 _MAX_LUMINANCE = 1.05 / 4.5 - 0.05
 
 
+def _scaled(ch, target, darken):
+    """`ch` scaled, keeping its hue, to the luminance `target`: down to it
+    when `darken`, else up to it, as far as the brightest channel allows.
+    Black lightens as grey."""
+    if darken:
+        lo, hi = 0.0, 1.0
+        for _ in range(30):
+            mid = (lo + hi) / 2
+            if _luminance(tuple(c * mid for c in ch)) > target:
+                hi = mid
+            else:
+                lo = mid
+        return tuple(int(c * lo) for c in ch)
+    base = ch if max(ch) else (1, 1, 1)
+    lo, hi = (1.0 if max(ch) else 0.0), 255 / max(base)
+    if _luminance(tuple(c * hi for c in base)) < target:
+        lo = hi
+    for _ in range(30):
+        mid = (lo + hi) / 2
+        if _luminance(tuple(c * mid for c in base)) < target:
+            lo = mid
+        else:
+            hi = mid
+    return tuple(min(255, math.ceil(c * hi - 1e-9)) for c in base)
+
+
 @functools.lru_cache(maxsize=1024)
-def css_text_colour(value):
+def css_text_colour(value, background=None):
     """A text colour as the ARGB integer Previewer writes, or None when it
-    draws nothing or can't be read (#239). Previewer darkens a colour with
-    less than 4.5:1 contrast against white until it has it, keeping its hue:
-    white is written 0xFF767676, yellow 0xFF7A7A00."""
+    draws nothing or can't be read (#239).
+
+    `background` is the 0xRRGGBB fill of the box drawn behind the text, or
+    None for the white page. Previewer measures the colour against it: with
+    less than 4.5:1 contrast, the colour moves toward whichever of black or
+    white contrasts more with the background, keeping its hue, until it has
+    4.5:1 (#383). On the page, white is written 0xFF767676 and yellow
+    0xFF7A7A00; on a #333333 box white is kept and black becomes about
+    0xFF9C9C9C. A colour that can't get lighter without changing its hue
+    (pure red) is kept."""
     if is_transparent(value):
         return None
     rgb = css_rgb(value)
     if rgb is None:
         return None
     ch = ((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF)
-    if _luminance(ch) > _MAX_LUMINANCE:
-        lo, hi = 0.0, 1.0
-        for _ in range(30):
-            mid = (lo + hi) / 2
-            if _luminance(tuple(c * mid for c in ch)) > _MAX_LUMINANCE:
-                hi = mid
-            else:
-                lo = mid
-        ch = tuple(int(c * lo) for c in ch)
+    bg = 0xFFFFFF if background is None else background
+    lum = _luminance(((bg >> 16) & 0xFF, (bg >> 8) & 0xFF, bg & 0xFF))
+    if background is None:
+        if _luminance(ch) > _MAX_LUMINANCE:
+            ch = _scaled(ch, _MAX_LUMINANCE, True)
+    else:
+        mine = _luminance(ch)
+        if (max(mine, lum) + 0.05) / (min(mine, lum) + 0.05) < 4.5:
+            # Black contrasts more with a light background, white with a
+            # dark one.
+            darken = (lum + 0.05) / 0.05 >= 1.05 / (lum + 0.05)
+            target = (lum + 0.05) / 4.5 - 0.05 if darken else 4.5 * (lum + 0.05) - 0.05
+            ch = _scaled(ch, target, darken)
     return 0xFF000000 | (ch[0] << 16) | (ch[1] << 8) | ch[2]
 
 
@@ -487,8 +525,9 @@ def css_typography(css):
         css_small_caps(css.get("font-variant")),
         css_text_transform(css.get("text-transform")),
         css_letter_spacing(css.get("letter-spacing")),
-        # Unset is black. A string, for the cache.
-        css_text_colour(str(css.get("color") or "black")),
+        # Unset is black. A string, for the cache. Measured against the box
+        # behind the text, or the page (#383).
+        css_text_colour(str(css.get("color") or "black"), css.get("background-behind")),
     )
 
 

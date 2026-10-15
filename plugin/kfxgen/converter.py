@@ -294,6 +294,25 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
         make = stylizer_factory or _default_stylizer
         stylizer = make(oeb_book, item)
         sizes = {}
+        fills = {}
+
+        def behind(elem):
+            # The fill of the nearest box kfxgen draws around `elem`, or
+            # its own, as 0xRRGGBB, or None for the page: text colours are
+            # measured against it (#383). Only a box draws a fill.
+            if elem in fills:
+                return fills[elem]
+            fill = None
+            if _local_tag(elem.tag) in _BOX_TAGS:
+                fill = _box_background(stylizer.style(elem))
+            if fill is None:
+                parent = elem.getparent()
+                if parent is not None and isinstance(parent.tag, str):
+                    fill = behind(parent)
+            else:
+                fill &= 0xFFFFFF
+            fills[elem] = fill
+            return fill
 
         def resolve(elem):
             try:
@@ -372,6 +391,8 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     "background-image": st.get("background-image"),
                     # A box's fill (#238). Declared: it doesn't inherit.
                     "background-color": st.get("background-color"),
+                    # What the text is drawn on (#383).
+                    "background-behind": behind(elem),
                     "background-repeat": st.get("background-repeat"),
                     # Where the book breaks the page: a contents entry
                     # there starts a section, one anywhere else is a place
@@ -1958,8 +1979,10 @@ def _box_background(css):
     value = (css or {}).get("background-color")
     if not value or _is_transparent(value):
         return None
-    argb = _border_colour(value)
-    return None if argb in (None, 0xFFFFFFFF) else argb
+    # Not _border_colour, which reads black as the default: a black fill is
+    # drawn (#383).
+    rgb = css_rgb(value)
+    return None if rgb in (None, 0xFFFFFF) else 0xFF000000 | rgb
 
 
 #: Space above a box when its CSS sets less: 1 line height (1.2em), what an

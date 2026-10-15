@@ -9,7 +9,7 @@ import unicodedata
 from urllib.parse import unquote
 
 from ._img_tokens import IMG_TOKEN_RE
-from .inline_style import ALIGN_MAP, TYPOGRAPHY_KEYS, VALIGN_MAP
+from .inline_style import ALIGN_MAP, TYPOGRAPHY_KEYS, VALIGN_MAP, css_text_colour
 from .kfxlib_minimal.kfx_container import KfxContainer
 from .kfxlib_minimal.standard_symbols import StandardSymbolTable
 from .kfxlib_minimal.ion import IonStruct, IonDecimal, IonAnnotation, IonBLOB, IS
@@ -435,6 +435,12 @@ _CLEAR_SYMBOLS = {"both": "$421", "left": "$59", "right": "$61"}
 def _write_clear(value, clear):
     if clear:
         value[IS("$628")] = IS(_CLEAR_SYMBOLS[clear])
+
+
+def _on_page(argb):
+    """A text colour as it is drawn on the white page: unchanged when it has
+    4.5:1 contrast there, else darkened as #239 darkens it (#383)."""
+    return css_text_colour(f"#{argb & 0xFFFFFF:06x}")
 
 
 def _space_to_write(block):
@@ -4626,7 +4632,16 @@ class NativeKFXGenerator:
         style_cache = {}  # (kind, sorted-attrs-tuple) -> entity_name
         kind_counts = {}  # kind -> next index for that kind
 
+        #: The fills of the boxes open around the chunk being written: the
+        #: converter measures a text colour against the box around it, which
+        #: kfxgen may not draw (a box in a flattened <aside>, #383).
+        open_fills = []
+
         def _allocate_style(kind, builder=None, **attrs):
+            if attrs.get("colour") is not None and not any(open_fills):
+                # Text written on the page is measured against it: a colour
+                # already readable there is unchanged (#383).
+                attrs["colour"] = _on_page(attrs["colour"])
             key = (kind, tuple(sorted(attrs.items())))
             if key in style_cache:
                 return style_cache[key]
@@ -5038,8 +5053,13 @@ class NativeKFXGenerator:
             entry_emphasis_spans = []
             entry_nodes = []
             entry_extras = []
+            open_fills.clear()
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
+                if chunk.get("type") == "open":
+                    open_fills.append((chunk.get("box") or {}).get("background"))
+                elif chunk.get("type") == "close" and open_fills:
+                    open_fills.pop()
                 if chunk.get("type") in ("open", "close"):
                     node = chunk.get("node")
                     if node == "table":
