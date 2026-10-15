@@ -137,6 +137,28 @@ def test_a_face_also_given_as_truetype_by_another_rule_is_embedded_once(
     assert log.warns == []
 
 
+def test_a_woff_only_bold_and_italic_embed_beside_a_truetype_regular():
+    """Only the same family, weight and style counts as the same face: a
+    TrueType regular does not stand in for a bold or italic given only as
+    WOFF (#379 re-check)."""
+    rules = [
+        {"font-family": "Probe", "src": "url(r.ttf)"},
+        {"font-family": "Probe", "font-weight": "bold", "src": "url(b.woff)"},
+        {"font-family": "Probe", "font-style": "italic", "src": "url(i.woff)"},
+    ]
+    manifest = {
+        "r.ttf": _ttf(),
+        "b.woff": _flavoured("woff", family="Bold"),
+        "i.woff": _flavoured("woff", family="Italic"),
+    }
+    faces = faces_from_rules(rules, manifest.get, _Log())
+    assert sorted((f.weight, f.italic) for f in faces) == [
+        (400, False),
+        (400, True),
+        (700, False),
+    ]
+
+
 def test_a_font_repeated_in_every_chapter_is_unpacked_once(monkeypatch):
     """Rules gathered from each chapter repeat; one book had 168 for 5 fonts."""
     import kfxgen.font_table as ft
