@@ -46,13 +46,16 @@ CASES = [
     ("plain", f'<p>{PICTURE}Short.</p><p>Plain {WORDS}</p>'),
     ("figure", f'<p>Figure {WORDS}</p><div class="cb"><img class="w20" src="i.jpg" alt="figure"/></div>'),
     ("rule", f'<p>Rule {WORDS}</p><hr class="cb"/><p>{WORDS}</p>'),
+    ("table", f'<p>Table {WORDS}</p><table class="cb"><tr><td>Cell one</td><td>Cell two</td></tr></table>'),
+    ("linked", f'<p>Linked {WORDS}</p><div class="cb"><a href="c.xhtml#end"><img class="w20" src="i.jpg" alt="linked"/></a></div><p id="end">{WORDS}</p>'),
 ]  # fmt: skip
 
 
 @pytest.fixture(scope="module")
 def converted(calibre):  # noqa: F811
     """{first word of each text entry or alt of each picture: its $628 or
-    None}, the rules' $628s, and calibre's version."""
+    None; "<alt> container": its container's}, the rules' and tables'
+    $628s, and calibre's version."""
     tmp, _env, version = calibre
     epub, kfx = tmp / "clear.epub", tmp / "clear.kfx"
     _build_floats(epub, CASES, CSS)
@@ -60,25 +63,27 @@ def converted(calibre):  # noqa: F811
     frags = load_fragments(kfx)
     styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
     texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
-    out, rules = {}, []
+    out, rules = {}, {"$596": [], "$278": []}
 
     def clear(e):
         v = styles.get(str(e.get("$157")), {}).get("$628")
         return None if v is None else str(v)
 
-    def walk(entries):
+    def walk(entries, parent=None):
         for e in entries:
             if isinstance(e, str):
                 continue
             if str(e.get("$159")) == "$271":
                 out[str(e.get("$584"))] = clear(e)
-            elif str(e.get("$159")) == "$596":
-                rules.append(clear(e))
+                if parent is not None:
+                    out[f"{e.get('$584')} container"] = clear(parent)
+            elif str(e.get("$159")) in rules:
+                rules[str(e.get("$159"))].append(clear(e))
             elif e.get("$145"):
                 r = e["$145"]
                 word = str(texts[str(r["name"])][r["$403"]]).split()[0]
                 out.setdefault(word, clear(e))
-            walk(e.get("$146") or [])
+            walk(e.get("$146") or [], e)
 
     for st in by_type(frags, "$259"):
         walk(val(st)["$146"])
@@ -98,6 +103,10 @@ def converted(calibre):  # noqa: F811
         # A cleared div around a picture clears the picture.
         ("figure", "$421"),
         ("fl", None),
+        # A linked picture's is its link's container (#386 review).
+        ("linked", None),
+        ("linked container", "$421"),
+        ("Cell", None),
     ],
 )
 def test_clear_reaches_the_entry(converted, word, symbol):
@@ -105,6 +114,6 @@ def test_clear_reaches_the_entry(converted, word, symbol):
     assert by_word[word] == symbol, f"calibre {version}"
 
 
-def test_a_cleared_rule_has_628(converted):
+def test_a_cleared_rule_and_table_have_628(converted):
     _by_word, rules, version = converted
-    assert rules == ["$421"], f"calibre {version}"
+    assert rules == {"$596": ["$421"], "$278": ["$421"]}, f"calibre {version}"

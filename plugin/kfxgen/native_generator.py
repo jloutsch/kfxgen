@@ -2299,9 +2299,9 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
-    def build_table_style_157(self, entity_name, border=None, width=None):
+    def build_table_style_157(self, entity_name, border=None, width=None, clear=None):
         """$157 for a native table node, as Kindle Previewer writes it (#219),
-        with the table's own border (#264)."""
+        with the table's own border (#264) and clear (#381)."""
         self.symtab.create_local_symbol(entity_name)
         value = IonStruct(
             IS("$16"), IonStruct(IS("$307"), IonDecimal("1"), IS("$306"), IS("$505")),
@@ -2311,6 +2311,7 @@ class NativeKFXGenerator:
             IS("$83"), 4286611584,
         )  # fmt: skip
         _apply_border(value, border, is_table=True)
+        _write_clear(value, clear)
         if width is not None:
             # A percentage table width, as Previewer writes it (#264): a
             # min-width, and at 100% the width too.
@@ -3876,12 +3877,15 @@ class NativeKFXGenerator:
                     first["space_above"] = space
             if block.get("clear"):
                 # Its first entry starts below the floats (#381): the pieces
-                # after a picture continue the paragraph.
+                # after a picture continue the paragraph. A linked picture's
+                # is its link's container, as Previewer writes it (#386
+                # review).
                 first = next(
                     (
                         c
                         for c in all_chunks[block_first_chunk:]
                         if c["type"] in ("text", "image")
+                        or (c["type"] == "open" and c.get("node") == "link")
                     ),
                     None,
                 )
@@ -4000,6 +4004,7 @@ class NativeKFXGenerator:
                 "border": tbl.get("border"),
                 "column_widths": tbl.get("column_widths"),
                 "width": tbl.get("width"),
+                "clear": block.get("clear"),  # (#381)
             }
             all_chunks.append(table_open)
             group = None
@@ -5044,6 +5049,11 @@ class NativeKFXGenerator:
                                 builder=self.build_table_style_157,
                                 border=_border_key(chunk.get("border")),
                                 width=chunk.get("width"),
+                                **(
+                                    {"clear": chunk["clear"]}
+                                    if chunk.get("clear")
+                                    else {}
+                                ),
                             )
                         )
                     elif node == "cell":
@@ -5093,6 +5103,11 @@ class NativeKFXGenerator:
                                     "",
                                     font_size=chapters[ch_idx].get("font_size", 1.0),
                                     align="center",
+                                    **(
+                                        {"clear": chunk["clear"]}
+                                        if chunk.get("clear")
+                                        else {}
+                                    ),
                                 )
                             )
                     if node == "box":

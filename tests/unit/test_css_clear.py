@@ -219,3 +219,32 @@ def test_a_book_with_no_clear_has_no_628(tmp_path):
     body = f'<p>{PICTURE}Short.</p><p>{WORDS}</p><hr class="hrcb"/>'
     body = body.replace("hrcb", "nothing")
     assert all("$628" not in s for _t, s, _ in _entries(body, tmp_path))
+
+
+@pytest.mark.unit
+def test_a_cleared_table_has_628_on_the_table(tmp_path):
+    """Previewer writes it on the `$278` (#386 review). Cells of paragraphs
+    are walked as the body is (#261); the table's clear waits past them."""
+    body = (
+        f'<p>{WORDS}</p><table class="cb"><tr><td><p>One cell</p><p>More</p></td>'
+        "<td><p>Two cell</p></td></tr></table>"
+    )
+    found = _entries(body, tmp_path)
+    (table,) = [s for t, s, _ in found if t == "$278"]
+    assert _clear_of(table) == "$421"
+    assert all(_clear_of(s) is None for t, s, _ in found if t != "$278")
+
+
+@pytest.mark.unit
+def test_a_cleared_linked_picture_has_628_on_the_link_container(tmp_path):
+    """Previewer writes it on the `$269` holding the link, not the picture
+    inside (#386 review)."""
+    body = (
+        f'<p>{WORDS}</p><div class="cb"><a href="c.xhtml#t"><img class="w20" '
+        f'src="i.jpg" alt="a"/></a></div><p id="t">{WORDS}</p>'
+    )
+    found = _entries(body, tmp_path)
+    i = next(n for n, (t, _s, _x) in enumerate(found) if t == "$271")
+    link, picture = found[i - 1], found[i]
+    assert link[0] == "$269" and _clear_of(link[1]) == "$421"
+    assert _clear_of(picture[1]) is None
