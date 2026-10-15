@@ -43,6 +43,7 @@ CASES = [
     ("div", f'<div class="w40"><img src="i.jpg" alt="div"/><p>Cap div.</p></div><p>{WORDS}</p>'),
     ("figure", f'<figure class="w40"><img src="i.jpg" alt="figure"/><figcaption>Cap fig.</figcaption></figure><p>{WORDS}</p>'),
     ("float", f'<div class="f40"><img src="i.jpg" alt="float"/><p>Cap float.</p></div><p>{WORDS}</p>'),
+    ("linkfloat", f'<div class="f40"><a href="c.xhtml#end"><img src="i.jpg" alt="linkfloat"/></a><p>Cap link.</p></div><p id="end">{WORDS}</p>'),
     ("centre", f'<div class="c40"><img src="i.jpg" alt="centre"/><p>Cap centre.</p></div><p>{WORDS}</p>'),
     ("px", f'<div class="w300"><img src="i.jpg" alt="px"/><p>Cap px.</p></div><p>{WORDS}</p>'),
     ("nowidth", f'<div class="open"><img src="i.jpg" alt="nowidth"/><p>Cap open.</p></div><p>{WORDS}</p>'),
@@ -52,8 +53,8 @@ CASES = [
 
 @pytest.fixture(scope="module")
 def converted(calibre):  # noqa: F811
-    """{alt: (container type, container style, picture style)}, and calibre's
-    version."""
+    """{alt: (the nearest container type, its style, picture style)}, and
+    calibre's version."""
     tmp, _env, version = calibre
     epub, kfx = tmp / "figures.epub", tmp / "figures.kfx"
     _build_floats(epub, CASES, CSS)
@@ -73,7 +74,10 @@ def converted(calibre):  # noqa: F811
                     styles.get(str(p.get("$157")), {}),
                     styles.get(str(e.get("$157")), {}),
                 )
-            walk(e.get("$146") or [], e)
+            # The nearest container with a width: a linked picture's own
+            # parent is its link's container.
+            sized = "$56" in styles.get(str(e.get("$157")), {})
+            walk(e.get("$146") or [], e if sized or parent is None else parent)
 
     for st in by_type(frags, "$259"):
         walk(val(st)["$146"], None)
@@ -90,6 +94,8 @@ def _pct(style):
         ("div", "$269", 40.0, None, False),
         ("figure", "$269", 40.0, None, False),
         ("float", "$270", 40.0, "$59", False),
+        # The Voyage drops a link in a floated box (#384 device check).
+        ("linkfloat", "$269", 40.0, None, False),
         ("centre", "$269", 40.0, None, True),
         ("px", "$269", 35.156, None, False),
     ],

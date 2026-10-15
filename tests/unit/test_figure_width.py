@@ -303,3 +303,16 @@ def test_a_px_picture_is_a_share_of_its_box(tmp_path, box, img_px, share):
 def test_auto_on_one_side_only_does_not_centre():
     css = dict(CSS, r40={"width": "40%", "margin-right": "auto"})
     assert not _box(_blocks(_figure("r40"), css))["box"]["centred"]
+
+
+@pytest.mark.unit
+def test_a_floated_box_holding_a_linked_picture_is_not_floated():
+    """The Voyage (5.13.6) drops the link of a picture in a floated box, as
+    it does a floated picture's (#243): tapping it turned the page (#384
+    device check). The box keeps its width and the link works."""
+    body = (
+        '<div class="f40"><a href="c.xhtml#t"><img class="full" src="i.jpg" alt="a"/>'
+        f'</a><p>{CAPTION}</p></div><p>{WORDS}</p><p id="t">Target.</p>'
+    )
+    box = _box(_blocks(body, CSS))
+    assert (box["box"]["width"], box["box"]["float"]) == (40.0, None)

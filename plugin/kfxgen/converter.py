@@ -1930,6 +1930,16 @@ def _box_width(css):
     return share if 0 < share < 100 else None
 
 
+def _holds_linked_picture(elem):
+    """Whether `elem` holds an <img> or <svg> inside an <a href>."""
+    for a in elem.iter():
+        if isinstance(a.tag, str) and _local_tag(a.tag) == "a" and a.get("href"):
+            for d in a.iter():
+                if isinstance(d.tag, str) and _local_tag(d.tag) in ("img", "svg"):
+                    return True
+    return False
+
+
 #: CSS px per unit, for a wrapper's width in a length (#384 review).
 _CSS_PX = {"$319": 1.0, "$308": 16.0, "$505": 16.0, "$318": 4 / 3, "$316": 96 / 25.4}
 
@@ -3635,6 +3645,10 @@ def extract_blocks_from_html(
                 width = None
         if border is None and fill is None and width is None:
             return False
+        if side and _holds_linked_picture(elem):
+            # The Voyage drops the link of a picture in a floated box, as it
+            # does a floated picture's (#243): the box keeps its width only.
+            side = None
         if not kids or not any(
             b.get("type") in ("table", "box") or (b.get("text") or "").strip()
             for b in kids
