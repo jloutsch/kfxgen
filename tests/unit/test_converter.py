@@ -3775,6 +3775,39 @@ class TestDiscardedListingBecomesGeneratedContents:
         assert "genuine front matter prose" in front_ch["text"]
         assert "Chapter I" in front_ch["text"]
 
+    @pytest.mark.parametrize("wrap", ["{}", "<section>{}</section>"])
+    def test_a_kept_listings_heading_doesnt_rebuild_its_page(self, wrap):
+        """#387, found by its A/B (a library book). The book's first TOC entry
+        comes after its listing page, which runs on into the title page,
+        copyright page and dedication with no entry of their own. Dropping
+        the listing left no Contents page to rebuild, so the listing is kept
+        (#335). The heading inside the kept listing then titled the leading
+        chapter "Table of Contents", and the title-keyed rebuild replaced the
+        whole chapter: listing, copyright page and dedication alike. No TOC
+        entry named it, so nothing is rebuilt, and the pages are kept."""
+        front = wrap.format(
+            '<nav epub:type="toc"><h1>Table of Contents</h1><ol>'
+            '<li><a href="c1.xhtml">Chapter I</a></li>'
+            '<li><a href="c2.xhtml">Chapter II</a></li>'
+            "</ol></nav>"
+        ) + (
+            "<p>Copyright 2020 by the publisher. All rights reserved, in every "
+            "country, in every form.</p><p>For my family.</p>"
+        )
+        oeb = _OEBBook(
+            [_RawSpineItem("front.xhtml", front)] + self._body_chapters(),
+            [_TOCNode("Chapter I", "c1.xhtml"), _TOCNode("Chapter II", "c2.xhtml")],
+        )
+        chapters = extract_chapters_from_oeb(oeb, _silent_log(), metadata=self.META)
+        front_ch = chapters[0]
+        assert not any(ch.get("toc_links") for ch in chapters)
+        assert [b["text"] for b in front_ch["blocks"]][-2:] == [
+            "Copyright 2020 by the publisher. All rights reserved, in every "
+            "country, in every form.",
+            "For my family.",
+        ]
+        assert "Chapter II" in front_ch["text"]
+
 
 @pytest.mark.unit
 @pytest.mark.parametrize(

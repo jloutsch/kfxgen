@@ -4762,7 +4762,7 @@ def extract_chapters_from_oeb(
                 return _with_listings_kept(
                     oeb_book, log, metadata, cover_href, native_tables
                 )
-            _replace_title_page(chapters, metadata, log)
+            _replace_title_page(chapters, metadata, log, keep_nav_listings)
             _warn_flattened_tables(
                 chapters, table_blocks, log, native_tables, notes_blocks
             )
@@ -4794,7 +4794,7 @@ def extract_chapters_from_oeb(
     log.info(f"Using {len(chapters)} spine items as chapters (no TOC mapping)")
     if _listing_without_contents(chapters, keep_nav_listings):
         return _with_listings_kept(oeb_book, log, metadata, cover_href, native_tables)
-    _replace_title_page(chapters, metadata, log)
+    _replace_title_page(chapters, metadata, log, keep_nav_listings)
     _warn_flattened_tables(chapters, table_blocks, log, native_tables, notes_blocks)
     return chapters
 
@@ -5089,8 +5089,14 @@ def _keep_illustrations(ch):
     ]
 
 
-def _replace_title_page(chapters, metadata, log):
-    """Replace title page, reformat copyright/contents, and set font sizes for front/back matter."""
+def _replace_title_page(chapters, metadata, log, listings_kept=False):
+    """Replace title page, reformat copyright/contents, and set font sizes for front/back matter.
+
+    `listings_kept`: the book keeps its own listing, as it has no Contents
+    page to rebuild (#335). A chapter titled "Contents" then got the name
+    from the kept listing's own heading (one the TOC named is rebuilt before
+    this pass), and its pages after the listing are the book's text: it is
+    kept as the book has it (#387)."""
     if not metadata:
         return
     title = metadata.get("title", "")
@@ -5159,7 +5165,7 @@ def _replace_title_page(chapters, metadata, log):
         elif ch_title in ("copyright", "copyright page"):
             ch["font_size"] = SMALL_FONT_SIZE
             log.info(f"  Copyright page (font_size={SMALL_FONT_SIZE})")
-        elif ch_title in _CONTENTS_TITLES:
+        elif ch_title in _CONTENTS_TITLES and not listings_kept:
             # Rebuild contents page from actual chapter titles
             _rebuild_contents_page(ch, chapters, log)
             ch.pop("blocks", None)
