@@ -48,9 +48,11 @@ CASES = [
     ("C14", '<p class="white">C14 white on the page.</p>'),
     # The colour inherited from the box itself.
     ("C15", '<div class="dark wbox"><p>C15 white inherited on a dark box.</p></div>'),
-    # A box kfxgen doesn't draw: an <aside> in a <div> is walked as one
-    # paragraph, so its text is on the page.
-    ("C16", '<div><aside><div class="dark"><p class="white">C16 white in a flattened sidebar.</p></div></aside></div>'),
+    # A box kfxgen doesn't draw: a box in a <span> in a <div> is walked as
+    # one paragraph, so its text is on the page.
+    ("C16", '<div><span><div class="dark"><p class="white">C16 white in a flattened sidebar.</p></div></span></div>'),
+    # A box in an <aside> in a <div> is drawn (#387).
+    ("C17", '<div><aside><div class="dark"><p class="white">C17 white in a nested aside.</p></div></aside></div>'),
 ]  # fmt: skip
 
 #: Kindle Previewer 4.0.3's value for each (#383 probe); C6 and C14 are
@@ -66,6 +68,7 @@ EXPECTED = {
     "C14": 0xFF767676,
     "C15": 0xFFFFFFFF,
     "C16": 0xFF767676,
+    "C17": 0xFFFFFFFF,
 }
 
 

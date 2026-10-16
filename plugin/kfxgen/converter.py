@@ -3109,6 +3109,10 @@ def extract_blocks_from_html(
         "tr",
         # A scene break: a rule, or space when it draws nothing (#230).
         "hr",
+        # The other browser blocks, <aside>, <header> and the rest: nested in
+        # a <div>, their paragraphs ran into one (#387). Pictures are walked
+        # on their own.
+        *(_BODY_BLOCK_TAGS - {"img", "svg"}),
     ):
         block_tags.add(tag)
         block_tags.add(ns + tag)

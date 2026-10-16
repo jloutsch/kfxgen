@@ -189,14 +189,14 @@ def test_white_text_on_the_page_is_unchanged(tmp_path):
 
 @pytest.mark.unit
 def test_text_from_a_fill_kfxgen_doesnt_draw_is_measured_against_the_page(tmp_path):
-    """A filled box kfxgen doesn't draw: a sidebar in an <aside> in a <div>,
-    which is walked as one paragraph (the A/B's W158 shape). Its white text
-    was measured against the fill and would be white on the page; the
-    generator measures any text it writes outside a filled box against the
-    page."""
+    """A filled box kfxgen doesn't draw: a box in a <span> in a <div>, which
+    is walked as one paragraph. (The A/B's W158 shape, an <aside> in a
+    <div>, was one until #387.) Its white text was measured against the
+    fill and would be white on the page; the generator measures any text it
+    writes outside a filled box against the page."""
     body = (
-        '<div><aside><div class="dark"><p class="white">Sidebar white.</p>'
-        "</div></aside></div>"
+        '<div><span><div class="dark"><p class="white">Sidebar white.</p>'
+        "</div></span></div>"
     )
     _colour, runs, fill = _texts(body, tmp_path)["Sidebar"]
     # Walked inline, the colour is a run's.
