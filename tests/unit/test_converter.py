@@ -6448,7 +6448,10 @@ def test_without_a_stylizer_only_the_border_attribute_counts():
         ("#336699", 0xFF336699),
         ("rgb(51, 102, 153)", 0xFF336699),
         ("#000000", None),
-        ("darkslategray", None),
+        # Every CSS name is read (#383); a system colour isn't, as in
+        # Previewer.
+        ("darkslategray", 0xFF2F4F4F),
+        ("windowtext", None),
         (None, None),
     ],
 )
