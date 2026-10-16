@@ -1,5 +1,49 @@
 # Changelog
 
+## 5.14.0 — Figure widths, clear, nested sidebars and colour
+
+The changes since 5.13.0, each reviewed and converted through real calibre,
+with the Gutenberg 90 and a library sample compared before and after each
+change. All five were checked on a Kindle.
+
+**Figure widths (#382).** A picture inside a wrapper with a width
+(`<div style="width: 60%"><img style="width: 100%"/></div>`, Gutenberg's
+usual figure markup) was drawn across the whole page: pg76 had 177
+full-page figures. The wrapper is now a container at its width, centred
+when both side margins are `auto`, and the picture is sized within it, as
+Kindle Previewer writes it.
+
+**CSS `clear` (#381).** An element set to `clear` started beside a floated
+picture instead of below it. `clear` is now written as Previewer writes it,
+on paragraphs, headings, pictures, rules, boxes and tables.
+
+**Text on dark boxes (#383).** A text colour too light to read against
+white was darkened even inside a box with a dark fill, so white text on a
+dark box became grey on dark grey. A colour is now measured against the
+fill behind it, as Previewer does, and changed only when it can't be read
+there. A box filled black is now drawn.
+
+**Nested sidebars and headers (#387).** An `<aside>`, `<header>`,
+`<footer>`, `<nav>`, `<main>` or other browser block inside a `<div>` or a
+`<section>` ran its headings and paragraphs into one paragraph, and a filled
+sidebar in it wasn't drawn. They now keep their paragraphs, headings and
+boxes, as in Previewer; 494 of 1,375 library EPUBs nest one. A contents
+listing nested this way is now recognised and replaced by kfxgen's contents
+page, like one placed directly in the page. A book that keeps its own
+contents listing, because it has no contents page to rebuild, now keeps the
+title, copyright and dedication pages that follow the listing; they were
+lost.
+
+**Colour names, `hsl()` and transparency (#383).** 22 colour names were
+read; all 148 CSS names now are, and `hsl()`. A partly transparent colour
+such as `rgba(0, 0, 0, 0.1)` was written at full strength; it is now
+blended onto the white page, as a browser shows it there. Previewer writes
+the transparency instead. Whether a Kindle draws that isn't known, and the
+blended colour looks the same either way.
+
+Not changed: the Voyage doesn't follow a link on a picture wider than about
+a third of the page, in Previewer's books too; the Paperwhite does (#385).
+
 ## 5.13.0 — Font sizes, drop caps, small caps, colour, floats and WOFF fonts
 
 The changes since 5.12.1, each reviewed and converted through real calibre,
