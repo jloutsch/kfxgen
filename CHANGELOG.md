@@ -27,14 +27,14 @@ there. A box filled black is now drawn.
 `<footer>`, `<nav>`, `<main>` or other browser block inside a `<div>` or a
 `<section>` ran its headings and paragraphs into one paragraph, and a filled
 sidebar in it wasn't drawn. They now keep their paragraphs, headings and
-boxes, as in Previewer; 494 of 1,375 library EPUBs nest one. A contents
-listing nested this way is now recognised and replaced by kfxgen's contents
-page, like one placed directly in the page. A book that keeps its own
-contents listing, because it has no contents page to rebuild, now keeps the
-title, copyright and dedication pages that follow the listing; they were
+boxes, as in Previewer; about 480 of 1,375 library EPUBs nest one. A
+contents listing nested this way is now recognised and replaced by kfxgen's
+contents page, like one placed directly in the page. A book that keeps its
+own contents listing, because it has no contents page to rebuild, now keeps
+the title, copyright and dedication pages that follow the listing; they were
 lost.
 
-**Colour names, `hsl()` and transparency (#383).** 22 colour names were
+**Colour names, `hsl()` and transparency (#383).** 23 colour names were
 read; all 148 CSS names now are, and `hsl()`. A partly transparent colour
 such as `rgba(0, 0, 0, 0.1)` was written at full strength; it is now
 blended onto the white page, as a browser shows it there. Previewer writes
