@@ -2513,6 +2513,14 @@ _TOC_DOC_ROLE = "doc-toc"
 #: own class holds the `toc` token (#329).
 _SOURCE_MARKED = "data-kfxgen-source"
 _SOURCE_TOC = "data-kfxgen-toc"
+#: Front matter a book marks by a `class` token or an `epub:type`, and by
+#: an ARIA role: kept when it follows a contents listing that is rebuilt
+#: (#393). Set on an element whose own class holds one of the tokens.
+_FRONT_MATTER = frozenset(
+    {"dedication", "epigraph", "copyright", "copyright-page", "colophon"}
+)
+_FRONT_MATTER_ROLES = frozenset({"doc-dedication", "doc-epigraph", "doc-colophon"})
+_SOURCE_FRONT = "data-kfxgen-front"
 
 
 def mark_source_classes(root):
@@ -2528,8 +2536,26 @@ def mark_source_classes(root):
     root.set(_SOURCE_MARKED, "1")
     for elem in root.iter():
         if isinstance(elem.tag, str):
-            if _TOC_CLASS_TOKEN in (elem.get("class") or "").split():
+            tokens = (elem.get("class") or "").lower().split()
+            if _TOC_CLASS_TOKEN in tokens:
                 elem.set(_SOURCE_TOC, "1")
+            if _FRONT_MATTER.intersection(tokens):
+                elem.set(_SOURCE_FRONT, "1")
+
+
+def _is_front_matter(elem):
+    """True when the book marks `elem` as a dedication, an epigraph, a
+    copyright page or a colophon (#393). The class is the book's own, before
+    calibre renamed it (#329)."""
+    if elem.getroottree().getroot().get(_SOURCE_MARKED):
+        if elem.get(_SOURCE_FRONT):
+            return True
+    elif _FRONT_MATTER.intersection((elem.get("class") or "").lower().split()):
+        return True
+    raw = elem.get(_EPUB_TYPE_ATTR) or elem.get("epub:type") or ""
+    if _FRONT_MATTER.intersection(raw.lower().split()):
+        return True
+    return (elem.get("role") or "").strip().lower() in _FRONT_MATTER_ROLES
 
 
 def _is_nav_listing(elem):
@@ -3363,7 +3389,12 @@ def extract_blocks_from_html(
         side = _clear_side(css)
         if side and not clear_at:
             clear_at.append((len(blocks), side))
+        start = len(blocks)
         _walk_flow(elem)
+        if isinstance(elem.tag, str) and _is_front_matter(elem):
+            # Kept if a contents rebuild replaces its chapter (#393).
+            for b in blocks[start:]:
+                b["front_matter"] = True
         if after and not break_at:
             break_at.append(len(blocks))
         if break_at:
@@ -5045,6 +5076,38 @@ def _split_text_above_listing(ch):
     return lead
 
 
+def _split_front_matter_below_listing(ch):
+    """The front matter printed after `ch`'s listing, as a chapter of its
+    own, or None.
+
+    The rebuild replaces the chapter holding a listing. A dedication or an
+    epigraph after the listing with no TOC entry of its own is part of that
+    chapter: pg64317's were replaced with it (#393). Only blocks the book
+    marks as front matter are kept (`_is_front_matter`): kept as a whole,
+    the text after a listing was most often another copy of the contents
+    (#389). They follow the rebuilt page, out of the navigation and with no
+    heading, as front matter before the first TOC entry is (#143). The rest,
+    pictures included (#117), is left for the rebuild."""
+    blocks = ch.get("blocks") or []
+    at = ch.get("_nav_listing_at")
+    if at is None:
+        return None
+    kept = [b for b in blocks[at:] if b.get("front_matter")]
+    if not _count_text_blocks(kept):
+        return None
+    left = blocks[:at] + [b for b in blocks[at:] if not b.get("front_matter")]
+    ch["blocks"] = left
+    ch["text"] = "\n\n".join(b["text"] for b in left if b.get("text"))
+    return {
+        "title": LEADING_TITLE_FALLBACK,
+        "text": "\n\n".join(b["text"] for b in kept if b.get("text")),
+        "blocks": kept,
+        "toc_level": ch.get("toc_level", 0),
+        "_omit_from_toc": True,
+        "_omit_title_heading": True,
+    }
+
+
 def _count_text_blocks(blocks):
     """Blocks with text, counting each paragraph inside a box (#319) and
     each paragraph in a native table's cells (#330)."""
@@ -5113,6 +5176,15 @@ def _replace_title_page(chapters, metadata, log, listings_kept=False):
         if lead is not None:
             chapters.insert(chapters.index(nav_contents_ch), lead)
             log.info(f"  Kept the text above the contents listing: {lead['title']}")
+    # Front matter after a listing about to be replaced is split off before
+    # any rebuild, whose links name chapters by their place in the list
+    # (#393). Only a chapter that dropped a listing has a place for it.
+    for ch in list(chapters):
+        if ch is nav_contents_ch or _normalize_title(ch["title"]) in _CONTENTS_TITLES:
+            after = _split_front_matter_below_listing(ch)
+            if after is not None:
+                chapters.insert(chapters.index(ch) + 1, after)
+                log.info("  Kept the front matter after the contents listing")
     for ch in chapters:
         if ch is nav_contents_ch:
             _rebuild_contents_page(ch, chapters, log)
