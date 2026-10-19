@@ -135,3 +135,15 @@ def test_a_picture_after_the_listing_is_still_kept_by_the_rebuild():
     chapters = _chapters(front)
     assert _kept_after(chapters) == ["For my family."]
     assert _contents(chapters).get("preserved_images")
+
+
+@pytest.mark.unit
+def test_a_picture_in_the_kept_front_matter_is_shown_once():
+    """It moves with its dedication; the rebuilt page doesn't keep it as
+    well (#396 review)."""
+    front = LISTING + '<div class="dedication"><p>For my family.</p>'
+    front += '<p><img src="d.jpg" alt="d"/></p></div>'
+    chapters = _chapters(front)
+    kept = _kept_after(chapters)
+    assert kept[0] == "For my family." and "d.jpg" in kept[1]
+    assert not _contents(chapters).get("preserved_images")
