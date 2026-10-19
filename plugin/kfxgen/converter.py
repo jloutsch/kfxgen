@@ -2425,7 +2425,10 @@ def _dedupe_keep_order(items):
 #: epub:type values naming navigation that is never rendered as body text.
 #: page-list is the big one: an EPUB 3 print-pagination nav holds one entry per
 #: printed page, which arrived as several hundred bare page numbers. (#60)
-_NON_RENDERED_EPUB_TYPES = {"page-list", "landmarks", "lot", "loi", "lov"}
+#: Landmarks name a few places the reader's own menu offers. A list of
+#: illustrations or tables (lot, loi, lov) is printed, as Kindle Previewer
+#: prints it: a page of links to the book's figures (#392).
+_NON_RENDERED_EPUB_TYPES = {"page-list", "landmarks"}
 _EPUB_TYPE_ATTR = "{http://www.idpf.org/2007/ops}type"
 
 
@@ -2520,6 +2523,9 @@ _FRONT_MATTER = frozenset(
     {"dedication", "epigraph", "copyright", "copyright-page", "colophon"}
 )
 _FRONT_MATTER_ROLES = frozenset({"doc-dedication", "doc-epigraph", "doc-colophon"})
+#: Lists of illustrations, tables or videos, kept after a rebuilt listing like
+#: front matter (#392). By `epub:type` only: a class named "lot" is anything.
+_LIST_EPUB_TYPES = frozenset({"lot", "loi", "lov"})
 _SOURCE_FRONT = "data-kfxgen-front"
 
 
@@ -2545,15 +2551,16 @@ def mark_source_classes(root):
 
 def _is_front_matter(elem):
     """True when the book marks `elem` as a dedication, an epigraph, a
-    copyright page or a colophon (#393). The class is the book's own, before
-    calibre renamed it (#329)."""
+    copyright page or a colophon (#393), or as a list of illustrations or
+    tables (#392). The class is the book's own, before calibre renamed it
+    (#329)."""
     if elem.getroottree().getroot().get(_SOURCE_MARKED):
         if elem.get(_SOURCE_FRONT):
             return True
     elif _FRONT_MATTER.intersection((elem.get("class") or "").lower().split()):
         return True
-    raw = elem.get(_EPUB_TYPE_ATTR) or elem.get("epub:type") or ""
-    if _FRONT_MATTER.intersection(raw.lower().split()):
+    raw = (elem.get(_EPUB_TYPE_ATTR) or elem.get("epub:type") or "").lower().split()
+    if _FRONT_MATTER.intersection(raw) or _LIST_EPUB_TYPES.intersection(raw):
         return True
     return (elem.get("role") or "").strip().lower() in _FRONT_MATTER_ROLES
 
