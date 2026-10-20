@@ -1,7 +1,7 @@
 """MathML is written as text a reader can follow (#235).
 
-Kindle Previewer 4 typesets each equation as a drawing (`yj_mathml`), which
-firmware below 5.18.2 can't show. kfxgen writes the text instead: exponents
+Kindle Previewer 4 typesets each equation as a drawing (`yj_mathml`).
+kfxgen doesn't draw yet, and writes the text instead: exponents
 and subscripts as raised and lowered runs, operators spaced, fractions as
 a/b and roots as √x, with parentheses around anything longer than a single
 token."""

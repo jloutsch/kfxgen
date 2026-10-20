@@ -1452,8 +1452,8 @@ _MATH_INVISIBLE = frozenset("\u2061\u2062\u2063\u2064")
 def _math_parts(math, flags):
     """A MathML equation as text a reader can follow (#235).
 
-    Kindle Previewer 4 draws each equation (`yj_mathml`, which firmware
-    below 5.18.2 can't show). This writes it instead: exponents and
+    Kindle Previewer 4 draws each equation (`yj_mathml`); kfxgen doesn't
+    draw yet, and writes it instead: exponents and
     subscripts as raised and lowered runs, operators spaced, a fraction as
     a/b and a root as √x, with parentheses around a part longer than a
     single token. A single-letter identifier is italic, as maths sets it.
