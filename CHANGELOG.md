@@ -1,5 +1,44 @@
 # Changelog
 
+## 5.15.0 — Ruby, kept front matter and lists of illustrations
+
+The changes since 5.14.0, each reviewed and converted through real calibre,
+with the Gutenberg 90 and a library sample compared before and after each
+change. Ruby was checked on the Voyage (5.13.6), the Paperwhite (5.19.2)
+and the Oasis (5.18.2); the other three write only shapes kfxgen already
+writes, and were not checked on a Kindle.
+
+**Ruby (#236).** Ruby annotations, such as the furigana over kanji in
+Japanese books, ran into their text: `<ruby>漢字<rt>かんじ</rt></ruby>` read
+"漢字かんじ". They are now written as Kindle ruby, as Kindle Previewer writes
+them, so the reading sits small above its base. `<rp>` fallback parentheses
+are dropped, as in Previewer. Ruby in headings and table cells works too,
+and a chapter heading with ruby prints once under a contents label that
+runs the readings in. Ruby is in 18 of the 21 Japanese books on Project
+Gutenberg and in none of the Gutenberg 90. On the Paperwhite, a book with
+thousands of readings turns pages slowly and once crashed the reader on
+opening the contents; Previewer's own file of the same book does the same,
+and a version of the book without ruby is fast.
+
+**A dedication or epigraph after a rebuilt contents listing (#393).** When
+kfxgen rebuilt a book's printed contents listing as its Contents page, a
+dedication or epigraph in the same file after the listing was lost with it
+(pg64317's dedication and epigraph). A block the book marks as a
+dedication, epigraph, copyright page or colophon is now kept, on a page of
+its own after the Contents page. Unmarked text after a listing is still
+replaced, as before.
+
+**Lists of illustrations and tables (#392).** A book's list of
+illustrations or list of tables (`epub:type` `loi`, `lot` or `lov`) was
+dropped with its page list and landmarks. It is now printed, a heading and
+one linked line per entry, as in Previewer. Page lists and landmarks are
+still dropped. In a library sample, 26 books have a visible list of
+illustrations and 17 a list of tables.
+
+**`rgb()` in percentages (#394).** A colour written in percentages, such as
+`rgb(100%, 0%, 0%)`, was not read, and the text kept its parent's colour. It
+is now read as Previewer reads it.
+
 ## 5.14.0 — Figure widths, clear, nested sidebars and colour
 
 The changes since 5.13.0, each reviewed and converted through real calibre,
