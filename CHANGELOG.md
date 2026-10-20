@@ -4,9 +4,10 @@
 
 The changes since 5.14.0, each reviewed and converted through real calibre,
 with the Gutenberg 90 and a library sample compared before and after each
-change. Ruby was checked on the Voyage (5.13.6), the Paperwhite (5.19.2)
-and the Oasis (5.18.2); the other three write only shapes kfxgen already
-writes, and were not checked on a Kindle.
+change (for #394, the Gutenberg 90 only: no library book uses it). Ruby was
+checked on the Voyage (5.13.6), the Paperwhite (5.19.2) and the Oasis
+(5.18.2); the other three write only shapes kfxgen already writes, and were
+not checked on a Kindle.
 
 **Ruby (#236).** Ruby annotations, such as the furigana over kanji in
 Japanese books, ran into their text: `<ruby>漢字<rt>かんじ</rt></ruby>` read
@@ -18,7 +19,8 @@ runs the readings in. Ruby is in 18 of the 21 Japanese books on Project
 Gutenberg and in none of the Gutenberg 90. On the Paperwhite, a book with
 thousands of readings turns pages slowly and once crashed the reader on
 opening the contents; Previewer's own file of the same book does the same,
-and a version of the book without ruby is fast.
+and a version of the book without ruby is fast. Its speed on the Voyage and
+Oasis wasn't recorded.
 
 **A dedication or epigraph after a rebuilt contents listing (#393).** When
 kfxgen rebuilt a book's printed contents listing as its Contents page, a
@@ -32,7 +34,7 @@ replaced, as before.
 illustrations or list of tables (`epub:type` `loi`, `lot` or `lov`) was
 dropped with its page list and landmarks. It is now printed, a heading and
 one linked line per entry, as in Previewer. Page lists and landmarks are
-still dropped. In a library sample, 26 books have a visible list of
+still dropped. In a library of 1,373 EPUBs, 26 books have a visible list of
 illustrations and 17 a list of tables.
 
 **`rgb()` in percentages (#394).** A colour written in percentages, such as
