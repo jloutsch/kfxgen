@@ -1443,6 +1443,7 @@ _MATH_ACCENTS = {
     "\u20d7": "\u20d7",
 }
 _MATH_TOKENS = frozenset({"mi", "mn", "mo", "mtext", "ms"})
+_MATH_SCRIPTS = frozenset({"msup", "msub", "msubsup", "mover", "munder", "munderover"})
 _MATH_SKIP = frozenset({"annotation", "annotation-xml", "mphantom"})
 # Function application, invisible times, separator and plus: no glyph, and a
 # Kindle font may draw one as a box.
@@ -1516,7 +1517,7 @@ def _math_is_atom(elem):
     if local in _MATH_TOKENS:
         return True
     kids = _math_kids(elem)
-    if local in ("msup", "msub", "msubsup", "mover", "munder", "munderover"):
+    if local in _MATH_SCRIPTS:
         return bool(kids) and _math_is_atom(kids[0])
     if local in ("msqrt", "mroot", "mfenced"):
         return True
@@ -1543,11 +1544,19 @@ def _math_row(elems, flags, script):
         if local == "mo":
             op = _math_token(e)
             if op in _MATH_INVISIBLE:
+                name = elems[i - 1] if i else None
+                if name is not None and _local_tag(name.tag) in _MATH_SCRIPTS:
+                    name = (_math_kids(name) or [name])[0]  # sin²x: the name
                 after = elems[i + 1] if i + 1 < len(elems) else None
+                bracketed = after is not None and (
+                    _local_tag(after.tag) == "mfenced"
+                    or _math_token(after)[:1] in _MATH_OPEN
+                )
                 if (
                     op == "\u2061"
-                    and len(out[-1][0] if out else "") > 1
-                    and not (after is not None and _math_token(after) in _MATH_OPEN)
+                    and name is not None
+                    and len(_math_token(name)) > 1
+                    and not bracketed
                 ):
                     # "sin x", where the name runs into an argument with no
                     # bracket; "f(x)" and "fx" need no space.
@@ -1594,7 +1603,7 @@ def _math_elem(e, flags, script):
     if local == "mspace":
         return [(" ", flags)]
     up, down = frozenset(flags | {FLAG_SUPER}), frozenset(flags | {FLAG_SUB})
-    if local in ("msup", "msub", "msubsup", "mover", "munder", "munderover") and kids:
+    if local in _MATH_SCRIPTS and kids:
         base = _math_elem(kids[0], flags, script)
         if local == "mover" and len(kids) == 2:
             mark = _MATH_ACCENTS.get(_math_token(kids[1]))

@@ -313,3 +313,34 @@ def test_a_function_name_is_spaced_from_its_argument(inner, text):
     """With U+2061 dropped, a name longer than one letter keeps a space before
     an argument that has no bracket (#401 re-check)."""
     assert _math(inner)["text"] == text
+
+
+@pytest.mark.parametrize(
+    ("inner", "runs"),
+    [
+        (
+            "<mi>sin</mi><mo>&#x2061;</mo><mrow><mo>(</mo><mi>x</mi><mo>)</mo></mrow>",
+            [("A sin(", ""), ("x", "i"), (") B", "")],
+        ),
+        (
+            "<mi>sin</mi><mo>&#x2061;</mo><mfenced><mi>x</mi></mfenced>",
+            [("A sin(", ""), ("x", "i"), (") B", "")],
+        ),
+        (
+            "<msup><mi>sin</mi><mn>2</mn></msup><mo>&#x2061;</mo><mi>x</mi>",
+            [("A sin", ""), ("2", "^"), (" ", ""), ("x", "i"), (" B", "")],
+        ),
+        (
+            "<msub><mi>log</mi><mn>2</mn></msub><mo>&#x2061;</mo><mi>x</mi>",
+            [("A log", ""), ("2", "_"), (" ", ""), ("x", "i"), (" B", "")],
+        ),
+        (
+            "<msup><mi>f</mi><mn>2</mn></msup><mo>&#x2061;</mo><mi>x</mi>",
+            [("A ", ""), ("f", "i"), ("2", "^"), ("x", "i"), (" B", "")],
+        ),
+    ],
+)
+def test_a_function_name_with_a_script_or_a_bracketed_row(inner, runs):
+    """LaTeXML writes the bracket inside an <mrow>; sin²x and log₂x keep the
+    space after the name's script (#401 re-check)."""
+    assert _runs(_math(inner)) == runs
