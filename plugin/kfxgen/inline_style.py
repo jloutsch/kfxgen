@@ -451,7 +451,8 @@ _CSS_COLOURS = {
     "yellow": 0xFFFF00, "yellowgreen": 0x9ACD32,
 }  # fmt: skip
 
-#: A channel is an integer or a percentage (#394); the alpha is a number.
+#: A channel is an integer or a percentage (#394); the alpha is a number. A
+#: percentage p is floor(p x 2.56), capped at 255, as Previewer reads it.
 _CHANNEL = r"\s*(\d+(?:\.\d+)?%|\d+)\s*"
 _RGB = re.compile(rf"rgba?\({_CHANNEL},{_CHANNEL},{_CHANNEL}(?:,\s*([\d.]+)\s*)?\)")
 _HSL = re.compile(
@@ -473,7 +474,7 @@ def _rgb_alpha(value):
     m = _RGB.fullmatch(v)
     if m:
         r, g, b = (
-            min(round(float(x[:-1]) * 2.55) if x.endswith("%") else int(x), 255)
+            min(int(float(x[:-1]) * 256 // 100) if x.endswith("%") else int(x), 255)
             for x in m.groups()[:3]
         )
         rgb = (r << 16) | (g << 8) | b

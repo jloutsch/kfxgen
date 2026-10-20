@@ -206,13 +206,31 @@ def test_a_percentage_alpha_fill_draws_no_box_as_in_previewer():
     ],
 )
 def test_percentage_channels_are_read(value, previewer):
-    got = css_rgb(value)
-    assert got is not None and _near(got, previewer), f"{got} vs {previewer:06X}"
+    assert css_rgb(value) == previewer
+
+
+#: (percentage, Previewer's channel), from box fills `rgb(p%, p%, 0%)` in a
+#: kpr4 probe (#398 review): floor(p x 2.56), capped at 255. round(p x 2.55)
+#: was 1 low on 9 of them.
+PREVIEWER_PERCENT = [
+    (1, 2), (2, 5), (10, 25), (12.5, 32), (20, 51), (25, 64), (33, 84),
+    (33.3, 85), (40, 102), (49.9, 127), (50, 128), (50.5, 129), (60, 153),
+    (66.6, 170), (70, 179), (75, 192), (80, 204), (87.5, 224), (90, 230),
+    (99, 253), (99.6, 254), (100, 255),
+]  # fmt: skip
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("percent", "channel"), PREVIEWER_PERCENT)
+def test_a_percentage_channel_is_previewers_exactly(percent, channel):
+    assert css_rgb(f"rgb({percent}%, {percent}%, 0%)") == (channel << 16) | (
+        channel << 8
+    )
 
 
 @pytest.mark.unit
 def test_a_translucent_percentage_colour_is_blended():
-    assert _near(css_rgb("rgba(100%, 0%, 0%, 0.5)"), 0xFF8080)
+    assert css_rgb("rgba(100%, 0%, 0%, 0.5)") == 0xFF8080
 
 
 @pytest.mark.unit
