@@ -1443,7 +1443,10 @@ _MATH_ACCENTS = {
     "\u20d7": "\u20d7",
 }
 _MATH_TOKENS = frozenset({"mi", "mn", "mo", "mtext", "ms"})
-_MATH_SKIP = frozenset({"annotation-xml", "mphantom"})
+_MATH_SKIP = frozenset({"annotation", "annotation-xml", "mphantom"})
+# Function application, invisible times, separator and plus: no glyph, and a
+# Kindle font may draw one as a box.
+_MATH_INVISIBLE = frozenset("\u2061\u2062\u2063\u2064")
 
 
 def _math_parts(math, flags):
@@ -1457,11 +1460,40 @@ def _math_parts(math, flags):
     Whitespace between MathML elements is source layout, not text; an
     <annotation> (the TeX source, mostly) is not text either."""
     parts = [make_anchor_mark(aid) for aid in _subtree_anchor_ids(math)]
+    if _math_stray_text(math):
+        # Text outside the token elements, invalid MathML: written as it
+        # reads, as before, still without its annotations (#401 QA).
+        text = "".join(c for c in "".join(_math_text(math)) if c not in _MATH_INVISIBLE)
+        text = " ".join(text.split())
+        return parts + ([(text, flags)] if text else [])
     body = _math_row(_math_kids(math), flags, False)
     if not "".join(seg for seg, _fl in body if isinstance(seg, str)).strip():
         alt = " ".join((math.get("alttext") or "").split())
         body = [(alt, flags)] if alt else []
     return parts + body
+
+
+def _math_stray_text(math):
+    """True when text sits outside a token element, not in a skipped one."""
+    for el in math.iter():
+        if not isinstance(el.tag, str):
+            continue
+        local = _local_tag(el.tag)
+        if local in _MATH_TOKENS or local in _MATH_SKIP:
+            continue
+        if (el.text or "").strip() or any((k.tail or "").strip() for k in el):
+            return True
+    return False
+
+
+def _math_text(elem):
+    if not isinstance(elem.tag, str) or _local_tag(elem.tag) in _MATH_SKIP:
+        return []
+    out = [elem.text or ""]
+    for k in elem:
+        out += _math_text(k)
+        out.append(k.tail or "")
+    return out
 
 
 def _math_kids(elem):
@@ -1509,6 +1541,8 @@ def _math_row(elems, flags, script):
         local = _local_tag(e.tag)
         if local == "mo":
             op = _math_token(e)
+            if op in _MATH_INVISIBLE:
+                continue
             op = "−" if op == "-" else op
             form = e.get("form")
             if op == ",":

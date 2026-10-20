@@ -257,3 +257,35 @@ def test_an_xml_annotation_is_not_text():
 
 def test_a_phantom_is_not_text():
     assert _math("<mi>a</mi><mphantom><mi>b</mi></mphantom>")["text"] == "A a B"
+
+
+@pytest.mark.parametrize(
+    ("inner", "text"),
+    [
+        ("x+1", "A x+1 B"),
+        ("<mrow>y<mo>=</mo>2</mrow>", "A y=2 B"),
+        (
+            '<mrow><mi>x</mi></mrow><span xmlns="http://www.w3.org/1999/xhtml">gloss</span>',
+            "A xgloss B",
+        ),
+        ("<semantics>z<annotation>z^2</annotation></semantics>", "A z B"),
+    ],
+)
+def test_text_outside_token_elements_is_kept_as_plain_text(inner, text):
+    """Invalid MathML, but main printed this text (#401 QA)."""
+    assert _math(inner)["text"] == text
+
+
+@pytest.mark.parametrize("invisible", ["&#x2061;", "&#x2062;", "&#x2063;", "&#x2064;"])
+def test_an_invisible_operator_is_not_written(invisible):
+    """Function application, invisible times, separator and plus have no glyph,
+    and a Kindle font may draw one as a box (#401 QA)."""
+    assert _math(f"<mi>f</mi><mo>{invisible}</mo><mi>x</mi>")["text"] == "A fx B"
+
+
+def test_text_after_a_child_alone_is_kept():
+    assert _math("<mrow><mi>y</mi>2</mrow>")["text"] == "A y2 B"
+
+
+def test_an_invisible_operator_is_dropped_from_plain_text_too():
+    assert _math("x<mo>&#x2062;</mo>y")["text"] == "A xy B"
