@@ -335,3 +335,20 @@ def test_each_chapter_has_its_own_ruby_fragment_numbered_from_one(tmp_path):
             named.append(used)
     assert len(named) == 2 and all(len(u) == 1 for u in named)
     assert {n for u in named for n in u} == set(rubies)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html",
+    [
+        '<a href="c.xhtml#t"><ruby>先<rt>さき</rt></ruby></a>',
+        '<ruby><a href="c.xhtml#t">先</a><rt>さき</rt></ruby>',
+        '<a href="c.xhtml#t"><i><ruby>先<rt>さき</rt></ruby></i></a>',
+    ],
+)
+def test_a_link_over_the_whole_base_goes_on_its_event(tmp_path, html):
+    frags = _book(f'<p>{html}</p><p id="t">T</p>', tmp_path=tmp_path)
+    events, _ = _events(frags)
+    (ev,) = events["先"]
+    assert (ev["$143"], ev["$144"]) == (0, 1)
+    assert "$757" in ev and "$179" in ev

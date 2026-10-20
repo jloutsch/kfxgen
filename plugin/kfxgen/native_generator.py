@@ -5467,9 +5467,9 @@ class NativeKFXGenerator:
                     )
                     span = spans_out[at] if at < len(spans_out) else None
                     base = (r_start, r_end - r_start)
-                    if span and span[:2] == base and not span[3]:
-                        # Emphasis over the whole base goes on the ruby's
-                        # event, as Previewer writes it.
+                    if span and span[:2] == base:
+                        # Emphasis or a link over the whole base goes on the
+                        # ruby's event, as Previewer writes them.
                         spans_out[at] = (*span, ruby)
                     else:
                         spans_out.insert(at, (*base, None, None, ruby))

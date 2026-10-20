@@ -625,3 +625,72 @@ def test_vendored_pin_matches_the_zip_it_describes():
         f"Vendored pin says kfxlib {pinned}, but the zip contains {actual}. "
         f"Refresh both together — see CONTRIBUTING.md → the upstream kfxlib copy."
     )
+
+
+def _make_ruby(out_dir):
+    """Ruby in a paragraph, per character, with <rp>, and in a heading and a
+    cell (#236). Not a golden input: no byte-exact file pins it."""
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.golden.inputs import _xhtml_page
+
+    body = (
+        "<h2><ruby>見出<rt>みだ</rt></ruby>し</h2>"
+        "<p>A <ruby>漢字<rp>(</rp><rt>かんじ</rt><rp>)</rp></ruby> B</p>"
+        "<p><ruby>漢<rt>かん</rt>字<rt>じ</rt></ruby></p>"
+        "<table><tr><td><ruby>表<rt>ひょう</rt></ruby></td><td>x</td></tr></table>"
+    )
+    return (
+        EpubBuilder()
+        .set_metadata(title="Ruby", author="Golden Author")
+        .add_chapter("Ruby", _xhtml_page("Ruby", body).encode("utf-8"))
+        .build(out_dir, "ruby")
+    )
+
+
+@pytest.mark.tier2
+@pytest.mark.integration
+@pytest.mark.filterwarnings("ignore:datetime.datetime.utcnow:DeprecationWarning")
+def test_upstream_decodes_ruby_to_epub_ruby(upstream_kfxlib, built_kfx):
+    """KFX Input reads kfxgen's ruby back as HTML ruby (#236), with no warning
+    beyond `_BASELINE_WARNINGS`: a ruby fragment it can't find, or one left
+    out of the entity map, is reported that way."""
+    import xml.etree.ElementTree as ET
+    from io import BytesIO
+
+    from kfxlib.message_logging import set_logger
+
+    messages: list[tuple[str, str]] = []
+    set_logger(_LevelCollector(messages))
+    try:
+        with decimal.localcontext():
+            book = upstream_kfxlib(str(built_kfx("ruby", _make_ruby)))
+            book.decode_book()
+            epub = book.convert_to_epub()
+    finally:
+        set_logger(None)
+
+    unexpected = [
+        (level, m)
+        for level, m in messages
+        if level in ("warning", "error")
+        and not any(known in m for known in _BASELINE_WARNINGS)
+    ]
+    assert not unexpected, f"upstream logged on ruby: {unexpected}"
+
+    xhtml = "{http://www.w3.org/1999/xhtml}"
+    rubies = []
+    with zipfile.ZipFile(BytesIO(epub)) as zf:
+        for name in zf.namelist():
+            if not name.endswith(".xhtml") or name.endswith("nav.xhtml"):
+                continue
+            for ruby in ET.fromstring(zf.read(name)).iter(f"{xhtml}ruby"):
+                rubies.append(
+                    [("".join(c.itertext()), c.tag.split("}")[1]) for c in ruby]
+                )
+    assert rubies == [
+        [("見出", "rb"), ("みだ", "rt")],
+        [("漢字", "rb"), ("かんじ", "rt")],
+        [("漢", "rb"), ("かん", "rt")],
+        [("字", "rb"), ("じ", "rt")],
+        [("表", "rb"), ("ひょう", "rt")],
+    ]
