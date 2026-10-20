@@ -51,6 +51,7 @@ from .inline_style import (
     make_anchor_mark,
     make_link_flag,
     make_mono_flag,
+    make_ruby_flag,
     make_size_flag,
     mono_families,
     normalize_runs_with_anchors,
@@ -1274,6 +1275,25 @@ def _walk_inline(
     # paragraph". Zero-length, so it changes no text and no span. (#79)
     for aid in _own_anchor_ids(elem):
         parts.append(make_anchor_mark(aid))
+    if local == "ruby":
+        parts.extend(
+            _ruby_parts(
+                elem,
+                cur,
+                lambda child: _walk_inline(
+                    child,
+                    cur,
+                    style_resolver,
+                    is_root=False,
+                    base_href=base_href,
+                    split_tables=split_tables,
+                    parent_emphasis=emphasis,
+                ),
+            )
+        )
+        if line:
+            parts.append(("", frozenset({LINE_START})))
+        return parts
     text = elem.text
     if text and local == "pre":
         # HTML ignores a newline straight after <pre>; the XML parser keeps it.
@@ -1365,6 +1385,38 @@ def _walk_inline(
     if line:
         parts.append(("", frozenset({LINE_START})))
     return parts
+
+
+def _ruby_parts(ruby, flags, walk):
+    """A <ruby>'s base text, each run flagged with the <rt> after it (#236).
+
+    The base is everything before an <rt> since the last one: text, an <rb>,
+    a <span>. A reading is its <rt>'s text; Kindle Previewer 4 styles a
+    reading's own markup, which kfxgen drops. An empty <rt> leaves its base
+    plain. <rp> is the fallback for readers without ruby, and is dropped, as
+    Previewer drops it. Previewer reads an <rtc> as ordinary text, and so
+    does this: `walk` takes it like any other child."""
+    out, base = [], []
+    if ruby.text:
+        base.append((ruby.text, flags))
+    for child in ruby:
+        local = _local_tag(child.tag) if isinstance(child.tag, str) else None
+        if local == "rt":
+            reading = " ".join("".join(child.itertext()).split())
+            if reading:
+                flag = make_ruby_flag(reading)
+                base = [
+                    (seg, fl | {flag}) if isinstance(seg, str) and seg else (seg, fl)
+                    for seg, fl in base
+                ]
+            out.extend(base)
+            out.extend(make_anchor_mark(aid) for aid in _subtree_anchor_ids(child))
+            base = []
+        elif local != "rp":
+            base.extend(walk(child))
+        if child.tail:
+            base.append((child.tail, flags))
+    return out + base
 
 
 def _own_anchor_ids(elem):

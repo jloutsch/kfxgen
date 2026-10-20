@@ -7,6 +7,7 @@ spans. See docs/superpowers/specs/2026-06-28-inline-emphasis-css-typography-desi
 
 import colorsys
 import functools
+import itertools
 import math
 import re
 
@@ -269,6 +270,30 @@ LINK_FLAG = "link"
 def make_link_flag(target):
     """Build the flag-set member that marks a run as a link to `target`."""
     return (LINK_FLAG, target)
+
+
+#: A ruby's base text carries ("ruby", (serial, reading)) (#236). The serial
+#: keeps two neighbouring rubies with one reading apart; it is unique within a
+#: conversion, and the generator numbers rubies in reading order.
+RUBY_FLAG = "ruby"
+_ruby_serials = itertools.count()
+
+
+def make_ruby_flag(reading):
+    """Build the flag-set member that gives a run of base text `reading`."""
+    return (RUBY_FLAG, (next(_ruby_serials), reading))
+
+
+def ruby_of(flags):
+    """A run's ruby as (serial, reading), or None."""
+    return flag_value(flags, RUBY_FLAG)
+
+
+def without_ruby(flags):
+    """A run's flags less its ruby, which is written as an event of its own."""
+    return frozenset(
+        f for f in flags if not (isinstance(f, tuple) and f[0] == RUBY_FLAG)
+    )
 
 
 MONO_FLAG = "mono"
