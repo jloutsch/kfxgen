@@ -3929,7 +3929,7 @@ def extract_blocks_from_html(
                         # "ab=1" for a/b = 1: the heading match reads it
                         # (#402).
                         **(
-                            {"plain_text": " ".join("".join(elem.itertext()).split())}
+                            {"plain_text": "".join(elem.itertext())}
                             if next(elem.iter(_MATHML_MATH, "math"), None) is not None
                             else {}
                         ),

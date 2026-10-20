@@ -429,3 +429,15 @@ def test_a_different_label_still_prints_above_the_heading(tmp_path):
         [{"title": "Another label", "text": "x", "blocks": blocks}], tmp_path
     )
     assert list(found) == ["Another label", "The a/b = 1 rule", "Body."]
+
+
+def test_a_pretty_printed_maths_heading_matches_its_label(tmp_path):
+    """The source's line breaks inside the equation are not the label's."""
+    blocks = _blocks(
+        f"<h1>The <math {M}>\n  <mfrac>\n    <mi>a</mi>\n    <mi>b</mi>\n  </mfrac>\n"
+        "  <mo>=</mo>\n  <mn>1</mn>\n</math> rule</h1><p>Body.</p>"
+    )
+    found = _chapter_texts(
+        [{"title": "The ab=1 rule", "text": "x", "blocks": blocks}], tmp_path
+    )
+    assert list(found) == ["The a/b = 1 rule", "Body."]
