@@ -441,3 +441,19 @@ def test_a_pretty_printed_maths_heading_matches_its_label(tmp_path):
         [{"title": "The ab=1 rule", "text": "x", "blocks": blocks}], tmp_path
     )
     assert list(found) == ["The a/b = 1 rule", "Body."]
+
+
+@pytest.mark.parametrize(
+    ("inner", "runs"),
+    [
+        ("<mi>X</mi><mn>1</mn>", [("X", "i"), ("1", "_")]),
+        (
+            "<mi>C</mi><mn>2</mn><mprescripts/><mn>6</mn>",
+            [("6", "_"), ("C", "i"), ("2", "_")],
+        ),
+    ],
+)
+def test_an_unpaired_script_is_kept(inner, runs):
+    """A script with no partner is lowered, not dropped (#403 QA)."""
+    block = _math(f"<mmultiscripts>{inner}</mmultiscripts>")
+    assert _runs(block) == [("A ", ""), *runs, (" B", "")]

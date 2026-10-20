@@ -1635,9 +1635,8 @@ def _math_elem(e, flags, script):
             if scripts is None:
                 out.extend(_math_elem(kids[0], flags, script))
                 continue
-            for low, high in zip(scripts[::2], scripts[1::2]):
-                out.extend(_math_elem(low, down, True))
-                out.extend(_math_elem(high, up, True))
+            for i, k in enumerate(scripts):
+                out.extend(_math_elem(k, up if i % 2 else down, True))
         return out
     if local == "mfrac" and len(kids) == 2:
         return [
