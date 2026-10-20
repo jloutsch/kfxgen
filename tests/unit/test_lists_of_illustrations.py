@@ -132,3 +132,19 @@ def test_a_list_after_a_rebuilt_contents_listing_is_kept(kind):
         "1. N item 1",
         "2. N item 2",
     ]
+
+
+@pytest.mark.unit
+def test_a_class_named_like_a_list_isnt_kept_after_a_rebuilt_listing():
+    """Lists are read by `epub:type` only: a class named "loi" could be
+    anything (#397 review)."""
+    front = (
+        '<nav epub:type="toc"><h1>Contents</h1><ol>'
+        '<li><a href="c1.xhtml">Chapter I</a></li></ol></nav>'
+        '<div class="loi"><p>Not a list.</p></div>'
+    )
+    chapters = _chapters(
+        [("front.xhtml", front)] + BODY,
+        [("Contents", "front.xhtml"), ("Chapter I", "c1.xhtml")],
+    )
+    assert [ch["title"] for ch in chapters] == ["Contents", "Chapter I"]
