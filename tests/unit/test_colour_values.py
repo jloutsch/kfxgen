@@ -211,7 +211,7 @@ def test_percentage_channels_are_read(value, previewer):
 
 #: (percentage, Previewer's channel), from box fills `rgb(p%, p%, 0%)` in a
 #: kpr4 probe (#398 review): floor(p x 2.56), capped at 255. round(p x 2.55)
-#: was 1 low on 9 of them.
+#: was off by 1 on 8 of them: high at 1% and 10%, low at the other six.
 PREVIEWER_PERCENT = [
     (1, 2), (2, 5), (10, 25), (12.5, 32), (20, 51), (25, 64), (33, 84),
     (33.3, 85), (40, 102), (49.9, 127), (50, 128), (50.5, 129), (60, 153),
