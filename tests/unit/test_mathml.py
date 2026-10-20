@@ -289,3 +289,27 @@ def test_text_after_a_child_alone_is_kept():
 
 def test_an_invisible_operator_is_dropped_from_plain_text_too():
     assert _math("x<mo>&#x2062;</mo>y")["text"] == "A xy B"
+
+
+def test_content_mathml_in_an_annotation_leaves_the_equation_structured():
+    """LaTeXML writes a Content MathML annotation by default (#401 re-check)."""
+    block = _math(
+        "<semantics><mrow><msup><mi>x</mi><mn>2</mn></msup><mo>+</mo><mn>1</mn></mrow>"
+        '<annotation-xml encoding="MathML-Content"><apply><plus/><apply><power/>'
+        "<ci>x</ci><cn>2</cn></apply><cn>1</cn></apply></annotation-xml></semantics>"
+    )
+    assert _runs(block) == [("A ", ""), ("x", "i"), ("2", "^"), (" + 1 B", "")]
+
+
+@pytest.mark.parametrize(
+    ("inner", "text"),
+    [
+        ("<mi>sin</mi><mo>&#x2061;</mo><mi>x</mi>", "A sin x B"),
+        ("<mi>f</mi><mo>&#x2061;</mo><mi>x</mi>", "A fx B"),
+        ("<mi>sin</mi><mo>&#x2061;</mo><mo>(</mo><mi>x</mi><mo>)</mo>", "A sin(x) B"),
+    ],
+)
+def test_a_function_name_is_spaced_from_its_argument(inner, text):
+    """With U+2061 dropped, a name longer than one letter keeps a space before
+    an argument that has no bracket (#401 re-check)."""
+    assert _math(inner)["text"] == text

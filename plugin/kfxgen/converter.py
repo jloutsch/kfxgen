@@ -1473,17 +1473,18 @@ def _math_parts(math, flags):
     return parts + body
 
 
-def _math_stray_text(math):
-    """True when text sits outside a token element, not in a skipped one."""
-    for el in math.iter():
-        if not isinstance(el.tag, str):
-            continue
-        local = _local_tag(el.tag)
-        if local in _MATH_TOKENS or local in _MATH_SKIP:
-            continue
-        if (el.text or "").strip() or any((k.tail or "").strip() for k in el):
-            return True
-    return False
+def _math_stray_text(elem):
+    """True when text sits outside a token element, and outside a skipped
+    one: a Content MathML annotation holds text of its own."""
+    local = _local_tag(elem.tag)
+    if local in _MATH_TOKENS or local in _MATH_SKIP:
+        return False
+    if (elem.text or "").strip():
+        return True
+    return any(
+        (k.tail or "").strip() or (isinstance(k.tag, str) and _math_stray_text(k))
+        for k in elem
+    )
 
 
 def _math_text(elem):
@@ -1537,11 +1538,20 @@ def _math_group(elems, flags, script):
 def _math_row(elems, flags, script):
     out = []
     prev = None  # what came before: None (start), "op" or "operand"
-    for e in elems:
+    for i, e in enumerate(elems):
         local = _local_tag(e.tag)
         if local == "mo":
             op = _math_token(e)
             if op in _MATH_INVISIBLE:
+                after = elems[i + 1] if i + 1 < len(elems) else None
+                if (
+                    op == "\u2061"
+                    and len(out[-1][0] if out else "") > 1
+                    and not (after is not None and _math_token(after) in _MATH_OPEN)
+                ):
+                    # "sin x", where the name runs into an argument with no
+                    # bracket; "f(x)" and "fx" need no space.
+                    out.append((" ", flags))
                 continue
             op = "−" if op == "-" else op
             form = e.get("form")
