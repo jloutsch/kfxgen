@@ -1467,14 +1467,11 @@ def _math_parts(math, flags):
 
 
 def _math_kids(elem):
-    kids = [
+    return [
         k
         for k in elem
         if isinstance(k.tag, str) and _local_tag(k.tag) not in _MATH_SKIP
     ]
-    if _local_tag(elem.tag) == "semantics":
-        return kids[:1]
-    return kids
 
 
 def _math_token(elem):

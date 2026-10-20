@@ -226,3 +226,22 @@ def test_a_display_equation_is_centred():
 def test_an_inline_equation_on_its_own_is_not_centred():
     blocks = _blocks(f"<p>before</p><math {M}><mi>x</mi></math>")
     assert (blocks[1]["block_style"] or {}).get("align") is None
+
+
+def test_spaces_inside_a_token_are_trimmed():
+    block = _math("<msup><mi>\n  r\n</mi><mn> 2 </mn></msup>")
+    assert _runs(block) == [("A ", ""), ("r", "i"), ("2", "^"), (" B", "")]
+
+
+def test_a_comma_is_followed_by_a_space():
+    block = _math("<mi>f</mi><mo>(</mo><mi>x</mi><mo>,</mo><mi>y</mi><mo>)</mo>")
+    assert block["text"] == "A f(x, y) B"
+
+
+def test_a_sign_after_an_opening_parenthesis_is_not_spaced():
+    assert _math("<mo>(</mo><mo>-</mo><mi>x</mi><mo>)</mo>")["text"] == "A (−x) B"
+
+
+def test_an_exponent_over_a_number_needs_no_parentheses():
+    block = _math("<mfrac><msup><mi>x</mi><mn>2</mn></msup><mn>2</mn></mfrac>")
+    assert block["text"] == "A x2/2 B"
