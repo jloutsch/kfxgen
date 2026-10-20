@@ -566,6 +566,22 @@ def _ruby_heading_title(blocks, title):
     return base, _title_spans(first, len(base))
 
 
+def _math_heading_title(blocks, title):
+    """(A chapter's first block's text, its runs) when `title` is that block's
+    plain text, as a producer flattens an equation into a TOC label ("The
+    ab=1 rule" for "The a/b = 1 rule"); else (`title`, None) (#402). Spaces
+    are ignored, as they are for ruby (#236)."""
+    blocks = _drop_edge_rules(blocks or ())
+    first = blocks[0] if blocks else None
+    if first is None or first.get("type") not in (None, "text"):
+        return title, None
+    plain = first.get("plain_text")
+    if not plain or "".join(title.split()) != "".join(plain.split()):
+        return title, None
+    base = first["text"].strip()
+    return base, _title_spans(first, len(base))
+
+
 def _title_spans(block, length):
     """`block`'s runs, moved onto a heading printing its first `length`
     characters after any leading space: the block is the book's own heading,
@@ -4266,7 +4282,9 @@ class NativeKFXGenerator:
             carried_anchor_keys = []
             title = chapter["title"]
             toc_links = chapter.get("toc_links")
-            title, ruby_title_spans = _ruby_heading_title(chapter.get("blocks"), title)
+            title, title_spans = _ruby_heading_title(chapter.get("blocks"), title)
+            if title_spans is None:
+                title, title_spans = _math_heading_title(chapter.get("blocks"), title)
 
             # Decide whether to emit the title as a heading text chunk.
             # Skip it when:
@@ -4305,10 +4323,10 @@ class NativeKFXGenerator:
                 # First chunk: chapter title (heading)
                 heading_chunk_indices.add(len(all_chunks))
                 heading_chunk = {"type": "text", "text": title}
-                if ruby_title_spans:
+                if title_spans:
                     # Its readings, even when the chapter is the heading
                     # alone and no block is left to cut it from.
-                    heading_chunk["spans"] = ruby_title_spans
+                    heading_chunk["spans"] = title_spans
                 all_chunks.append(heading_chunk)
 
             if toc_links:

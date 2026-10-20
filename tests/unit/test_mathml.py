@@ -344,3 +344,88 @@ def test_a_function_name_with_a_script_or_a_bracketed_row(inner, runs):
     """LaTeXML writes the bracket inside an <mrow>; sin²x and log₂x keep the
     space after the name's script (#401 re-check)."""
     assert _runs(_math(inner)) == runs
+
+
+def test_prescripts_come_before_the_base():
+    """An isotope, ¹⁴₆C: prescripts are written first, lowered then raised (#402)."""
+    block = _math(
+        "<mmultiscripts><mi>C</mi><mprescripts/><mn>6</mn><mn>14</mn></mmultiscripts>"
+    )
+    assert _runs(block) == [("A ", ""), ("6", "_"), ("14", "^"), ("C", "i"), (" B", "")]
+
+
+def test_postscripts_follow_the_base_and_none_is_empty():
+    block = _math(
+        "<mmultiscripts><mi>R</mi><mi>i</mi><none/><none/><mi>j</mi></mmultiscripts>"
+    )
+    assert _runs(block) == [
+        ("A ", ""),
+        ("R", "i"),
+        ("i", "_i"),
+        ("j", "^i"),
+        (" B", ""),
+    ]
+
+
+def test_a_string_literal_keeps_its_quotation_marks():
+    assert _math("<ms>abc</ms>")["text"] == 'A "abc" B'
+
+
+def test_a_string_literal_with_its_own_quotes():
+    assert _math('<ms lquote="«" rquote="»">abc</ms>')["text"] == "A «abc» B"
+
+
+FRAC_HEADING = f"<h1>The <math {M}><mfrac><mi>a</mi><mi>b</mi></mfrac><mo>=</mo><mn>1</mn></math> rule</h1>"
+
+
+def _chapter_texts(chapters, tmp_path):
+    from kfxgen.native_generator import NativeKFXGenerator
+    from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
+
+    out = tmp_path / "m.kfx"
+    NativeKFXGenerator().generate_full_book(
+        title="T", author="A", chapters=chapters, output_path=str(out)
+    )
+    frags = load_fragments(out)
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    found = {}
+    for st in by_type(frags, "$259"):
+        for e in iter_entries(val(st)["$146"]):
+            if e.get("$145"):
+                ref = e["$145"]
+                found[str(texts[str(ref["name"])][ref["$403"]])] = len(
+                    e.get("$142") or []
+                )
+    return found
+
+
+def test_a_heading_with_maths_prints_once_under_a_flattened_label(tmp_path):
+    """A label written from the heading's plain text, "The ab=1 rule", names
+    the heading "The a/b = 1 rule", which prints once, with its runs (#402)."""
+    blocks = _blocks(FRAC_HEADING + "<p>Body.</p>")
+    found = _chapter_texts(
+        [{"title": "The ab=1 rule", "text": "x", "blocks": blocks}], tmp_path
+    )
+    assert list(found) == ["The a/b = 1 rule", "Body."]
+    assert found["The a/b = 1 rule"] > 0  # the italic a and b
+
+
+def test_a_chapter_of_only_a_maths_heading_keeps_its_runs(tmp_path):
+    blocks = _blocks(FRAC_HEADING)
+    found = _chapter_texts(
+        [
+            {"title": "The ab=1 rule", "text": "The a/b = 1 rule", "blocks": blocks},
+            {"title": "Two", "text": "y", "blocks": _blocks("<p>Body.</p>")},
+        ],
+        tmp_path,
+    )
+    assert "The ab=1 rule" not in found
+    assert found["The a/b = 1 rule"] > 0
+
+
+def test_a_different_label_still_prints_above_the_heading(tmp_path):
+    blocks = _blocks(FRAC_HEADING + "<p>Body.</p>")
+    found = _chapter_texts(
+        [{"title": "Another label", "text": "x", "blocks": blocks}], tmp_path
+    )
+    assert list(found) == ["Another label", "The a/b = 1 rule", "Body."]

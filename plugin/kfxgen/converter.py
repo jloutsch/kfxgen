@@ -1442,6 +1442,7 @@ _MATH_ACCENTS = {
     "→": "\u20d7",
     "\u20d7": "\u20d7",
 }
+_MATHML_MATH = "{http://www.w3.org/1998/Math/MathML}math"
 _MATH_TOKENS = frozenset({"mi", "mn", "mo", "mtext", "ms"})
 _MATH_SCRIPTS = frozenset({"msup", "msub", "msubsup", "mover", "munder", "munderover"})
 _MATH_SKIP = frozenset({"annotation", "annotation-xml", "mphantom"})
@@ -1594,6 +1595,8 @@ def _math_elem(e, flags, script):
         variant = e.get("mathvariant") or (
             "italic" if local == "mi" and len(text) == 1 else ""
         )
+        if local == "ms":
+            text = e.get("lquote", '"') + text + e.get("rquote", '"')
         fl = set(flags)
         if "italic" in variant:
             fl.add(FLAG_ITALIC)
@@ -1621,6 +1624,20 @@ def _math_elem(e, flags, script):
             out.extend(_math_elem(k, down, True))
         for k in highs:
             out.extend(_math_elem(k, up, True))
+        return out
+    if local == "mmultiscripts" and kids:
+        # base (sub sup)* <mprescripts/> (sub sup)*: the prescripts are
+        # written first, as an isotope reads, ¹⁴₆C (#402).
+        tags = [_local_tag(k.tag) for k in kids]
+        cut = tags.index("mprescripts") if "mprescripts" in tags else len(kids)
+        out = []
+        for scripts in (kids[cut + 1 :], None, kids[1:cut]):
+            if scripts is None:
+                out.extend(_math_elem(kids[0], flags, script))
+                continue
+            for low, high in zip(scripts[::2], scripts[1::2]):
+                out.extend(_math_elem(low, down, True))
+                out.extend(_math_elem(high, up, True))
         return out
     if local == "mfrac" and len(kids) == 2:
         return [
@@ -3908,6 +3925,14 @@ def extract_blocks_from_html(
                         "heading": _local_tag(elem.tag) in _HEADING_TAGS,
                         # A table row written as a paragraph (#219).
                         "row": _local_tag(elem.tag) == "tr",
+                        # Its text as a producer flattens it into a TOC label,
+                        # "ab=1" for a/b = 1: the heading match reads it
+                        # (#402).
+                        **(
+                            {"plain_text": " ".join("".join(elem.itertext()).split())}
+                            if next(elem.iter(_MATHML_MATH, "math"), None) is not None
+                            else {}
+                        ),
                         # Ids inherited from an enclosing container point at
                         # this block's start; only ids declared inside it have
                         # a position of their own.
