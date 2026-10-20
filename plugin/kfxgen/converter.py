@@ -1443,9 +1443,7 @@ _MATH_ACCENTS = {
     "\u20d7": "\u20d7",
 }
 _MATH_TOKENS = frozenset({"mi", "mn", "mo", "mtext", "ms"})
-_MATH_SKIP = frozenset(
-    {"annotation", "annotation-xml", "mphantom", "none", "mprescripts"}
-)
+_MATH_SKIP = frozenset({"annotation-xml", "mphantom"})
 
 
 def _math_parts(math, flags):

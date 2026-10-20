@@ -245,3 +245,15 @@ def test_a_sign_after_an_opening_parenthesis_is_not_spaced():
 def test_an_exponent_over_a_number_needs_no_parentheses():
     block = _math("<mfrac><msup><mi>x</mi><mn>2</mn></msup><mn>2</mn></mfrac>")
     assert block["text"] == "A x2/2 B"
+
+
+def test_an_xml_annotation_is_not_text():
+    block = _math(
+        "<semantics><mi>z</mi>"
+        '<annotation-xml encoding="MathML-Presentation"><mi>q</mi></annotation-xml></semantics>'
+    )
+    assert block["text"] == "A z B"
+
+
+def test_a_phantom_is_not_text():
+    assert _math("<mi>a</mi><mphantom><mi>b</mi></mphantom>")["text"] == "A a B"
