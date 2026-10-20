@@ -1294,6 +1294,11 @@ def _walk_inline(
         if line:
             parts.append(("", frozenset({LINE_START})))
         return parts
+    if local == "math":
+        parts.extend(_math_parts(elem, cur))
+        if line:
+            parts.append(("", frozenset({LINE_START})))
+        return parts
     text = elem.text
     if text and local == "pre":
         # HTML ignores a newline straight after <pre>; the XML parser keeps it.
@@ -1417,6 +1422,200 @@ def _ruby_parts(ruby, flags, walk):
         if child.tail:
             base.append((child.tail, flags))
     return out + base
+
+
+# MathML operators written with a space either side when they join two
+# operands (#235); a leading one is a sign ("−b") and gets none.
+_MATH_INFIX = frozenset("=≠<>≤≥≈≡∼≃≅∝≪≫→←↔⇒⇐⇔↦∈∉∋⊂⊃⊆⊇+−±∓×÷·⋅∗∘∪∩∧∨⊕⊗")
+_MATH_OPEN = frozenset("([{⟨⌊⌈|‖")
+# A one-letter accent over a single letter, as the combining mark that puts it
+# there: x̄ rather than x then ¯.
+_MATH_ACCENTS = {
+    "¯": "\u0304",
+    "‾": "\u0305",
+    "^": "\u0302",
+    "ˆ": "\u0302",
+    "~": "\u0303",
+    "˜": "\u0303",
+    "˙": "\u0307",
+    "¨": "\u0308",
+    "→": "\u20d7",
+    "\u20d7": "\u20d7",
+}
+_MATH_TOKENS = frozenset({"mi", "mn", "mo", "mtext", "ms"})
+_MATH_SKIP = frozenset(
+    {"annotation", "annotation-xml", "mphantom", "none", "mprescripts"}
+)
+
+
+def _math_parts(math, flags):
+    """A MathML equation as text a reader can follow (#235).
+
+    Kindle Previewer 4 draws each equation (`yj_mathml`, which firmware
+    below 5.18.2 can't show). This writes it instead: exponents and
+    subscripts as raised and lowered runs, operators spaced, a fraction as
+    a/b and a root as √x, with parentheses around a part longer than a
+    single token. A single-letter identifier is italic, as maths sets it.
+    Whitespace between MathML elements is source layout, not text; an
+    <annotation> (the TeX source, mostly) is not text either."""
+    parts = [make_anchor_mark(aid) for aid in _subtree_anchor_ids(math)]
+    body = _math_row(_math_kids(math), flags, False)
+    if not "".join(seg for seg, _fl in body if isinstance(seg, str)).strip():
+        alt = " ".join((math.get("alttext") or "").split())
+        body = [(alt, flags)] if alt else []
+    return parts + body
+
+
+def _math_kids(elem):
+    kids = [
+        k
+        for k in elem
+        if isinstance(k.tag, str) and _local_tag(k.tag) not in _MATH_SKIP
+    ]
+    if _local_tag(elem.tag) == "semantics":
+        return kids[:1]
+    return kids
+
+
+def _math_token(elem):
+    return " ".join("".join(elem.itertext()).split())
+
+
+def _math_is_atom(elem):
+    """True when `elem` reads as one unit without parentheses: a token, a
+    script on one, a root, or a row holding just one of those."""
+    local = _local_tag(elem.tag)
+    if local in _MATH_TOKENS:
+        return True
+    kids = _math_kids(elem)
+    if local in ("msup", "msub", "msubsup", "mover", "munder", "munderover"):
+        return bool(kids) and _math_is_atom(kids[0])
+    if local in ("msqrt", "mroot", "mfenced"):
+        return True
+    return (
+        local in ("mrow", "mstyle", "mpadded", "semantics")
+        and len(kids) == 1
+        and (_math_is_atom(kids[0]))
+    )
+
+
+def _math_group(elems, flags, script):
+    """`elems` as one operand: in parentheses unless it is a single atom."""
+    inner = _math_row(elems, flags, script)
+    if len(elems) == 1 and _math_is_atom(elems[0]):
+        return inner
+    return [("(", flags), *inner, (")", flags)]
+
+
+def _math_row(elems, flags, script):
+    out = []
+    prev = None  # what came before: None (start), "op" or "operand"
+    for e in elems:
+        local = _local_tag(e.tag)
+        if local == "mo":
+            op = _math_token(e)
+            op = "−" if op == "-" else op
+            form = e.get("form")
+            if op == ",":
+                out.append((", " if not script else ",", flags))
+            elif (
+                op in _MATH_INFIX
+                and not script
+                and form != "prefix"
+                and (prev == "operand" or form == "infix")
+            ):
+                out.append((f" {op} ", flags))
+            else:
+                out.append((op, flags))
+            prev = (
+                "operand"
+                if op and op not in _MATH_INFIX and op not in _MATH_OPEN
+                else "op"
+            )
+            continue
+        out.extend(_math_elem(e, flags, script))
+        prev = "operand"
+    return out
+
+
+def _math_elem(e, flags, script):
+    local = _local_tag(e.tag)
+    kids = _math_kids(e)
+    if local in _MATH_TOKENS:
+        text = _math_token(e)
+        variant = e.get("mathvariant") or (
+            "italic" if local == "mi" and len(text) == 1 else ""
+        )
+        fl = set(flags)
+        if "italic" in variant:
+            fl.add(FLAG_ITALIC)
+        if "bold" in variant:
+            fl.add(FLAG_BOLD)
+        return [(text, frozenset(fl))] if text else []
+    if local == "mspace":
+        return [(" ", flags)]
+    up, down = frozenset(flags | {FLAG_SUPER}), frozenset(flags | {FLAG_SUB})
+    if local in ("msup", "msub", "msubsup", "mover", "munder", "munderover") and kids:
+        base = _math_elem(kids[0], flags, script)
+        if local == "mover" and len(kids) == 2:
+            mark = _MATH_ACCENTS.get(_math_token(kids[1]))
+            text = "".join(seg for seg, _fl in base)
+            if mark and len(text) == 1:
+                return [(seg + mark, fl) for seg, fl in base]
+        if local in ("msub", "munder"):
+            lows, highs = kids[1:2], []
+        elif local in ("msup", "mover"):
+            lows, highs = [], kids[1:2]
+        else:
+            lows, highs = kids[1:2], kids[2:3]
+        out = list(base)
+        for k in lows:
+            out.extend(_math_elem(k, down, True))
+        for k in highs:
+            out.extend(_math_elem(k, up, True))
+        return out
+    if local == "mfrac" and len(kids) == 2:
+        return [
+            *_math_group(kids[:1], flags, script),
+            ("/", flags),
+            *_math_group(kids[1:], flags, script),
+        ]
+    if local == "msqrt":
+        return [("√", flags), *_math_group(kids, flags, script)]
+    if local == "mroot" and len(kids) == 2:
+        return [
+            *_math_elem(kids[1], up, True),
+            ("√", flags),
+            *_math_group(kids[:1], flags, script),
+        ]
+    if local == "mfenced":
+        seps = "".join((e.get("separators") or ",").split()) or ","
+        out = [(e.get("open", "("), flags)]
+        for i, k in enumerate(kids):
+            if i:
+                sep = seps[min(i - 1, len(seps) - 1)]
+                out.append((f"{sep} " if sep == "," else sep, flags))
+            out.extend(_math_elem(k, flags, script))
+        out.append((e.get("close", ")"), flags))
+        return out
+    if local == "mtable":
+        out = []
+        for r, row in enumerate(kids):
+            if r:
+                out.append(("; ", flags))
+            cells = (
+                _math_kids(row)
+                if _local_tag(row.tag) in ("mtr", "mlabeledtr")
+                else [row]
+            )
+            for c, cell in enumerate(cells):
+                if c:
+                    out.append((", ", flags))
+                out.extend(_math_row(_math_kids(cell), flags, script))
+        return out
+    if local == "maction":
+        return _math_elem(kids[0], flags, script) if kids else []
+    return _math_row(kids, flags, script)
 
 
 def _own_anchor_ids(elem):
@@ -3605,7 +3804,9 @@ def extract_blocks_from_html(
             pending_ids.extend(trailing)
             return
 
-        is_block = elem.tag in block_tags
+        # An equation walked as a block is a paragraph of its own; its
+        # children are MathML, not blocks to walk one by one (#235).
+        is_block = elem.tag in block_tags or _local_tag(elem.tag) == "math"
         has_block_child = any(_holds_blocks(child) for child in elem)
 
         if (
@@ -3643,6 +3844,9 @@ def extract_blocks_from_html(
                         spans, drop = _initial(elem, css, text, spans, style_resolver)
                         if drop:
                             bstyle["drop_cap"] = drop
+                if _local_tag(elem.tag) == "math" and elem.get("display") == "block":
+                    # Centred, as Previewer sets a display equation (#235).
+                    bstyle = {**(bstyle or compute_block_style({})), "align": "center"}
                 block_ids = _dedupe_keep_order(ids)
                 blocks.append(
                     {
