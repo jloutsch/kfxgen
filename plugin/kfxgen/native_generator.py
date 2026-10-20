@@ -4260,11 +4260,7 @@ class NativeKFXGenerator:
             carried_anchor_keys = []
             title = chapter["title"]
             toc_links = chapter.get("toc_links")
-            ruby_title_spans = None
-            if not toc_links:
-                title, ruby_title_spans = _ruby_heading_title(
-                    chapter.get("blocks"), title
-                )
+            title, ruby_title_spans = _ruby_heading_title(chapter.get("blocks"), title)
 
             # Decide whether to emit the title as a heading text chunk.
             # Skip it when:
