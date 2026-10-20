@@ -539,7 +539,9 @@ def _ruby_heading_title(blocks, title):
     each reading run in after its base, is `title`; else (`title`, None)
     (#236). calibre takes a TOC label from the book's navigation, which runs
     the readings in, as Kindle Previewer's labels do. Matched against its
-    base, the book's heading printed under kfxgen's."""
+    base, the book's heading printed under kfxgen's. A reading may be in
+    parentheses, as <rp> gives it, and spaces are ignored, as they were when
+    the heading's text held its readings (#399 QA)."""
     blocks = _drop_edge_rules(blocks or ())
     first = blocks[0] if blocks else None
     if first is None or first.get("type") not in (None, "text"):
@@ -551,10 +553,14 @@ def _ruby_heading_title(blocks, title):
             rubies[ruby[0]] = (s + n, ruby[1])
     if not rubies:
         return title, None
-    text = first["text"]
-    for end, reading in sorted(rubies.values(), reverse=True):
-        text = text[:end] + reading + text[end:]
-    if text.strip() != title.strip():
+
+    def run_in(fmt):
+        text = first["text"]
+        for end, reading in sorted(rubies.values(), reverse=True):
+            text = text[:end] + fmt.format(reading) + text[end:]
+        return "".join(text.split())
+
+    if "".join(title.split()) not in {run_in(f) for f in ("{}", "({})", "（{}）")}:
         return title, None
     base = first["text"].strip()
     return base, _title_spans(first, len(base))

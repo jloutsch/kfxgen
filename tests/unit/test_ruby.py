@@ -420,3 +420,39 @@ def test_a_chapter_of_only_a_ruby_heading_keeps_its_readings(tmp_path):
         for ev in events["法螺男爵"]
         if "$757" in ev
     ] == [(0, 2, "ほら")]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("heading", "label"),
+    [
+        (
+            "<ruby>法螺<rp>(</rp><rt>ほら</rt><rp>)</rp></ruby>"
+            "<ruby>男爵<rp>(</rp><rt>だんしやく</rt><rp>)</rp></ruby>",
+            "法螺(ほら)男爵(だんしやく)",
+        ),
+        (
+            "<ruby>法螺<rt>ほら</rt></ruby><ruby>男爵<rt>だんしやく</rt></ruby>",
+            "法螺（ほら）男爵（だんしやく）",
+        ),
+        (
+            "<ruby>法螺<rt>ほら</rt></ruby><ruby>男爵<rt>だんしやく</rt></ruby>",
+            "法螺 ほら 男爵 だんしやく",
+        ),
+    ],
+)
+def test_a_ruby_heading_prints_once_under_a_label_in_parentheses_or_spaced(
+    tmp_path, heading, label
+):
+    # A label with the readings in parentheses, as <rp> gives them, or
+    # spaced: main matched both, the heading text holding the same (#399 QA).
+    out = tmp_path / "h.kfx"
+    blocks = _blocks(f"<h1>{heading}</h1><p>本文。</p>")
+    NativeKFXGenerator().generate_full_book(
+        title="T",
+        author="A",
+        chapters=[{"title": label, "text": "法螺男爵\n\n本文。", "blocks": blocks}],
+        output_path=str(out),
+    )
+    events, _ = _events(load_fragments(out))
+    assert list(events) == ["法螺男爵", "本文。"]
