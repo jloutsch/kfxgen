@@ -534,6 +534,32 @@ def _title_after_pictures(blocks, title):
     return False
 
 
+def _ruby_heading_title(blocks, title):
+    """(The base text of a chapter's first block, its runs) when that block,
+    each reading run in after its base, is `title`; else (`title`, None)
+    (#236). calibre takes a TOC label from the book's navigation, which runs
+    the readings in, as Kindle Previewer's labels do. Matched against its
+    base, the book's heading printed under kfxgen's."""
+    blocks = _drop_edge_rules(blocks or ())
+    first = blocks[0] if blocks else None
+    if first is None or first.get("type") not in (None, "text"):
+        return title, None
+    rubies = {}
+    for s, n, flags in first.get("spans") or ():
+        ruby = ruby_of(flags)
+        if ruby:
+            rubies[ruby[0]] = (s + n, ruby[1])
+    if not rubies:
+        return title, None
+    text = first["text"]
+    for end, reading in sorted(rubies.values(), reverse=True):
+        text = text[:end] + reading + text[end:]
+    if text.strip() != title.strip():
+        return title, None
+    base = first["text"].strip()
+    return base, _title_spans(first, len(base))
+
+
 def _title_spans(block, length):
     """`block`'s runs, moved onto a heading printing its first `length`
     characters after any leading space: the block is the book's own heading,
@@ -4234,6 +4260,11 @@ class NativeKFXGenerator:
             carried_anchor_keys = []
             title = chapter["title"]
             toc_links = chapter.get("toc_links")
+            ruby_title_spans = None
+            if not toc_links:
+                title, ruby_title_spans = _ruby_heading_title(
+                    chapter.get("blocks"), title
+                )
 
             # Decide whether to emit the title as a heading text chunk.
             # Skip it when:
@@ -4272,6 +4303,10 @@ class NativeKFXGenerator:
                 # First chunk: chapter title (heading)
                 heading_chunk_indices.add(len(all_chunks))
                 heading_chunk = {"type": "text", "text": title}
+                if ruby_title_spans:
+                    # Its readings, even when the chapter is the heading
+                    # alone and no block is left to cut it from.
+                    heading_chunk["spans"] = ruby_title_spans
                 all_chunks.append(heading_chunk)
 
             if toc_links:

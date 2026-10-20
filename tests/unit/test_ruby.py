@@ -369,3 +369,54 @@ def test_each_ruby_fragment_is_in_both_entity_maps(tmp_path):
     assert names <= {str(n) for n in val(index)["$252"][0]["$181"]}
     (container,) = by_type(frags, "$270")
     assert sum(1 for kind, _id in val(container)["$181"] if int(kind) == 756) == 2
+
+
+@pytest.mark.unit
+def test_a_heading_with_ruby_prints_once_under_a_flattened_title(tmp_path):
+    # calibre's TOC label runs each reading into its base, as the book's own
+    # navigation does (pg34084); the heading prints once, with its ruby.
+    out = tmp_path / "h.kfx"
+    blocks = _blocks(
+        "<h1><ruby>法螺<rt>ほら</rt></ruby><ruby>男爵<rt>だんしやく</rt></ruby></h1>"
+        "<p>本文。</p>"
+    )
+    NativeKFXGenerator().generate_full_book(
+        title="T",
+        author="A",
+        chapters=[{"title": "法螺ほら男爵だんしやく", "text": "x", "blocks": blocks}],
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    events, _ = _events(frags)
+    assert list(events) == ["法螺男爵", "本文。"]
+    readings = _readings(frags)
+    assert [
+        (ev["$143"], ev["$144"], str(readings[str(ev["$757"]), ev["$758"]]["$145"]))
+        for ev in events["法螺男爵"]
+        if "$757" in ev
+    ] == [(0, 2, "ほら"), (2, 2, "だんしやく")]
+
+
+@pytest.mark.unit
+def test_a_chapter_of_only_a_ruby_heading_keeps_its_readings(tmp_path):
+    # pg34084's title page: the chapter is its heading alone.
+    out = tmp_path / "h.kfx"
+    blocks = _blocks("<h1><ruby>法螺<rt>ほら</rt></ruby>男爵</h1>")
+    NativeKFXGenerator().generate_full_book(
+        title="T",
+        author="A",
+        chapters=[
+            {"title": "法螺ほら男爵", "text": "法螺男爵", "blocks": blocks},
+            {"title": "Two", "text": "y", "blocks": _blocks("<p>Body.</p>")},
+        ],
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    events, _ = _events(frags)
+    assert "法螺ほら男爵" not in events
+    readings = _readings(frags)
+    assert [
+        (ev["$143"], ev["$144"], str(readings[str(ev["$757"]), ev["$758"]]["$145"]))
+        for ev in events["法螺男爵"]
+        if "$757" in ev
+    ] == [(0, 2, "ほら")]
