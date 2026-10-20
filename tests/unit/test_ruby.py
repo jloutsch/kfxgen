@@ -352,3 +352,20 @@ def test_a_link_over_the_whole_base_goes_on_its_event(tmp_path, html):
     (ev,) = events["先"]
     assert (ev["$143"], ev["$144"]) == (0, 1)
     assert "$757" in ev and "$179" in ev
+
+
+@pytest.mark.unit
+def test_each_ruby_fragment_is_in_both_entity_maps(tmp_path):
+    # Previewer's file, converted to KFX, lists its $756 in the $270 map and
+    # in the $419 index, as every fragment kfxgen writes is listed.
+    frags = _book(
+        "<p><ruby>一<rt>いち</rt></ruby></p>",
+        "<p><ruby>二<rt>に</rt></ruby></p>",
+        tmp_path=tmp_path,
+    )
+    names = {str(f.fid) for f in by_type(frags, "$756")}
+    assert len(names) == 2
+    (index,) = by_type(frags, "$419")
+    assert names <= {str(n) for n in val(index)["$252"][0]["$181"]}
+    (container,) = by_type(frags, "$270")
+    assert sum(1 for kind, _id in val(container)["$181"] if int(kind) == 756) == 2
