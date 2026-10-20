@@ -33,6 +33,7 @@ pytestmark = [pytest.mark.slow, pytest.mark.integration]
 CSS = """.T1 { color: darkred; } .T3 { color: hsl(0, 100%, 25%); }
 .T6 { color: rgba(255, 0, 0, 0.25); } .T7 { color: rgba(0, 0, 0, 0.9); }
 .T12 { color: lightgray; } .white { color: #ffffff; }
+.T13 { color: rgb(100%, 0%, 0%); } .T14 { color: rgba(100%, 0%, 0%, 0.5); }
 div.F1 { background-color: rgba(0, 0, 0, 0.1); padding: 0.5em; }
 div.F3 { background-color: hsl(120, 50%, 80%); padding: 0.5em; }
 div.F4 { background-color: lightgray; padding: 0.5em; }
@@ -47,6 +48,8 @@ CASES = [
     ("T6", '<p class="T6">T6 translucent red text.</p>'),
     ("T7", '<p class="T7">T7 nearly opaque black text.</p>'),
     ("T12", '<p class="T12">T12 lightgray text.</p>'),
+    ("T13", '<p class="T13">T13 percentage red text.</p>'),
+    ("T14", '<p class="T14">T14 translucent percentage red text.</p>'),
     ("F1", '<div class="F1"><p>F1 text on a translucent shade.</p></div>'),
     ("F3", '<div class="F3"><p>F3 text on an hsl fill.</p></div>'),
     ("F4", '<div class="F4"><p>F4 text on a lightgray fill.</p></div>'),
@@ -106,6 +109,7 @@ def converted(calibre):  # noqa: F811
         ("T1", 0xFF8B0000),
         ("T3", 0xFF7F0000),
         ("T12", 0xFF767676),
+        ("T13", 0xFFEE0000),
         # Blended onto the page: 90% black.
         ("T7", 0xFF1A1A1A),
     ],
@@ -115,9 +119,10 @@ def test_a_text_colour(converted, case, colour):
     assert _near(by_case[case][0], colour), f"calibre {version}: {by_case[case]}"
 
 
-def test_translucent_text_is_opaque_and_pink(converted):
+@pytest.mark.parametrize("case", ["T6", "T14"])
+def test_translucent_text_is_opaque_and_pink(converted, case):
     by_case, version = converted
-    got = by_case["T6"][0]
+    got = by_case[case][0]
     r, g, b = (got >> 16) & 0xFF, (got >> 8) & 0xFF, got & 0xFF
     assert got >> 24 == 0xFF and r > g == b > 0, f"calibre {version}: {got:08X}"
 

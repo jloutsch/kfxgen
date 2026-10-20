@@ -190,3 +190,32 @@ def test_a_named_or_hsl_fill_is_drawn(cls, fill):
 def test_a_percentage_alpha_fill_draws_no_box_as_in_previewer():
     blocks = _blocks('<div class="red"><p>Plain.</p></div>', CSS)
     assert [b.get("type") for b in blocks] == [None]
+
+
+# --- Percentage channels (#394) -----------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("value", "previewer"),
+    [
+        ("rgb(100%, 0%, 0%)", 0xFF0000),
+        ("rgb(0%, 0%, 50%)", 0x000080),
+        ("rgb(50.5%, 20%, 10%)", 0x813319),
+        ("rgb(150%, 0%, 0%)", 0xFF0000),
+    ],
+)
+def test_percentage_channels_are_read(value, previewer):
+    got = css_rgb(value)
+    assert got is not None and _near(got, previewer), f"{got} vs {previewer:06X}"
+
+
+@pytest.mark.unit
+def test_a_translucent_percentage_colour_is_blended():
+    assert _near(css_rgb("rgba(100%, 0%, 0%, 0.5)"), 0xFF8080)
+
+
+@pytest.mark.unit
+def test_percentage_red_text_gets_previewers_colour():
+    """Previewer writes `FFEE0000`: red, darkened to 4.5:1 (#239)."""
+    assert css_text_colour("rgb(100%, 0%, 0%)") == 0xFFEE0000
