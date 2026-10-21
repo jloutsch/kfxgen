@@ -14,7 +14,9 @@ from .inline_style import (
     TYPOGRAPHY_KEYS,
     VALIGN_MAP,
     css_text_colour,
+    math_of,
     ruby_of,
+    without_math,
     without_ruby,
 )
 from .kfxlib_minimal.kfx_container import KfxContainer
@@ -819,7 +821,8 @@ def place_locations(sections):
     locations = []
     for entries in sections:
         pid = next_location = 0
-        for eid, length in entries:
+        for eid, length, *start in entries:
+            start = start[0] if start else 0
             if length <= 0:
                 # A link container shares its picture's position (#355): a
                 # location falling there is the container's, as in kfxlib.
@@ -828,7 +831,7 @@ def place_locations(sections):
                     next_location += POSITIONS_PER_LOCATION
                 continue
             while next_location < pid + length:
-                locations.append((eid, next_location - pid))
+                locations.append((eid, start + next_location - pid))
                 next_location += POSITIONS_PER_LOCATION
             pid += length
     return locations
@@ -1397,6 +1400,152 @@ class NativeKFXGenerator:
         value = IonStruct(IS("$757"), IS(name), IS("$146"), entries)
         return YJFragment(fid=IS(name), ftype=IS("$756"), value=value)
 
+    def _declare_feature(self, name):
+        """Append `name` 1.0 to the built $585 (#235)."""
+        self.symtab.create_local_symbol(name)
+        frag = next(f for f in self.fragments if f.ftype == IS("$585"))
+        frag.value[IS("$590")].append(
+            IonStruct(
+                IS("$586"),
+                "com.amazon.yjconversion",
+                IS("$492"),
+                name,
+                IS("$589"),
+                IonStruct(IS("version"), IonStruct(IS("$587"), 1, IS("$588"), 0)),
+            )
+        )
+
+    def _math_note(self, text):
+        """A content reference to an equation's alt text or source (#235).
+        A fragment takes strings until it holds MAX_CONTENT_FRAGMENT_SIZE
+        bytes, kfxlib's limit, which leaves out its last string."""
+        groups = self._math_strings
+        if not groups or sum(len(t.encode("utf-8")) for t in groups[-1][1]) >= (
+            MAX_CONTENT_FRAGMENT_SIZE
+        ):
+            name = f"content_math{len(groups) + 1}"
+            self.symtab.create_local_symbol(name)
+            groups.append((name, []))
+        name, strings = groups[-1]
+        strings.append(text)
+        return IonStruct(IS("$4"), IS(name), IS("$403"), len(strings) - 1)
+
+    def _math_entry(self, item, eids):
+        """A drawn equation as Kindle Previewer writes it (#235): a container
+        holding a container holding one shape of glyph paths."""
+        _serial, drawing, alt, source = item
+        e1, e2, e3 = eids
+
+        def em(v):
+            return IonStruct(
+                IS("$307"), IonDecimal(f"{v / 1000:.5f}"), IS("$306"), IS("$308")
+            )
+
+        pct100 = IonStruct(IS("$307"), IonDecimal("100"), IS("$306"), IS("$314"))
+        n = len(self._math_styles) // 2
+        box_style, shape_style = f"mbox{n}", f"mshape{n}"
+        for name in (box_style, shape_style):
+            self.symtab.create_local_symbol(name)
+        self._math_styles.append(
+            (
+                box_style,
+                IonStruct(
+                    IS("$56"),
+                    em(drawing.width),
+                    IS("$65"),
+                    pct100,
+                    IS("$173"),
+                    IS(box_style),
+                ),
+            )
+        )
+        self._math_styles.append(
+            (
+                shape_style,
+                IonStruct(
+                    IS("$546"),
+                    IS("$377"),
+                    IS("$173"),
+                    IS(shape_style),
+                    IS("$31"),
+                    em(-drawing.depth),
+                ),
+            )
+        )
+        first = len(self._math_paths)
+        self._math_paths.extend(list(p) for p in drawing.paths)
+        paths = [
+            IonStruct(
+                IS("$249"),
+                IonStruct(IS("$403"), first + k, IS("$4"), IS("mpaths")),
+                IS("$98"),
+                [1, 0, 0, 1, 0, 0],
+                IS("$76"),
+                0,
+                IS("$159"),
+                IS("$273"),
+            )
+            for k in range(len(drawing.paths))
+        ]
+        shape = IonStruct(
+            IS("$155"),
+            e3,
+            IS("$65"),
+            pct100,
+            IS("$66"),
+            drawing.width,
+            IS("$67"),
+            drawing.height,
+            IS("$56"),
+            em(drawing.width),
+            IS("$57"),
+            em(drawing.height),
+            IS("$250"),
+            paths,
+            IS("$157"),
+            IS(shape_style),
+            IS("$686"),
+            IS("$269"),
+            IS("$159"),
+            IS("$272"),
+        )
+        inner = IonStruct(
+            IS("$155"),
+            e2,
+            IS("$156"),
+            IS("$323"),
+            IS("$159"),
+            IS("$270"),
+            IS("$615"),
+            IS("$689"),
+            IS("$146"),
+            [shape],
+        )
+        notes = [
+            IonStruct(IS("$145"), self._math_note(alt or " "), IS("$687"), IS("$584")),
+            IonStruct(IS("$145"), self._math_note(source), IS("$687"), IS("$690")),
+        ]
+        return IonStruct(
+            IS("$155"),
+            e1,
+            IS("$615"),
+            IS("$688"),
+            IS("$601"),
+            IS("$283"),
+            IS("$683"),
+            notes,
+            IS("$156"),
+            IS("$323"),
+            IS("$684"),
+            IS("$441"),
+            IS("$157"),
+            IS(box_style),
+            IS("$159"),
+            IS("$270"),
+            IS("$146"),
+            [inner],
+        )
+
     def _declare_table_viewer(self):
         """Add `yj_table_viewer` 1 after `yj_table` in the built $585 (#254).
 
@@ -1929,13 +2078,17 @@ class NativeKFXGenerator:
         """
         entries = []
         for item in position_ids:
+            eid_offset = None
             if isinstance(item, (list, tuple)):
-                char_offset, position_id = item
+                char_offset, position_id, *rest = item
+                eid_offset = rest[0] if rest else None
             else:
                 # Legacy: plain list of position IDs
                 char_offset = len(entries)
                 position_id = item
             entry = IonStruct(IS("$184"), char_offset, IS("$185"), position_id)
+            if eid_offset:
+                entry[IS("$143")] = eid_offset
             entries.append(entry)
 
         return YJFragment(fid=IS("$348"), ftype=IS("$265"), value=entries)
@@ -1963,6 +2116,8 @@ class NativeKFXGenerator:
         """
         section_positions = ch_data["section_positions"]
         chunk_positions = ch_data["chunk_positions"]
+        math_by_position = ch_data.get("math_by_position") or {}
+        math_positions = set()
         chapter_chunk_ranges = ch_data["chapter_chunk_ranges"]
         all_chunks = ch_data["all_chunks"]
         # outer_positions stays in ch_data shape for future nested-$259
@@ -2029,6 +2184,33 @@ class NativeKFXGenerator:
                 else:
                     chunk_text_len = len(chunk)  # legacy: bare string
                 entries_265_raw.append((char_offset, chunk_positions[chunk_idx]))
+                maths = math_by_position.get(chunk_positions[chunk_idx])
+                if maths:
+                    # A drawn equation (#235): its container, inner container
+                    # and shape take a position each, the paragraph one offset.
+                    text, items = maths
+                    pos = chunk_positions[chunk_idx]
+                    done = 0
+                    for j, (k, _item, eids) in enumerate(items):
+                        base = char_offset + k + 2 * j
+                        located.append((pos, k - done, done))
+                        if k > done:
+                            # The paragraph reaches the equation here; right
+                            # after another, where that one's resumes it.
+                            entries_265_raw.append((base, pos, k))
+                            math_positions.add((base, pos))
+                        for n, e in enumerate(eids):
+                            entries_265_raw.append((base + n, e))
+                            math_positions.add(e)
+                            located.append((e, 1))
+                        done = k + 1
+                        if done < len(text):
+                            entries_265_raw.append((base + 3, pos, done))
+                            math_positions.add((base + 3, pos))
+                    if done < len(text):
+                        located.append((pos, len(text) - done, done))
+                    char_offset += len(text) + 2 * len(items)
+                    continue
                 char_offset += chunk_text_len
                 if chunk_positions[chunk_idx] is not None:
                     located.append((chunk_positions[chunk_idx], chunk_text_len))
@@ -2046,7 +2228,8 @@ class NativeKFXGenerator:
                 and deduped[-1][0] == entry[0]
                 and deduped[-1][1] in link_positions
             )
-            if entry[0] not in seen_offsets or shares_link:
+            in_math = entry[1] in math_positions or tuple(entry[:2]) in math_positions
+            if entry[0] not in seen_offsets or shares_link or in_math:
                 seen_offsets.add(entry[0])
                 deduped.append(entry)
         entries_265_raw = deduped
@@ -2061,14 +2244,21 @@ class NativeKFXGenerator:
         section_positions_264 = {}
         for ch_idx, sec_name in enumerate(section_names):
             start, end = chapter_chunk_ranges[ch_idx]
-            pids = [section_positions[ch_idx]] + [
-                p for p in chunk_positions[start:end] if p is not None
-            ]
+            pids = [section_positions[ch_idx]]
+            for p in chunk_positions[start:end]:
+                if p is not None:
+                    pids.append(p)
+                    for _k, _item, eids in (math_by_position.get(p) or ("", ()))[1]:
+                        pids.extend(eids)
             section_positions_264[sec_name] = pids
 
         # All position IDs for $550 (section + every chunk in reading order)
         all_position_ids = list(section_positions)
-        all_position_ids.extend(p for p in chunk_positions if p is not None)
+        for p in chunk_positions:
+            if p is not None:
+                all_position_ids.append(p)
+                for _k, _item, eids in (math_by_position.get(p) or ("", ()))[1]:
+                    all_position_ids.extend(eids)
         locations = place_locations(location_sections)
 
         return {
@@ -2736,6 +2926,7 @@ class NativeKFXGenerator:
         emphasis_spans=None,
         container_nodes=None,
         container_extras=None,
+        maths=None,
     ):
         """
         Builds Fragment $259 (Storyline / Flow Map)
@@ -2929,6 +3120,20 @@ class NativeKFXGenerator:
             if first_leaf:
                 entry[IS("$790")] = 1
                 first_leaf = False
+            if maths and position in maths:
+                # Text and drawn equations together, as Previewer writes a
+                # paragraph holding an equation (#235).
+                text, items = maths[position]
+                mixed, last = [], 0
+                for k, item, eids in items:
+                    if text[last:k]:
+                        mixed.append(text[last:k])
+                    mixed.append(self._math_entry(item, eids))
+                    last = k + 1
+                if text[last:]:
+                    mixed.append(text[last:])
+                del entry[IS("$145")]
+                entry[IS("$146")] = mixed
 
             if link_targets and i < len(link_targets) and link_targets[i]:
                 anchor_name = link_targets[i]
@@ -3495,6 +3700,13 @@ class NativeKFXGenerator:
         # textBlock goes with the $145 fragments: a book of pictures only has
         # none, so it declares nothing, as kfxlib's own conversion does (#357).
         capabilities = []
+        if ch_data.get("math_names"):
+            # Position entries part-way into a paragraph (#235).
+            self.symtab.create_local_symbol("kfxgen.pidMapWithOffset")
+            self.symtab.create_local_symbol("version")
+            capabilities.append(
+                IonStruct(IS("$492"), "kfxgen.pidMapWithOffset", IS("version"), 1)
+            )
         if content_names:
             self.symtab.create_local_symbol("kfxgen.textBlock")
             self.symtab.create_local_symbol("version")
@@ -3551,6 +3763,7 @@ class NativeKFXGenerator:
             + anchor_names
             + section_ad_names
             + ruby_names
+            + ch_data.get("math_names", [])
         )
         if cover_resource_name:
             all_entity_names.append(cover_resource_name)
@@ -3600,6 +3813,8 @@ class NativeKFXGenerator:
             entity_map.append([597, get_id(ad_name)])
         for ruby_name in ruby_names:
             entity_map.append([756, get_id(ruby_name)])
+        for math_name in ch_data.get("math_names", []):
+            entity_map.append([692, get_id(math_name)])
         if cover_resource_name:
             entity_map.append([164, get_id(cover_resource_name)])
             entity_map.append([417, get_id(cover_location_name)])
@@ -3624,6 +3839,8 @@ class NativeKFXGenerator:
             self._declare_table_viewer()
         if ruby_names:
             self._declare_ruby()
+        if ch_data.get("math_names"):
+            self._declare_feature("yj_mathml")
 
         # 16. Build $ion_symbol_table fragment (REQUIRED for Kindle)
         # Must be added last so all symbols used by other fragments are registered
@@ -4602,6 +4819,19 @@ class NativeKFXGenerator:
                 if ruby and (chunk_idx, ruby[0]) not in ruby_eids:
                     ruby_eids[chunk_idx, ruby[0]] = content_pos_id
                     content_pos_id += self.CONTENT_POS_STEP
+        # A drawn equation (#235): its container, the container in it and
+        # its shape, an id each, all three taking positions.
+        math_eids = {}
+        for chunk_idx, chunk in enumerate(all_chunks):
+            for _s, _length, flags in chunk.get("spans") or ():
+                m = math_of(flags)
+                if m and (chunk_idx, m[0]) not in math_eids:
+                    math_eids[chunk_idx, m[0]] = tuple(
+                        content_pos_id + n * self.CONTENT_POS_STEP for n in range(3)
+                    )
+                    content_pos_id += 3 * self.CONTENT_POS_STEP
+        math_by_position = {}
+        self._math_paths, self._math_strings, self._math_styles = [], [], []
         #: {chapter: [(eid, reading)]}, numbered from 1 in each chapter: Kindle
         #: Previewer writes one ruby fragment per storyline.
         ruby_readings = {}
@@ -5456,8 +5686,18 @@ class NativeKFXGenerator:
                     ruby = ruby_of(flags)
                     if ruby:
                         rubies.setdefault(ruby[0], [s, s, ruby[1]])[1] = s + length
+                maths = [
+                    (s, math_of(flags), math_eids[chunk_idx, math_of(flags)[0]])
+                    for s, length, flags in chunk_spans
+                    if math_of(flags)
+                ]
+                if maths:
+                    math_by_position[chunk_positions[chunk_idx]] = (
+                        chunk["text"],
+                        maths,
+                    )
                 for s, length, flags in chunk_spans:
-                    flags = without_ruby(flags)
+                    flags = without_math(without_ruby(flags))
                     if not flags:
                         continue
                     if drop and s + length <= drop[1]:
@@ -5545,6 +5785,7 @@ class NativeKFXGenerator:
                 emphasis_spans=entry_emphasis_spans,
                 container_nodes=entry_nodes,
                 container_extras=entry_extras,
+                maths=math_by_position,
             )
             storyline_names.append(sl_name)
             self.fragments.append(frag_259)
@@ -5569,6 +5810,8 @@ class NativeKFXGenerator:
 
         def _refs(nodes):
             for e in nodes or []:
+                if not isinstance(e, IonStruct):
+                    continue
                 if IS("$157") in e:
                     referenced.add(str(e[IS("$157")]))
                 for sp in e.get(IS("$142")) or []:
@@ -5595,8 +5838,33 @@ class NativeKFXGenerator:
             extra_style_names.append(self.RUBY_STYLE_NAME)
         for ch_idx, readings in ruby_readings.items():
             self.fragments.append(self.build_fragment_756(f"ruby{ch_idx}", readings))
+        math_names = []
+        if self._math_paths:
+            self.symtab.create_local_symbol("mpaths")
+            self.fragments.append(
+                YJFragment(
+                    fid=IS("mpaths"),
+                    ftype=IS("$692"),
+                    value=IonStruct(
+                        IS("$4"), IS("mpaths"), IS("$693"), self._math_paths
+                    ),
+                )
+            )
+            math_names.append("mpaths")
+            for name, strings in self._math_strings:
+                self.fragments.append(
+                    self.build_fragment_145(strings, content_name=name)
+                )
+                content_names.append(name)
+            for name, value in self._math_styles:
+                self.fragments.append(
+                    YJFragment(fid=IS(name), ftype=IS("$157"), value=value)
+                )
+                extra_style_names.append(name)
 
         return {
+            "math_names": math_names,
+            "math_by_position": math_by_position,
             "ruby_names": [f"ruby{ch_idx}" for ch_idx in ruby_readings],
             "story_names": story_names,
             "storyline_names": storyline_names,

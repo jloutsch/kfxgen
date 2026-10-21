@@ -1,10 +1,11 @@
-"""MathML is written as text a reader can follow (#235).
+"""An equation that can't be drawn is written as text a reader can follow
+(#235).
 
-Kindle Previewer 4 typesets each equation as a drawing (`yj_mathml`).
-kfxgen doesn't draw yet, and writes the text instead: exponents
-and subscripts as raised and lowered runs, operators spaced, fractions as
-a/b and roots as √x, with parentheses around anything longer than a single
-token."""
+kfxgen draws each equation as Kindle Previewer 4 does (`yj_mathml`; see
+test_mathml_native.py). When ziamath can't draw one, it writes the text
+instead: exponents and subscripts as raised and lowered runs, operators
+spaced, fractions as a/b and roots as √x, with parentheses around anything
+longer than a single token. Drawing is off for every test here."""
 
 import pytest
 from lxml import etree
@@ -14,6 +15,11 @@ from kfxgen.inline_style import FLAG_BOLD, FLAG_ITALIC, FLAG_SUB, FLAG_SUPER
 
 M = 'xmlns="http://www.w3.org/1998/Math/MathML"'
 _SHOWN = {FLAG_SUPER: "^", FLAG_SUB: "_", FLAG_ITALIC: "i", FLAG_BOLD: "b"}
+
+
+@pytest.fixture(autouse=True)
+def _no_drawing(monkeypatch):
+    monkeypatch.setattr(_conv, "draw_math", lambda _math: None)
 
 
 def _blocks(body):

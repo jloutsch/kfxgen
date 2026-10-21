@@ -694,3 +694,89 @@ def test_upstream_decodes_ruby_to_epub_ruby(upstream_kfxlib, built_kfx):
         [("字", "rb"), ("じ", "rt")],
         [("表", "rb"), ("ひょう", "rt")],
     ]
+
+
+_MATHML = 'xmlns="http://www.w3.org/1998/Math/MathML"'
+_R2 = f"<math {_MATHML}><msup><mi>r</mi><mn>2</mn></msup></math>"
+_HALF = f"<math {_MATHML}><mfrac><mn>1</mn><mn>2</mn></mfrac></math>"
+
+
+def _make_maths(out_dir):
+    """Equations in every place a paragraph can hold one (#235): mid-text, at
+    either end, two together, alone as a display equation, in a link, in a
+    cell, and in a heading whose TOC label is its flattened text."""
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.golden.inputs import _xhtml_page
+
+    one = (
+        f"<p>Area {_R2} here.</p><p>{_R2} starts.</p><p>Ends {_HALF}</p>"
+        f"<p>Two {_R2}{_HALF} together.</p>"
+        f'<math {_MATHML} display="block"><mi>x</mi><mo>=</mo><mo>-</mo><mi>b</mi>'
+        "<mo>-</mo><mn>4</mn></math><p>After the display.</p>"
+        f'<p>A <a href="#t">linked {_R2}</a> equation.</p>'
+        f"<table><tr><td>Cell {_HALF}</td><td>x</td></tr></table>"
+        '<p id="t">Target.</p>'
+    )
+    two = f"<h1>The {_HALF} rule</h1><p>Second chapter.</p>"
+    return (
+        EpubBuilder()
+        .set_metadata(title="Maths", author="Golden Author")
+        .add_chapter("One", _xhtml_page("One", one).encode("utf-8"))
+        .add_chapter("The 12 rule", _xhtml_page("Two", two).encode("utf-8"))
+        .build(out_dir, "maths")
+    )
+
+
+@pytest.mark.tier2
+@pytest.mark.integration
+@pytest.mark.filterwarnings("ignore:datetime.datetime.utcnow:DeprecationWarning")
+def test_upstream_decodes_drawn_equations(upstream_kfxlib, built_kfx):
+    """KFX Input reads kfxgen's drawn equations (#235) with no warning beyond
+    `_BASELINE_WARNINGS`: its position and location checks walk every
+    paragraph holding one. Each comes back as an SVG of paths, as KFX Input
+    reads Previewer's, with its alt text."""
+    import xml.etree.ElementTree as ET
+    from io import BytesIO
+
+    from kfxlib.message_logging import set_logger
+
+    messages: list[tuple[str, str]] = []
+    set_logger(_LevelCollector(messages))
+    try:
+        with decimal.localcontext():
+            book = upstream_kfxlib(str(built_kfx("maths", _make_maths)))
+            book.decode_book()
+            epub = book.convert_to_epub()
+    finally:
+        set_logger(None)
+
+    unexpected = [
+        (level, m)
+        for level, m in messages
+        if level in ("warning", "error")
+        and not any(known in m for known in _BASELINE_WARNINGS)
+    ]
+    assert not unexpected, f"upstream logged on maths: {unexpected}"
+
+    xhtml = "{http://www.w3.org/1999/xhtml}"
+    svg = "{http://www.w3.org/2000/svg}"
+    labels, texts, nav = [], [], ""
+    with zipfile.ZipFile(BytesIO(epub)) as zf:
+        for name in sorted(zf.namelist()):
+            if name.endswith("nav.xhtml"):
+                nav = "".join(ET.fromstring(zf.read(name)).itertext())
+            elif name.endswith(".xhtml"):
+                root = ET.fromstring(zf.read(name))
+                for e in root.iter():
+                    if e.get("role") == "math":
+                        assert e.find(f".//{svg}path") is not None
+                        labels.append(e.get("aria-label"))
+                body = root.find(f"{xhtml}body")
+                for desc in body.iter(f"{svg}desc"):
+                    desc.text = ""  # the MathML source, written in the SVG
+                texts.append(" ".join("".join(body.itertext()).split()))
+    assert labels == ["r2", "r2", "1/2", "r2", "1/2", "x = −b − 4", "r2", "1/2", "1/2"]
+    text = " ".join(texts)
+    assert "\ufffc" not in nav and "\ufffc" not in text
+    for words in ("Area here.", "starts.", "Ends", "Two together.", "Cell", "The rule"):
+        assert words in text, words

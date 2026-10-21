@@ -51,6 +51,7 @@ from .inline_style import (
     make_anchor_mark,
     make_link_flag,
     make_mono_flag,
+    make_math_flag,
     make_ruby_flag,
     make_size_flag,
     mono_families,
@@ -59,6 +60,7 @@ from .inline_style import (
     parse_vertical_align,
     run_font_size,
 )
+from .math_draw import draw as draw_math
 from .native_generator import NativeKFXGenerator
 
 _ITALIC_TAGS = {"em", "i"}
@@ -1452,15 +1454,17 @@ _MATH_INVISIBLE = frozenset("\u2061\u2062\u2063\u2064")
 
 
 def _math_parts(math, flags):
-    """A MathML equation as text a reader can follow (#235).
+    """A MathML equation, drawn as Kindle Previewer 4 draws it: one
+    placeholder character carrying its drawing, its alt text and its
+    source (#235).
 
-    Kindle Previewer 4 draws each equation (`yj_mathml`); kfxgen doesn't
-    draw yet, and writes it instead: exponents and
-    subscripts as raised and lowered runs, operators spaced, a fraction as
-    a/b and a root as √x, with parentheses around a part longer than a
-    single token. A single-letter identifier is italic, as maths sets it.
-    Whitespace between MathML elements is source layout, not text; an
-    <annotation> (the TeX source, mostly) is not text either."""
+    One that can't be drawn is written as text a reader can follow:
+    exponents and subscripts as raised and lowered runs, operators spaced,
+    a fraction as a/b and a root as √x, with parentheses around a part
+    longer than a single token. A single-letter identifier is italic, as
+    maths sets it. Whitespace between MathML elements is source layout, not
+    text; an <annotation> (the TeX source, mostly) is not text either. That
+    text is also the alt text of a drawn equation without `alttext`."""
     parts = [make_anchor_mark(aid) for aid in _subtree_anchor_ids(math)]
     if _math_stray_text(math):
         # Text outside the token elements, invalid MathML: written as it
@@ -1469,8 +1473,16 @@ def _math_parts(math, flags):
         text = " ".join(text.split())
         return parts + ([(text, flags)] if text else [])
     body = _math_row(_math_kids(math), flags, False)
-    if not "".join(seg for seg, _fl in body if isinstance(seg, str)).strip():
-        alt = " ".join((math.get("alttext") or "").split())
+    text = "".join(seg for seg, _fl in body if isinstance(seg, str))
+    alt = " ".join((math.get("alttext") or "").split())
+    drawing = draw_math(math)
+    if drawing is not None:
+        from lxml import etree
+
+        source = etree.tostring(math, encoding="unicode", with_tail=False)
+        flag = make_math_flag(drawing, alt or " ".join(text.split()), source)
+        return parts + [("\ufffc", flags | {flag})]
+    if not text.strip():
         body = [(alt, flags)] if alt else []
     return parts + body
 

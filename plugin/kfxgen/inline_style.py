@@ -296,6 +296,29 @@ def without_ruby(flags):
     )
 
 
+#: An equation drawn as glyph outlines (#235): ("math", (serial, drawing,
+#: alt text, MathML source)) on the one placeholder character it takes.
+MATH_FLAG = "math"
+_math_serials = itertools.count()
+
+
+def make_math_flag(drawing, alt, source):
+    """Build the flag-set member that puts an equation's drawing on a run."""
+    return (MATH_FLAG, (next(_math_serials), drawing, alt, source))
+
+
+def math_of(flags):
+    """A run's equation as (serial, drawing, alt, source), or None."""
+    return flag_value(flags, MATH_FLAG)
+
+
+def without_math(flags):
+    """A run's flags less its equation, which is written as an entry."""
+    return frozenset(
+        f for f in flags if not (isinstance(f, tuple) and f[0] == MATH_FLAG)
+    )
+
+
 MONO_FLAG = "mono"
 
 #: Monospace families a book names without the generic `monospace` after them.

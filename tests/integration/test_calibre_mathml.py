@@ -4,8 +4,11 @@ calibre's EPUB input and its stylesheet reach `<math>` before kfxgen does.
 This converts the #235 probe's main shapes with calibre: an exponent, a
 subscript, a fraction, a root, a prefixed `<m:math>`, a TeX annotation, an
 equation in a table cell and a display equation straight in the body. Each
-paragraph reads as text, with its exponents raised (`$44: $370`) and its
-subscripts lowered (`$371`), and the display equation is centred.
+equation is drawn in its paragraph, as Kindle Previewer draws it: the
+plugin's bundled ziamath is unpacked from its zip inside calibre and draws
+it, and the display equation is centred. The paragraphs below show each
+drawing as [its alt text], which is #401's text form when the equation has
+no `alttext`.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found. CI has no calibre, so this is
@@ -146,9 +149,17 @@ def _build(path):
             z.writestr(name, data)
 
 
+def _bracketed(text):
+    """'M1 r2' as kfxgen now prints it: 'M1 [r2]', the equation drawn."""
+    label, alt = text.split(" ", 1)
+    return f"{label} [{alt}]"
+
+
 @pytest.fixture(scope="module")
 def converted(calibre):  # noqa: F811
-    """{paragraph text: (its style, [(start, length, shift)])}, and calibre's version."""
+    """({paragraph text, each drawn equation as [its alt text]: (its style,
+    [path count per equation])}, the book's fragments), and calibre's
+    version."""
     tmp, _env, version = calibre
     epub, kfx = tmp / "mathml.epub", tmp / "mathml.kfx"
     _build(epub)
@@ -156,44 +167,70 @@ def converted(calibre):  # noqa: F811
     frags = load_fragments(kfx)
     texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
     styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+
+    def note(ref):
+        return str(texts[str(ref["name"])][ref["$403"]])
+
     out = {}
     for st in by_type(frags, "$259"):
         for e in iter_entries(val(st)["$146"]):
-            if not e.get("$145"):
+            if not hasattr(e, "get") or str(e.get("$159")) != "$269":
                 continue
-            text = str(texts[str(e["$145"]["name"])][e["$145"]["$403"]])
-            shifts = []
-            for ev in e.get("$142") or []:
-                shift = styles.get(str(ev.get("$157")), {}).get("$44")
-                if shift is not None:
-                    shifts.append((ev["$143"], ev["$144"], str(shift)))
-            out[text] = (styles.get(str(e.get("$157")), {}), shifts)
-    return out, version
+            if e.get("$145"):
+                parts, counts = [note(e["$145"])], []
+            elif isinstance(e.get("$146"), list):
+                parts, counts = [], []
+                for x in e["$146"]:
+                    if isinstance(x, str):
+                        parts.append(str(x))
+                        continue
+                    alt = next(
+                        note(n["$145"]) for n in x["$683"] if str(n["$687"]) == "$584"
+                    )
+                    ((shape,),) = [inner["$146"] for inner in x["$146"]]
+                    parts.append(f"[{alt}]")
+                    counts.append(len(shape["$250"]))
+            else:
+                continue
+            out["".join(parts)] = (styles.get(str(e.get("$157")), {}), counts)
+    return (out, frags), version
 
 
-@pytest.mark.parametrize(("text", "shifts"), [(t, s) for t, _, s in CASES])
-def test_an_equation_reads_as_text_with_its_scripts_shifted(converted, text, shifts):
-    paragraphs, version = converted
-    assert text in paragraphs, f"calibre {version}: {list(paragraphs)}"
-    assert paragraphs[text][1] == shifts, f"calibre {version}"
+@pytest.mark.parametrize("text", [t for t, _, _ in CASES])
+def test_an_equation_is_drawn_in_its_paragraph(converted, text):
+    (paragraphs, _frags), version = converted
+    expected = _bracketed(text)
+    assert expected in paragraphs, f"calibre {version}: {list(paragraphs)}"
+    ((paths,),) = [paragraphs[expected][1]]
+    assert paths > 0, f"calibre {version}"
 
 
 def test_a_display_equation_is_its_own_centred_paragraph(converted):
-    paragraphs, version = converted
-    assert DISPLAY_TEXT in paragraphs, f"calibre {version}: {list(paragraphs)}"
-    style, shifts = paragraphs[DISPLAY_TEXT]
+    (paragraphs, _frags), version = converted
+    expected = f"[{DISPLAY_TEXT}]"
+    assert expected in paragraphs, f"calibre {version}: {list(paragraphs)}"
+    style, counts = paragraphs[expected]
     assert str(style.get("$34")) == "$320", f"calibre {version}: {style}"
-    assert shifts == [(DISPLAY_TEXT.index("2"), 1, "$370")], f"calibre {version}"
+    assert len(counts) == 1 and counts[0] >= 16, f"calibre {version}"
 
 
 def test_an_equation_in_a_table_cell(converted):
-    paragraphs, version = converted
-    assert paragraphs.get("e2 x", (None, None))[1] == [(1, 1, "$370")], (
+    (paragraphs, _frags), version = converted
+    assert any("[e2]" in t for t in paragraphs), (
         f"calibre {version}: {list(paragraphs)}"
     )
 
 
 def test_a_heading_with_maths_prints_once_under_a_flattened_label(converted):
-    paragraphs, version = converted
+    (paragraphs, _frags), version = converted
     assert FLAT_LABEL not in paragraphs, f"calibre {version}: {list(paragraphs)}"
-    assert FRAC_HEADING_TEXT in paragraphs, f"calibre {version}: {list(paragraphs)}"
+    assert f"The [{FRAC_HEADING_TEXT[4:-5]}] rule" in paragraphs, (
+        f"calibre {version}: {list(paragraphs)}"
+    )
+
+
+def test_the_book_declares_its_drawings(converted):
+    (_paragraphs, frags), version = converted
+    assert len(by_type(frags, "$692")) == 1, f"calibre {version}"
+    (features,) = by_type(frags, "$585")
+    assert "yj_mathml" in [str(f["$492"]) for f in val(features)["$590"]]
