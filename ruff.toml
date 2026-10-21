@@ -18,6 +18,9 @@ extend-exclude = [
     # length-bound fix in utilities.py) are still allowed; ruff just won't
     # touch the rest.
     "plugin/kfxgen/kfxlib_minimal/",
+    # Third-party packages copied unchanged from their wheels (#235); see
+    # plugin/kfxgen/vendor/VENDOR.md.
+    "plugin/kfxgen/vendor/",
 ]
 
 [lint]
