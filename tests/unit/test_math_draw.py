@@ -281,3 +281,47 @@ def test_a_deep_but_real_equation_is_drawn():
 def test_the_budget_is_each_equations_own():
     assert _draw(_nested(60, CFRAC)) is None
     assert _draw(R2) is not None
+
+
+def _stretched(height, by="minsize"):
+    """A stretchy bar `height` ems tall, set by its own minsize or by the
+    space beside it."""
+    if by == "minsize":
+        return f'<math {M}><mo minsize="{height}em" stretchy="true">|</mo><mi>x</mi></math>'
+    return (
+        f'<math {M}><mrow><mo stretchy="true">(</mo><mspace height="{height}em"/>'
+        '<mo stretchy="true">)</mo></mrow></math>'
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "markup", [_stretched(100_000), _stretched(10_000, "space"), _stretched(800)]
+)
+def test_a_bracket_too_tall_is_left_undrawn(markup):
+    """ziamath builds a tall bracket from repeated parts in a loop that grows
+    with the square of their count: 100,000 ems ran for minutes."""
+    start = time.monotonic()
+    assert _draw(markup) is None
+    assert time.monotonic() - start < 5
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("markup", [_stretched(700), _stretched(300, "space")])
+def test_a_tall_bracket_is_drawn(markup):
+    """Up to 1,000 of the font's ems, 750 MathML ems in ziamath."""
+    assert _draw(markup) is not None
+
+
+@pytest.mark.unit
+def test_an_equation_with_too_much_text_is_left_undrawn():
+    """ziamath's time grows faster than the text: 50,000 digits took 10 s."""
+    start = time.monotonic()
+    assert _draw(f"<math {M}><mn>{'7' * 50_000}</mn></math>") is None
+    assert time.monotonic() - start < 5
+    assert _draw(f"<math {M}><mn>{'7' * 4_001}</mn></math>") is None
+
+
+@pytest.mark.unit
+def test_an_equation_of_4000_characters_is_drawn():
+    assert _draw(f"<math {M}><mn>{'7' * 4_000}</mn></math>") is not None

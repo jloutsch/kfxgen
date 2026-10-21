@@ -36,6 +36,15 @@ _TOKEN = re.compile(r"[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)(?:[eE]-?\d+)?")
 #: 30 µs.
 _STEPS = 20_000
 _budget = threading.local()
+#: The tallest bracket ziamath may build, in the font's ems (ziamath takes
+#: a MathML em as 1.33 of them). It builds one from repeated parts in a
+#: loop that grows with the square of their count: 1,333 took 0.14 s,
+#: 4,000 1.4 s, 133,000 ran for over 3 minutes.
+_TALLEST = 1_000
+#: The most text an equation may hold. ziamath's time grows faster than
+#: its length: 4,000 digits took 0.1 s, 50,000 10 s. The longest of 24
+#: equations in real books held 101 characters.
+_LONGEST = 4_000
 
 
 class _OverBudget(Exception):
@@ -48,11 +57,13 @@ def _local(tag):
 
 def _ziamath():
     """The bundled ziamath, or None when it can't be loaded, each node it
-    lays out counted against `_budget`."""
+    lays out counted against `_budget` and each bracket it builds no taller
+    than `_TALLEST`."""
     try:
         if not _vendor.on_path():
             return None
         import ziamath
+        from ziamath.mathtable import MathAssembly
         from ziamath.nodes.mnode import Mnode
     except Exception:
         return None
@@ -67,6 +78,14 @@ def _ziamath():
 
         fromelement._budgeted = True
         Mnode.fromelement = classmethod(fromelement)
+        build = MathAssembly.assemble
+
+        def assemble(self, reqsize, minoverlap):
+            if reqsize > _TALLEST * self.font.info.layout.unitsperem:
+                raise _OverBudget
+            return build(self, reqsize, minoverlap)
+
+        MathAssembly.assemble = assemble
     return ziamath
 
 
@@ -76,7 +95,7 @@ def _source(math):
     hyphen-minus operator written as a minus sign, which keeps it clear of
     ziamath's rewrite of `<mo>-</mo>`, a regex that swallows the markup
     between two of them. None for an equation holding an `<mglyph>`, a
-    picture ziamath doesn't draw."""
+    picture ziamath doesn't draw, or more than `_LONGEST` characters."""
     from lxml import etree
 
     math = copy.deepcopy(math)
@@ -108,6 +127,8 @@ def _source(math):
             for i, child in enumerate(list(e)):
                 parent.insert(at + i, child)
             parent.remove(e)
+    if len("".join(math.itertext())) > _LONGEST:
+        return None
     return etree.tostring(math, encoding="unicode")
 
 
