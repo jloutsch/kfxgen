@@ -119,6 +119,18 @@ def test_text_outside_the_tokens_is_text_not_a_drawing():
 
 
 @pytest.mark.unit
+def test_an_equation_too_deep_to_draw_is_text():
+    """ziamath's work doubles with each row nested in a row: a 60-deep
+    continued fraction is written as #401's text, not drawn."""
+    deep = "<mn>1</mn>"
+    for _ in range(60):
+        deep = f"<mrow><mn>1</mn><mo>+</mo><mfrac><mn>1</mn>{deep}</mfrac></mrow>"
+    (block,) = _blocks(f"<p>Deep <math {M}>{deep}</math></p>")
+    assert block["text"].startswith("Deep 1 + 1/(1 + 1/(")
+    assert _maths(block) == []
+
+
+@pytest.mark.unit
 def test_a_display_equation_is_a_centred_paragraph_of_its_drawing():
     blocks = _blocks(
         f'<p>Before.</p><math {M} display="block">{R2[len(f"<math {M}>") :]}<p>After.</p>'

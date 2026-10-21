@@ -13,6 +13,7 @@ is drawn."""
 import copy
 import logging
 import re
+import threading
 import xml.etree.ElementTree as ET
 from collections import namedtuple
 
@@ -28,6 +29,17 @@ _IDENTITY = (1, 0, 0, 1, 0, 0)
 _NOT_DRAWN = {"annotation", "annotation-xml"}
 _COMMANDS = {"M": (0, 2), "L": (1, 2), "Q": (2, 4), "C": (3, 6), "Z": (4, 0)}
 _TOKEN = re.compile(r"[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)(?:[eE]-?\d+)?")
+#: The nodes ziamath may lay out for one equation. It lays each child of a
+#: row out twice, so its work doubles with each row nested in a row: a
+#: 60-deep continued fraction would run for hours. Of 24 equations in
+#: real books the largest took 199, an 8-deep \cfrac 10,207, each about
+#: 30 µs.
+_STEPS = 20_000
+_budget = threading.local()
+
+
+class _OverBudget(Exception):
+    pass
 
 
 def _local(tag):
@@ -35,13 +47,26 @@ def _local(tag):
 
 
 def _ziamath():
-    """The bundled ziamath, or None when it can't be loaded."""
+    """The bundled ziamath, or None when it can't be loaded, each node it
+    lays out counted against `_budget`."""
     try:
         if not _vendor.on_path():
             return None
         import ziamath
+        from ziamath.nodes.mnode import Mnode
     except Exception:
         return None
+    if not getattr(Mnode.fromelement, "_budgeted", False):
+        layout = Mnode.fromelement.__func__
+
+        def fromelement(cls, element, parent, **kwargs):
+            if _budget.left <= 0:
+                raise _OverBudget
+            _budget.left -= 1
+            return layout(cls, element, parent, **kwargs)
+
+        fromelement._budgeted = True
+        Mnode.fromelement = classmethod(fromelement)
     return ziamath
 
 
@@ -203,6 +228,7 @@ def draw(math):
         # Each glyph a <symbol>, placed by a <use>.
         zm.config.svg2 = True
         zm.config.precision = 3
+        _budget.left = _STEPS
         svg = ET.fromstring(zm.Math(source, size=_EM).svg())
         x0, y0, w, h = (float(v) for v in svg.get("viewBox").split())
     except Exception:

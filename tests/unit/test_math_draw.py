@@ -6,6 +6,8 @@ path list (0 move, 1 line, 2 quadratic, 3 cubic, 4 close) with a matrix:
 a glyph's path is the same wherever it is placed, so a book stores it once,
 as Kindle Previewer does."""
 
+import time
+
 import pytest
 from lxml import etree
 
@@ -237,3 +239,45 @@ def test_a_space_or_invisible_operator_is_not_drawn(body, glyphs):
     """ziamath gives each a glyph of no width and no outline."""
     d = _draw(f"<math {M}>{body}</math>")
     assert d is not None and len(d.paths) == glyphs
+
+
+def _nested(depth, row):
+    """An equation of `depth` rows, each `row` with the next inside it."""
+    inner = "<mn>1</mn>"
+    for _ in range(depth):
+        inner = row.format(inner)
+    return f"<math {M}>{inner}</math>"
+
+
+CFRAC = "<mrow><mn>1</mn><mo>+</mo><mfrac><mn>1</mn>{}</mfrac></mrow>"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "depth, row",
+    [
+        (60, CFRAC),
+        (12, "<mrow><mi>y</mi>{}</mrow>"),
+        (8, "<mfenced>{}</mfenced>"),
+    ],
+)
+def test_an_equation_nested_too_deep_is_left_undrawn(depth, row):
+    """ziamath lays each child of a row out twice, so its work doubles with
+    each row nested in a row: a 60-deep continued fraction would run for
+    hours. Its layout stops at a budget, and the equation is written as
+    text."""
+    start = time.monotonic()
+    assert _draw(_nested(depth, row)) is None
+    assert time.monotonic() - start < 5
+
+
+@pytest.mark.unit
+def test_a_deep_but_real_equation_is_drawn():
+    """A 9-deep continued fraction, about half the budget."""
+    assert _draw(_nested(9, CFRAC)) is not None
+
+
+@pytest.mark.unit
+def test_the_budget_is_each_equations_own():
+    assert _draw(_nested(60, CFRAC)) is None
+    assert _draw(R2) is not None

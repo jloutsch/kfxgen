@@ -98,11 +98,16 @@ DISPLAY = (
     "<mi>c</mi></msqrt></mrow><mrow><mn>2</mn><mi>a</mi></mrow></mfrac></math>"
 )
 DISPLAY_TEXT = "x = (−b ± √(b2 − 4ac))/(2a)"
+#: A 60-deep continued fraction: too deep for ziamath to lay out in time.
+DEEP = "<mn>1</mn>"
+for _ in range(60):
+    DEEP = f"<mrow><mn>1</mn><mo>+</mo><mfrac><mn>1</mn>{DEEP}</mfrac></mrow>"
+DEEP = f"Deep <math {M}>{DEEP}</math>"
 
 
 def _build(path):
     body = "<h1>Maths</h1>" + "".join(f"<p>{html}</p>" for _, html, _ in CASES)
-    body += f"<p>Display:</p>{DISPLAY}<p>After.</p>"
+    body += f"<p>Display:</p>{DISPLAY}<p>After.</p><p>{DEEP}</p>"
     body += f"<table><tr><td><math {M}><msup><mi>e</mi><mn>2</mn></msup></math></td><td>x</td></tr></table>"
     files = {
         "nav.xhtml": XHTML.format(
@@ -234,3 +239,12 @@ def test_the_book_declares_its_drawings(converted):
     assert len(by_type(frags, "$692")) == 1, f"calibre {version}"
     (features,) = by_type(frags, "$585")
     assert "yj_mathml" in [str(f["$492"]) for f in val(features)["$590"]]
+
+
+def test_an_equation_too_deep_to_draw_is_text(converted):
+    """ziamath's work doubles with each row nested in a row; the conversion
+    finishes, with the equation as text."""
+    (paragraphs, _frags), version = converted
+    (deep,) = [t for t in paragraphs if t.startswith("Deep ")]
+    assert deep.startswith("Deep 1 + 1/(1 + 1/(1 + "), f"calibre {version}: {deep[:80]}"
+    assert "[" not in deep and paragraphs[deep][1] == [], f"calibre {version}"
