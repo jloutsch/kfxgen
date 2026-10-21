@@ -1472,21 +1472,31 @@ class NativeKFXGenerator:
                 ),
             )
         )
-        first = len(self._math_paths)
-        self._math_paths.extend(list(p) for p in drawing.paths)
-        paths = [
-            IonStruct(
-                IS("$249"),
-                IonStruct(IS("$403"), first + k, IS("$4"), IS("mpaths")),
-                IS("$98"),
-                [1, 0, 0, 1, 0, 0],
-                IS("$76"),
-                0,
-                IS("$159"),
-                IS("$273"),
+
+        def number(v):
+            return v if isinstance(v, int) else IonDecimal(f"{v:f}")
+
+        paths = []
+        for glyph, path, matrix in drawing.paths:
+            # A glyph's path is stored once in the book, as Previewer does.
+            index = self._math_glyphs.get(glyph) if glyph else None
+            if index is None:
+                index = len(self._math_paths)
+                self._math_paths.append(list(path))
+                if glyph:
+                    self._math_glyphs[glyph] = index
+            paths.append(
+                IonStruct(
+                    IS("$249"),
+                    IonStruct(IS("$403"), index, IS("$4"), IS("mpaths")),
+                    IS("$98"),
+                    [number(v) for v in matrix],
+                    IS("$76"),
+                    0,
+                    IS("$159"),
+                    IS("$273"),
+                )
             )
-            for k in range(len(drawing.paths))
-        ]
         shape = IonStruct(
             IS("$155"),
             e3,
@@ -4832,6 +4842,7 @@ class NativeKFXGenerator:
                     content_pos_id += 3 * self.CONTENT_POS_STEP
         math_by_position = {}
         self._math_paths, self._math_strings, self._math_styles = [], [], []
+        self._math_glyphs = {}
         #: {chapter: [(eid, reading)]}, numbered from 1 in each chapter: Kindle
         #: Previewer writes one ruby fragment per storyline.
         ruby_readings = {}

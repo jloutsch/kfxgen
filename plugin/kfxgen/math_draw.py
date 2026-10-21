@@ -2,9 +2,13 @@
 (#235), by ziamath, bundled in `vendor/`.
 
 A drawing is measured in thousandths of an em from its top left corner, y
-downwards; `depth` is how far it reaches below the text's baseline. Each
-path is a KFX path list: 0 move, 1 line, 2 quadratic curve, 3 cubic curve,
-4 close, each followed by its points."""
+downwards; `depth` is how far it reaches below the text's baseline. It
+places paths: (glyph, path, matrix), the path a KFX path list (0 move,
+1 line, 2 quadratic curve, 3 cubic curve, 4 close, each followed by its
+points) and the matrix (a, b, c, d, e, f) placing it, as SVG's. A glyph's
+path is the same in every equation, so a book stores it once, as Kindle
+Previewer does; a fraction or root bar has no glyph and is placed as it
+is drawn."""
 
 import copy
 import logging
@@ -18,6 +22,9 @@ MathDrawing = namedtuple("MathDrawing", "width height depth paths")
 
 #: ziamath's size: one unit is a thousandth of an em, as in Previewer's.
 _EM = 1000
+#: A glyph's path is kept in hundredths of its own units, in whole numbers.
+_GLYPH = 100
+_IDENTITY = (1, 0, 0, 1, 0, 0)
 _NOT_DRAWN = {"annotation", "annotation-xml"}
 _COMMANDS = {"M": (0, 2), "L": (1, 2), "Q": (2, 4), "C": (3, 6), "Z": (4, 0)}
 _TOKEN = re.compile(r"[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)(?:[eE]-?\d+)?")
@@ -79,9 +86,10 @@ def _source(math):
     return etree.tostring(math, encoding="unicode")
 
 
-def _path(d, x0, y0):
+def _path(d, x0, y0, scale=1):
     """An SVG path's absolute M, L, H, V, Q, C and Z commands as a KFX
-    path list, moved so (x0, y0) is 0, 0; None for anything else."""
+    path list, moved so (x0, y0) is 0, 0 and multiplied by `scale`; None
+    for anything else."""
     out, x, y, start = [], 0.0, 0.0, (0.0, 0.0)
     tokens = _TOKEN.findall(d)
     i = 0
@@ -92,7 +100,7 @@ def _path(d, x0, y0):
             v = float(tokens[i])
             i += 1
             x, y = (v, y) if cmd == "H" else (x, v)
-            out += [1, round(x - x0), round(y - y0)]
+            out += [1, round((x - x0) * scale), round((y - y0) * scale)]
             continue
         if cmd not in _COMMANDS:
             return None
@@ -101,7 +109,7 @@ def _path(d, x0, y0):
         i += n
         out.append(code)
         for j in range(0, n, 2):
-            out += [round(nums[j] - x0), round(nums[j + 1] - y0)]
+            out += [round((nums[j] - x0) * scale), round((nums[j + 1] - y0) * scale)]
         if n:
             x, y = nums[-2], nums[-1]
         if cmd == "M":
@@ -131,6 +139,52 @@ class _Unknown(logging.Handler):
             self.seen = True
 
 
+def _placements(svg, x0, y0):
+    """ziamath's SVG as (glyph, path, matrix) placements, moved so (x0, y0)
+    is 0, 0; None for anything it can't place."""
+    symbols, inside = {}, set()
+    for e in svg.iter():
+        if _local(e.tag) == "symbol":
+            path = []
+            for p in e.iter():
+                if _local(p.tag) == "path":
+                    inside.add(id(p))
+                    part = _path(p.get("d", ""), 0, 0, _GLYPH)
+                    if part is None:
+                        return None
+                    path += part
+            symbols[e.get("id")] = ([float(v) for v in e.get("viewBox").split()], path)
+    placed = []
+    for e in svg.iter():
+        local = _local(e.tag)
+        if local in ("svg", "g", "symbol") or id(e) in inside:
+            continue
+        if local == "use":
+            href = e.get("href") or e.get("{http://www.w3.org/1999/xlink}href", "")
+            (vx, vy, vw, vh), path = symbols[href.lstrip("#")]
+            scale, scale_y = float(e.get("width")) / vw, float(e.get("height")) / vh
+            if abs(scale - scale_y) > scale / 1000:
+                return None
+            x = float(e.get("x", 0)) - vx * scale - x0
+            y = float(e.get("y", 0)) - vy * scale - y0
+            s = round(scale / _GLYPH, 6)
+            placed.append(
+                (href.lstrip("#"), tuple(path), (s, 0, 0, s, round(x, 1), round(y, 1)))
+            )
+        elif local == "rect":
+            placed.append((None, tuple(_rect(e, x0, y0)), _IDENTITY))
+        elif local == "path":
+            path = _path(e.get("d", ""), x0, y0)
+            if path is None:
+                return None
+            placed.append((None, tuple(path), _IDENTITY))
+        else:
+            return None
+    if any(not path for _key, path, _m in placed):
+        return None
+    return placed
+
+
 def draw(math):
     """The `<math>` element drawn, or None when it can't be."""
     zm = _ziamath()
@@ -144,9 +198,9 @@ def draw(math):
         root.setLevel(logging.WARNING)
     root.addHandler(unknown)
     try:
-        # Each glyph as a path in place, not a <symbol> and its <use>.
-        zm.config.svg2 = False
-        zm.config.precision = 1
+        # Each glyph a <symbol>, placed by a <use>.
+        zm.config.svg2 = True
+        zm.config.precision = 3
         svg = ET.fromstring(zm.Math(source, size=_EM).svg())
         x0, y0, w, h = (float(v) for v in svg.get("viewBox").split())
     except Exception:
@@ -156,20 +210,10 @@ def draw(math):
         root.setLevel(level)
     if unknown.seen:
         return None
-    paths = []
-    for e in svg.iter():
-        local = _local(e.tag)
-        if local == "path":
-            path = _path(e.get("d", ""), x0, y0)
-        elif local == "rect":
-            path = _rect(e, x0, y0)
-        elif local in ("svg", "g"):
-            continue
-        else:
-            return None
-        if not path:
-            return None
-        paths.append(tuple(path))
+    try:
+        paths = _placements(svg, x0, y0)
+    except (ValueError, KeyError, ZeroDivisionError):
+        return None
     if not paths:
         return None
     return MathDrawing(round(w), round(h), round(y0 + h), tuple(paths))

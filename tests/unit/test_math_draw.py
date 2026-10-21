@@ -1,8 +1,10 @@
 """An equation drawn as glyph outlines (#235).
 
 A drawing is measured in thousandths of an em from its top left corner, y
-downwards, with its depth below the baseline; each path is a KFX path list
-(0 move, 1 line, 2 quadratic, 3 cubic, 4 close)."""
+downwards, with its depth below the baseline. It places paths, each a KFX
+path list (0 move, 1 line, 2 quadratic, 3 cubic, 4 close) with a matrix:
+a glyph's path is the same wherever it is placed, so a book stores it once,
+as Kindle Previewer does."""
 
 import pytest
 from lxml import etree
@@ -36,14 +38,20 @@ def _points(path):
     return points
 
 
+def _placed(item):
+    """A placement's points, through its matrix."""
+    _key, path, (a, b, c, d, e, f) = item
+    return [(a * x + c * y + e, b * x + d * y + f) for x, y in _points(path)]
+
+
 @pytest.mark.unit
 def test_an_equation_is_drawn_inside_its_box():
     d = _draw(R2)
     assert 500 < d.width < 1000 and 600 < d.height < 1100
     assert 0 <= d.depth < d.height
     assert len(d.paths) == 2  # r and 2
-    for path in d.paths:
-        for x, y in _points(path):
+    for item in d.paths:
+        for x, y in _placed(item):
             assert -2 <= x <= d.width + 2 and -2 <= y <= d.height + 2
 
 
@@ -51,7 +59,10 @@ def test_an_equation_is_drawn_inside_its_box():
 def test_a_fraction_bar_is_a_closed_path():
     d = _draw(f"<math {M}><mfrac><mn>1</mn><mn>2</mn></mfrac></math>")
     assert len(d.paths) == 3
-    assert any(p[0] == 0 and p[-1] == 4 and len(_points(p)) == 4 for p in d.paths)
+    assert any(
+        key is None and p[0] == 0 and p[-1] == 4 and len(_points(p)) == 4
+        for key, p, _m in d.paths
+    )
 
 
 @pytest.mark.unit
@@ -130,8 +141,8 @@ def test_a_relative_svg_command_is_refused():
 @pytest.mark.unit
 def test_a_fraction_bar_is_a_rectangle_across_the_fraction():
     d = _draw(f"<math {M}><mfrac><mn>1</mn><mn>2</mn></mfrac></math>")
-    (bar,) = [p for p in d.paths if len(p) == 13 and p[-1] == 4]
-    (x, y), (right, top), (right2, bottom), (x2, bottom2) = _points(bar)
+    (bar,) = [item for item in d.paths if item[0] is None]
+    (x, y), (right, top), (right2, bottom), (x2, bottom2) = _placed(bar)
     assert (top, right2, bottom2, x2) == (y, right, bottom, x)
     assert right - x > d.width / 2 and 0 < bottom - y < d.height / 10
 
@@ -194,3 +205,19 @@ def test_an_unknown_element_is_seen_when_warnings_are_off():
         assert root.level == logging.ERROR
     finally:
         root.setLevel(level)
+
+
+@pytest.mark.unit
+def test_a_glyph_placed_twice_is_one_path():
+    d = _draw(f"<math {M}><mi>r</mi><mo>+</mo><mi>r</mi></math>")
+    first, _plus, second = d.paths
+    assert first[0] == second[0] is not None and first[1] == second[1]
+    assert second[2][4] > first[2][4]  # further right
+
+
+@pytest.mark.unit
+def test_a_glyph_is_the_same_path_in_every_equation():
+    one = {k: p for k, p, _m in _draw(R2).paths}
+    two = {k: p for k, p, _m in _draw(f"<math {M}><mi>r</mi><mi>s</mi></math>").paths}
+    shared = set(one) & set(two)
+    assert shared and all(one[k] == two[k] for k in shared)

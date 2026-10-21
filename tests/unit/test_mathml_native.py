@@ -162,9 +162,16 @@ def test_the_shape_points_into_the_path_bundle(tmp_path):
     refs = [
         p["$249"] for x in mixed if not isinstance(x, str) for p in _shape(x)[1]["$250"]
     ]
-    assert len(refs) == len(paths) == 5  # r, 2; 1, 2, the bar
-    assert sorted(int(r["$403"]) for r in refs) == list(range(5))
+    assert len(refs) == 5  # r, 2; 1, 2, the bar
+    assert sorted({int(r["$403"]) for r in refs}) == list(range(len(paths)))
     assert {str(r["name"]) for r in refs} == {str(bundle["name"])}
+
+
+@pytest.mark.unit
+def test_a_glyph_used_again_is_stored_once(tmp_path):
+    frags = _book(tmp_path, [_chapter(f"<p>{R2} and {R2}</p><p>{R2}</p>")])
+    (bundle_frag,) = by_type(frags, "$692")
+    assert len(val(bundle_frag)["$693"]) == 2  # r and 2
 
 
 @pytest.mark.unit
