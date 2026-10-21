@@ -7,6 +7,7 @@ path is a KFX path list: 0 move, 1 line, 2 quadratic curve, 3 cubic curve,
 4 close, each followed by its points."""
 
 import copy
+import logging
 import re
 import xml.etree.ElementTree as ET
 from collections import namedtuple
@@ -39,13 +40,30 @@ def _ziamath():
 
 def _source(math):
     """The equation as ziamath reads it: annotations out, `<semantics>`
-    unwrapped, and a hyphen-minus operator written as a minus sign, which
-    keeps it clear of ziamath's rewrite of `<mo>-</mo>`, a regex that
-    swallows the markup between two of them."""
+    unwrapped, an `<maction>` replaced by its selected child, and a
+    hyphen-minus operator written as a minus sign, which keeps it clear of
+    ziamath's rewrite of `<mo>-</mo>`, a regex that swallows the markup
+    between two of them. None for an equation holding an `<mglyph>`, a
+    picture ziamath doesn't draw."""
     from lxml import etree
 
     math = copy.deepcopy(math)
     math.tail = None
+    if any(_local(e.tag) == "mglyph" for e in math.iter()):
+        return None
+    for e in list(math.iter()):
+        parent = e.getparent()
+        if _local(e.tag) == "maction" and parent is not None:
+            kids = list(e)
+            try:
+                chosen = kids[int(e.get("selection", 1)) - 1] if kids else None
+            except (ValueError, IndexError):
+                chosen = kids[0]
+            if chosen is not None:
+                chosen.tail = e.tail
+                parent.replace(e, chosen)
+            else:
+                parent.remove(e)
     for e in list(math.iter()):
         if _local(e.tag) in _NOT_DRAWN and e.getparent() is not None:
             e.getparent().remove(e)
@@ -100,18 +118,43 @@ def _rect(e, x0, y0):
     return [0, x, y, 1, right, y, 1, right, bottom, 1, x, bottom, 4]
 
 
+class _Unknown(logging.Handler):
+    """Notes ziamath's warning for an element it doesn't know, which it
+    lays out as a plain row."""
+
+    def __init__(self):
+        super().__init__(logging.WARNING)
+        self.seen = False
+
+    def emit(self, record):
+        if str(record.msg).startswith("Undefined element"):
+            self.seen = True
+
+
 def draw(math):
     """The `<math>` element drawn, or None when it can't be."""
     zm = _ziamath()
-    if zm is None:
+    source = _source(math) if zm is not None else None
+    if source is None:
         return None
+    unknown = _Unknown()
+    root = logging.getLogger()
+    level = root.level
+    if root.getEffectiveLevel() > logging.WARNING:
+        root.setLevel(logging.WARNING)
+    root.addHandler(unknown)
     try:
         # Each glyph as a path in place, not a <symbol> and its <use>.
         zm.config.svg2 = False
         zm.config.precision = 1
-        svg = ET.fromstring(zm.Math(_source(math), size=_EM).svg())
+        svg = ET.fromstring(zm.Math(source, size=_EM).svg())
         x0, y0, w, h = (float(v) for v in svg.get("viewBox").split())
     except Exception:
+        return None
+    finally:
+        root.removeHandler(unknown)
+        root.setLevel(level)
+    if unknown.seen:
         return None
     paths = []
     for e in svg.iter():

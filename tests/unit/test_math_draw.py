@@ -149,3 +149,48 @@ def test_annotations_raise_no_ziamath_warning(caplog):
     assert [
         r.getMessage() for r in caplog.records if "Undefined" in r.getMessage()
     ] == []
+
+
+@pytest.mark.unit
+def test_maction_draws_its_selected_child():
+    toggled = _draw(
+        f"<math {M}><maction actiontype='toggle' selection='2'><mi>a</mi>"
+        "<msup><mi>r</mi><mn>2</mn></msup></maction></math>"
+    )
+    assert toggled == _draw(R2)
+    first = _draw(
+        f"<math {M}><maction actiontype='toggle'><mi>r</mi><mi>a</mi></maction></math>"
+    )
+    assert first == _draw(f"<math {M}><mi>r</mi></math>")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "body",
+    [
+        "<mstack><mn>12</mn><msrow><mo>+</mo><mn>3</mn></msrow></mstack>",
+        "<mlongdiv><mn>3</mn><mn>12</mn></mlongdiv>",
+        "<mi>a</mi><mi><mglyph src='a.png' alt='a'/></mi>",
+    ],
+)
+def test_an_element_ziamath_cant_draw_leaves_the_equation_undrawn(body):
+    """ziamath lays out an element it doesn't know as a plain row, and draws
+    no picture for an `<mglyph>`: the equation is written as text instead."""
+    assert _draw(f"<math {M}>{body}</math>") is None
+
+
+@pytest.mark.unit
+def test_an_unknown_element_is_seen_when_warnings_are_off():
+    import logging
+
+    root = logging.getLogger()
+    level = root.level
+    root.setLevel(logging.ERROR)
+    try:
+        assert (
+            _draw(f"<math {M}><mlongdiv><mn>3</mn><mn>12</mn></mlongdiv></math>")
+            is None
+        )
+        assert root.level == logging.ERROR
+    finally:
+        root.setLevel(level)
