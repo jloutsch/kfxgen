@@ -177,6 +177,8 @@ def test_the_shape_is_sized_in_ems_and_sits_on_the_baseline(tmp_path):
     assert int(shape["$66"]) == drawing.width and int(shape["$67"]) == drawing.height
     assert float(shape["$56"]["$307"]) == pytest.approx(drawing.width / 1000)
     styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    box = styles[str(mixed[1]["$157"])]
+    assert float(box["$56"]["$307"]) == pytest.approx(drawing.width / 1000)
     shift = styles[str(shape["$157"])]["$31"]
     assert float(shift["$307"]) == pytest.approx(-drawing.depth / 1000)
     assert str(shift["$306"]) == "$308"
@@ -250,3 +252,15 @@ def test_position_ids_are_unique(tmp_path):
     frags = _book(tmp_path, [_chapter(f"<p>{R2} a {HALF}</p><p>{R2}</p>")])
     eids = [int(e["$155"]) for e in _entries(frags) if "$155" in e]
     assert len(eids) == len(set(eids))
+
+
+@pytest.mark.unit
+def test_a_location_after_an_equation_counts_the_paragraphs_offset():
+    """A paragraph resumes after an equation at its own offset: a location
+    falling there names that offset, not the positions since it began."""
+    from kfxgen.native_generator import POSITIONS_PER_LOCATION, place_locations
+
+    section = [(9, 1), (1, 5, 0), (2, 1), (3, 1), (4, 1), (1, 300, 6)]
+    locations = place_locations([section])
+    # Position 110: the paragraph's second part starts at position 9, offset 6.
+    assert (1, 6 + POSITIONS_PER_LOCATION - 9) in locations

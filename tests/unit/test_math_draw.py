@@ -125,3 +125,27 @@ def test_svg_path_commands(d, path):
 @pytest.mark.unit
 def test_a_relative_svg_command_is_refused():
     assert math_draw._path("M 1 2 l 3 4", 0, 0) is None
+
+
+@pytest.mark.unit
+def test_a_fraction_bar_is_a_rectangle_across_the_fraction():
+    d = _draw(f"<math {M}><mfrac><mn>1</mn><mn>2</mn></mfrac></math>")
+    (bar,) = [p for p in d.paths if len(p) == 13 and p[-1] == 4]
+    (x, y), (right, top), (right2, bottom), (x2, bottom2) = _points(bar)
+    assert (top, right2, bottom2, x2) == (y, right, bottom, x)
+    assert right - x > d.width / 2 and 0 < bottom - y < d.height / 10
+
+
+@pytest.mark.unit
+def test_annotations_raise_no_ziamath_warning(caplog):
+    """ziamath warns of each element it doesn't know; an annotation and
+    `<semantics>` are left out before it reads the equation."""
+    _draw(
+        f"<math {M}><semantics><msup><mi>z</mi><mn>2</mn></msup>"
+        '<annotation encoding="application/x-tex">z^2</annotation>'
+        '<annotation-xml encoding="MathML-Content"><ci>z</ci></annotation-xml>'
+        "</semantics></math>"
+    )
+    assert [
+        r.getMessage() for r in caplog.records if "Undefined" in r.getMessage()
+    ] == []

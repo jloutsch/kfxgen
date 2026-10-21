@@ -98,3 +98,15 @@ def test_a_zip_path_is_split_from_a_module_path(tmp_path):
     inside = plugin / "kfxgen"
     assert _vendor.split_zip(inside) == (plugin, "kfxgen")
     assert _vendor.split_zip(tmp_path) == (None, None)
+
+
+@pytest.mark.unit
+def test_an_unpacked_folder_is_not_written_again(tmp_path, monkeypatch):
+    plugin = _plugin_zip(tmp_path / "kfxgen.zip", {"kfxgen/vendor/pkg/__init__.py": ""})
+    first = _vendor.unpack(plugin, "kfxgen", tmp_path / "cache")
+
+    def no_writes(*_a, **_k):
+        raise AssertionError("unpacked again")
+
+    monkeypatch.setattr(_vendor.os, "open", no_writes)
+    assert _vendor.unpack(plugin, "kfxgen", tmp_path / "cache") == first
