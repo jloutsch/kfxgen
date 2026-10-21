@@ -161,9 +161,12 @@ def _placements(svg, x0, y0):
             continue
         if local == "use":
             href = e.get("href") or e.get("{http://www.w3.org/1999/xlink}href", "")
-            (vx, vy, vw, _vh), path = symbols[href.lstrip("#")]
-            # ziamath scales a glyph's width and height alike.
-            scale = float(e.get("width")) / vw
+            (vx, vy, _vw, vh), path = symbols[href.lstrip("#")]
+            if not path:
+                continue  # a space or an invisible operator: no width, no outline
+            # ziamath scales a glyph's width and height alike; a symbol's
+            # height is the font's line, never 0.
+            scale = float(e.get("height")) / vh
             x = float(e.get("x", 0)) - vx * scale - x0
             y = float(e.get("y", 0)) - vy * scale - y0
             s = round(scale / _GLYPH, 6)

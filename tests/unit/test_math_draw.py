@@ -221,3 +221,19 @@ def test_a_glyph_is_the_same_path_in_every_equation():
     two = {k: p for k, p, _m in _draw(f"<math {M}><mi>r</mi><mi>s</mi></math>").paths}
     shared = set(one) & set(two)
     assert shared and all(one[k] == two[k] for k in shared)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "body, glyphs",
+    [
+        ("<mtext>a b</mtext>", 2),
+        ("<mi>a</mi><mo>&#x2062;</mo><mi>b</mi>", 2),
+        ("<mi>f</mi><mo>&#x2061;</mo><mi>x</mi>", 2),
+        ("<mtext>&#xa0;x</mtext>", 1),
+    ],
+)
+def test_a_space_or_invisible_operator_is_not_drawn(body, glyphs):
+    """ziamath gives each a glyph of no width and no outline."""
+    d = _draw(f"<math {M}>{body}</math>")
+    assert d is not None and len(d.paths) == glyphs
