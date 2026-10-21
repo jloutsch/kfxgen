@@ -271,3 +271,17 @@ def test_a_location_after_an_equation_counts_the_paragraphs_offset():
     locations = place_locations([section])
     # Position 110: the paragraph's second part starts at position 9, offset 6.
     assert (1, 6 + POSITIONS_PER_LOCATION - 9) in locations
+
+
+@pytest.mark.unit
+def test_a_book_of_display_equations_declares_no_offsets(tmp_path):
+    """An equation alone in its paragraph leaves no position part-way into
+    one, and kfxlib flags the capability declared without one."""
+    frags = _book(
+        tmp_path,
+        [_chapter(f'<p>Before.</p><math {M} display="block"><mi>x</mi></math>')],
+    )
+    (caps,) = by_type(frags, "$593")
+    assert "kfxgen.pidMapWithOffset" not in [str(c["$492"]) for c in val(caps)]
+    (features,) = by_type(frags, "$585")
+    assert "yj_mathml" in [str(f["$492"]) for f in val(features)["$590"]]

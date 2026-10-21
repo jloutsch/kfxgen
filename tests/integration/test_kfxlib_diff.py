@@ -780,3 +780,41 @@ def test_upstream_decodes_drawn_equations(upstream_kfxlib, built_kfx):
     assert "\ufffc" not in nav and "\ufffc" not in text
     for words in ("Area here.", "starts.", "Ends", "Two together.", "Cell", "The rule"):
         assert words in text, words
+
+
+def _make_display_maths(out_dir):
+    """Equations only on lines of their own (#235): no position falls part-way
+    into a paragraph."""
+    from tests.fixtures.epub_builder import EpubBuilder
+    from tests.fixtures.golden.inputs import _xhtml_page
+
+    body = f'<p>Before.</p><math {_MATHML} display="block"><mi>x</mi><mo>=</mo><mn>1</mn></math><p>After.</p>'
+    return (
+        EpubBuilder()
+        .set_metadata(title="Display", author="Golden Author")
+        .add_chapter("One", _xhtml_page("One", body).encode("utf-8"))
+        .build(out_dir, "display_maths")
+    )
+
+
+@pytest.mark.tier2
+@pytest.mark.integration
+@pytest.mark.filterwarnings("ignore:datetime.datetime.utcnow:DeprecationWarning")
+def test_upstream_reads_display_equations_without_warning(upstream_kfxlib, built_kfx):
+    from kfxlib.message_logging import set_logger
+
+    messages: list[tuple[str, str]] = []
+    set_logger(_LevelCollector(messages))
+    try:
+        with decimal.localcontext():
+            book = upstream_kfxlib(str(built_kfx("display_maths", _make_display_maths)))
+            book.decode_book()
+    finally:
+        set_logger(None)
+    unexpected = [
+        (level, m)
+        for level, m in messages
+        if level in ("warning", "error")
+        and not any(known in m for known in _BASELINE_WARNINGS)
+    ]
+    assert not unexpected, f"upstream logged on display maths: {unexpected}"

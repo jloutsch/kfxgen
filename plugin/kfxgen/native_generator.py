@@ -3710,8 +3710,10 @@ class NativeKFXGenerator:
         # textBlock goes with the $145 fragments: a book of pictures only has
         # none, so it declares nothing, as kfxlib's own conversion does (#357).
         capabilities = []
-        if ch_data.get("math_names"):
-            # Position entries part-way into a paragraph (#235).
+        if any(len(e) > 2 and e[2] for e in pos_data["position_entries_265"]):
+            # Position entries part-way into a paragraph (#235). An equation
+            # alone in its paragraph makes none, and kfxlib flags the
+            # capability declared without one.
             self.symtab.create_local_symbol("kfxgen.pidMapWithOffset")
             self.symtab.create_local_symbol("version")
             capabilities.append(
