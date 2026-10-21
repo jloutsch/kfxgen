@@ -5205,21 +5205,27 @@ def _has_media_overlays(oeb_book):
 
     parser = etree.XMLParser(resolve_entities=False, no_network=True)
     root = os.path.realpath(root)
-    try:
-        container = etree.parse(os.path.join(root, "META-INF", "container.xml"), parser)
-        for full_path in container.xpath("//*[local-name()='rootfile']/@full-path"):
-            opf = os.path.realpath(os.path.join(root, full_path))
-            if os.path.commonpath([root, opf]) != root:
-                _security_log.warning(
-                    "rejected OPF path outside the book: %r", full_path
-                )
-                continue
-            if etree.parse(opf, parser).xpath(
-                "//*[local-name()='item'][@media-overlay]"
-            ):
-                return True
-    except (OSError, ValueError, etree.Error):
+
+    def parse(path):
+        """The file at `path` in the folder, parsed; None when it is out of
+        the folder (a `..` path or a link) or can't be read."""
+        full = os.path.realpath(os.path.join(root, path))
+        try:
+            if os.path.commonpath([root, full]) != root:
+                _security_log.warning("rejected path outside the book: %r", path)
+                return None
+            return etree.parse(full, parser)
+        except (OSError, ValueError, etree.Error):
+            return None
+
+    container = parse(os.path.join("META-INF", "container.xml"))
+    if container is None:
         return False
+    # Each OPF is read on its own: one missing or broken doesn't hide the next.
+    for full_path in container.xpath("//*[local-name()='rootfile']/@full-path"):
+        opf = parse(full_path)
+        if opf is not None and opf.xpath("//*[local-name()='item'][@media-overlay]"):
+            return True
     return False
 
 

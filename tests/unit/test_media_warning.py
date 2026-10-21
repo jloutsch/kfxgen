@@ -178,6 +178,42 @@ def test_an_opf_outside_the_folder_is_not_read(tmp_path):
     assert _said(book) == []
 
 
+def _second_rootfile(book_folder, first):
+    """container.xml names `first`, then the book's own OPF."""
+    container = book_folder / "META-INF" / "container.xml"
+    rootfile = '<rootfile full-path="OPS/c.opf"'
+    container.write_text(
+        container.read_text().replace(
+            rootfile,
+            f'<rootfile full-path="{first}" media-type="application/oebps-package+xml"/>'
+            + rootfile,
+        )
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("first", ["OPS/missing.opf", "OPS/broken.opf"])
+def test_an_unreadable_first_opf_does_not_hide_a_second(tmp_path, first):
+    book = _book(tmp_path, overlays=True)
+    folder = tmp_path / "unpacked"
+    (folder / "OPS" / "broken.opf").write_text("<package><manifest>")
+    _second_rootfile(folder, first)
+    assert len(_said(book)) == 1
+
+
+@pytest.mark.unit
+def test_a_container_file_outside_the_folder_is_not_read(tmp_path):
+    """A container.xml that is a link out of the folder is ignored, as an OPF
+    path out of it is."""
+    book = _book(tmp_path, overlays=True)
+    container = tmp_path / "unpacked" / "META-INF" / "container.xml"
+    outside = tmp_path / "container.xml"
+    outside.write_bytes(container.read_bytes())
+    container.unlink()
+    container.symlink_to(outside)
+    assert _said(book) == []
+
+
 @pytest.mark.unit
 def test_an_audio_element_with_no_fallback_writes_no_block():
     from lxml import etree
