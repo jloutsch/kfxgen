@@ -5193,6 +5193,69 @@ def _with_listings_kept(oeb_book, log, metadata, cover_href, native_tables):
     )
 
 
+def _has_media_overlays(oeb_book):
+    """Whether the book pairs its pages with read-aloud narration: a
+    `media-overlay` link on a manifest item of its own OPF. calibre's
+    manifest drops those links and the SMIL files, so this reads the OPF
+    calibre unpacked into the container folder (#248)."""
+    root = getattr(getattr(oeb_book, "container", None), "rootdir", None)
+    if not root:
+        return False
+    from lxml import etree
+
+    parser = etree.XMLParser(resolve_entities=False, no_network=True)
+    root = os.path.realpath(root)
+    try:
+        container = etree.parse(os.path.join(root, "META-INF", "container.xml"), parser)
+        for full_path in container.xpath("//*[local-name()='rootfile']/@full-path"):
+            opf = os.path.realpath(os.path.join(root, full_path))
+            if os.path.commonpath([root, opf]) != root:
+                _security_log.warning(
+                    "rejected OPF path outside the book: %r", full_path
+                )
+                continue
+            if etree.parse(opf, parser).xpath(
+                "//*[local-name()='item'][@media-overlay]"
+            ):
+                return True
+    except (OSError, ValueError, etree.Error):
+        return False
+    return False
+
+
+def _warn_media(oeb_book, log):
+    """Say once per book that its narration, audio and video are left out:
+    kfxgen writes neither (#248). A clip's fallback text is written."""
+    clips = files = 0
+    for item in getattr(oeb_book, "spine", None) or ():
+        # A page that doesn't parse is skipped, as in extraction (#73).
+        try:
+            n = sum(
+                isinstance(e.tag, str) and _local_tag(e.tag) in ("audio", "video")
+                for e in item.data.iter()
+            )
+        except Exception:
+            continue
+        clips += n
+        files += bool(n)
+    what = []
+    if _has_media_overlays(oeb_book):
+        what.append("this book's read-aloud narration")
+    if clips:
+        what.append(
+            f"{clips} audio or video clip{'s' if clips != 1 else ''} "
+            f"in {files} file{'s' if files != 1 else ''}"
+        )
+    if what:
+        log.warn(
+            "  Left out, since kfxgen writes no audio or video: "
+            + " and ".join(what)
+            + ". The text and pictures are converted"
+            + (", with each clip's fallback text" if clips else "")
+            + " (#248)"
+        )
+
+
 def _warn_flattened_tables(chapters, table_blocks, log, native_tables, notes_blocks=()):
     """Say once per book how many tables were written as rows of text (#219),
     and why: native tables were turned off, or these tables fell back.
@@ -6020,6 +6083,7 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         cover_href=cover_href,
         native_tables=native_tables,
     )
+    _warn_media(oeb_book, log)
     total_chars = sum(len(ch["text"]) for ch in chapters)
     log.info(f"  Chapters: {len(chapters)}")
     log.info(f"  Total content: {total_chars:,} characters")
