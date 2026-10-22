@@ -398,3 +398,49 @@ def test_a_different_label_still_prints_above_a_drawn_heading(tmp_path):
         tmp_path, [{"title": "Another label", "text": "x", "blocks": _blocks(body)}]
     )
     assert _lines(frags) == ["Another label", "The [EQ] rule", "Body."]
+
+
+@pytest.mark.unit
+def test_a_label_mixes_alttext_and_text_as_its_equations_have_them(tmp_path):
+    """One equation has `alttext` and one doesn't: the label writes each as
+    it can (#404 mutations)."""
+    body = (
+        f'<h1>Both <math {M} alttext="r squared"><msup><mi>r</mi><mn>2</mn></msup>'
+        f"</math> and <math {M}><mfrac><mi>a</mi><mi>b</mi></mfrac></math></h1>"
+        "<p>Body.</p>"
+    )
+    frags = _book(
+        tmp_path,
+        [{"title": "Both r squared and a/b", "text": "x", "blocks": _blocks(body)}],
+    )
+    assert _lines(frags) == ["Both [EQ] and [EQ]", "Body."]
+
+
+@pytest.mark.unit
+def test_an_equation_in_a_split_headings_second_block_stays_in_place(tmp_path):
+    """The second block's runs move along by the first's length (#404
+    mutations)."""
+    body = f"<h1>The rule</h1><h1>for <math {M}><mi>x</mi></math></h1><p>Body.</p>"
+    frags = _book(
+        tmp_path,
+        [{"title": "The rule for x", "text": "x", "blocks": _blocks(body)}],
+    )
+    assert _lines(frags) == ["The rule for [EQ]", "Body."]
+
+
+@pytest.mark.unit
+def test_a_heading_without_maths_still_prints_as_its_label(tmp_path):
+    """Only a heading holding an equation prints as the book writes it: one
+    of plain text keeps printing as its label, without its line breaks (54
+    of the Gutenberg 90 would change otherwise; #404 mutations)."""
+    frags = _book(
+        tmp_path,
+        [
+            {
+                "title": "Part One",
+                "text": "x",
+                "blocks": _blocks("<h1>Part<br/>One</h1><p>Body.</p>"),
+            }
+        ],
+    )
+    assert _lines(frags) == ["Part One", "Body."]
