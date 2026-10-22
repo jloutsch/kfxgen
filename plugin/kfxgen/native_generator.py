@@ -569,19 +569,34 @@ def _ruby_heading_title(blocks, title):
 
 
 def _math_heading_title(blocks, title):
-    """(A chapter's first block's text, its runs) when `title` is that block's
-    plain text, as a producer flattens an equation into a TOC label ("The
-    ab=1 rule" for "The a/b = 1 rule"); else (`title`, None) (#402). Spaces
-    are ignored, as they are for ruby (#236)."""
-    blocks = _drop_edge_rules(blocks or ())
-    first = blocks[0] if blocks else None
-    if first is None or first.get("type") not in (None, "text"):
-        return title, None
-    plain = first.get("plain_text")
-    if not plain or "".join(title.split()) != "".join(plain.split()):
-        return title, None
-    base = first["text"].strip()
-    return base, _title_spans(first, len(base))
+    """(The text of a chapter's first blocks, their runs) when `title` is
+    those blocks as a producer writes an equation into a TOC label: its
+    source text run together ("The ab=1 rule" for "The a/b = 1 rule", #402),
+    its `alttext`, or its text; else (`title`, None). The heading then
+    prints once with its equations, as on Kindle Previewer's page, also when
+    it is split over up to three blocks (#404). Spaces are ignored, as they
+    are for ruby (#236)."""
+    want = "".join(title.split())
+    matched = []
+    for block in _drop_edge_rules(blocks or ())[:_MAX_SPLIT_TITLE_BLOCKS]:
+        if block.get("type") not in (None, "text"):
+            return title, None
+        matched.append(block)
+        if not any(b.get("label_texts") for b in matched):
+            continue
+        readings = zip(*(b.get("label_texts") or (b["text"],) * 3 for b in matched))
+        if want in {"".join("".join(r).split()) for r in readings}:
+            base, spans = "", []
+            for b in matched:
+                part = b["text"].strip()
+                if base:
+                    base += " "
+                spans += [
+                    (s + len(base), n, f) for s, n, f in _title_spans(b, len(part))
+                ]
+                base += part
+            return base, spans
+    return title, None
 
 
 def _title_spans(block, length):

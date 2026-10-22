@@ -1467,10 +1467,7 @@ def _math_parts(math, flags):
     text is also the alt text of a drawn equation without `alttext`."""
     parts = [make_anchor_mark(aid) for aid in _subtree_anchor_ids(math)]
     if _math_stray_text(math):
-        # Text outside the token elements, invalid MathML: written as it
-        # reads, as before, still without its annotations (#401 QA).
-        text = "".join(c for c in "".join(_math_text(math)) if c not in _MATH_INVISIBLE)
-        text = " ".join(text.split())
+        text = _math_reading(math)
         return parts + ([(text, flags)] if text else [])
     body = _math_row(_math_kids(math), flags, False)
     text = "".join(seg for seg, _fl in body if isinstance(seg, str))
@@ -1485,6 +1482,43 @@ def _math_parts(math, flags):
     if not text.strip():
         body = [(alt, flags)] if alt else []
     return parts + body
+
+
+def _math_reading(math):
+    """The text kfxgen writes for an equation it doesn't draw, without its
+    runs: "a/b = 1"."""
+    if _math_stray_text(math):
+        # Text outside the token elements, invalid MathML: written as it
+        # reads, as before, still without its annotations (#401 QA).
+        text = "".join(c for c in "".join(_math_text(math)) if c not in _MATH_INVISIBLE)
+        return " ".join(text.split())
+    body = _math_row(_math_kids(math), frozenset(), False)
+    return "".join(seg for seg, _fl in body if isinstance(seg, str))
+
+
+def _label_texts(elem):
+    """A block holding an equation as a producer writes it into a TOC label:
+    its source text run together ("The ab=1 rule", #402), each equation as
+    its `alttext`, or each as the text kfxgen writes for it (#404). None for
+    a block without one."""
+    if next(elem.iter(_MATHML_MATH, "math"), None) is None:
+        return None
+
+    def written(e, maths):
+        out = [e.text or ""]
+        for kid in e:
+            if kid.tag in (_MATHML_MATH, "math"):
+                out.append(maths(kid))
+            elif isinstance(kid.tag, str):
+                out.append(written(kid, maths))
+            out.append(kid.tail or "")
+        return "".join(out)
+
+    return (
+        "".join(elem.itertext()),
+        written(elem, lambda m: m.get("alttext") or _math_reading(m)),
+        written(elem, _math_reading),
+    )
 
 
 def _math_stray_text(elem):
@@ -3936,12 +3970,11 @@ def extract_blocks_from_html(
                         "heading": _local_tag(elem.tag) in _HEADING_TAGS,
                         # A table row written as a paragraph (#219).
                         "row": _local_tag(elem.tag) == "tr",
-                        # Its text as a producer flattens it into a TOC label,
-                        # "ab=1" for a/b = 1: the heading match reads it
-                        # (#402).
+                        # Its text as a producer writes it into a TOC label:
+                        # the heading match reads it (#402, #404).
                         **(
-                            {"plain_text": "".join(elem.itertext())}
-                            if next(elem.iter(_MATHML_MATH, "math"), None) is not None
+                            {"label_texts": labels}
+                            if (labels := _label_texts(elem)) is not None
                             else {}
                         ),
                         # Ids inherited from an enclosing container point at

@@ -92,6 +92,15 @@ FRAC_HEADING = (
     f"<h1>The <math {M}><mfrac><mi>a</mi><mi>b</mi></mfrac><mo>=</mo><mn>1</mn></math>"
     " rule</h1><p>After the heading.</p>"
 )
+#: The same heading under a label written from its `alttext`, and a heading
+#: split over two blocks under one label (#404).
+ALT_LABEL = "The a over b equals 1 rule"
+ALT_HEADING = FRAC_HEADING.replace("<math ", '<math alttext="a over b equals 1" ')
+SPLIT_LABEL = "The ab rule"
+SPLIT_HEADING = (
+    f"<h1>The <math {M}><mfrac><mi>a</mi><mi>b</mi></mfrac></math></h1><h1>rule</h1>"
+    "<p>After the split heading.</p>"
+)
 DISPLAY = (
     f'<math {M} display="block"><mi>x</mi><mo>=</mo><mfrac><mrow><mo>-</mo><mi>b</mi>'
     "<mo>&#xB1;</mo><msqrt><msup><mi>b</mi><mn>2</mn></msup><mo>-</mo><mn>4</mn><mi>a</mi>"
@@ -113,22 +122,31 @@ def _build(path):
         "nav.xhtml": XHTML.format(
             "Nav",
             '<nav epub:type="toc"><ol><li><a href="c1.xhtml">Maths</a></li>'
-            f'<li><a href="c2.xhtml">{FLAT_LABEL}</a></li></ol></nav>',
+            f'<li><a href="c2.xhtml">{FLAT_LABEL}</a></li>'
+            f'<li><a href="c3.xhtml">{ALT_LABEL}</a></li>'
+            f'<li><a href="c4.xhtml">{SPLIT_LABEL}</a></li></ol></nav>',
         ),
         "c1.xhtml": XHTML.format("Maths", body),
         "c2.xhtml": XHTML.format("Heading", FRAC_HEADING),
+        "c3.xhtml": XHTML.format("Alt heading", ALT_HEADING),
+        "c4.xhtml": XHTML.format("Split heading", SPLIT_HEADING),
     }
     ncx = (
         '<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">'
         '<head><meta name="dtb:uid" content="mathml"/></head><docTitle><text>MathML</text></docTitle>'
         '<navMap><navPoint id="n1" playOrder="1"><navLabel><text>Maths</text></navLabel>'
         '<content src="c1.xhtml"/></navPoint><navPoint id="n2" playOrder="2"><navLabel>'
-        f'<text>{FLAT_LABEL}</text></navLabel><content src="c2.xhtml"/></navPoint></navMap></ncx>'
+        f'<text>{FLAT_LABEL}</text></navLabel><content src="c2.xhtml"/></navPoint>'
+        f'<navPoint id="n3" playOrder="3"><navLabel><text>{ALT_LABEL}</text></navLabel>'
+        '<content src="c3.xhtml"/></navPoint><navPoint id="n4" playOrder="4"><navLabel>'
+        f'<text>{SPLIT_LABEL}</text></navLabel><content src="c4.xhtml"/></navPoint></navMap></ncx>'
     )
     items = (
         '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
         '<item id="c1" href="c1.xhtml" media-type="application/xhtml+xml" properties="mathml"/>'
         '<item id="c2" href="c2.xhtml" media-type="application/xhtml+xml" properties="mathml"/>'
+        '<item id="c3" href="c3.xhtml" media-type="application/xhtml+xml" properties="mathml"/>'
+        '<item id="c4" href="c4.xhtml" media-type="application/xhtml+xml" properties="mathml"/>'
         '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
     )
     opf = (
@@ -137,7 +155,8 @@ def _build(path):
         'xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="u">mathml'
         "</dc:identifier><dc:title>MathML</dc:title><dc:language>en</dc:language>"
         '<meta property="dcterms:modified">2026-10-20T00:00:00Z</meta></metadata>'
-        f'<manifest>{items}</manifest><spine toc="ncx"><itemref idref="c1"/><itemref idref="c2"/></spine></package>'
+        f'<manifest>{items}</manifest><spine toc="ncx"><itemref idref="c1"/><itemref idref="c2"/>'
+        '<itemref idref="c3"/><itemref idref="c4"/></spine></package>'
     )
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
@@ -232,6 +251,20 @@ def test_a_heading_with_maths_prints_once_under_a_flattened_label(converted):
     assert f"The [{FRAC_HEADING_TEXT[4:-5]}] rule" in paragraphs, (
         f"calibre {version}: {list(paragraphs)}"
     )
+
+
+@pytest.mark.parametrize(
+    ("label", "printed"),
+    [(ALT_LABEL, "The [a over b equals 1] rule"), (SPLIT_LABEL, "The [a/b] rule")],
+)
+def test_a_heading_with_maths_prints_once_under_any_label_for_it(
+    converted, label, printed
+):
+    """A label from the equation's `alttext`, or one naming a heading split
+    over two blocks: the book's heading prints once, drawn (#404)."""
+    (paragraphs, _frags), version = converted
+    assert label not in paragraphs, f"calibre {version}: {list(paragraphs)}"
+    assert printed in paragraphs, f"calibre {version}: {list(paragraphs)}"
 
 
 def test_the_book_declares_its_drawings(converted):

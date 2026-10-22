@@ -416,6 +416,44 @@ def test_a_heading_with_maths_prints_once_under_a_flattened_label(tmp_path):
     assert found["The a/b = 1 rule"] > 0  # the italic a and b
 
 
+@pytest.mark.parametrize(
+    ("alttext", "label"),
+    [
+        ("a over b equals 1", "The a over b equals 1 rule"),
+        (r"\frac{a}{b}=1", r"The \frac{a}{b}=1 rule"),
+        ("", "The a/b=1 rule"),
+        ("a over b equals 1", "The a/b=1 rule"),
+    ],
+)
+def test_a_heading_with_maths_prints_once_under_any_label_for_it(
+    tmp_path, alttext, label
+):
+    """A producer writes the label from the equation's `alttext`, words or
+    TeX, or from its text: each names the heading, which prints once with
+    its runs, as Kindle Previewer's page shows it (#404)."""
+    heading = FRAC_HEADING.replace("<math ", f'<math alttext="{alttext}" ')
+    found = _chapter_texts(
+        [{"title": label, "text": "x", "blocks": _blocks(heading + "<p>Body.</p>")}],
+        tmp_path,
+    )
+    assert list(found) == ["The a/b = 1 rule", "Body."]
+    assert found["The a/b = 1 rule"] > 0
+
+
+def test_a_maths_heading_split_over_two_blocks_prints_once(tmp_path):
+    """Previewer's page shows the book's two lines; kfxgen joins a split
+    heading into one, keeping its runs (#404)."""
+    blocks = _blocks(
+        f"<h1>The <math {M}><mfrac><mi>a</mi><mi>b</mi></mfrac></math></h1>"
+        "<h1>rule</h1><p>Body.</p>"
+    )
+    found = _chapter_texts(
+        [{"title": "The ab rule", "text": "x", "blocks": blocks}], tmp_path
+    )
+    assert list(found) == ["The a/b rule", "Body."]
+    assert found["The a/b rule"] > 0
+
+
 def test_a_chapter_of_only_a_maths_heading_keeps_its_runs(tmp_path):
     blocks = _blocks(FRAC_HEADING)
     found = _chapter_texts(
