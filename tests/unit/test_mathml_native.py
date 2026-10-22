@@ -11,11 +11,17 @@ from lxml import etree
 
 from kfxgen import converter as _conv
 from kfxgen.inline_style import math_of
+from kfxgen.kfxlib_minimal.ion import IonDecimal
 from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
 
 M = 'xmlns="http://www.w3.org/1998/Math/MathML"'
 R2 = f"<math {M}><msup><mi>r</mi><mn>2</mn></msup></math>"
 HALF = f"<math {M}><mfrac><mn>1</mn><mn>2</mn></mfrac></math>"
+QUAD = (
+    f"<math {M}><mi>x</mi><mo>=</mo><mfrac><mrow><mo>-</mo><mi>b</mi><mo>±</mo>"
+    "<msqrt><msup><mi>b</mi><mn>2</mn></msup><mo>-</mo><mn>4</mn><mi>a</mi>"
+    "<mi>c</mi></msqrt></mrow><mrow><mn>2</mn><mi>a</mi></mrow></mfrac></math>"
+)
 PLACEHOLDER = "\ufffc"
 
 
@@ -184,6 +190,42 @@ def test_a_glyph_used_again_is_stored_once(tmp_path):
     frags = _book(tmp_path, [_chapter(f"<p>{R2} and {R2}</p><p>{R2}</p>")])
     (bundle_frag,) = by_type(frags, "$692")
     assert len(val(bundle_frag)["$693"]) == 2  # r and 2
+
+
+@pytest.mark.unit
+def test_each_glyph_is_placed_where_it_was_drawn(tmp_path):
+    (block,) = _blocks(f"<p>{QUAD}</p>")
+    ((_o, (_s, drawing, _a, _src)),) = _maths(block)
+    frags = _book(tmp_path, [{"title": "One", "text": "x", "blocks": [block]}])
+    (mixed,) = _mixed(frags)
+    _inner, shape = _shape(mixed[0])
+    placed = [[float(v) for v in p["$98"]] for p in shape["$250"]]
+    assert placed == [list(m) for _g, _p, m in drawing.paths]
+
+
+@pytest.mark.unit
+def test_every_decimal_fits_in_32_bits(tmp_path):
+    """The Oasis reads a decimal's digits as a 32-bit number: x = 4474.5
+    written as 4474.500000 wrapped round to 179.5, drawing the glyph over
+    the equation's first."""
+    frags = _book(tmp_path, [_chapter(f"<p>{QUAD}</p>")])
+    found = []
+
+    def walk(node):
+        if isinstance(node, IonDecimal):
+            found.append(node)
+        elif hasattr(node, "values"):
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    for f in frags:
+        walk(val(f))
+    assert any(d > 4294 for d in found)
+    digits = {d: int("".join(map(str, d.as_tuple().digits))) for d in found}
+    assert {d: n for d, n in digits.items() if n >= 2**32} == {}
 
 
 @pytest.mark.unit

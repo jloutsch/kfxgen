@@ -1474,7 +1474,9 @@ class NativeKFXGenerator:
         )
 
         def number(v):
-            return v if isinstance(v, int) else IonDecimal(f"{v:f}")
+            # In its fewest digits: the Oasis reads a decimal's digits as a
+            # 32-bit number, so 4474.5 as 4474.500000 wraps round to 179.5.
+            return v if isinstance(v, int) else IonDecimal(str(v))
 
         paths = []
         for glyph, path, matrix in drawing.paths:
