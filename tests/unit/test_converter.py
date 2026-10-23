@@ -8715,6 +8715,35 @@ def test_hidden_inline_content_is_not_printed(body, text):
 
 
 @pytest.mark.unit
+def test_a_hidden_inline_child_of_a_mixed_container_is_not_printed():
+    # A div holding text and a block takes the container path, whose inline
+    # children go through the same hidden check (#256, #282).
+    assert _texts(
+        '<div>Text <span hidden="hidden">12</span>more<p>Block</p></div>'
+    ) == [
+        "Text more",
+        "Block",
+    ]
+
+
+@pytest.mark.unit
+def test_an_id_on_a_line_break_keeps_its_place():
+    (block,) = _conv.extract_blocks_from_html(
+        _doc('<p>line one<br id="b1"/>line two</p>'), base_href="c.xhtml"
+    )
+    assert block["text"] == "line one\nline two"
+    assert block["anchor_offsets"]["c.xhtml#b1"] == len("line one")
+
+
+@pytest.mark.unit
+def test_an_items_own_number_with_a_leading_zero_isnt_numbered_again():
+    assert _texts("<ol><li>01. First note</li><li>02. Second</li></ol>") == [
+        "01. First note",
+        "02. Second",
+    ]
+
+
+@pytest.mark.unit
 def test_a_hidden_cell_on_the_rows_path_is_not_printed():
     texts = _texts(
         '<table><tr><td>Lamp</td><td hidden="hidden">secret</td><td>lit</td></tr></table>'
