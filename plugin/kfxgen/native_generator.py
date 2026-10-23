@@ -568,30 +568,36 @@ def _ruby_heading_title(blocks, title):
     return base, _title_spans(first, len(base))
 
 
-def _math_heading_title(blocks, title):
+def _book_heading_title(blocks, title):
     """(The text of a chapter's first blocks, their runs) when `title` is
-    those blocks as a producer writes an equation into a TOC label: its
-    source text run together ("The ab=1 rule" for "The a/b = 1 rule", #402),
-    its `alttext`, or its text; else (`title`, None). The heading then
-    prints once with its equations, as on Kindle Previewer's page, also when
-    it is split over up to three blocks (#404), or when `title` is only its
-    first words (#408). Spaces are ignored, as they are for ruby (#236)."""
+    those blocks, else (`title`, None). The book's heading then prints in
+    place of the label, once and as the book writes it, as on Kindle
+    Previewer's page: its line breaks, runs and spacing, and a heading split
+    over up to three blocks on as many lines (#409). `title` matches when it
+    is their text without case, spaces or punctuation, as a duplicate
+    heading has always been found (#64), or, spaces ignored, when it writes
+    an equation as a producer does: its source text run together ("The
+    ab=1 rule" for "The a/b = 1 rule", #402), its `alttext`, or its text
+    (#404); or when it is the first words of a heading holding one (#408)."""
     want = "".join(title.split())
+    target = _normalize_title(title)
     matched = []
     for block in _drop_edge_rules(blocks or ())[:_MAX_SPLIT_TITLE_BLOCKS]:
         if block.get("type") not in (None, "text"):
             return title, None
         matched.append(block)
-        if not any(b.get("label_texts") for b in matched):
-            continue
-        forms = len(next(b["label_texts"] for b in matched if b.get("label_texts")))
+        forms = max(
+            (len(b["label_texts"]) for b in matched if b.get("label_texts")), default=1
+        )
         readings = zip(*(b.get("label_texts") or (b["text"],) * forms for b in matched))
-        if want in {"".join("".join(r).split()) for r in readings}:
+        if (
+            target and _normalize_title("".join(b["text"] for b in matched)) == target
+        ) or (want in {"".join("".join(r).split()) for r in readings}):
             base, spans = "", []
             for b in matched:
                 part = b["text"].strip()
                 if base:
-                    base += " "
+                    base += "\n"
                 spans += [
                     (s + len(base), n, f) for s, n, f in _title_spans(b, len(part))
                 ]
@@ -4558,7 +4564,7 @@ class NativeKFXGenerator:
             toc_links = chapter.get("toc_links")
             title, title_spans = _ruby_heading_title(chapter.get("blocks"), title)
             if title_spans is None:
-                title, title_spans = _math_heading_title(chapter.get("blocks"), title)
+                title, title_spans = _book_heading_title(chapter.get("blocks"), title)
 
             # Decide whether to emit the title as a heading text chunk.
             # Skip it when:

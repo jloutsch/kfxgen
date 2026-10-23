@@ -388,7 +388,7 @@ def test_a_drawn_heading_split_over_two_blocks_prints_once(tmp_path):
     frags = _book(
         tmp_path, [{"title": "The ab rule", "text": "x", "blocks": _blocks(body)}]
     )
-    assert _lines(frags) == ["The [EQ] rule", "Body."]
+    assert _lines(frags) == ["The [EQ]\nrule", "Body."]
 
 
 @pytest.mark.unit
@@ -425,25 +425,7 @@ def test_an_equation_in_a_split_headings_second_block_stays_in_place(tmp_path):
         tmp_path,
         [{"title": "The rule for x", "text": "x", "blocks": _blocks(body)}],
     )
-    assert _lines(frags) == ["The rule for [EQ]", "Body."]
-
-
-@pytest.mark.unit
-def test_a_heading_without_maths_still_prints_as_its_label(tmp_path):
-    """Only a heading holding an equation prints as the book writes it: one
-    of plain text keeps printing as its label, without its line breaks (54
-    of the Gutenberg 90 would change otherwise; #404 mutations)."""
-    frags = _book(
-        tmp_path,
-        [
-            {
-                "title": "Part One",
-                "text": "x",
-                "blocks": _blocks("<h1>Part<br/>One</h1><p>Body.</p>"),
-            }
-        ],
-    )
-    assert _lines(frags) == ["Part One", "Body."]
+    assert _lines(frags) == ["The rule\nfor [EQ]", "Body."]
 
 
 RUBY_MATHS = (
@@ -494,7 +476,7 @@ def test_a_split_heading_matches_under_its_alttext_label(tmp_path):
     frags = _book(
         tmp_path, [{"title": "The a over b rule", "text": "x", "blocks": _blocks(body)}]
     )
-    assert _lines(frags) == ["The [EQ] rule", "Body."]
+    assert _lines(frags) == ["The [EQ]\nrule", "Body."]
 
 
 @pytest.mark.unit

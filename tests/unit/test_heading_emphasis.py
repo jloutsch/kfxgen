@@ -105,10 +105,11 @@ def test_a_css_italic_word_in_a_heading_stays_italic(tmp_path):
 
 @pytest.mark.unit
 def test_a_label_in_other_capitals_keeps_the_emphasis(tmp_path):
-    """The label prints; the book's runs mark the same letters."""
+    """The book's heading prints, in its own capitals and with its runs, in
+    place of the label (#409; the label printed until then)."""
     ch = _chapter("THE HARBOUR", "<h1>The <i>Harbour</i></h1><p>Text.</p>")
-    _, _, runs = _heading(_book(tmp_path, [ch]), "THE HARBOUR")
-    (word,) = [s for t, s in runs if t == "HARBOUR"]
+    _, _, runs = _heading(_book(tmp_path, [ch]), "The Harbour")
+    (word,) = [s for t, s in runs if t == "Harbour"]
     assert _italic(word)
 
 
