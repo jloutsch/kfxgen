@@ -2367,20 +2367,17 @@ class NativeKFXGenerator:
 
         return YJFragment(symbol_table_data)
 
-    def build_fragment_270(self, container_id, entity_map):
+    def build_fragment_270(self, container_id):
         """
         Builds Fragment $270 (Container Info)
 
         This fragment is REQUIRED by the KFX container format. It contains:
         - Container ID (CR!...)
         - Compression and DRM settings
-        - Entity map ($181) listing all fragment types and their entity IDs
         - Application version info
 
         Args:
             container_id: String (e.g. "CR!FEHAKUKMU05DIVSIJBZWPW44H9VH")
-            entity_map: List of [ftype_id, entity_id] pairs
-                       e.g., [[585, 348], [490, 348], [145, 348], ...]
 
         Returns:
             YJFragment with type $270
@@ -2402,8 +2399,6 @@ class NativeKFXGenerator:
             CONTAINER_FORMAT_KFX_MAIN,  # Container format
             IS("version"),
             2,  # Version
-            IS("$181"),
-            entity_map,  # Entity map [[ftype_id, entity_id], ...]
         )
 
         return YJFragment(ftype=IS("$270"), value=value)
@@ -3843,60 +3838,7 @@ class NativeKFXGenerator:
         self.fragments.append(self.build_fragment_419(container_id, all_entity_names))
 
         # 15. Build $270 container info fragment (REQUIRED)
-        def get_id(name):
-            return self.symtab.get_id(IS(name))
-
-        entity_map = [
-            [585, 348],
-            [490, 348],
-            [258, 348],
-            [538, 348],
-            [389, 348],
-        ]
-        for cname in content_names:
-            entity_map.append([145, get_id(cname)])
-        for sname in story_names:
-            entity_map.append([157, get_id(sname)])
-        for sname in extra_style_names:
-            entity_map.append([157, get_id(sname)])
-        for sl_name in storyline_names:
-            entity_map.append([259, get_id(sl_name)])
-        for sec_name in section_names:
-            entity_map.append([260, get_id(sec_name)])
-        for anchor_name in anchor_names:
-            entity_map.append([266, get_id(anchor_name)])
-        entity_map.extend(
-            [
-                [264, 348],
-                [265, 348],
-                [550, 348],
-            ]
-        )
-        for ad_name in section_ad_names:
-            entity_map.append([597, get_id(ad_name)])
-        for ruby_name in ruby_names:
-            entity_map.append([756, get_id(ruby_name)])
-        for math_name in ch_data.get("math_names", []):
-            entity_map.append([692, get_id(math_name)])
-        if cover_resource_name:
-            entity_map.append([164, get_id(cover_resource_name)])
-            entity_map.append([417, get_id(cover_location_name)])
-        for resource_name, location_name in image_resources.values():
-            entity_map.append([164, get_id(resource_name)])
-            entity_map.append([417, get_id(location_name)])
-        # Embedded fonts (#15): $262 (@font-face decl, self-keyed root -> id
-        # 262) + $418 (raw bytes, keyed by location). Without these the reader
-        # can't resolve the font resources and falls back to the device font.
-        for face in self.font_table.faces:
-            entity_map.append([262, get_id("$262")])
-            entity_map.append([418, get_id(face.location)])
-        entity_map.extend(
-            [
-                [395, 348],
-                [419, 348],
-            ]
-        )
-        self.fragments.append(self.build_fragment_270(container_id, entity_map))
+        self.fragments.append(self.build_fragment_270(container_id))
 
         if self._wrote_zoom_table:
             self._declare_table_viewer()
@@ -4072,7 +4014,7 @@ class NativeKFXGenerator:
                 chunk_positions: List of content position IDs (one per chunk)
                 chapter_chunk_ranges: List of (start_idx, end_idx) per chapter
                 all_chunks: List of chunk text strings
-                anchor_names: List of $266 anchor entity names (for entity map/index)
+                anchor_names: List of $266 anchor entity names (for the entity index)
                 extra_style_names: List of additional $157 style names (headings, links)
         """
         # Per-chapter $145 fragments (#2): each chapter owns its own content

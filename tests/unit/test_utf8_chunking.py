@@ -1,9 +1,11 @@
 """
 UTF-8 multibyte chunking boundary tests (#52).
 
-Council finding (Feynman): the chunker at
-`plugin/kfxgen/native_generator.py::_split_long_text` slices on
-`len(text)` and `text[pos:pos+CHUNK_SIZE]`. The original concern was
+Council finding (Feynman): the chunker this was written against,
+`native_generator.py::_split_long_text`, sliced on `len(text)` and
+`text[pos:pos+CHUNK_SIZE]`. #226 replaced it with one entry per
+paragraph and it has since been deleted (#282); these tests still pin
+long multibyte paragraphs through the code that replaced it. The original concern was
 that this might split surrogate pairs or otherwise corrupt multi-byte
 UTF-8 characters at chunk boundaries.
 
@@ -100,7 +102,7 @@ def _max_position_id(frags) -> int:
 @pytest.mark.unit
 class TestMultibyteChunking:
     """Probe the chunker against non-Latin input. Each test generates
-    a book whose chapter text exceeds CHUNK_SIZE (2000 chars) using
+    a book whose chapter text exceeds the old 2,000-character chunk using
     multibyte UTF-8 characters, then asserts the output is valid."""
 
     def test_emoji_only_chunks_are_valid_utf8(self):

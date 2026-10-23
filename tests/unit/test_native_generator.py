@@ -1474,22 +1474,25 @@ def test_override_kindle_font_false_without_fonts():
     assert _override_kindle_font(frag) is False
 
 
-def test_fonts_registered_in_entity_map_and_index():
-    # kfxlib rejects font fragments that aren't registered in the $270 entity
-    # map / $419 entity index ("missing from entity map"), which stops the
-    # Kindle from resolving them. Every emitted face must appear in both.
+def test_fonts_registered_in_entity_map_and_index(tmp_path):
+    # kfxlib rejects font fragments that aren't registered in the container's
+    # entity map / $419 entity index ("missing from entity map"), which stops
+    # the Kindle from resolving them. The map is the one the container writes
+    # from the fragments it holds (#282), read back from the file.
     from kfxgen.font_table import Face, FontTable
 
     g = NativeKFXGenerator()
     face = Face("foo", 400, False, b"\x00\x01\x00\x00x", "foo-400", "resource/font0")
+    out = tmp_path / "fonts.kfx"
     g.generate_full_book(
         title="T",
         author="A",
         chapters=[{"title": "C1", "text": "Hi."}],
         font_table=FontTable([face]),
+        output_path=str(out),
     )
-    frag270 = next(f for f in g.fragments if str(f.ftype) == "$270")
-    ftypes = {pair[0] for pair in frag270.value[IS("$181")]}
+    (container,) = by_type(load_fragments(out), "$270")
+    ftypes = {int(kind) for kind, _id in val(container)["$181"]}
     assert 262 in ftypes  # @font-face decl registered
     assert 418 in ftypes  # raw font bytes registered
 
