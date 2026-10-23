@@ -574,8 +574,8 @@ def _math_heading_title(blocks, title):
     source text run together ("The ab=1 rule" for "The a/b = 1 rule", #402),
     its `alttext`, or its text; else (`title`, None). The heading then
     prints once with its equations, as on Kindle Previewer's page, also when
-    it is split over up to three blocks (#404). Spaces are ignored, as they
-    are for ruby (#236)."""
+    it is split over up to three blocks (#404), or when `title` is only its
+    first words (#408). Spaces are ignored, as they are for ruby (#236)."""
     want = "".join(title.split())
     matched = []
     for block in _drop_edge_rules(blocks or ())[:_MAX_SPLIT_TITLE_BLOCKS]:
@@ -597,7 +597,34 @@ def _math_heading_title(blocks, title):
                 ]
                 base += part
             return base, spans
+    # A label of the heading's first words names the whole heading, as on
+    # Kindle Previewer's page; prose opening with them doesn't (#408).
+    first = next(iter(_drop_edge_rules(blocks or ())), None)
+    if (
+        first is not None
+        and first.get("heading")
+        and want
+        and any(_opens_with_words(f, want) for f in first.get("label_texts") or ())
+    ):
+        base = first["text"].strip()
+        return base, _title_spans(first, len(base))
     return title, None
+
+
+def _opens_with_words(text, want):
+    """Whether `text`, spaces ignored, opens with `want` and a word ends
+    there: "The x rule and more" opens with "Thexrule" but not "Thexru"."""
+    i = 0
+    for k, ch in enumerate(text):
+        if ch.isspace():
+            continue
+        if ch != want[i]:
+            return False
+        i += 1
+        if i == len(want):
+            rest = text[k + 1 :]
+            return not rest or not rest[0].isalnum()
+    return False
 
 
 def _title_spans(block, length):

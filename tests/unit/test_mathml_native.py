@@ -509,3 +509,37 @@ def test_a_label_of_the_source_text_keeps_rp_brackets(tmp_path, rp):
     label = f"漢{rp[0]}kan{rp[1]}字 x"
     frags = _book(tmp_path, [{"title": label, "text": "x", "blocks": _blocks(body)}])
     assert _lines(frags) == ["漢字 [EQ]", "Body."]
+
+
+PREFIX_HEADING = f"<h1>The <math {M}><mi>x</mi></math> rule and more</h1><p>Body.</p>"
+
+
+@pytest.mark.unit
+def test_a_label_opening_a_drawn_heading_names_the_whole_heading(tmp_path):
+    """The label is the heading's first words: the heading prints once, whole,
+    as on Kindle Previewer's page (#408)."""
+    frags = _book(
+        tmp_path,
+        [{"title": "The x rule", "text": "x", "blocks": _blocks(PREFIX_HEADING)}],
+    )
+    assert _lines(frags) == ["The [EQ] rule and more", "Body."]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("body", "label"),
+    [
+        (PREFIX_HEADING, "The x ru"),
+        (
+            f"<p>The <math {M}><mi>x</mi></math> rule and more</p><p>Body.</p>",
+            "The x rule",
+        ),
+    ],
+)
+def test_a_label_ending_mid_word_or_opening_a_paragraph_prints_above_it(
+    tmp_path, body, label
+):
+    """Only whole words, and only a heading: prose that opens with the label's
+    words is not the chapter's heading (#408)."""
+    frags = _book(tmp_path, [{"title": label, "text": "x", "blocks": _blocks(body)}])
+    assert _lines(frags) == [label, "The [EQ] rule and more", "Body."]

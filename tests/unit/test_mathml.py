@@ -454,6 +454,19 @@ def test_a_maths_heading_split_over_two_blocks_prints_once(tmp_path):
     assert found["The a/b rule"] > 0
 
 
+def test_a_label_opening_a_maths_heading_names_the_whole_heading(tmp_path):
+    """The heading prints once, whole and with its runs, not the label and
+    then the rest of the heading (#408)."""
+    blocks = _blocks(
+        f"<h1>The <math {M}><mi>x</mi></math> rule and more</h1><p>Body.</p>"
+    )
+    found = _chapter_texts(
+        [{"title": "The x rule", "text": "x", "blocks": blocks}], tmp_path
+    )
+    assert list(found) == ["The x rule and more", "Body."]
+    assert found["The x rule and more"] > 0
+
+
 def test_a_chapter_of_only_a_maths_heading_keeps_its_runs(tmp_path):
     blocks = _blocks(FRAC_HEADING)
     found = _chapter_texts(
