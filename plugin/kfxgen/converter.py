@@ -3894,7 +3894,9 @@ def extract_blocks_from_html(
             past_start = set(table["anchor_ids"]) - _table_start_ids(table)
             native = not (toc_targets and past_start & set(toc_targets))
             if not native and nav_listing_at is not None:
-                # The rows walk below records any listing again.
+                # Drop what the native attempt recorded: the rows walk below
+                # records its own, and keeps a listing inside a cell as the
+                # row's text, recording none (#282).
                 del nav_listing_at[listings:]
         if native:
             # The caption is walked like any block, as the rows build walks

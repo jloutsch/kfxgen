@@ -2929,6 +2929,52 @@ def test_a_contents_listing_in_a_cell_is_recorded_at_the_table():
 
 
 @pytest.mark.unit
+def test_a_contents_listing_in_a_table_that_keeps_rows_leaves_no_record():
+    # A TOC entry past the table's start keeps it as rows (#219). The native
+    # attempt recorded the listing in its cell; that record is dropped, or it
+    # would mark a listing the rows walk doesn't drop (#282). The rows walk
+    # keeps the listing's text in its row and records none.
+    at = []
+    blocks = extract_blocks_from_html(
+        _doc(
+            "<p>Intro</p><table><tr><td>x</td></tr><tr id='r2'><td><p>a</p>"
+            '<div class="toc"><p>Chapter 1</p></div></td></tr></table><p>After</p>'
+        ),
+        native_tables=True,
+        nav_listing_at=at,
+        toc_targets={"r2"},
+    )
+    assert [b["text"] for b in blocks] == ["Intro", "x", "a Chapter 1", "After"]
+    assert at == []
+
+
+@pytest.mark.unit
+def test_an_anchor_at_a_paragraph_cells_end_goes_on_its_last_paragraph():
+    table, _ = _native_table(
+        '<table><tr><td><p>a</p><p>b</p><a id="x"></a></td></tr></table>'
+    )
+    paragraphs = _cell(table, 0, 0)["paragraphs"]
+    assert "x" in paragraphs[-1]["anchor_ids"]
+
+
+@pytest.mark.unit
+def test_a_list_items_marker_waits_past_a_paragraph_cell_for_its_text():
+    # The cell sets the item's pending "1." aside and puts it back, so it
+    # goes on the first text after the table (#261, #282).
+    blocks = extract_blocks_from_html(
+        _doc(
+            "<ol><li><table><tr><td><p>a</p><p>b</p></td></tr></table>"
+            "<p>after</p></li><li>two</li></ol>"
+        ),
+        native_tables=True,
+    )
+    assert [b["text"] for b in blocks if b.get("type") != "table"] == [
+        "1. after",
+        "2. two",
+    ]
+
+
+@pytest.mark.unit
 def test_paragraphs_in_a_cell_get_anchor_keys():
     table, blocks = _native_table(
         '<table><tr><td><p>a</p><p id="two">b</p></td></tr></table>'
