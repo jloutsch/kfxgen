@@ -543,3 +543,28 @@ def test_a_label_ending_mid_word_or_opening_a_paragraph_prints_above_it(
     words is not the chapter's heading (#408)."""
     frags = _book(tmp_path, [{"title": label, "text": "x", "blocks": _blocks(body)}])
     assert _lines(frags) == [label, "The [EQ] rule and more", "Body."]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("body", "label", "lines"),
+    [
+        # A rule above the heading is passed over, as for a whole match.
+        ("<hr/>" + PREFIX_HEADING, "The x rule", ["The [EQ] rule and more", "Body."]),
+        # Any label form opens the heading: here its alttext.
+        (
+            f'<h1>The <math {M} alttext="ex"><mi>x</mi></math> rule and more</h1>'
+            "<p>Body.</p>",
+            "The ex rule",
+            ["The [EQ] rule and more", "Body."],
+        ),
+        # An empty label opens nothing.
+        (PREFIX_HEADING, "", ["The [EQ] rule and more", "Body."]),
+    ],
+)
+def test_a_label_opening_a_drawn_heading_after_a_rule_or_by_alttext(
+    tmp_path, body, label, lines
+):
+    """(#408 mutations)"""
+    frags = _book(tmp_path, [{"title": label, "text": "x", "blocks": _blocks(body)}])
+    assert [line for line in _lines(frags) if line] == lines

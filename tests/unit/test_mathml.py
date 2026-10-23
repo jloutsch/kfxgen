@@ -467,6 +467,21 @@ def test_a_label_opening_a_maths_heading_names_the_whole_heading(tmp_path):
     assert found["The x rule and more"] > 0
 
 
+def test_a_chapter_of_only_a_heading_its_label_opens_keeps_its_runs(tmp_path):
+    """Nothing is left to cut the heading from, so its runs come with the
+    match (#408 mutations)."""
+    blocks = _blocks(f"<h1>The <math {M}><mi>x</mi></math> rule and more</h1>")
+    found = _chapter_texts(
+        [
+            {"title": "The x rule", "text": "The x rule and more", "blocks": blocks},
+            {"title": "Two", "text": "y", "blocks": _blocks("<p>Body.</p>")},
+        ],
+        tmp_path,
+    )
+    assert "The x rule" not in found
+    assert found["The x rule and more"] > 0
+
+
 def test_a_chapter_of_only_a_maths_heading_keeps_its_runs(tmp_path):
     blocks = _blocks(FRAC_HEADING)
     found = _chapter_texts(
