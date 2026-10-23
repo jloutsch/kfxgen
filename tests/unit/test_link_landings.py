@@ -68,8 +68,8 @@ def test_a_cover_books_contents_links_open_their_own_chapters(tmp_path):
                 "title": "Contents",
                 "text": "",
                 "toc_links": [
-                    {"text": "Chapter 1", "target_chapter_idx": 1},
-                    {"text": "Chapter 2", "target_chapter_idx": 2},
+                    {"text": "To one", "target_chapter_idx": 1},
+                    {"text": "To two", "target_chapter_idx": 2},
                 ],
             },
             {"title": "Chapter 1", "text": "Chapter 1\n\nFirst chapter body."},
@@ -79,8 +79,9 @@ def test_a_cover_books_contents_links_open_their_own_chapters(tmp_path):
         output_path=str(tmp_path / "b.kfx"),
     )
     landings = _landings(tmp_path / "b.kfx")
-    assert landings["Chapter 1"].startswith("Chapter 1")
-    assert landings["Chapter 2"].startswith("Chapter 2")
+    # Labels the chapters don't print, so a link landing on itself fails.
+    assert landings["To one"] == "Chapter 1"
+    assert landings["To two"] == "Chapter 2"
 
 
 def test_a_picture_takes_only_the_anchors_at_its_paragraphs_start(tmp_path):
