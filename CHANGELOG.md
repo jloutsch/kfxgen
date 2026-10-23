@@ -6,16 +6,17 @@ The changes since 5.15.0, each reviewed and converted through real calibre,
 with the Gutenberg 90 and a library sample compared before and after each
 change. The equations and headings were checked on the Oasis (5.18.2) and
 the Paperwhite (5.19.2), and all but the last heading change on the Voyage
-(5.13.6) too. The media warning changes no KFX and was not checked on a
-Kindle.
+(5.13.6) too. #402's changes write only text shapes #401 checked on all
+three, and were not checked on their own. The media warning changes no KFX
+and was not checked on a Kindle.
 
 **MathML equations are drawn (#235).** An equation's markup was walked as
 plain text, so r² read "r2" and ½ read "12". Each equation is now drawn
 from glyph outlines, as Kindle Previewer draws it: fractions stacked and
 roots under their sign. The drawings are made with ziamath and its STIX Two
-Math font, bundled in the plugin, which grows from 219 KB to 1.2 MB. The
-alt text and the MathML source are kept with each drawing, and search
-finds the text around it. An equation ziamath can't draw, or one too
+Math font, bundled in the plugin, whose download grows from 229 KB to
+1.2 MB. The alt text and the MathML source are kept with each drawing, and
+search finds the text around it. An equation ziamath can't draw, or one too
 deeply nested to draw in about half a second, is written as text a reader
 can follow (#401): scripts raised and lowered, `a/b`, `√(x + 1)`, matrices
 row by row; `<mmultiscripts>` writes its prescripts first and `<ms>` its
@@ -29,8 +30,8 @@ heading split over two blocks ran onto one line, and "CHAPTER I." under
 the label "Chapter I" left a paragraph holding only its full stop. The
 heading now prints once, as written; the TOC keeps the label. A part page
 holding only a heading and a picture keeps its heading, which was lost
-before: pg120's "PART TWO—The Sea-cook" to "PART FIVE", and pg1184's
-"VOLUME TWO" to "VOLUME FIVE", are back. The same matching covers headings
+before: pg120's six part headings and pg1184's "VOLUME TWO" to "VOLUME
+FIVE" are back. The same matching covers headings
 with equations, under a label written from the equation's alt text, its
 TeX or its text (#404), under a label of the heading's first words (#408),
 and under any of a ruby heading's label forms (#410).
