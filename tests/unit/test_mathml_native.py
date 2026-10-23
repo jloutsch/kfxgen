@@ -444,3 +444,24 @@ def test_a_heading_without_maths_still_prints_as_its_label(tmp_path):
         ],
     )
     assert _lines(frags) == ["Part One", "Body."]
+
+
+RUBY_MATHS = (
+    f"<h1><ruby>漢<rt>kan</rt></ruby>字 <math {M}><mi>x</mi></math></h1><p>Body.</p>"
+)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "label", ["漢字 x", "漢(kan)字 x", "漢（kan）字 x", "漢kan字 x"]
+)
+def test_a_heading_with_ruby_and_a_drawn_equation_prints_once(tmp_path, label):
+    """A label giving the ruby's base alone, its reading in parentheses or
+    run in, as `_ruby_heading_title` takes them: the heading prints once,
+    with its reading and its drawing, as on Kindle Previewer's page (#410)."""
+    frags = _book(
+        tmp_path, [{"title": label, "text": "x", "blocks": _blocks(RUBY_MATHS)}]
+    )
+    assert _lines(frags) == ["漢字 [EQ]", "Body."]
+    readings = [str(r["$145"]) for f in by_type(frags, "$756") for r in val(f)["$146"]]
+    assert readings == ["kan"]

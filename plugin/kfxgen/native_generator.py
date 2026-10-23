@@ -584,7 +584,8 @@ def _math_heading_title(blocks, title):
         matched.append(block)
         if not any(b.get("label_texts") for b in matched):
             continue
-        readings = zip(*(b.get("label_texts") or (b["text"],) * 3 for b in matched))
+        forms = len(next(b["label_texts"] for b in matched if b.get("label_texts")))
+        readings = zip(*(b.get("label_texts") or (b["text"],) * forms for b in matched))
         if want in {"".join("".join(r).split()) for r in readings}:
             base, spans = "", []
             for b in matched:

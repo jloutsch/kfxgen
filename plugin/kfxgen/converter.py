@@ -1496,29 +1496,40 @@ def _math_reading(math):
     return "".join(seg for seg, _fl in body if isinstance(seg, str))
 
 
+#: How a TOC label writes a ruby reading, as `_ruby_heading_title` takes
+#: it: run into its base, left out, or in parentheses (#236, #410).
+_LABEL_READINGS = ("{}", "", "({})", "（{}）")
+
+
 def _label_texts(elem):
     """A block holding an equation as a producer writes it into a TOC label:
     its source text run together ("The ab=1 rule", #402), each equation as
-    its `alttext`, or each as the text kfxgen writes for it (#404). None for
-    a block without one."""
+    its `alttext`, or each as the text kfxgen writes for it (#404); each of
+    those with any ruby reading as `_LABEL_READINGS` writes it (#410). None
+    for a block without an equation."""
     if next(elem.iter(_MATHML_MATH, "math"), None) is None:
         return None
 
-    def written(e, maths):
+    def written(e, maths, reading):
         out = [e.text or ""]
         for kid in e:
+            local = _local_tag(kid.tag) if isinstance(kid.tag, str) else None
             if kid.tag in (_MATHML_MATH, "math"):
                 out.append(maths(kid))
-            elif isinstance(kid.tag, str):
-                out.append(written(kid, maths))
+            elif local == "rt":
+                text = "".join(kid.itertext()).strip()
+                out.append(reading.format(text) if text else "")
+            elif local is not None and local != "rp":
+                out.append(written(kid, maths, reading))
             out.append(kid.tail or "")
         return "".join(out)
 
-    return (
-        "".join(elem.itertext()),
-        written(elem, lambda m: m.get("alttext") or _math_reading(m)),
-        written(elem, _math_reading),
+    maths = (
+        lambda m: "".join(m.itertext()),
+        lambda m: m.get("alttext") or _math_reading(m),
+        _math_reading,
     )
+    return tuple(written(elem, m, r) for m in maths for r in _LABEL_READINGS)
 
 
 def _math_stray_text(elem):
