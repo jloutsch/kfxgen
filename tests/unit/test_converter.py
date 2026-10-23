@@ -2507,6 +2507,25 @@ def test_an_anchor_before_each_row_still_belongs_to_the_next_row():
 
 
 @pytest.mark.unit
+def test_an_anchor_before_each_row_and_one_after_the_last_still_belong_forward():
+    # An anchor before the first row says the table runs the carry-forward
+    # way, even with one after the last row, which names what comes next
+    # (#282: without "starts with a row" each note took the next one's id).
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<table><a id="n1"></a><tr><td>1.</td><td>First.</td></tr>'
+            '<a id="n2"></a><tr><td>2.</td><td>Second.</td></tr><a id="x"></a>'
+            "</table><h2>Next</h2>"
+        )
+    )
+    assert _row_anchors(blocks) == [
+        ("1. First.", ["n1"]),
+        ("2. Second.", ["n2"]),
+        ("Next", ["x"]),
+    ]
+
+
+@pytest.mark.unit
 def test_an_anchor_only_after_the_last_row_still_carries_forward():
     # A table's only anchor, just inside </table>, usually names what comes
     # next — here the next chapter. Moving it onto the last row put that row in
@@ -2670,6 +2689,12 @@ def test_thead_tbody_tfoot_colspan_rowspan_go_native():
         "<table><caption>only a caption</caption></table>",
         "<table><td>cell with no row</td></table>",
         "<table><tr></tr></table>",
+        # Each beside a real row, so only its own check rejects it (#282).
+        "<table><tr><td>a<td>cell in a cell</td></td></tr></table>",
+        "<table><tr><td>a<tr><td>row in a cell</td></tr></td></tr></table>",
+        "<table><tbody><tr>"
+        + "".join(f"<td>{n}</td>" for n in range(_conv._MAX_NATIVE_COLUMNS + 1))
+        + "</tr></tbody></table>",
     ],
     ids=[
         "nested",
@@ -2678,6 +2703,9 @@ def test_thead_tbody_tfoot_colspan_rowspan_go_native():
         "no-rows",
         "cell-outside-row",
         "no-cells",
+        "cell-in-a-cell",
+        "row-in-a-cell",
+        "too-wide-in-tbody",
     ],
 )
 def test_tables_that_fall_back_to_rows(html):
