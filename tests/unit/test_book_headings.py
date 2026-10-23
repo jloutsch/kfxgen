@@ -92,3 +92,11 @@ def test_a_label_opening_a_plain_heading_still_cuts_it(tmp_path):
     rest of the heading follows, as before."""
     lines = _printed(tmp_path, "Chapter 1", "<h1>Chapter 1 The Storm</h1><p>Body.</p>")
     assert [t for t, _ in lines] == ["Chapter 1", "The Storm", "Body."]
+
+
+@pytest.mark.unit
+def test_an_empty_label_names_no_block(tmp_path):
+    """A label with no letters or digits matches nothing: an ornament opening
+    the chapter stays a paragraph, not its heading (#409 mutations)."""
+    lines = _printed(tmp_path, "", "<p>* * *</p><p>Body.</p>")
+    assert [t for t, _ in lines] == ["", "* * *", "Body."]
