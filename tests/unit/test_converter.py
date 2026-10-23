@@ -4673,6 +4673,32 @@ def test_a_notes_section_heading_is_still_a_chapter(tmp_path):
 
 
 @pytest.mark.unit
+def test_a_heading_holding_a_note_marker_is_still_a_chapter(tmp_path):
+    # #282: the heading wraps a marker, as a note on a chapter title does.
+    epub = _epub_with_toc(
+        tmp_path,
+        '<h1 id="one">Chapter One</h1><p>x</p>'
+        '<h1 id="two">Chapter Two<a epub:type="noteref" href="#n1">1</a></h1><p>y</p>'
+        '<aside epub:type="footnote" id="n1"><p>Note.</p></aside>',
+        [("Chapter One", "index.xhtml#one"), ("Chapter Two", "index.xhtml#two")],
+    )
+    assert _chapter_titles(epub) == ["Chapter One", "Chapter Two"]
+
+
+@pytest.mark.unit
+def test_a_note_marked_box_holding_a_heading_is_still_a_chapter(tmp_path):
+    # #282: one aside marked as a footnote holds the whole Notes section.
+    epub = _epub_with_toc(
+        tmp_path,
+        '<h1 id="one">Chapter One</h1><p>x<a epub:type="noteref" href="#n1">1</a></p>'
+        '<aside epub:type="footnote" id="notes"><h1>Notes</h1>'
+        '<p id="n1">1. Note.</p></aside>',
+        [("Chapter One", "index.xhtml#one"), ("Notes", "index.xhtml#notes")],
+    )
+    assert _chapter_titles(epub) == ["Chapter One", "Notes"]
+
+
+@pytest.mark.unit
 def test_a_notes_section_itself_is_still_a_chapter(tmp_path):
     epub = _epub_with_toc(
         tmp_path,
@@ -5674,6 +5700,22 @@ def test_an_id_matches_its_percent_encoded_link():
 
 
 @pytest.mark.unit
+def test_a_link_target_keeps_its_files_folder():
+    # #282: anchor keys keep the folder (text/ch0.xhtml#n1), so link
+    # targets must too, or a notes table in a subfolder isn't found.
+    refs = "".join(f'<p>Claim<a href="#n{n}">{n}</a>.</p>' for n in (1, 2, 3))
+    rows = "".join(
+        f'<tr><td>{n}.</td><td>Note {n}.</td></tr><a id="n{n}"></a>' for n in (1, 2, 3)
+    )
+    oeb = _table_book(f"{refs}<table>{rows}</table>")
+    oeb.spine[0].href = "text/ch0.xhtml"
+    table = next(
+        e for e in oeb.spine[0].data.iter() if _conv._local_tag(e.tag) == "table"
+    )
+    assert _conv._is_notes_table(table, "text/ch0.xhtml", _conv._book_link_targets(oeb))
+
+
+@pytest.mark.unit
 def test_a_notes_table_is_written_as_one_paragraph_per_note():
     html = f"<table>{_note_rows(['1.', '2.', '3.'])}</table><p>After.</p>"
     blocks = extract_blocks_from_html(
@@ -5907,6 +5949,30 @@ def test_a_toc_entry_on_the_listing_itself_owns_it():
         "Part One": False,
         "Chapter 1": False,
     }
+
+
+@pytest.mark.unit
+def test_a_toc_entry_on_a_percent_encoded_listing_id_owns_it():
+    # #282: calibre hands the TOC fragment encoded ("toc%3A1" for "toc:1").
+    listing = _LISTING.replace('<div class="toc">', '<div id="toc:1" class="toc">')
+    chapters = _listing_chapters(
+        [
+            (
+                "front.xhtml",
+                f"<h1>Title</h1><p>By someone.</p>{listing}"
+                '<h1 id="p1">Part One</h1><p>Part text.</p>',
+            ),
+            ("c1.xhtml", "<h1>Chapter 1</h1><p>One.</p>"),
+        ],
+        [
+            ("Title", "front.xhtml"),
+            ("Contents", "front.xhtml#toc%3A1"),
+            ("Part One", "front.xhtml#p1"),
+            ("Chapter 1", "c1.xhtml"),
+        ],
+    )
+    flagged = {c["title"]: bool(c.get("_had_nav_listing")) for c in chapters}
+    assert flagged["Contents"] and not flagged["Title"]
 
 
 @pytest.mark.unit

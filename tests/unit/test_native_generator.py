@@ -3342,6 +3342,32 @@ def test_790_goes_on_the_first_leaf_not_a_container(tmp_path):
 
 
 @pytest.mark.unit
+def test_790_goes_only_on_a_leading_picture(tmp_path):
+    # #282: the text after it gets none. (A leading rule is dropped.)
+    from kfxgen.converter import _make_img_token
+    from tests._helpers import jpeg_of
+
+    out = tmp_path / "t.kfx"
+    NativeKFXGenerator().generate_full_book(
+        "T",
+        "A",
+        [
+            {
+                "title": "Chapter",
+                "text": "x",
+                "_omit_title_heading": True,
+                "blocks": [_para(_make_img_token("p.jpg", "", None)), _para("Body.")],
+            }
+        ],
+        images={"p.jpg": jpeg_of(40, 30)},
+        output_path=str(out),
+    )
+    story = [f for f in load_fragments(out) if str(f.ftype) == "$259"][-1]
+    carriers = [e for e in iter_entries(val(story)["$146"]) if "$790" in e]
+    assert [str(e["$159"]) for e in carriers] == ["$271"]
+
+
+@pytest.mark.unit
 def test_header_colspan_rowspan_reach_the_cell_style(tmp_path):
     block = _table_block([["H"], ["a"]])
     block["table"]["rows"][0]["group"] = "head"
