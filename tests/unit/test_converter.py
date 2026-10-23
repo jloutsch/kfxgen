@@ -2511,8 +2511,8 @@ def test_an_anchor_before_each_row_and_one_after_the_last_still_belong_forward()
     # An anchor before the first row says the table runs the carry-forward
     # way, even with one after the last row, which names what comes next
     # (#282: without "starts with a row" each note took the next one's id).
-    # A built layout: neither the Gutenberg 90 nor the library sample has
-    # it; calibre's notes tables put each anchor after its row.
+    # A built layout: neither the Gutenberg 90 nor a library of 1,396 EPUBs
+    # has it; calibre's notes tables put each anchor after its row.
     blocks = _conv.extract_blocks_from_html(
         _doc(
             '<table><a id="n1"></a><tr><td>1.</td><td>First.</td></tr>'
