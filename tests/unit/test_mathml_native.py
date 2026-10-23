@@ -495,3 +495,17 @@ def test_a_split_heading_matches_under_its_alttext_label(tmp_path):
         tmp_path, [{"title": "The a over b rule", "text": "x", "blocks": _blocks(body)}]
     )
     assert _lines(frags) == ["The [EQ] rule", "Body."]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rp", [("《", "》"), ("【", "】")])
+def test_a_label_of_the_source_text_keeps_rp_brackets(tmp_path, rp):
+    """A label written from the heading's source text reads its <rp> as they
+    stand, whatever brackets they hold (#410 QA: 《》 printed twice)."""
+    body = (
+        f"<h1><ruby>漢<rp>{rp[0]}</rp><rt>kan</rt><rp>{rp[1]}</rp></ruby>字 "
+        f"<math {M}><mi>x</mi></math></h1><p>Body.</p>"
+    )
+    label = f"漢{rp[0]}kan{rp[1]}字 x"
+    frags = _book(tmp_path, [{"title": label, "text": "x", "blocks": _blocks(body)}])
+    assert _lines(frags) == ["漢字 [EQ]", "Body."]

@@ -1497,8 +1497,9 @@ def _math_reading(math):
 
 
 #: How a TOC label writes a ruby reading, as `_ruby_heading_title` takes
-#: it: run into its base, left out, or in parentheses (#236, #410).
-_LABEL_READINGS = ("{}", "", "({})", "（{}）")
+#: it: as the source reads, <rp> and all, run into its base, left out, or
+#: in parentheses (#236, #410).
+_LABEL_READINGS = (None, "{}", "", "({})", "（{}）")
 
 
 def _label_texts(elem):
@@ -1516,6 +1517,8 @@ def _label_texts(elem):
             local = _local_tag(kid.tag) if isinstance(kid.tag, str) else None
             if kid.tag in (_MATHML_MATH, "math"):
                 out.append(maths(kid))
+            elif reading is None and local is not None:
+                out.append(written(kid, maths, reading))
             elif local == "rt":
                 text = "".join(kid.itertext()).strip()
                 out.append(reading.format(text) if text else "")
