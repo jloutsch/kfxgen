@@ -6092,6 +6092,45 @@ def test_a_hidden_picture_in_a_discarded_listing_stays_hidden():
 
 
 @pytest.mark.unit
+def test_a_picture_under_a_display_none_box_in_a_listing_stays_hidden():
+    # #428: the listing walk checks CSS display too, as the body walk does,
+    # and a link into the hidden box still lands on the next block shown.
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<div class="toc"><p>Chapter 1</p>'
+            '<div id="plate" style="display:none"><img src="hidden.png" alt=""/></div>'
+            "</div><p>After</p>"
+        )
+    )
+    assert "hidden.png" not in " ".join(b["text"] for b in blocks)
+    assert "plate" in blocks[-1]["anchor_ids"]
+
+
+@pytest.mark.unit
+def test_a_toc_entry_on_a_hidden_box_in_a_listing_keeps_the_next_part():
+    # #432 QA: the box's ids are dropped, as they were before #428; carried,
+    # they named Part One's heading and the part was lost.
+    chapters = _listing_chapters(
+        [
+            (
+                "front.xhtml",
+                '<h1>Title</h1><p>By someone.</p><div class="toc">'
+                '<p><a href="front.xhtml#p1">Part One</a></p>'
+                '<div hidden="hidden" id="box"></div></div>'
+                '<h1 id="p1">Part One</h1><p>Part text.</p>',
+            ),
+        ],
+        [
+            ("Title", "front.xhtml"),
+            ("Contents", "front.xhtml#box"),
+            ("Part One", "front.xhtml#p1"),
+        ],
+    )
+    part = next((c for c in chapters if c["title"] == "Part One"), None)
+    assert part is not None and "Part text." in part["text"]
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "wrap", ["{}", '<div class="shade">{}</div>', '<div class="box">{}</div>']
 )
@@ -8790,6 +8829,32 @@ def test_a_hidden_inline_child_of_a_mixed_container_is_not_printed():
         "Text more",
         "Block",
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "img",
+    [
+        '<img style="display:none" src="a.jpg"/>',
+        '<img hidden="hidden" src="a.jpg"/>',
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"'
+        ' style="display:none"><image xlink:href="a.jpg"/></svg>',
+    ],
+    ids=["display none", "hidden", "svg"],
+)
+def test_a_hidden_picture_inside_a_paragraph_is_not_written(img):
+    # As hidden text in a paragraph is not (#256, #428).
+    assert _texts(f"<p>{img}text</p>") == ["text"]
+
+
+@pytest.mark.unit
+def test_an_id_on_a_hidden_picture_keeps_its_place():
+    (block,) = _conv.extract_blocks_from_html(
+        _doc('<p>one <img id="i1" hidden="hidden" src="a.jpg"/>two</p>'),
+        base_href="c.xhtml",
+    )
+    assert block["text"] == "one two"
+    assert block["anchor_offsets"]["c.xhtml#i1"] == len("one ")
 
 
 @pytest.mark.unit
