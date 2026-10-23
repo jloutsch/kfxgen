@@ -8732,6 +8732,7 @@ def test_an_id_on_a_line_break_keeps_its_place():
         _doc('<p>line one<br id="b1"/>line two</p>'), base_href="c.xhtml"
     )
     assert block["text"] == "line one\nline two"
+    # On the newline the <br> becomes, at the br's own place, as any id is.
     assert block["anchor_offsets"]["c.xhtml#b1"] == len("line one")
 
 
