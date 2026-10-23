@@ -465,3 +465,33 @@ def test_a_heading_with_ruby_and_a_drawn_equation_prints_once(tmp_path, label):
     assert _lines(frags) == ["漢字 [EQ]", "Body."]
     readings = [str(r["$145"]) for f in by_type(frags, "$756") for r in val(f)["$146"]]
     assert readings == ["kan"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("ruby", "label"),
+    [
+        ("<ruby>漢<rp>(</rp><rt>kan</rt><rp>)</rp></ruby>字", "漢字 x"),
+        ("<ruby>漢<rt>kan</rt></ruby><ruby>字<rt></rt></ruby>", "漢(kan)字 x"),
+    ],
+)
+def test_rp_fallbacks_and_an_empty_reading_are_not_in_the_label(tmp_path, ruby, label):
+    """<rp> is the fallback for readers without ruby and an empty <rt> has
+    no reading: neither is written into a label (#410 mutations)."""
+    body = f"<h1>{ruby} <math {M}><mi>x</mi></math></h1><p>Body.</p>"
+    frags = _book(tmp_path, [{"title": label, "text": "x", "blocks": _blocks(body)}])
+    assert _lines(frags) == ["漢字 [EQ]", "Body."]
+
+
+@pytest.mark.unit
+def test_a_split_heading_matches_under_its_alttext_label(tmp_path):
+    """A block without an equation is read the same way in every label form
+    (#410 mutations)."""
+    body = (
+        f'<h1>The <math {M} alttext="a over b"><mfrac><mi>a</mi><mi>b</mi></mfrac>'
+        "</math></h1><h1>rule</h1><p>Body.</p>"
+    )
+    frags = _book(
+        tmp_path, [{"title": "The a over b rule", "text": "x", "blocks": _blocks(body)}]
+    )
+    assert _lines(frags) == ["The [EQ] rule", "Body."]
