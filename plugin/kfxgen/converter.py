@@ -3644,8 +3644,12 @@ def extract_blocks_from_html(
         block already does. Anchors are paragraph-granular, so the link lands
         just past where it used to.
         """
+        if _is_non_rendered(elem):
+            return
         if _is_hidden(elem, style_resolver):
-            # As the body walk: links into it land on the next block (#428).
+            # Hidden by CSS: its picture goes (#428), its ids carry on as
+            # they did when it was walked. Ids inside a listing should name
+            # the listing instead (#433).
             pending_ids.extend(_subtree_anchor_ids(elem))
             return
         if _local_tag(elem.tag) == "img":

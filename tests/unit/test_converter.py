@@ -6107,6 +6107,30 @@ def test_a_picture_under_a_display_none_box_in_a_listing_stays_hidden():
 
 
 @pytest.mark.unit
+def test_a_toc_entry_on_a_hidden_box_in_a_listing_keeps_the_next_part():
+    # #432 QA: the box's ids are dropped, as they were before #428; carried,
+    # they named Part One's heading and the part was lost.
+    chapters = _listing_chapters(
+        [
+            (
+                "front.xhtml",
+                '<h1>Title</h1><p>By someone.</p><div class="toc">'
+                '<p><a href="front.xhtml#p1">Part One</a></p>'
+                '<div hidden="hidden" id="box"></div></div>'
+                '<h1 id="p1">Part One</h1><p>Part text.</p>',
+            ),
+        ],
+        [
+            ("Title", "front.xhtml"),
+            ("Contents", "front.xhtml#box"),
+            ("Part One", "front.xhtml#p1"),
+        ],
+    )
+    part = next((c for c in chapters if c["title"] == "Part One"), None)
+    assert part is not None and "Part text." in part["text"]
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "wrap", ["{}", '<div class="shade">{}</div>', '<div class="box">{}</div>']
 )
