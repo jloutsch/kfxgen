@@ -4622,8 +4622,12 @@ class NativeKFXGenerator:
                 # The title is cut from the body only because the heading
                 # prints it. With the heading suppressed by the caller, the
                 # matching words are the page's own and stay (#284 review:
-                # back/notes.xhtml lost its "Notes").
-                cut_title = not chapter.get("_omit_title_heading")
+                # back/notes.xhtml lost its "Notes"), and so on a page of a
+                # heading and a picture, which prints no heading of
+                # kfxgen's (#33; #409 QA: a part page lost its heading).
+                cut_title = (
+                    not chapter.get("_omit_title_heading") and not body_is_image_only
+                )
                 text = chapter["text"]
                 stripped = text.lstrip()
                 if cut_title and _opens_with_title(stripped, title):

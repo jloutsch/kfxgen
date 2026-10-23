@@ -100,3 +100,56 @@ def test_an_empty_label_names_no_block(tmp_path):
     the chapter stays a paragraph, not its heading (#409 mutations)."""
     lines = _printed(tmp_path, "", "<p>* * *</p><p>Body.</p>")
     assert [t for t, _ in lines] == ["", "* * *", "Body."]
+
+
+def _part_page(tmp_path, label):
+    """A part page as books write it: a heading and a picture, nothing else.
+    [(text, number of runs)] for its text paragraphs, and its picture count."""
+    from kfxgen.native_generator import NativeKFXGenerator
+    from tests._helpers import MINIMAL_JPEG
+
+    img = "\x00IMG\x01images/x.jpg\x01\x00"
+    out = tmp_path / "p.kfx"
+    NativeKFXGenerator().generate_full_book(
+        title="T",
+        author="A",
+        chapters=[
+            {
+                "title": label,
+                "text": f"PART ONE\n\n{img}",
+                "blocks": [
+                    {"text": "PART ONE", "spans": [], "heading": True},
+                    {"text": img, "spans": []},
+                ],
+            },
+            {"title": "Two", "text": "Two\n\nBody.", "blocks": _blocks("<p>Body.</p>")},
+        ],
+        images={"images/x.jpg": MINIMAL_JPEG},
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    lines, pictures = [], 0
+    for st in by_type(frags, "$259"):
+        if str(st.fid) != "l0":
+            continue
+        for e in iter_entries(val(st)["$146"]):
+            if not hasattr(e, "get"):
+                continue
+            if e.get("$175") is not None:
+                pictures += 1
+            elif e.get("$145"):
+                ref = e["$145"]
+                lines.append(str(texts[str(ref["name"])][ref["$403"]]))
+    return lines, pictures
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("label", ["Part One", "PART ONE"])
+def test_a_part_page_keeps_its_heading_over_its_picture(tmp_path, label):
+    """The page prints its picture with no heading of kfxgen's (#33); the
+    book's own heading stays above it, under a label in other capitals as
+    under one written the same (#409 QA: the heading was lost)."""
+    lines, pictures = _part_page(tmp_path, label)
+    assert lines == ["PART ONE"]
+    assert pictures == 1
