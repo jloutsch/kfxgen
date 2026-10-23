@@ -4502,6 +4502,43 @@ def test_calibre_toc_entries_for_a_footnote_do_not_become_chapters(tmp_path, enc
 
 
 @pytest.mark.unit
+def test_a_marker_whose_link_is_percent_encoded_is_still_a_marker(tmp_path):
+    # calibre strips the footnote-ref class, so the marker is known only by
+    # its link to the note; that link may be written `#fn%3A1` for `fn:1`
+    # (#282). As a chapter, the marker's TOC entry printed "1" as a heading.
+    body = _MD_FOOTNOTE_BODY.replace(
+        '<a class="footnote-ref" href="#fn:1">', '<a href="#fn%3A1">'
+    )
+    epub = _epub_with_toc(
+        tmp_path,
+        body,
+        [
+            ("Chapter One", "index.xhtml#one"),
+            ("1", "index.xhtml#fnref:1"),
+            ("Chapter Two", "index.xhtml#two"),
+        ],
+    )
+    assert _chapter_titles(epub) == ["Chapter One", "Chapter Two"]
+
+
+@pytest.mark.unit
+def test_a_percent_encoded_toc_entry_into_a_table_keeps_its_rows(tmp_path):
+    # A TOC entry past a table's start keeps it as rows, so the entry starts
+    # its chapter there (#219); calibre hands it as `#r%3A2` for `r:2` (#282).
+    epub = _epub_with_toc(
+        tmp_path,
+        '<h1 id="one">Chapter One</h1><table>'
+        '<tr id="r:1"><td>First row</td><td>a</td></tr>'
+        '<tr id="r:2"><td>Second row</td><td>b</td></tr></table>',
+        [("Chapter One", "index.xhtml#one"), ("Second", "index.xhtml#r%3A2")],
+    )
+    from tests.fixtures.oeb_shim import EpubAsOeb
+
+    titles, tables = _titles_and_tables(EpubAsOeb(str(epub)), native=True)
+    assert (titles, tables) == (["Chapter One", "Second"], 0)
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "body,target",
     [
