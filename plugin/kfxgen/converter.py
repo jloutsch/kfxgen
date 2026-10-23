@@ -5048,7 +5048,7 @@ def extract_chapters_from_oeb(
     orphan_keys = []
     svg_text_files = 0  # files whose SVG draws words, said once (#231)
 
-    for i, item in enumerate(oeb_book.spine):
+    for i, item in enumerate(_spine_in_order(oeb_book, toc_entries)):
         # Per-item try/except (#73): a single bad item logs a warning and
         # the loop continues. The previous shape wrapped the whole loop in
         # a bare except Exception, which aborted iteration on the first
@@ -5252,22 +5252,19 @@ def _with_listings_kept(oeb_book, log, metadata, cover_href, native_tables):
     )
 
 
-def _has_media_overlays(oeb_book):
-    """Whether the book pairs its pages with read-aloud narration: a
-    `media-overlay` link on a manifest item of its own OPF. calibre's
-    manifest drops those links and the SMIL files, so this reads the OPF
-    calibre unpacked into the container folder (#248)."""
+def _container_parser(oeb_book):
+    """A function parsing a file of the folder calibre unpacked the book
+    into, or None when there is no folder. It returns None for a file out of
+    the folder (a `..` path or a link) or one that can't be read."""
     root = getattr(getattr(oeb_book, "container", None), "rootdir", None)
     if not root:
-        return False
+        return None
     from lxml import etree
 
     parser = etree.XMLParser(resolve_entities=False, no_network=True)
     root = os.path.realpath(root)
 
     def parse(path):
-        """The file at `path` in the folder, parsed; None when it is out of
-        the folder (a `..` path or a link) or can't be read."""
         full = os.path.realpath(os.path.join(root, path))
         try:
             if os.path.commonpath([root, full]) != root:
@@ -5277,6 +5274,55 @@ def _has_media_overlays(oeb_book):
         except (OSError, ValueError, etree.Error):
             return None
 
+    return parse
+
+
+def _spine_in_order(oeb_book, toc_entries):
+    """calibre's spine, with the files it added in TOC order (#253). When a
+    book's spine leaves out files its pages link to, calibre appends them in
+    a different order on every conversion, as non-linear files after all the
+    book's own. Those of them its own OPF spine doesn't list are the added
+    ones. Unchanged when that OPF can't be read."""
+    spine = list(oeb_book.spine)
+    parse = _container_parser(oeb_book)
+    name = getattr(oeb_book.container, "opfname", None) if parse else None
+    opf = parse(name) if name else None
+    if opf is None:
+        return spine
+
+    def file(href):
+        # Names only, compared: an OPF in a subfolder may write "../Text/x".
+        return posixpath.basename(unquote((href or "").split("#")[0]))
+
+    hrefs = {
+        i.get("id"): i.get("href")
+        for i in opf.xpath("//*[local-name()='manifest']/*[local-name()='item']")
+    }
+    listed = {
+        file(hrefs.get(r.get("idref")))
+        for r in opf.xpath("//*[local-name()='spine']/*[local-name()='itemref']")
+    }
+    toc = {}
+    for n, entry in enumerate(toc_entries):
+        toc.setdefault(file(entry.get("href")), n)
+    tail = len(spine)
+    while tail and not getattr(spine[tail - 1], "linear", True):
+        tail -= 1
+    own = spine[:tail] + [i for i in spine[tail:] if file(i.href) in listed]
+    added = [i for i in spine[tail:] if file(i.href) not in listed]
+    return own + sorted(
+        added, key=lambda i: (toc.get(file(i.href), len(toc)), file(i.href))
+    )
+
+
+def _has_media_overlays(oeb_book):
+    """Whether the book pairs its pages with read-aloud narration: a
+    `media-overlay` link on a manifest item of its own OPF. calibre's
+    manifest drops those links and the SMIL files, so this reads the OPF
+    calibre unpacked into the container folder (#248)."""
+    parse = _container_parser(oeb_book)
+    if parse is None:
+        return False
     container = parse(os.path.join("META-INF", "container.xml"))
     if container is None:
         return False
