@@ -88,8 +88,9 @@ def _build_epub(path):
 
 @pytest.fixture(scope="module")
 def book(calibre):  # noqa: F811
-    """(paragraph texts, {word: its run's style}) of the converted book."""
-    tmp, _env, _version = calibre
+    """(paragraph texts, {word: its run's style}, calibre's version) of the
+    converted book."""
+    tmp, _env, version = calibre
     epub, kfx = tmp / "inline.epub", tmp / "inline.kfx"
     _build_epub(epub)
     _ebook_convert(calibre, epub, kfx, native=True)
@@ -107,30 +108,32 @@ def book(calibre):  # noqa: F811
             for r in entry.get("$142") or []:
                 word = text[r["$143"] : r["$143"] + r["$144"]]
                 runs[word] = styles.get(str(r.get("$157")), {})
-    return paras, runs
+    return paras, runs, version
 
 
 def test_code_and_a_monospace_rule_are_monospace(book):
-    _, runs = book
+    _, runs, version = book
     for word in ("CODEWORD", "MONOWORD"):
-        assert "monospace" in str(runs[word].get("$11")), word
-    assert "PLAINWORD" not in runs
+        assert "monospace" in str(runs[word].get("$11")), f"calibre {version}: {word}"
+    assert "PLAINWORD" not in runs, f"calibre {version}"
 
 
 def test_struck_and_underlined_runs_carry_their_lines(book):
-    _, runs = book
-    assert str(runs["STRUCKWORD"].get("$27")) == "$328"
-    assert str(runs["UNDERWORD"].get("$23")) == "$328"
+    _, runs, version = book
+    assert str(runs["STRUCKWORD"].get("$27")) == "$328", f"calibre {version}"
+    assert str(runs["UNDERWORD"].get("$23")) == "$328", f"calibre {version}"
 
 
 def test_a_super_span_is_raised(book):
-    _, runs = book
-    assert str(runs["RAISEDWORD"].get("$44")) == "$370"
+    _, runs, version = book
+    assert str(runs["RAISEDWORD"].get("$44")) == "$370", f"calibre {version}"
 
 
 def test_preformatted_text_keeps_its_lines_and_spaces(book):
-    paras, _ = book
+    paras, _, version = book
     (pre,) = [p for p in paras if p.startswith("PRE ONE")]
     first, second = pre.split("\n")
-    assert first == "PRE ONE"
-    assert second.replace(" ", " ") == "  PRE TWO"
+    assert first == "PRE ONE", f"calibre {version}"
+    # kfxgen may write the leading spaces as no-break spaces, which keep
+    # their width (#202); either is a pass.
+    assert second.replace("\u00a0", " ") == "  PRE TWO", f"calibre {version}"
