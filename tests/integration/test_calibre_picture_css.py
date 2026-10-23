@@ -58,7 +58,7 @@ def _page(title, body):
     )
 
 
-def _build_epub(path):
+def _build_epub(path, pages=PAGES, css=CSS):
     ncx = (
         '<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" '
         'version="2005-1"><head><meta name="dtb:uid" content="t"/></head>'
@@ -66,15 +66,15 @@ def _build_epub(path):
         + "".join(
             f'<navPoint id="p{i}" playOrder="{i}"><navLabel><text>{n}</text>'
             f'</navLabel><content src="{n}.xhtml"/></navPoint>'
-            for i, n in enumerate(PAGES, 1)
+            for i, n in enumerate(pages, 1)
         )
         + "</navMap></ncx>"
     )
     items = "".join(
         f'<item id="{n}" href="{n}.xhtml" media-type="application/xhtml+xml"/>'
-        for n in PAGES
+        for n in pages
     )
-    spine = "".join(f'<itemref idref="{n}"/>' for n in PAGES)
+    spine = "".join(f'<itemref idref="{n}"/>' for n in pages)
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
         z.writestr(
@@ -98,9 +98,9 @@ def _build_epub(path):
             '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
             '</manifest><spine toc="ncx">' + spine + "</spine></package>",
         )
-        for n, body in PAGES.items():
+        for n, body in pages.items():
             z.writestr(f"{n}.xhtml", _page(n, body))
-        z.writestr("s.css", CSS)
+        z.writestr("s.css", css)
         z.writestr("pic.jpg", jpeg_of(600, 400))
         z.writestr("page.jpg", jpeg_of(800, 1200))
         z.writestr("toc.ncx", ncx)
