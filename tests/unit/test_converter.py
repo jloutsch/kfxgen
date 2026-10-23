@@ -5992,6 +5992,40 @@ def test_a_listing_page_with_just_its_heading_becomes_the_contents_page():
 
 
 @pytest.mark.unit
+def test_a_listing_pages_picture_doesnt_count_toward_its_length():
+    # A picture's token is markup, not the page's text: a heading and a plate
+    # above the listing is still a contents page (#282).
+    token = _conv._make_img_token("images/" + "p" * 60 + ".png", "")
+    chapters = [
+        {
+            "title": "Navigation",
+            "text": "Navigation" + token,
+            "blocks": [{"text": "Navigation"}, {"text": token}],
+            "_had_nav_listing": True,
+        },
+        {"title": "Part One", "text": "Part text."},
+    ]
+    assert len(token) > _conv._NAV_REMNANT_MAX_LEN
+    assert _conv._nav_listing_contents_chapter(chapters) is chapters[0]
+
+
+@pytest.mark.unit
+def test_a_hidden_picture_in_a_discarded_listing_stays_hidden():
+    # A listing's pictures are kept when its text is dropped (#117), but not
+    # one the book hides (#282).
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<p>Intro</p><div class="toc"><p>Chapter 1</p>'
+            '<img src="shown.png" alt=""/><img hidden="hidden" src="hidden.png" alt=""/>'
+            "</div><p>After</p>"
+        )
+    )
+    texts = " ".join(b["text"] for b in blocks)
+    assert "shown.png" in texts
+    assert "hidden.png" not in texts
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "wrap", ["{}", '<div class="shade">{}</div>', '<div class="box">{}</div>']
 )
