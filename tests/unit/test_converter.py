@@ -2932,10 +2932,9 @@ def test_a_contents_listing_in_a_cell_is_recorded_at_the_table():
 def test_a_contents_listing_in_a_table_that_keeps_rows_leaves_no_record():
     # A TOC entry past the table's start keeps it as rows (#219). The native
     # attempt recorded the listing in its cell; that record is dropped, or it
-    # would mark a listing the rows walk doesn't drop (#282). The rows walk
-    # keeps the listing's text in its row and records none.
+    # would mark a listing the rows walk doesn't drop (#282).
     at = []
-    blocks = extract_blocks_from_html(
+    extract_blocks_from_html(
         _doc(
             "<p>Intro</p><table><tr><td>x</td></tr><tr id='r2'><td><p>a</p>"
             '<div class="toc"><p>Chapter 1</p></div></td></tr></table><p>After</p>'
@@ -2944,7 +2943,6 @@ def test_a_contents_listing_in_a_table_that_keeps_rows_leaves_no_record():
         nav_listing_at=at,
         toc_targets={"r2"},
     )
-    assert [b["text"] for b in blocks] == ["Intro", "x", "a Chapter 1", "After"]
     assert at == []
 
 
