@@ -4785,6 +4785,8 @@ def _assemble_chapters_by_coordinate(
     coords = []
     last_block_in_file = {}
     prev_flat = -1
+    listing_entry = False
+    empty_listing = set()  # coords whose listing page has no blocks (#433)
     for entry in toc_entries:
         norm = _normalize_href(entry["href"])
         try:
@@ -4816,7 +4818,16 @@ def _assemble_chapters_by_coordinate(
             bi = 0
         bi = min(bi, len(spine_blocks[si]) - 1) if spine_blocks[si] else 0
         fi = file_offset[si] + bi
-        if fi <= prev_flat:
+        names_listing = bool(frag) and any(
+            frag in ids
+            for _, ids in spine_items_ordered[si].get("nav_listing_at") or ()
+        )
+        if fi == prev_flat and listing_entry and not names_listing:
+            # The entry before named a listing that ends where this one
+            # starts: it keeps the listing as a page with no blocks, for the
+            # rebuild, rather than taking this entry's (#433).
+            empty_listing.add(len(coords) - 1)
+        elif fi <= prev_flat:
             log.warn(
                 f"  TOC entry {entry['title']!r} out of document order; skipping split"
             )
@@ -4831,6 +4842,7 @@ def _assemble_chapters_by_coordinate(
             flat[fi].setdefault("anchor_offsets", {})[key] = 0
         coords.append((fi, si, entry["title"], key, entry.get("level", 0)))
         prev_flat = fi
+        listing_entry = names_listing
         last_block_in_file[si] = bi
 
     if not coords:
@@ -4950,7 +4962,10 @@ def _assemble_chapters_by_coordinate(
             # The entries after it are all in its file.
             end = file_offset[si] + len(spine_blocks[si])
         start = 0 if (k == 0 and head_has_toc_anchor) else fi
-        ch = _flag_nav(_mk(title, flat[start:end]), start, end)
+        if k in empty_listing:
+            ch = {"title": title, "text": "", "blocks": [], "_had_nav_listing": True}
+        else:
+            ch = _flag_nav(_mk(title, flat[start:end]), start, end)
         if ch:
             if _is_file_name_label(title, spine_items_ordered[si]["href"]):
                 _retitle_from_heading(ch)

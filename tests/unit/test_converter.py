@@ -6132,6 +6132,54 @@ def test_a_toc_entry_on_a_hidden_box_in_a_listing_keeps_the_next_part():
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
+    "listing, entries",
+    [
+        (
+            '<div class="toc">{}<div id="box"><p>Box.</p></div></div>',
+            [("Contents", "#box")],
+        ),
+        (
+            '<div class="toc">{}<div id="box" style="display:none"><p>Box.</p></div></div>',
+            [("Contents", "#box")],
+        ),
+        ('<div class="toc" id="box">{}</div>', [("Contents", "#box")]),
+        # A label that isn't a contents title: the page is rebuilt for its
+        # listing, and named Contents.
+        ('<div class="toc" id="box">{}</div>', [("Navigation", "#box")]),
+        # A second entry into the same listing adds no page.
+        (
+            '<div class="toc" id="box">{}<p id="more">More.</p></div>',
+            [("Contents", "#box"), ("More", "#more")],
+        ),
+    ],
+    ids=["box", "display-none-box", "listing", "navigation", "two-entries"],
+)
+def test_a_toc_entry_on_a_listing_just_before_the_next_part_keeps_the_part(
+    listing, entries
+):
+    # #433: the listing's ids went on Part One's heading, so the Contents
+    # entry started there, Part One's entry was skipped as out of order and
+    # the rebuild replaced the part with an empty contents page.
+    oeb = _table_book(
+        "<h1>Foreword</h1><p>A.</p><p>B.</p>"
+        + listing.format('<p><a href="#p1">Part One</a></p>')
+        + '<h1 id="p1">Part One</h1><p>Part text.</p>'
+    )
+    oeb.toc = [
+        _TOCNode("Foreword", "ch0.xhtml"),
+        *(_TOCNode(title, f"ch0.xhtml{frag}") for title, frag in entries),
+        _TOCNode("Part One", "ch0.xhtml#p1"),
+    ]
+    chapters = extract_chapters_from_oeb(oeb, _silent_log(), metadata=_METADATA)
+    assert [(c["title"], c["text"].split()) for c in chapters] == [
+        ("Foreword", ["Foreword", "A.", "B."]),
+        ("Contents", ["Contents", "Foreword", "Part", "One"]),
+        ("Part One", ["Part", "One", "Part", "text."]),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
     "wrap", ["{}", '<div class="shade">{}</div>', '<div class="box">{}</div>']
 )
 def test_a_boxed_part_page_holding_a_listing_is_not_replaced(wrap):
