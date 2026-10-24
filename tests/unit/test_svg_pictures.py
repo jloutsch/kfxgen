@@ -15,7 +15,7 @@ from unittest import mock
 
 import pytest
 
-from kfxgen.converter import extract_images_from_oeb
+from kfxgen.converter import _pictures_in_table_cells, extract_images_from_oeb
 from kfxgen.image_optimize import svg_to_png
 
 pytestmark = [pytest.mark.unit]
@@ -107,6 +107,18 @@ def test_an_svg_is_drawn_at_twice_its_size_within_the_cap(monkeypatch, size, box
     assert seen == [{"width": box, "height": box}]
 
 
+def test_at_scale_1_an_svg_is_drawn_at_its_own_size(monkeypatch):
+    seen = []
+
+    def rasterize_svg(data=None, **kw):
+        seen.append(kw)
+        return PNG_SIG + b"x" * 200
+
+    _fake_rasterizer(monkeypatch, rasterize_svg, (200, 100))
+    assert svg_to_png(SVG, scale=1) == (PNG_SIG + b"x" * 200, (200, 100))
+    assert seen == [{"width": 200, "height": 200}]
+
+
 def test_an_svg_qt_cannot_size_is_drawn_as_qt_draws_it(monkeypatch):
     """No size to double: no box, and no own size to show it at."""
     seen = []
@@ -118,6 +130,46 @@ def test_an_svg_qt_cannot_size_is_drawn_as_qt_draws_it(monkeypatch):
     _fake_rasterizer(monkeypatch, rasterize_svg, (-1, -1))
     assert svg_to_png(SVG) == (PNG_SIG + b"x" * 200, None)
     assert seen == [{}]
+
+
+@pytest.mark.parametrize(
+    ("href", "cell_href"),
+    [("a.svg", "a.svg"), ("my%20pic.svg", "my pic.svg")],  # (#195)
+)
+def test_an_svg_in_a_table_cell_is_drawn_at_its_own_size(monkeypatch, href, cell_href):
+    """A picture in a cell has no style, as Previewer writes it (#262), so it
+    shows at its pixel size: at 2x the CELL box was twice as big on the
+    Paperwhite (#441 device check). It keeps #439's own size."""
+    seen = []
+
+    def rasterize_svg(data=None, **kw):
+        seen.append(kw)
+        return PNG_SIG + b"x" * 200
+
+    _fake_rasterizer(monkeypatch, rasterize_svg)
+    images = extract_images_from_oeb(
+        _Book([_Parsed(href, SVG)]), mock.MagicMock(), own_size={cell_href}
+    )
+    assert images[href][:8] == PNG_SIG
+    assert seen == [{"width": 200, "height": 200}]
+
+
+def test_pictures_in_table_cells_are_found_by_their_manifest_href():
+    from lxml import etree
+
+    xhtml = (
+        '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+        '<table><tr><td><p><img src="../images/a.svg"/></p></td>'
+        '<th><img src="../images/b.svg"/></th><td><img src="../images/c.png"/></td>'
+        '</tr></table><p><img src="../images/d.svg"/></p></body></html>'
+    )
+    item = mock.Mock(href="text/c.xhtml", data=etree.fromstring(xhtml))
+    book = mock.Mock(spine=[item])
+    assert _pictures_in_table_cells(book) == {
+        "images/a.svg",
+        "images/b.svg",
+        "images/c.png",
+    }
 
 
 def test_an_excluded_svg_is_not_extracted(monkeypatch):

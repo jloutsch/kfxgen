@@ -214,9 +214,9 @@ def gif_to_png(data, log=None):
     return out
 
 
-def svg_to_png(data, log=None):
-    """Rasterise an SVG file to PNG at twice its own size: (png, own size),
-    or None when that cannot be done here (#438, #440).
+def svg_to_png(data, log=None, scale=2):
+    """Rasterise an SVG file to PNG at `scale` times its own size: (png, own
+    size), or None when that cannot be done here (#438, #440).
 
     Kindle Previewer has no KFX form for it to copy: it refuses Enhanced
     Typesetting for a book with an `<img>` of an SVG file, and its MOBI keeps
@@ -243,7 +243,7 @@ def svg_to_png(data, log=None):
             # and 1.2 GB, and Qt would not read that PNG back for
             # `optimize_image` to shrink (#439 review). calibre's
             # `size.scale` fits the SVG inside the box, keeping its shape.
-            box = min(2 * max(own), DEFAULT_MAX_DIM)
+            box = min(scale * max(own), DEFAULT_MAX_DIM)
             out = rasterize_svg(data, width=box, height=box)
         else:
             own = None

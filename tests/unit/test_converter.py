@@ -459,6 +459,7 @@ def _patch_pipeline(monkeypatch, captured):
     monkeypatch.setattr(
         _conv, "extract_images_from_oeb", lambda *a, **k: {"x.jpg": b"XX"}
     )
+    monkeypatch.setattr(_conv, "_pictures_in_table_cells", lambda *a, **k: set())
     monkeypatch.setattr(
         _conv, "extract_chapters_from_oeb", lambda *a, **k: [{"text": "hi"}]
     )
