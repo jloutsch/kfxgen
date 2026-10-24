@@ -66,6 +66,14 @@ def test_an_svg_picture_is_extracted_as_png(monkeypatch):
     assert seen == [(SVG, {})]
 
 
+def test_an_excluded_svg_is_not_extracted(monkeypatch):
+    """The cover's href is excluded by the caller, SVG or not."""
+    _fake_rasterizer(monkeypatch, lambda data=None, **kw: PNG_SIG + b"x" * 200)
+    book = _Book([_Parsed("cover.svg", SVG), _Parsed("a.svg", SVG)])
+    images = extract_images_from_oeb(book, mock.MagicMock(), ["cover.svg"])
+    assert set(images) == {"a.svg"}
+
+
 def test_without_calibre_an_svg_picture_is_skipped_with_a_warning():
     log = mock.MagicMock()
     images = extract_images_from_oeb(_Book([_Parsed("a.svg", SVG)]), log)
