@@ -22,7 +22,7 @@ from ._img_tokens import (
     IMG_TOKEN_SPACE as _IMG_TOKEN_SPACE,
 )
 from .font_table import BOLD_WEIGHT_THRESHOLD, parse_style, parse_weight
-from .image_optimize import GIF_SIGNATURES, gif_to_png, optimize_images
+from .image_optimize import GIF_SIGNATURES, gif_to_png, optimize_images, svg_to_png
 from .inline_style import (
     FLAG_BOLD,
     FLAG_ITALIC,
@@ -5946,6 +5946,7 @@ def extract_images_from_oeb(oeb_book, log, exclude_hrefs=None):
     images = {}
     skipped_unsupported = 0
     converted_gifs = 0
+    converted_svgs = 0
     excluded = {_normalize_href(h) for h in (exclude_hrefs or [])}
     try:
         for item in oeb_book.manifest:
@@ -5953,9 +5954,24 @@ def extract_images_from_oeb(oeb_book, log, exclude_hrefs=None):
             if "image" not in media:
                 continue
             data = getattr(item, "data", None)
+            href = getattr(item, "href", "") or ""
+            if media == "image/svg+xml":
+                if not href or _normalize_href(href) in excluded:
+                    continue
+                # calibre hands an SVG over parsed, not as bytes, so the
+                # check below dropped every one without a word (#438).
+                raw = getattr(item, "bytes_representation", None)
+                png = svg_to_png(raw, log) if raw else None
+                if png is None:
+                    skipped_unsupported += 1
+                    log.warn(f"  Skipping image {href!r}: SVG not rasterised")
+                    continue
+                log.info(f"  Rasterised SVG to PNG: {href!r}")
+                converted_svgs += 1
+                images[href] = png
+                continue
             if not isinstance(data, (bytes, bytearray)) or len(data) <= 100:
                 continue
-            href = getattr(item, "href", "") or ""
             if not href or _normalize_href(href) in excluded:
                 continue
             # Pre-filter to formats the generator handles (JPEG, PNG). The
@@ -5996,6 +6012,8 @@ def extract_images_from_oeb(oeb_book, log, exclude_hrefs=None):
     summary = f"  Extracted {len(images)} body image(s) from manifest"
     if converted_gifs:
         summary += f" ({converted_gifs} GIF converted to PNG)"
+    if converted_svgs:
+        summary += f" ({converted_svgs} SVG rasterised to PNG)"
     if skipped_unsupported:
         summary += f" ({skipped_unsupported} skipped — unsupported format)"
     log.info(summary)
