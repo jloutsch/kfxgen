@@ -3332,6 +3332,7 @@ class NativeKFXGenerator:
         images=None,
         font_table=None,
         resolved_image_refs=False,
+        display_dims=None,
     ):
         """
         Generates a complete KFX book with metadata and content.
@@ -3366,6 +3367,9 @@ class NativeKFXGenerator:
                 instead of falling back to another image that happens to
                 share its filename (#195). Hrefs that could not be resolved
                 (a `..` segment, an absolute path) still fall back.
+            display_dims: Optional {href: (width, height)}: the size to show
+                an image at when it is not its pixel size, as for an SVG
+                drawn at twice its size (#440). Only the page size uses it.
 
         Returns:
             bytes: Serialized KFX data
@@ -3532,6 +3536,10 @@ class NativeKFXGenerator:
                         resource_name, location_name, fmt, width=width, height=height
                     )
                 )
+                # The resource states its real pixels; the page size comes
+                # from the size to show it at, when the caller gives one: an
+                # SVG drawn at twice its size (#440).
+                width, height = (display_dims or {}).get(href) or (width, height)
                 self.fragments.append(self.build_fragment_417(location_name, data))
                 base = _img_basename(href)
                 # Basename collision (e.g. images/foo.jpg + ext/foo.jpg): keep

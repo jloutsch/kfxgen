@@ -3794,6 +3794,49 @@ def _para(text, anchor_keys=()):
     }
 
 
+@pytest.mark.unit
+def test_a_picture_with_display_dims_is_sized_by_them_not_its_pixels(tmp_path):
+    """An SVG drawn at twice its size is shown at its own size (#440): its
+    width style and its `small` class come from the SVG's own size, while
+    the resource states the PNG's real pixels."""
+    out = tmp_path / "t.kfx"
+    NativeKFXGenerator().generate_full_book(
+        "T",
+        "A",
+        [
+            {
+                "title": "Chapter",
+                "text": "x",
+                "blocks": [_para(_pic(h)) for h in ("s.svg", "t.svg", "p.png")],
+            }
+        ],
+        output_path=str(out),
+        images={
+            "s.svg": _png(400, 200),
+            "t.svg": _png(128, 128),
+            "p.png": _png(400, 200),
+        },
+        display_dims={"s.svg": (200, 100), "t.svg": (64, 64)},
+    )
+    frags = load_fragments(out)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    res = {str(f.fid): val(f) for f in by_type(frags, "$164")}
+    shown = []
+    for st in by_type(frags, "$259"):
+        for e in iter_entries(val(st)["$146"]):
+            if str(e.get("$159")) == "$271":
+                r = res[str(e["$175"])]
+                w = {str(k): v for k, v in styles[str(e["$157"])].items()}["$56"]
+                shown.append(
+                    (int(r["$422"]), int(r["$423"]), str(w["$307"]), str(w["$306"]))
+                )
+    assert shown == [
+        (400, 200, "40.323", "$314"),  # 200 px wide of the 496 px column
+        (128, 128, "3", "$308"),  # small, as a 64x64 picture is
+        (400, 200, "80.645", "$314"),  # no display size: its pixels decide
+    ]
+
+
 def _picture_table(paragraphs):
     block = _table_block([["p", "side"]])
     block["table"]["rows"][0]["cells"][0]["paragraphs"] = paragraphs

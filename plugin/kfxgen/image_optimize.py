@@ -215,14 +215,15 @@ def gif_to_png(data, log=None):
 
 
 def svg_to_png(data, log=None):
-    """Rasterise an SVG file to PNG at its own size, or None when that
-    cannot be done here (#438).
+    """Rasterise an SVG file to PNG at twice its own size: (png, own size),
+    or None when that cannot be done here (#438, #440).
 
     Kindle Previewer has no KFX form for it to copy: it refuses Enhanced
     Typesetting for a book with an `<img>` of an SVG file, and its MOBI keeps
     the SVG. PNG is a format this project has watched render on hardware.
-    The SVG's own size keeps the picture as wide on the page as a PNG of that
-    size would be; it is soft on a 300 ppi screen when the SVG is small.
+    Twice the size, shown at the own size the caller gets back: at its own
+    size, 8 px text read but was soft on the Paperwhite (#440). The own size
+    is None when Qt cannot state one.
 
     Returns None when calibre is not importable (tests, CI) or the rasterise
     fails, so the caller can skip the picture with a warning.
@@ -235,14 +236,18 @@ def svg_to_png(data, log=None):
             log.debug("  calibre's rasterize_svg unavailable; cannot convert SVG")
         return None
     try:
-        # Over the cap, drawn at the cap: at its own size a 20000x20000 SVG
-        # took 67 s and 1.2 GB, and Qt would not read that PNG back for
-        # `optimize_image` to shrink (#439 review). Under it, no size is
-        # passed, since calibre's `size.scale` also enlarges.
         size = QSvgRenderer(QByteArray(data)).defaultSize()
-        over = max(size.width(), size.height()) > DEFAULT_MAX_DIM
-        fit = {"width": DEFAULT_MAX_DIM, "height": DEFAULT_MAX_DIM} if over else {}
-        out = rasterize_svg(data, **fit)
+        own = (size.width(), size.height())
+        if min(own) > 0:
+            # Never past the cap: at its own size a 20000x20000 SVG took 67 s
+            # and 1.2 GB, and Qt would not read that PNG back for
+            # `optimize_image` to shrink (#439 review). calibre's
+            # `size.scale` fits the SVG inside the box, keeping its shape.
+            box = min(2 * max(own), DEFAULT_MAX_DIM)
+            out = rasterize_svg(data, width=box, height=box)
+        else:
+            own = None
+            out = rasterize_svg(data)
     except Exception as e:  # noqa: BLE001 - never fail a conversion over an image
         if log:
             log.warn(f"  SVG to PNG failed ({e}); skipping the image")
@@ -251,7 +256,7 @@ def svg_to_png(data, log=None):
         if log:
             log.warn("  SVG to PNG produced something that is not a PNG; skipping")
         return None
-    return out
+    return out, own
 
 
 _MIN_MAX_DIM, _MAX_MAX_DIM = 16, 20000
