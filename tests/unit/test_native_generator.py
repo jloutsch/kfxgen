@@ -4716,6 +4716,83 @@ def test_ids_waiting_for_a_box_land_on_its_first_paragraph(tmp_path):
     assert str(target.get("$159")) == "$269" and text(target) == "First."
 
 
+def _missing_picture(key):
+    from kfxgen.converter import _make_img_token
+
+    return {
+        "text": _make_img_token("missing.png", "", None),
+        "spans": [],
+        "anchor_keys": [key],
+        "anchor_offsets": {key: 0},
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("blocks", "lands_on"),
+    [
+        pytest.param(
+            lambda: [
+                _para("Lead."),
+                _missing_picture("c.xhtml#pic"),
+                _box_block([_missing_picture("c.xhtml#in")]),
+                _para("After."),
+            ],
+            "After.",
+            id="box-then-paragraph",
+        ),
+        pytest.param(
+            lambda: [
+                _para("Lead."),
+                _missing_picture("c.xhtml#pic"),
+                _box_block([_missing_picture("c.xhtml#in")]),
+            ],
+            "Lead.",
+            id="box-last-in-chapter",
+        ),
+        pytest.param(
+            lambda: [
+                _para("Lead."),
+                {
+                    **_box_block(
+                        [_box_block([_missing_picture("c.xhtml#in")]), _para("Inside.")]
+                    ),
+                    "anchor_keys": ["c.xhtml#pic"],
+                },
+            ],
+            "Inside.",
+            id="nested-box",
+        ),
+    ],
+)
+def test_ids_waiting_for_a_box_with_no_content_go_to_the_next_block(
+    tmp_path, blocks, lands_on
+):
+    """A box whose only paragraph emits nothing has no paragraph to take the
+    ids waiting for it: they go on to the next block, as past any block that
+    emits nothing (#434). It raised StopIteration."""
+    from kfxgen.inline_style import make_link_flag
+
+    link = {
+        "text": "to pic",
+        "spans": [(0, 6, frozenset({make_link_flag("c.xhtml#pic")}))],
+        "anchor_keys": [],
+    }
+    chapters = [
+        {"title": "One", "text": "x", "blocks": [link]},
+        {"title": "Two", "text": "y", "blocks": blocks()},
+    ]
+    entries, _, text, anchors = _book(tmp_path, chapters)
+    by_id = {e["$155"]: e for e in entries}
+    (target,) = [
+        by_id[anchors[str(sp["$179"])]]
+        for e in entries
+        for sp in e.get("$142") or []
+        if "$179" in sp
+    ]
+    assert text(target) == lands_on
+
+
 @pytest.mark.unit
 def _box_spacing(tmp_path, kids, following):
     box = _box_block(kids, space_above=1.2, space_below=0.0)

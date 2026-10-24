@@ -4267,6 +4267,12 @@ class NativeKFXGenerator:
             chunk["anchor_keys"] = _dedupe_keys((chunk.get("anchor_keys") or []) + keys)
             chunk.setdefault("anchor_offsets", {}).update(dict.fromkeys(keys, 0))
 
+        def _emitted_content(first):
+            """Whether a chunk from `first` on can take anchor keys: a box
+            whose paragraphs emitted nothing is only its `open` and `close`
+            (#434)."""
+            return any(c["type"] not in ("open", "close") for c in all_chunks[first:])
+
         def _emit_box_chunks(block, following):
             """A box (#238): an `open` chunk, its paragraphs, a `close`. The
             box's own keys (a file's key, ids carried to it) go on its first
@@ -4319,7 +4325,7 @@ class NativeKFXGenerator:
                         for ch in all_chunks[first:]:
                             if ch.get("type") == "image":
                                 ch["size"] = _size_in_box(ch.get("size"), box)
-                if pending and len(all_chunks) > first:
+                if pending and _emitted_content(first):
                     _attach_keys(first, pending)
                     pending = []
                 pending += unplaced
@@ -4706,7 +4712,7 @@ class NativeKFXGenerator:
                                     k: v for k, v in block.items() if k != "space_above"
                                 }
                             unplaced = _emit_paragraph(block)
-                        if pending and len(all_chunks) > first:
+                        if pending and _emitted_content(first):
                             _attach_keys(first, pending)
                             pending = []
                         pending += unplaced
