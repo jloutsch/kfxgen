@@ -39,9 +39,17 @@ class _Book:
         self.manifest = items
 
 
-def _fake_rasterizer(monkeypatch, rasterize_svg):
+def _fake_rasterizer(monkeypatch, rasterize_svg, size=(200, 100)):
+    """calibre's rasteriser, and Qt's renderer stating the SVG's own `size`."""
     fake = types.ModuleType("calibre.ebooks.oeb.transforms.rasterize")
     fake.rasterize_svg = rasterize_svg
+    qt = types.ModuleType("qt.core")
+    qt.QByteArray = bytes
+    qt.QSvgRenderer = lambda data: mock.Mock(
+        defaultSize=lambda: mock.Mock(width=lambda: size[0], height=lambda: size[1])
+    )
+    monkeypatch.setitem(sys.modules, "qt", types.ModuleType("qt"))
+    monkeypatch.setitem(sys.modules, "qt.core", qt)
     for name in (
         "calibre",
         "calibre.ebooks",
@@ -64,6 +72,31 @@ def test_an_svg_picture_is_extracted_as_png(monkeypatch):
     assert images["a.svg"][:8] == PNG_SIG
     # The file's own bytes, at its own size: no width or height asked for.
     assert seen == [(SVG, {})]
+
+
+@pytest.mark.parametrize(
+    ("size", "fit"),
+    [
+        ((20000, 20000), {"width": 2048, "height": 2048}),
+        ((3000, 1000), {"width": 2048, "height": 2048}),
+        ((1000, 3000), {"width": 2048, "height": 2048}),
+        ((2048, 100), {}),
+    ],
+)
+def test_an_svg_over_the_size_cap_is_drawn_at_the_cap(monkeypatch, size, fit):
+    """Drawn at its own size, a 20000x20000 SVG took 67 s and 1.2 GB, and Qt
+    then refused to read the PNG back, so `optimize_image` could not shrink
+    it (#439 review). At or under the cap no size is passed: calibre's
+    `size.scale` would enlarge it."""
+    seen = []
+
+    def rasterize_svg(data=None, **kw):
+        seen.append(kw)
+        return PNG_SIG + b"x" * 200
+
+    _fake_rasterizer(monkeypatch, rasterize_svg, size)
+    assert svg_to_png(SVG) is not None
+    assert seen == [fit]
 
 
 def test_an_excluded_svg_is_not_extracted(monkeypatch):

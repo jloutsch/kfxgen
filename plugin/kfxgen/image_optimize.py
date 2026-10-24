@@ -229,12 +229,20 @@ def svg_to_png(data, log=None):
     """
     try:
         from calibre.ebooks.oeb.transforms.rasterize import rasterize_svg
+        from qt.core import QByteArray, QSvgRenderer
     except Exception:
         if log:
             log.debug("  calibre's rasterize_svg unavailable; cannot convert SVG")
         return None
     try:
-        out = rasterize_svg(data)
+        # Over the cap, drawn at the cap: at its own size a 20000x20000 SVG
+        # took 67 s and 1.2 GB, and Qt would not read that PNG back for
+        # `optimize_image` to shrink (#439 review). Under it, no size is
+        # passed, since calibre's `size.scale` also enlarges.
+        size = QSvgRenderer(QByteArray(data)).defaultSize()
+        over = max(size.width(), size.height()) > DEFAULT_MAX_DIM
+        fit = {"width": DEFAULT_MAX_DIM, "height": DEFAULT_MAX_DIM} if over else {}
+        out = rasterize_svg(data, **fit)
     except Exception as e:  # noqa: BLE001 - never fail a conversion over an image
         if log:
             log.warn(f"  SVG to PNG failed ({e}); skipping the image")
