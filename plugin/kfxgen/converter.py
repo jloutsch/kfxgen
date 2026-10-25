@@ -5589,6 +5589,14 @@ HALF_TITLE_TITLES = frozenset(
 )
 
 
+#: The longest title page, in characters, that kfxgen replaces with the book's
+#: title and author. In 200 library books, 160 had a title or half-title page
+#: replaced: in 19 it held 411 to 4,275, its chapter taking in what followed
+#: the page (a contents listing in two), and none other held more than 326
+#: (#448).
+_TITLE_PAGE_MAX_LEN = 400
+
+
 #: A chapter that held a discarded listing is treated as the book's contents
 #: page only when what remains of it is heading-sized. Anything longer is a
 #: page that merely *carried* a listing, and its text is content that must
@@ -5824,7 +5832,17 @@ def _replace_title_page(chapters, metadata, log, listings_kept=False):
         if ch.get("_from_spine"):
             continue
         ch_title = _normalize_title(ch["title"])
-        if ch_title in TITLE_PAGE_TITLES:
+        if ch_title in TITLE_PAGE_TITLES | HALF_TITLE_TITLES and (
+            len(_IMG_TOKEN_RE.sub("", ch.get("text") or "").strip())
+            > _TITLE_PAGE_MAX_LEN
+        ):
+            # More than a title page: its chapter also holds what follows it
+            # with no TOC entry of its own, such as the book's contents
+            # listing, which the replacement deleted (#448). Printed as
+            # written; only the label is left off.
+            ch["_omit_title_heading"] = True
+            log.info("  Kept the title page as written: it holds more than one")
+        elif ch_title in TITLE_PAGE_TITLES:
             kept = _keep_illustrations(ch)
             ch["text"] = f"{title}\n\nby\n\n{author}"
             # Links into the replaced page land on it, as on a rebuilt

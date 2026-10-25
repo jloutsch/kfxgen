@@ -396,6 +396,24 @@ class TestHalfTitlePage:
         _replace_title_page(chapters, self.META, _silent_log())
         assert chapters[0]["anchor_keys"] == ["t.xhtml", "t.xhtml#h", "t.xhtml#a"]
 
+    @pytest.mark.parametrize("label", ["Title Page", "Half Title Page"])
+    def test_a_page_holding_more_than_a_title_page_is_kept(self, label):
+        # #448: a contents listing in the title page's chapter was deleted
+        # with it. A page longer than a title page is printed as written.
+        lines = [f"Chapter {n} and its title" for n in range(1, 21)]
+        blocks = [{"text": t, "anchor_keys": []} for t in ["The Real Title"] + lines]
+        chapters = [
+            {
+                "title": label,
+                "text": "\n\n".join(b["text"] for b in blocks),
+                "blocks": blocks,
+            }
+        ]
+        _replace_title_page(chapters, self.META, _silent_log())
+        ch = chapters[0]
+        assert [b["text"] for b in ch["blocks"]] == ["The Real Title"] + lines
+        assert ch["_omit_title_heading"] is True
+
     def test_half_title_excluded_from_rebuilt_contents(self):
         chapters = [
             {"title": "Contents", "text": "old toc"},
