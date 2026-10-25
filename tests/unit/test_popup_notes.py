@@ -67,6 +67,8 @@ def test_footnote_keys_are_the_ids_on_and_inside_footnotes():
         '<aside epub:type="endnote" id="f"><p id="f1">z</p></aside>'
         '<div role="doc-footnote" id="c">w</div>'
         '<p id="plain">v</p>'
+        '<aside epub:type="footnote" id="h" style="display: none"><p id="h1">u</p></aside>'
+        '<div style="display: none"><p epub:type="footnote" id="g">t</p></div>'
     )
     item = mock.Mock(href="text/n.xhtml", data=etree.fromstring(X.format(body)))
     keys = _conv._footnote_keys(mock.Mock(spine=[item]))

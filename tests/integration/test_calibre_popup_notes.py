@@ -74,6 +74,17 @@ FILES = {
     "k.xhtml": "<h1>K link into the aside</h1>"
     f"<p>K1 text{NOTEREF.format('#kp1', 11)} more.</p>"
     '<aside epub:type="footnote"><p id="kp1">K2 Inner para.</p></aside>',
+    # A hidden footnote: its id carries on to the next paragraph, which is
+    # not a note (#446 review).
+    "l.xhtml": "<h1>L hidden footnote</h1>"
+    f"<p>L1 text{NOTEREF.format('#ln1', 12)} more.</p>"
+    '<aside epub:type="footnote" id="ln1" style="display: none">'
+    "<p>L2 Hidden note.</p></aside><p>L3 After.</p>",
+    # A footnote in a table cell (#446 review).
+    "m.xhtml": "<h1>M footnote in a cell</h1>"
+    f"<p>M1 text{NOTEREF.format('#mn1', 13)} more.</p>"
+    '<table><tr><td><aside epub:type="footnote" id="mn1"><p>M2 Cell note.</p>'
+    "</aside></td><td>M3 Beside.</td></tr></table>",
 }
 #: Previewer 4.0.3 on these shapes: "link" = $616: $617 on the link span,
 #: "note" = $615: $281 on the entry. Unlisted paragraphs have neither.

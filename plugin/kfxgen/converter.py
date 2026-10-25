@@ -2734,11 +2734,13 @@ def _epub_types(elem):
     return (elem.get(_EPUB_TYPE_ATTR) or elem.get("epub:type") or "").lower().split()
 
 
-def _footnote_keys(oeb_book):
+def _footnote_keys(oeb_book, log=None):
     """The key of every id on or inside an `epub:type="footnote"` element in
     the spine: the targets Kindle Previewer writes as pop-up notes when a
     noteref links to them (#445). Not endnotes or `role` notes, which
-    Previewer leaves as ordinary links."""
+    Previewer leaves as ordinary links, and not a footnote CSS hides: its
+    ids carry on to the next block shown, which is not a note (#446
+    review). Its CSS is read with calibre's Stylizer when `log` is given."""
     keys = set()
     for item in oeb_book.spine:
         try:
@@ -2747,12 +2749,25 @@ def _footnote_keys(oeb_book):
             continue
         if data is None or not hasattr(data, "iter"):
             continue
+        notes = [
+            e
+            for e in data.iter()
+            if isinstance(e.tag, str) and "footnote" in _epub_types(e)
+        ]
+        if not notes:
+            continue
+        resolver = _build_style_resolver(oeb_book, item, log) if log else None
         doc = _key_doc(getattr(item, "href", "") or "", "")
-        for elem in data.iter():
-            if isinstance(elem.tag, str) and "footnote" in _epub_types(elem):
-                for d in elem.iter():
-                    if isinstance(d.tag, str):
-                        keys.update(f"{doc}#{aid}" for aid in _own_anchor_ids(d))
+        for elem in notes:
+            if any(
+                _is_hidden(a, resolver)
+                for a in (elem, *elem.iterancestors())
+                if isinstance(a.tag, str)
+            ):
+                continue
+            for d in elem.iter():
+                if isinstance(d.tag, str):
+                    keys.update(f"{doc}#{aid}" for aid in _own_anchor_ids(d))
     return keys
 
 
@@ -6348,7 +6363,7 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         cover_image=cover_image,
         images=images,  # ISSUE-4 INVESTIGATION (image rendering)
         display_dims=display_dims,
-        footnote_keys=_footnote_keys(oeb_book),
+        footnote_keys=_footnote_keys(oeb_book, log),
         language=metadata["language"],
         publisher=metadata["publisher"],
         issue_date=metadata.get("issue_date"),

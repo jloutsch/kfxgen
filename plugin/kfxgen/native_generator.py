@@ -4997,7 +4997,10 @@ class NativeKFXGenerator:
                 )
                 body_anchor_map[target] = anchor_name
                 anchor_names.append(anchor_name)
-                if target in popup_targets:
+                in_cell = {"cell", "in_header_cell"} & set(all_chunks[chunk_idx])
+                if target in popup_targets and not in_cell:
+                    # Not in a table cell: Previewer marks none there (#446
+                    # review).
                     self._popup_anchors.add(anchor_name)
                     self._popup_positions.add(chunk_positions[chunk_idx])
 
