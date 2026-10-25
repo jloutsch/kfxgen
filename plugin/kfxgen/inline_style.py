@@ -272,6 +272,12 @@ def make_link_flag(target):
     return (LINK_FLAG, target)
 
 
+#: A link marked `epub:type="noteref"` (#445). With a footnote as its target
+#: it is written as Previewer writes a pop-up note's link; otherwise it is an
+#: ordinary link.
+NOTEREF_FLAG = "noteref"
+
+
 #: A ruby's base text carries ("ruby", (serial, reading)) (#236). The serial
 #: keeps two neighbouring rubies with one reading apart; it is unique within a
 #: conversion, and the generator numbers rubies in reading order.

@@ -11,6 +11,7 @@ from urllib.parse import unquote
 from ._img_tokens import IMG_TOKEN_RE
 from .inline_style import (
     ALIGN_MAP,
+    NOTEREF_FLAG,
     TYPOGRAPHY_KEYS,
     VALIGN_MAP,
     css_text_colour,
@@ -1270,6 +1271,10 @@ class NativeKFXGenerator:
         from .font_table import FontTable  # noqa: PLC0415
 
         self.font_table = FontTable([])
+        # Pop-up notes (#445), empty for the same reason.
+        self._footnote_keys = set()
+        self._popup_anchors = set()  # link anchors of pop-up notes
+        self._popup_positions = set()  # the note entries they land on
 
     def generate_metadata_only(self, title, author, asin=None, output_path=None):
         """
@@ -3176,6 +3181,8 @@ class NativeKFXGenerator:
             if first_leaf:
                 entry[IS("$790")] = 1
                 first_leaf = False
+            if position in self._popup_positions:
+                entry[IS("$615")] = IS("$281")
             if maths and position in maths:
                 # Text and drawn equations together, as Previewer writes a
                 # paragraph holding an equation (#235).
@@ -3239,6 +3246,8 @@ class NativeKFXGenerator:
                     span = IonStruct(IS("$143"), start, IS("$144"), length)
                     if anchor_name:
                         self.symtab.create_local_symbol(anchor_name)
+                        if anchor_name in self._popup_anchors:
+                            span[IS("$616")] = IS("$617")
                         span[IS("$179")] = IS(anchor_name)
                     if style_name:
                         self.symtab.create_local_symbol(style_name)
@@ -3333,6 +3342,7 @@ class NativeKFXGenerator:
         font_table=None,
         resolved_image_refs=False,
         display_dims=None,
+        footnote_keys=None,
     ):
         """
         Generates a complete KFX book with metadata and content.
@@ -3370,6 +3380,9 @@ class NativeKFXGenerator:
             display_dims: Optional {href: (width, height)}: the size to show
                 an image at when it is not its pixel size, as for an SVG
                 drawn at twice its size (#440). Only the page size uses it.
+            footnote_keys: Optional set of anchor keys that name a footnote:
+                a noteref link to one is written as Previewer writes a pop-up
+                note (#445).
 
         Returns:
             bytes: Serialized KFX data
@@ -3497,6 +3510,8 @@ class NativeKFXGenerator:
 
         image_resources = {}
         self._image_dims = {}  # basename -> (width, height) for style picker
+        self._footnote_keys = set(footnote_keys or ())
+        self._popup_anchors, self._popup_positions = set(), set()
         if images:
             # Filter to recognized formats first, then enumerate so resource
             # names stay contiguous (img_0, img_1, ...) regardless of skips.
@@ -4950,11 +4965,18 @@ class NativeKFXGenerator:
         from .inline_style import link_target as _link_target
 
         referenced_targets = set()
+        noteref_targets = set()
         for chunk in all_chunks:
             for _s, _length, flags in chunk.get("spans") or []:
                 target = _link_target(flags)
                 if target:
                     referenced_targets.add(target)
+                    if NOTEREF_FLAG in flags:
+                        noteref_targets.add(target)
+        # A noteref to a footnote: Previewer marks its link and the note it
+        # lands on (#445). shortcut: marked per anchor, so a plain link to
+        # the same note is marked too; split the anchor if a book does that.
+        popup_targets = noteref_targets & self._footnote_keys
 
         body_anchor_map = {}  # anchor key -> anchor name
         if referenced_targets:
@@ -4975,6 +4997,9 @@ class NativeKFXGenerator:
                 )
                 body_anchor_map[target] = anchor_name
                 anchor_names.append(anchor_name)
+                if target in popup_targets:
+                    self._popup_anchors.add(anchor_name)
+                    self._popup_positions.add(chunk_positions[chunk_idx])
 
         # Build the $145 content fragments for each chapter's chunk-range
         # slice. Image chunks are filtered out — $145 holds only text

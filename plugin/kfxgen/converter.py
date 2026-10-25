@@ -36,6 +36,7 @@ from .inline_style import (
     FLAG_UNDERLINE,
     HARD_BREAK,
     LINE_START,
+    NOTEREF_FLAG,
     _parse_font_family,
     BLACK,
     COLOUR_FLAG,
@@ -1165,8 +1166,10 @@ def _walk_inline(
             # it): the inner one wins, as a tap lands on the innermost
             # element. Keeping both left the run's target to the frozenset's
             # hash order, so it changed between runs (#317).
-            cur = {f for f in cur if not _is_link_flag(f)}
+            cur = {f for f in cur if not _is_link_flag(f) and f != NOTEREF_FLAG}
             cur.add(make_link_flag(target))
+            if "noteref" in _epub_types(elem):
+                cur.add(NOTEREF_FLAG)
     css = None
     own_css = None
     emphasis = None
@@ -2727,8 +2730,34 @@ _NOTE_CLASSES = {"footnote-ref", "footnote-backref"}
 _HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 
 
+def _epub_types(elem):
+    return (elem.get(_EPUB_TYPE_ATTR) or elem.get("epub:type") or "").lower().split()
+
+
+def _footnote_keys(oeb_book):
+    """The key of every id on or inside an `epub:type="footnote"` element in
+    the spine: the targets Kindle Previewer writes as pop-up notes when a
+    noteref links to them (#445). Not endnotes or `role` notes, which
+    Previewer leaves as ordinary links."""
+    keys = set()
+    for item in oeb_book.spine:
+        try:
+            data = item.data
+        except Exception:
+            continue
+        if data is None or not hasattr(data, "iter"):
+            continue
+        doc = _key_doc(getattr(item, "href", "") or "", "")
+        for elem in data.iter():
+            if isinstance(elem.tag, str) and "footnote" in _epub_types(elem):
+                for d in elem.iter():
+                    if isinstance(d.tag, str):
+                        keys.update(f"{doc}#{aid}" for aid in _own_anchor_ids(d))
+    return keys
+
+
 def _is_note_element(elem):
-    types = (elem.get(_EPUB_TYPE_ATTR) or elem.get("epub:type") or "").lower().split()
+    types = _epub_types(elem)
     if _NOTE_TYPES & set(types):
         return True
     if (elem.get("role") or "").strip().lower() in _NOTE_ROLES:
@@ -6319,6 +6348,7 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         cover_image=cover_image,
         images=images,  # ISSUE-4 INVESTIGATION (image rendering)
         display_dims=display_dims,
+        footnote_keys=_footnote_keys(oeb_book),
         language=metadata["language"],
         publisher=metadata["publisher"],
         issue_date=metadata.get("issue_date"),
