@@ -12,9 +12,9 @@ None was checked on the Oasis.
 whose target is, or sits inside, an `epub:type="footnote"` element is now
 marked the way Kindle Previewer 4.0.3 marks it. Tapping it shows the note in
 a pop-up, and closing the pop-up leaves the reader where they were. As in
-Previewer's output, endnotes, `role` notes, plain links, hidden footnotes
-and footnotes in a table cell stay ordinary links. In 200 library books, 9
-gain 339 pop-up notes.
+Previewer's output, endnotes, `role` notes, hidden footnotes and footnotes
+in a table cell stay ordinary links, as does a plain link to a note no
+noteref points at. In 200 library books, 9 gain 339 pop-up notes.
 
 **Title pages are printed as the book has them (#448).** kfxgen replaced a
 title page's text with the book's title and author, and a half-title's with
