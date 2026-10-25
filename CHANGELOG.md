@@ -1,5 +1,52 @@
 # Changelog
 
+## 5.17.0 — SVG pictures, hidden pictures and lost content
+
+The changes since 5.16.0, each reviewed and converted through real calibre,
+with the Gutenberg 90 and a library sample compared before and after each
+change. The SVG pictures were checked on the Paperwhite (5.19.2), and not on
+the Oasis or the Voyage. The other changes write no new KFX structure and
+were not checked on a Kindle.
+
+**SVG pictures are shown (#438, #440).** calibre hands an SVG file to the
+plugin already parsed, not as bytes, so every `<img>` of an SVG file was
+dropped without a warning, its alt text with it. Kindle Previewer has no
+KFX form to copy: it refuses Enhanced Typesetting for any book with one,
+and its MOBI keeps the SVG. kfxgen now draws each one as a PNG with
+calibre's own rasteriser, at twice the SVG's size and shown at its own
+size, so small text in a drawing stays clear. A drawing is never more than
+2048 px on a side: at its own size a 20000 x 20000 SVG took 44 to 67
+seconds and over 1.2 GB of memory. An SVG in a table cell is drawn at its own size,
+because a picture in a cell is shown at its pixel size. In a library of
+1,397 EPUBs, 15 books hold SVG files, and 5 of them gain 70 pictures; one
+of those had 37 of its 45 pictures missing.
+
+**A picture the book hides stays hidden (#428).** A picture inside a
+paragraph, or under a hidden box in a contents listing, was written even
+when its CSS hid it, so books that give Kindle readers one picture and
+other readers another showed both. In 504 library books with a picture
+and some hidden content, 74 write 362 fewer pictures; in the largest
+case kfxgen now writes 217 pictures, the same as Kindle Previewer, where
+it wrote 335.
+
+**A part after a contents listing is kept (#433).** When a TOC entry
+pointed into a contents listing and the next part's heading followed it
+in the same file, the next entry was skipped and the contents page was
+rebuilt over the part: its heading and text were lost. The part is kept,
+after the contents page. No book in the Gutenberg 90 or in 119 library
+books with that shape changes.
+
+**A box with nothing to show no longer stops the conversion (#434).** A
+box whose only picture writes nothing, with an id waiting for it, made the
+native writer fail with an empty error, and the Previewer fallback's
+message was the one shown. The ids now go to the next block. One book in
+a 504-book library sample failed this way and now converts.
+
+**Chapters calibre adds to the spine keep TOC order (#253).** When a book's
+spine leaves out files its pages link to, calibre adds them in a different
+order on each conversion, and the chapters came out shuffled. Those files
+now follow the TOC.
+
 ## 5.16.0 — MathML equations, book headings and media warnings
 
 The changes since 5.15.0, each reviewed and converted through real calibre,
