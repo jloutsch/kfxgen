@@ -4689,6 +4689,9 @@ def test_a_heading_holding_a_note_marker_is_still_a_chapter(tmp_path):
 @pytest.mark.unit
 def test_a_note_marked_box_holding_a_heading_is_still_a_chapter(tmp_path):
     # #282: one aside marked as a footnote holds the whole Notes section.
+    # The shim reads no CSS, so every entry starts a chapter here; calibre
+    # sees no page break and keeps "Notes" as a place in Chapter One (#363).
+    # tests/integration/test_calibre_notes_aside.py checks it there (#431).
     epub = _epub_with_toc(
         tmp_path,
         '<h1 id="one">Chapter One</h1><p>x<a epub:type="noteref" href="#n1">1</a></p>'
