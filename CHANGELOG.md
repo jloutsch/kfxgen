@@ -1,5 +1,38 @@
 # Changelog
 
+## 5.18.0 — Pop-up footnotes, title pages and links into front matter
+
+The changes since 5.17.0, each reviewed and converted through real calibre,
+with the Gutenberg 90 and a library sample compared before and after each
+change. Pop-up footnotes and title pages were checked on the Paperwhite
+(5.19.2) and the Voyage (5.13.6), the contents-page links on the Paperwhite.
+None was checked on the Oasis.
+
+**Footnotes open as pop-ups (#445).** A link marked `epub:type="noteref"`
+whose target is, or sits inside, an `epub:type="footnote"` element is now
+marked the way Kindle Previewer 4.0.3 marks it. Tapping it shows the note in
+a pop-up, and closing the pop-up leaves the reader where they were. As in
+Previewer's output, endnotes, `role` notes, plain links, hidden footnotes
+and footnotes in a table cell stay ordinary links. In 200 library books, 9
+gain 339 pop-up notes.
+
+**Title pages are printed as the book has them (#448).** kfxgen replaced a
+title page's text with the book's title and author, and a half-title's with
+the title. When the page's chapter also took in what followed it with no
+TOC entry of its own, that was deleted too: in two library books, the printed
+contents listing. The page is now printed as written, with only its TOC
+label ("Title Page") left off. In 200 library books, the 160 with a title
+page lose only kfxgen's own title, "by" and author lines, and gain 18,668
+characters of their own text and 152 links in it.
+
+**Links into front matter land on it (#436, #447).** A contents page kfxgen
+rebuilds, and a replaced title page, dropped the ids on the page, so a "back
+to contents" link or a link to the title page went nowhere or landed on the
+next part. They now land on the page. In 200 library books, 47 gain 3,174
+links into the rebuilt contents page, and in the Gutenberg 90, 4 gain 68. In
+another 200, 23 gain 145 links into a title page, which since #448 land on
+the book's own page.
+
 ## 5.17.0 — SVG pictures, hidden pictures and lost content
 
 The changes since 5.16.0, each reviewed and converted through real calibre,
