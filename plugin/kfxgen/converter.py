@@ -5740,6 +5740,11 @@ def _count_text_blocks(blocks):
     return sum(count(b) for b in blocks)
 
 
+def _block_keys(ch):
+    """The anchor keys of a chapter's blocks, which hold their parts' own."""
+    return [k for b in ch.get("blocks") or () for k in b.get("anchor_keys") or ()]
+
+
 def _keep_illustrations(ch):
     """Move the pictures off a chapter whose text is about to be replaced.
 
@@ -5822,6 +5827,9 @@ def _replace_title_page(chapters, metadata, log, listings_kept=False):
         if ch_title in TITLE_PAGE_TITLES:
             kept = _keep_illustrations(ch)
             ch["text"] = f"{title}\n\nby\n\n{author}"
+            # Links into the replaced page land on it, as on a rebuilt
+            # contents page (#436, #447).
+            ch["anchor_keys"] = _block_keys(ch)
             ch.pop("blocks", None)
             if kept:
                 ch["preserved_images"] = kept
@@ -5840,6 +5848,7 @@ def _replace_title_page(chapters, metadata, log, listings_kept=False):
             # label as a heading so it can't leak onto the page. (#107)
             kept = _keep_illustrations(ch)
             ch["text"] = title
+            ch["anchor_keys"] = _block_keys(ch)
             ch.pop("blocks", None)
             ch["_omit_title_heading"] = True
             if kept:
@@ -5939,10 +5948,7 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     moved = contents_ch.pop("_listing_keys", [])
     for ch in all_chapters:
         _drop_keys(ch.get("blocks") or (), moved)
-    contents_ch["anchor_keys"] = _dedupe_keep_order(
-        [k for b in contents_ch.get("blocks") or () for k in b.get("anchor_keys") or ()]
-        + moved
-    )
+    contents_ch["anchor_keys"] = _dedupe_keep_order(_block_keys(contents_ch) + moved)
 
     # Build display text (header + entries)
     lines = ["Contents"]

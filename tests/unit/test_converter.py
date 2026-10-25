@@ -379,6 +379,23 @@ class TestHalfTitlePage:
         assert ch["text"] == "The Real Title\n\nby\n\nJane Author"
         assert ch["_omit_title_heading"] is True
 
+    @pytest.mark.parametrize("label", ["Title Page", "Half Title Page"])
+    def test_a_replaced_page_keeps_its_blocks_keys(self, label):
+        # #447: the replaced page's blocks go, and links to their ids with
+        # them. The page holds the keys, as a rebuilt contents page does (#436).
+        chapters = [
+            {
+                "title": label,
+                "text": "x",
+                "blocks": [
+                    {"text": "x", "anchor_keys": ["t.xhtml", "t.xhtml#h"]},
+                    {"text": "y", "anchor_keys": ["t.xhtml#a"]},
+                ],
+            }
+        ]
+        _replace_title_page(chapters, self.META, _silent_log())
+        assert chapters[0]["anchor_keys"] == ["t.xhtml", "t.xhtml#h", "t.xhtml#a"]
+
     def test_half_title_excluded_from_rebuilt_contents(self):
         chapters = [
             {"title": "Contents", "text": "old toc"},
