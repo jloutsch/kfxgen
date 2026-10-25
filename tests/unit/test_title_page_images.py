@@ -1,18 +1,10 @@
-"""Pictures printed on a replaced front-matter page survive the replacement (#178).
+"""Pictures printed on a title page reach the book (#178).
 
-`_replace_title_page` rewrites a title page's body to the book's title and
-author, and a half-title's to the title alone. The reason is that the text on
-those pages states worse than the metadata does — a TOC label like "Title Page"
-is structural, not content. That is a statement about the text and none at all
-about what the publisher printed alongside it.
-
-Until this, the pictures went with it: the whole scanned page in a page-scan
-book, the vignette or series device above the title in an ordinary illustrated
-one. Measured across a 226-book library, 181 books lost 314 images.
-
-#117 already made this call for the contents page, and the generator reads
-`preserved_images` outside its `toc_links` branch precisely so a page with no
-links can use it. This is that mechanism applied one page earlier.
+`_replace_title_page` used to rewrite a title page's body to the book's title
+and author, and a half-title's to the title alone; #178 moved their pictures
+aside so they survived it, as #117 had for the contents page. Measured across
+a 226-book library, 181 books had lost 314 images. Since #448 the page is
+printed as written, so its pictures stay where the book has them.
 """
 
 from __future__ import annotations
@@ -71,7 +63,7 @@ def _front(chapters, label):
     return next(c for c in chapters if c["title"].lower().startswith(label.lower()[:5]))
 
 
-class TestReplacedPagesKeepTheirPictures:
+class TestTitlePagesKeepTheirPictures:
     def test_a_title_page_keeps_what_was_printed_on_it(self, tmp_path):
         epub = _book(
             tmp_path,
@@ -80,18 +72,16 @@ class TestReplacedPagesKeepTheirPictures:
             ("images/a.jpeg", "images/b.jpeg"),
         )
         ch = _front(_chapters(epub), "Title Page")
-        assert ch["text"] == "A Title\n\nby\n\nAn Author", (
-            "the replacement text is the point of the feature and must stay"
-        )
-        assert len(ch.get("preserved_images") or []) == 2
+        assert len(re.findall("\x00IMG", ch["text"])) == 2
+        assert "preserved_images" not in ch
 
     def test_a_half_title_keeps_them_too(self, tmp_path):
         epub = _book(
             tmp_path, "Half Title", _image_page("images/a.jpeg"), ("images/a.jpeg",)
         )
         ch = _front(_chapters(epub), "Half Title")
-        assert ch["text"] == "A Title", "half-title convention is title only"
-        assert len(ch.get("preserved_images") or []) == 1
+        assert len(re.findall("\x00IMG", ch["text"])) == 1
+        assert "preserved_images" not in ch
 
     def test_a_page_with_no_pictures_gains_no_key(self, tmp_path):
         """An empty list would make every replaced page look like it kept something."""

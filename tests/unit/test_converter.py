@@ -345,14 +345,12 @@ class TestHalfTitlePage:
 
     META = {"title": "The Real Title", "author": "Jane Author"}
 
-    def test_half_title_replaced_with_title_only_no_author(self):
+    def test_half_title_kept_as_written(self):
+        # #448: printed as the book has it, not replaced with the title.
         chapters = [{"title": "Half Title Page", "text": "the title\n"}]
         _replace_title_page(chapters, self.META, _silent_log())
         ch = chapters[0]
-        # Title only — no author, no "by" (distinct from the full title page).
-        assert ch["text"] == "The Real Title"
-        assert "Jane Author" not in ch["text"]
-        assert "by" not in ch["text"]
+        assert ch["text"] == "the title\n"
         # The structural label must be suppressed as a heading.
         assert ch["_omit_title_heading"] is True
 
@@ -368,40 +366,25 @@ class TestHalfTitlePage:
             chapters = [{"title": label, "text": "x"}]
             _replace_title_page(chapters, self.META, _silent_log())
             ch = chapters[0]
-            assert ch["text"] == "The Real Title", f"{label!r} not recognized"
+            assert ch["text"] == "x", f"{label!r} text changed"
             assert ch["_omit_title_heading"] is True, f"{label!r} heading not omitted"
 
-    def test_full_title_page_still_includes_author(self):
-        # Regression guard: the full title page path is unchanged.
+    def test_full_title_page_kept_as_written(self):
         chapters = [{"title": "Title Page", "text": "old"}]
         _replace_title_page(chapters, self.META, _silent_log())
         ch = chapters[0]
-        assert ch["text"] == "The Real Title\n\nby\n\nJane Author"
+        assert ch["text"] == "old"
         assert ch["_omit_title_heading"] is True
-
-    @pytest.mark.parametrize("label", ["Title Page", "Half Title Page"])
-    def test_a_replaced_page_keeps_its_blocks_keys(self, label):
-        # #447: the replaced page's blocks go, and links to their ids with
-        # them. The page holds the keys, as a rebuilt contents page does (#436).
-        chapters = [
-            {
-                "title": label,
-                "text": "x",
-                "blocks": [
-                    {"text": "x", "anchor_keys": ["t.xhtml", "t.xhtml#h"]},
-                    {"text": "y", "anchor_keys": ["t.xhtml#a"]},
-                ],
-            }
-        ]
-        _replace_title_page(chapters, self.META, _silent_log())
-        assert chapters[0]["anchor_keys"] == ["t.xhtml", "t.xhtml#h", "t.xhtml#a"]
 
     @pytest.mark.parametrize("label", ["Title Page", "Half Title Page"])
     def test_a_page_holding_more_than_a_title_page_is_kept(self, label):
         # #448: a contents listing in the title page's chapter was deleted
-        # with it. A page longer than a title page is printed as written.
+        # with it. The page is printed as written, its ids with it (#447).
         lines = [f"Chapter {n} and its title" for n in range(1, 21)]
-        blocks = [{"text": t, "anchor_keys": []} for t in ["The Real Title"] + lines]
+        blocks = [
+            {"text": t, "anchor_keys": [f"t.xhtml#b{n}"]}
+            for n, t in enumerate(["The Real Title"] + lines)
+        ]
         chapters = [
             {
                 "title": label,
@@ -411,7 +394,7 @@ class TestHalfTitlePage:
         ]
         _replace_title_page(chapters, self.META, _silent_log())
         ch = chapters[0]
-        assert [b["text"] for b in ch["blocks"]] == ["The Real Title"] + lines
+        assert ch["blocks"] == blocks
         assert ch["_omit_title_heading"] is True
 
     def test_half_title_excluded_from_rebuilt_contents(self):
@@ -439,9 +422,8 @@ def test_replace_title_page_clears_stale_blocks():
     """Chapters whose text is synthesised must not retain stale blocks (#9)."""
     dummy_blocks = [{"spans": [("old text", "old text", frozenset())]}]
     chapters = [
-        # Title page — blocks must be cleared after text replacement.
+        # Title and half-title pages are printed as written (#448).
         {"title": "Title Page", "text": "old", "blocks": list(dummy_blocks)},
-        # Half-title page — same invariant.
         {"title": "Half Title", "text": "old", "blocks": list(dummy_blocks)},
         # Contents page — _rebuild_contents_page replaces text, blocks must go.
         {"title": "Contents", "text": "old", "blocks": list(dummy_blocks)},
@@ -451,8 +433,8 @@ def test_replace_title_page_clears_stale_blocks():
     meta = {"title": "MyBook", "author": "A. Author"}
     _replace_title_page(chapters, meta, _silent_log())
 
-    assert "blocks" not in chapters[0], "title page blocks not cleared"
-    assert "blocks" not in chapters[1], "half-title page blocks not cleared"
+    assert "blocks" in chapters[0], "title page blocks wrongly cleared"
+    assert "blocks" in chapters[1], "half-title page blocks wrongly cleared"
     assert "blocks" not in chapters[2], "contents page blocks not cleared"
     assert "blocks" in chapters[3], "normal chapter blocks wrongly cleared"
 
@@ -3398,15 +3380,14 @@ class TestTitleNormalisation:
         assert [link["text"] for link in contents["toc_links"]] == ["Chapter 1"]
         assert "blocks" not in contents
 
-    def test_punctuated_title_page_is_replaced(self):
+    def test_punctuated_title_page_is_recognised(self):
         chapters = [{"title": "Title Page:", "text": "old"}]
         _replace_title_page(chapters, self.META, _silent_log())
-        assert chapters[0]["text"] == "The Real Title\n\nby\n\nJane Author"
+        assert chapters[0]["_omit_title_heading"] is True
 
-    def test_punctuated_half_title_is_replaced(self):
+    def test_punctuated_half_title_is_recognised(self):
         chapters = [{"title": "Half Title Page.", "text": "old"}]
         _replace_title_page(chapters, self.META, _silent_log())
-        assert chapters[0]["text"] == "The Real Title"
         assert chapters[0]["_omit_title_heading"] is True
 
     def test_punctuated_small_text_chapter_gets_small_font(self):

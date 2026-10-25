@@ -5107,7 +5107,7 @@ def extract_chapters_from_oeb(
     Args:
         oeb_book: Calibre OEB book object
         log: Calibre logger
-        metadata: Optional dict with 'title' and 'author' for title page replacement
+        metadata: Optional dict with 'title' and 'author'; front-matter rules run only with a title
         cover_href: Manifest href of the cover image, when one was found
         native_tables: Write eligible tables as one table block each (#219)
         keep_nav_listings: Print contents listings rather than drop them;
@@ -5589,14 +5589,6 @@ HALF_TITLE_TITLES = frozenset(
 )
 
 
-#: The longest title page, in characters, that kfxgen replaces with the book's
-#: title and author. In 200 library books, 160 had a title or half-title page
-#: replaced: in 19 it held 411 to 4,275, its chapter taking in what followed
-#: the page (a contents listing in two), and none other held more than 326
-#: (#448).
-_TITLE_PAGE_MAX_LEN = 400
-
-
 #: A chapter that held a discarded listing is treated as the book's contents
 #: page only when what remains of it is heading-sized. Anything longer is a
 #: page that merely *carried* a listing, and its text is content that must
@@ -5756,17 +5748,10 @@ def _block_keys(ch):
 def _keep_illustrations(ch):
     """Move the pictures off a chapter whose text is about to be replaced.
 
-    Three front-matter pages have their body rewritten: the contents listing
-    becomes kfxgen's own (#132), and the title and half-title pages become the
-    book's title and author. In every case the reason is that the *text*
-    duplicates something KFX carries itself or states worse than the metadata
-    does. None of that is a reason to drop what the publisher printed there.
-
-    #117 made this call for the contents page. The title pages had no
-    equivalent, so a scanned title page — the whole page, in a page-scan book —
-    went with the text that replaced it, and so did the vignette or series
-    device an ordinary illustrated book prints above its title. Measured across
-    a 226-book library: 181 books, 314 images (#178).
+    The contents listing becomes kfxgen's own (#132), because its *text*
+    duplicates the navigation KFX carries itself. That is no reason to drop
+    what the publisher printed there (#117). Title pages, which were rewritten
+    too until #448, are now kept as written.
 
     Tokens only, never the blocks they came from: the surrounding text is
     exactly what the caller is replacing. `preserved_images` is read outside
@@ -5780,7 +5765,7 @@ def _keep_illustrations(ch):
 
 
 def _replace_title_page(chapters, metadata, log, listings_kept=False):
-    """Replace title page, reformat copyright/contents, and set font sizes for front/back matter.
+    """Label title pages, rebuild contents, and set font sizes for front/back matter.
 
     `listings_kept`: the book keeps its own listing, as it has no Contents
     page to rebuild (#335). A chapter titled "Contents" then got the name
@@ -5790,7 +5775,6 @@ def _replace_title_page(chapters, metadata, log, listings_kept=False):
     if not metadata:
         return
     title = metadata.get("title", "")
-    author = metadata.get("author", "")
     if not title:
         return
     # A listing recognised by markup rather than by title still has to become
@@ -5832,49 +5816,13 @@ def _replace_title_page(chapters, metadata, log, listings_kept=False):
         if ch.get("_from_spine"):
             continue
         ch_title = _normalize_title(ch["title"])
-        if ch_title in TITLE_PAGE_TITLES | HALF_TITLE_TITLES and (
-            len(_IMG_TOKEN_RE.sub("", ch.get("text") or "").strip())
-            > _TITLE_PAGE_MAX_LEN
-        ):
-            # More than a title page: its chapter also holds what follows it
-            # with no TOC entry of its own, such as the book's contents
-            # listing, which the replacement deleted (#448). Printed as
-            # written; only the label is left off.
+        if ch_title in TITLE_PAGE_TITLES | HALF_TITLE_TITLES:
+            # Printed as the book has it; only the TOC label ("Title Page")
+            # is left off, as structural metadata (#33, #107). Its text used
+            # to be replaced with the book's title and author, which deleted
+            # whatever else its chapter held, such as a contents listing or a
+            # page with no TOC entry of its own (#448).
             ch["_omit_title_heading"] = True
-            log.info("  Kept the title page as written: it holds more than one")
-        elif ch_title in TITLE_PAGE_TITLES:
-            kept = _keep_illustrations(ch)
-            ch["text"] = f"{title}\n\nby\n\n{author}"
-            # Links into the replaced page land on it, as on a rebuilt
-            # contents page (#436, #447).
-            ch["anchor_keys"] = _block_keys(ch)
-            ch.pop("blocks", None)
-            if kept:
-                ch["preserved_images"] = kept
-                log.info(
-                    f"  Kept {len(kept)} illustration(s) from the replaced title page"
-                )
-            # The replaced body already contains the book title — don't
-            # also render the chapter's TOC name ("Title Page") as a
-            # heading on top of it (#33).
-            ch["_omit_title_heading"] = True
-            log.info(f"  Replaced title page with: {title} by {author}")
-        elif ch_title in HALF_TITLE_TITLES:
-            # Half-title convention: book title only, no author. The TOC
-            # label ("Half Title Page") is structural metadata, never
-            # printed content — replace with the title and suppress the
-            # label as a heading so it can't leak onto the page. (#107)
-            kept = _keep_illustrations(ch)
-            ch["text"] = title
-            ch["anchor_keys"] = _block_keys(ch)
-            ch.pop("blocks", None)
-            ch["_omit_title_heading"] = True
-            if kept:
-                ch["preserved_images"] = kept
-                log.info(
-                    f"  Kept {len(kept)} illustration(s) from the replaced half-title"
-                )
-            log.info(f"  Replaced half-title page with: {title}")
         elif ch_title in ("copyright", "copyright page"):
             ch["font_size"] = SMALL_FONT_SIZE
             log.info(f"  Copyright page (font_size={SMALL_FONT_SIZE})")

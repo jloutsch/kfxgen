@@ -4541,9 +4541,8 @@ class NativeKFXGenerator:
             # Decide whether to emit the title as a heading text chunk.
             # Skip it when:
             # - `_is_cover`: synthetic cover chapter (#32), no title text.
-            # - `_omit_title_heading`: caller-set flag (e.g. Title Page
-            #   replaced with title+author body — heading would be
-            #   redundant) (#33).
+            # - `_omit_title_heading`: caller-set flag (e.g. a Title Page
+            #   label, which is structural, not the book's text) (#33).
             # - The body (after title-prefix stripping) contains image
             #   tokens but no real text — for image-only chapters
             #   (map pages, diagram pages), the title heading appears

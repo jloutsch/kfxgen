@@ -1,9 +1,10 @@
 """Links into a title page kfxgen replaces land on it, through calibre.
 
-kfxgen replaces a title page's text with the book's title and author, and a
+kfxgen replaced a title page's text with the book's title and author, and a
 half-title page's with the title (#33, #107), dropping the page's blocks and
 their anchor keys with them. A link to the page's file or an id on it then
-had nothing to land on. #436 fixed the same for the rebuilt contents page.
+had nothing to land on. Since #448 the page is printed as written, its ids
+with it.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found. CI has no calibre, so this is
@@ -79,7 +80,5 @@ def test_links_into_a_replaced_title_page_land_on_it(calibre, shape):  # noqa: F
             word = t[int(sp["$143"]) : int(sp["$143"]) + int(sp["$144"])]
             if "$179" in sp and word in ("L1", "L2"):
                 landed[word] = text(by_id[anchors[str(sp["$179"])]])
-    # The replaced page opens with the book's title (the EPUB's dc:title).
-    assert landed == {"L1": f"title{shape}", "L2": f"title{shape}"}, (
-        f"calibre {version}"
-    )
+    # The page is printed as written since #448, its heading first.
+    assert landed == {"L1": "The Book", "L2": "The Book"}, f"calibre {version}"
