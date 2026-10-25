@@ -6234,6 +6234,22 @@ _LISTING_436 = (
             {"Part One": ["p1.xhtml"]},
             id="a-page-titled-contents",
         ),
+        pytest.param(
+            [
+                (
+                    "toc.xhtml",
+                    "<h1>Contents</h1><table>"
+                    '<tr><td id="r1"><a href="p1.xhtml">Part One</a></td><td>1</td></tr>'
+                    '<tr><td><a href="c1.xhtml">Chapter One</a></td><td>2</td></tr>'
+                    "</table>",
+                ),
+                ("p1.xhtml", "<h1>Part One</h1><p>Part text.</p>"),
+            ],
+            [("Contents", "toc.xhtml"), ("Part One", "p1.xhtml")],
+            ["toc.xhtml", "toc.xhtml#r1"],
+            {"Part One": ["p1.xhtml"]},
+            id="a-contents-page-in-a-table",
+        ),
     ],
 )
 def test_links_into_a_rebuilt_contents_page_land_on_it(
@@ -6253,7 +6269,9 @@ def test_links_into_a_rebuilt_contents_page_land_on_it(
         spine.append(item)
     toc = toc + [("Chapter One", "c1.xhtml"), ("Chapter Two", "c2.xhtml")]
     oeb = _OEBBook(spine=spine, toc=[_TOCNode(t, h) for t, h in toc])
-    chapters = extract_chapters_from_oeb(oeb, _silent_log(), metadata=_METADATA)
+    chapters = extract_chapters_from_oeb(
+        oeb, _silent_log(), metadata=_METADATA, native_tables=True
+    )
     (page,) = [c for c in chapters if c.get("toc_links")]
     assert page["anchor_keys"] == page_keys
     held = {

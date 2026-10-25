@@ -61,7 +61,7 @@ from .inline_style import (
     run_font_size,
 )
 from .math_draw import draw as draw_math
-from .native_generator import NativeKFXGenerator, _block_keys
+from .native_generator import NativeKFXGenerator
 
 _ITALIC_TAGS = {"em", "i"}
 _BOLD_TAGS = {"strong", "b"}
@@ -5896,7 +5896,8 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     for ch in all_chapters:
         _drop_keys(ch.get("blocks") or (), moved)
     contents_ch["anchor_keys"] = _dedupe_keep_order(
-        [k for b in contents_ch.get("blocks") or () for k in _block_keys(b)] + moved
+        [k for b in contents_ch.get("blocks") or () for k in b.get("anchor_keys") or ()]
+        + moved
     )
 
     # Build display text (header + entries)
