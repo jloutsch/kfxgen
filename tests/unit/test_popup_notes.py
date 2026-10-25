@@ -46,6 +46,20 @@ def test_a_noteref_link_is_flagged_and_a_plain_link_is_not():
     assert NOTEREF_FLAG not in plain
 
 
+def test_a_plain_link_inside_a_noteref_is_not_flagged():
+    # A link inside a link (the WordDumb plugin writes it, #317): the inner
+    # one is the link, and it isn't a noteref.
+    flags = _flags_of_links(
+        '<p>a<a epub:type="noteref" href="#n1">x<a href="#p1">y</a></a></p>'
+    )
+    targets = {
+        next(f[1] for f in fl if isinstance(f, tuple) and f[0] == "link"): fl
+        for fl in flags
+    }
+    assert NOTEREF_FLAG in targets["c.xhtml#n1"]
+    assert NOTEREF_FLAG not in targets["c.xhtml#p1"]
+
+
 def test_footnote_keys_are_the_ids_on_and_inside_footnotes():
     body = (
         '<aside epub:type="footnote" id="a"><p id="a1">x</p></aside>'
