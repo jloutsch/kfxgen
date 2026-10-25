@@ -14,7 +14,7 @@ dropped without a warning, its alt text with it. Kindle Previewer has no
 KFX form to copy: it refuses Enhanced Typesetting for any book with one,
 and its MOBI keeps the SVG. kfxgen now draws each one as a PNG with
 calibre's own rasteriser, at twice the SVG's size and shown at its own
-size, so small text in a drawing stays clear. A drawing is never more than
+size, so small text in a drawing is clearer. A drawing is never more than
 2048 px on a side: at its own size a 20000 x 20000 SVG took 44 to 67
 seconds and over 1.2 GB of memory. An SVG in a table cell is drawn at its own size,
 because a picture in a cell is shown at its pixel size. In a library of
