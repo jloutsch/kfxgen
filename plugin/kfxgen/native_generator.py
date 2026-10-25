@@ -4514,8 +4514,9 @@ class NativeKFXGenerator:
             start_idx = len(all_chunks)
             # Anchor ids belonging to blocks this chapter drops (a heading that
             # duplicates the chapter title). Re-attached to the chapter's first
-            # chunk below so links to those ids still resolve. (#62)
-            carried_anchor_keys = []
+            # chunk below so links to those ids still resolve. (#62) A page the
+            # converter rebuilt names the keys of the blocks it replaced (#436).
+            carried_anchor_keys = list(chapter.get("anchor_keys") or ())
             title = chapter["title"]
             toc_links = chapter.get("toc_links")
             title, title_spans = _ruby_heading_title(chapter.get("blocks"), title)

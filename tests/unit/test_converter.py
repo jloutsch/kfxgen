@@ -6179,6 +6179,91 @@ def test_a_toc_entry_on_a_listing_just_before_the_next_part_keeps_the_part(
     ]
 
 
+_LISTING_436 = (
+    '<p><a href="{0}">Part One</a></p><p><a href="c1.xhtml">Chapter One</a></p>'
+    '<p><a href="c2.xhtml">Chapter Two</a></p>'
+)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("files", "toc", "page_keys", "elsewhere"),
+    [
+        pytest.param(
+            [
+                (
+                    "front.xhtml",
+                    "<h1>Foreword</h1><p>Foreword text.</p>"
+                    f'<div class="toc" id="box">{_LISTING_436.format("front.xhtml#p1")}'
+                    '</div><h1 id="p1">Part One</h1><p>Part text.</p>',
+                )
+            ],
+            [
+                ("Foreword", "front.xhtml"),
+                ("Contents", "front.xhtml#box"),
+                ("Part One", "front.xhtml#p1"),
+            ],
+            ["front.xhtml#box"],
+            {"Foreword": ["front.xhtml"], "Part One": ["front.xhtml#p1"]},
+            id="listing-before-the-next-part",
+        ),
+        pytest.param(
+            [
+                (
+                    "toc.xhtml",
+                    f'<div class="toc" id="box">{_LISTING_436.format("p1.xhtml")}</div>',
+                ),
+                ("p1.xhtml", "<h1>Part One</h1><p>Part text.</p>"),
+            ],
+            [("Table", "toc.xhtml"), ("Part One", "p1.xhtml")],
+            ["toc.xhtml", "toc.xhtml#box"],
+            {"Part One": ["p1.xhtml"]},
+            id="listing-in-its-own-file",
+        ),
+        pytest.param(
+            [
+                (
+                    "toc.xhtml",
+                    '<h1 id="head">Contents</h1>'
+                    f'<div id="box">{_LISTING_436.format("p1.xhtml")}</div>',
+                ),
+                ("p1.xhtml", "<h1>Part One</h1><p>Part text.</p>"),
+            ],
+            [("Contents", "toc.xhtml"), ("Part One", "p1.xhtml")],
+            ["toc.xhtml", "toc.xhtml#head", "toc.xhtml#box"],
+            {"Part One": ["p1.xhtml"]},
+            id="a-page-titled-contents",
+        ),
+    ],
+)
+def test_links_into_a_rebuilt_contents_page_land_on_it(
+    files, toc, page_keys, elsewhere
+):
+    # #436: the rebuild drops the page's blocks, and their keys with them,
+    # so links to the listing's file, its id or its heading were dropped;
+    # a listing with no block of its own had carried its id onto the next
+    # part's heading instead. The rebuilt page holds them all.
+    spine = []
+    for href, body in files + [
+        ("c1.xhtml", "<h1>Chapter One</h1><p>One text.</p>"),
+        ("c2.xhtml", "<h1>Chapter Two</h1><p>Two text.</p>"),
+    ]:
+        item = _SpineItem(href, "")
+        item.data = _xhtml_raw(body)
+        spine.append(item)
+    toc = toc + [("Chapter One", "c1.xhtml"), ("Chapter Two", "c2.xhtml")]
+    oeb = _OEBBook(spine=spine, toc=[_TOCNode(t, h) for t, h in toc])
+    chapters = extract_chapters_from_oeb(oeb, _silent_log(), metadata=_METADATA)
+    (page,) = [c for c in chapters if c.get("toc_links")]
+    assert page["anchor_keys"] == page_keys
+    held = {
+        c["title"]: [k for b in c.get("blocks") or () for k in b.get("anchor_keys")]
+        for c in chapters
+        if c["title"] in elsewhere
+    }
+    assert held == elsewhere
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "wrap", ["{}", '<div class="shade">{}</div>', '<div class="box">{}</div>']

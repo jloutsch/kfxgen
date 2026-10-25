@@ -61,7 +61,7 @@ from .inline_style import (
     run_font_size,
 )
 from .math_draw import draw as draw_math
-from .native_generator import NativeKFXGenerator
+from .native_generator import NativeKFXGenerator, _block_keys
 
 _ITALIC_TAGS = {"em", "i"}
 _BOLD_TAGS = {"strong", "b"}
@@ -4806,8 +4806,8 @@ def _assemble_chapters_by_coordinate(
     coords = []
     last_block_in_file = {}
     prev_flat = -1
-    listing_entry = False
-    empty_listing = set()  # coords whose listing page has no blocks (#433)
+    listing_entry = None  # the listing ids the entry before named
+    empty_listing = {}  # coord -> its listing's keys, for a page with no blocks (#433)
     for entry in toc_entries:
         norm = _normalize_href(entry["href"])
         try:
@@ -4839,15 +4839,23 @@ def _assemble_chapters_by_coordinate(
             bi = 0
         bi = min(bi, len(spine_blocks[si]) - 1) if spine_blocks[si] else 0
         fi = file_offset[si] + bi
-        names_listing = bool(frag) and any(
-            frag in ids
-            for _, ids in spine_items_ordered[si].get("nav_listing_at") or ()
+        names_listing = next(
+            (
+                ids
+                for _, ids in spine_items_ordered[si].get("nav_listing_at") or ()
+                if frag and frag in ids
+            ),
+            None,
         )
         if fi == prev_flat and listing_entry and not names_listing:
             # The entry before named a listing that ends where this one
             # starts: it keeps the listing as a page with no blocks, for the
-            # rebuild, rather than taking this entry's (#433).
-            empty_listing.add(len(coords) - 1)
+            # rebuild, rather than taking this entry's (#433). The listing's
+            # ids, carried onto this entry's block, are the page's (#436).
+            empty_listing[len(coords) - 1] = [
+                _entry_key(spine_items_ordered[coords[-1][1]], i)
+                for i in sorted(listing_entry)
+            ]
         elif fi <= prev_flat:
             log.warn(
                 f"  TOC entry {entry['title']!r} out of document order; skipping split"
@@ -4984,7 +4992,13 @@ def _assemble_chapters_by_coordinate(
             end = file_offset[si] + len(spine_blocks[si])
         start = 0 if (k == 0 and head_has_toc_anchor) else fi
         if k in empty_listing:
-            ch = {"title": title, "text": "", "blocks": [], "_had_nav_listing": True}
+            ch = {
+                "title": title,
+                "text": "",
+                "blocks": [],
+                "_had_nav_listing": True,
+                "_listing_keys": empty_listing[k],
+            }
         else:
             ch = _flag_nav(_mk(title, flat[start:end]), start, end)
         if ch:
@@ -5873,6 +5887,17 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     # Tokens only, not the blocks they came from: the surrounding text is
     # exactly what this function exists to replace.
     preserved_images = _keep_illustrations(contents_ch)
+
+    # Links into the page kfxgen replaces land on it (#436): the keys of the
+    # blocks it drops (its file's, its heading's, the listing's), and those
+    # of a listing with no block of its own, from the block they were
+    # carried to.
+    moved = contents_ch.pop("_listing_keys", [])
+    for ch in all_chapters:
+        _drop_keys(ch.get("blocks") or (), moved)
+    contents_ch["anchor_keys"] = _dedupe_keep_order(
+        [k for b in contents_ch.get("blocks") or () for k in _block_keys(b)] + moved
+    )
 
     # Build display text (header + entries)
     lines = ["Contents"]

@@ -4704,6 +4704,42 @@ def test_links_land_on_the_paragraphs_inside_a_box(tmp_path):
 
 
 @pytest.mark.unit
+def test_a_rebuilt_contents_pages_own_keys_land_on_its_heading(tmp_path):
+    """The converter hands a rebuilt contents page the keys of the blocks it
+    replaced (#436). They go on the page's first chunk, its heading, as keys
+    of a dropped heading do (#62)."""
+    from kfxgen.inline_style import make_link_flag
+
+    back = {
+        "text": "back to file to box",
+        "spans": [
+            (0, 7, frozenset({make_link_flag("toc.xhtml")})),
+            (12, 7, frozenset({make_link_flag("toc.xhtml#box")})),
+        ],
+        "anchor_keys": [],
+    }
+    chapters = [
+        {
+            "title": "Contents",
+            "text": "",
+            "toc_links": [{"text": "One", "target_chapter_idx": 1}],
+            "anchor_keys": ["toc.xhtml", "toc.xhtml#box"],
+        },
+        {"title": "One", "text": "x", "blocks": [_para("Body."), back]},
+    ]
+    entries, _, text, anchors = _book(tmp_path, chapters)
+    by_id = {e["$155"]: e for e in entries}
+    landed = [
+        text(by_id[anchors[str(sp["$179"])]])
+        for e in entries
+        if text(e) == "back to file to box"
+        for sp in e.get("$142") or []
+        if "$179" in sp
+    ]
+    assert landed == ["Contents", "Contents"]
+
+
+@pytest.mark.unit
 def test_the_chapter_title_is_cut_from_a_boxs_first_paragraph(tmp_path):
     box = _box_block([_para("Notes. A first note."), _para("A second note.")])
     chapters = [{"title": "Notes", "text": box["text"], "blocks": [box]}]
