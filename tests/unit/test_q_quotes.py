@@ -70,3 +70,58 @@ def test_the_marks_take_the_qs_own_formatting():
     assert block["text"] == '"a" "b"'
     italic = [(s, n) for s, n, flags in block["spans"] if FLAG_ITALIC in flags]
     assert italic == [(0, 3), (5, 1)]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("lang", "text"),
+    [
+        # Region and script tags Previewer has marks of their own for (#503
+        # QA; 4,422 tags measured).
+        ("fr-CA", "«a»"),
+        ("pt-PT", "«a»"),
+        ("zh-Hant", "「a」"),
+        ("de-AT", '"a"'),
+    ],
+)
+def test_region_tags_previewer_knows(lang, text):
+    assert _texts(f'<p><q lang="{lang}">a</q></p>') == [text]
+
+
+@pytest.mark.unit
+def test_an_empty_lang_means_unknown():
+    """lang="" is an unknown language: plain marks, not the parent's (#503 QA)."""
+    assert _texts('<p lang="fr"><q lang="">a</q></p>') == ['"a"']
+
+
+def _styled(css_for_q, body='<p lang="en"><q>a <q>b</q></q></p>'):
+    """Text of `body` with `css_for_q` as each <q>'s resolved CSS."""
+    xhtml = f'<html xmlns="http://www.w3.org/1999/xhtml"><body>{body}</body></html>'
+    root = etree.fromstring(xhtml.encode())
+
+    def resolver(elem):
+        return {"q-css": css_for_q} if _conv._local_tag(elem.tag) == "q" else {}
+
+    blocks = _conv.extract_blocks_from_html(
+        root, style_resolver=resolver, base_href="c.xhtml"
+    )
+    return [b["text"] for b in blocks]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("css", "text"),
+    [
+        # A book typing its own marks sets quotes: none (#503 QA).
+        ({"quotes": "none"}, "a b"),
+        ({"quotes": '"<<" ">>" "<" ">"'}, "<<a <b>>>"),
+        ({"quotes": '"\\201C" "\\201D"'}, "“a “b””"),
+        # ::before/::after content replaces the marks.
+        ({"before": '"[["', "after": '"]]"'}, "[[a [[b]]]]"),
+        ({"before": "open-quote", "after": "close-quote"}, "“a ‘b’”"),
+        ({"before": "none", "after": "none"}, "a b"),
+    ],
+    ids=["none", "strings", "escapes", "before-after", "open-close", "content-none"],
+)
+def test_the_books_css_for_q(css, text):
+    assert _styled(css) == [text]

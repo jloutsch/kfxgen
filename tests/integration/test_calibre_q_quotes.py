@@ -34,11 +34,13 @@ BODY = (
 )
 
 
-def _epub(path, html_lang):
+def _epub(path, html_lang, css=None):
     attrs = f' xml:lang="{html_lang}" lang="{html_lang}"' if html_lang else ""
     page = (
         '<?xml version="1.0" encoding="utf-8"?><html '
-        f'xmlns="http://www.w3.org/1999/xhtml"{attrs}><head><title>c</title></head>'
+        f'xmlns="http://www.w3.org/1999/xhtml"{attrs}><head><title>c</title>'
+        + (f"<style>{css}</style>" if css else "")
+        + "</head>"
         f"<body>{BODY}</body></html>"
     )
     with zipfile.ZipFile(path, "w") as z:
@@ -92,3 +94,28 @@ def test_q_is_printed_with_its_marks(calibre, html_lang, q1, q2):  # noqa: F811
     assert q1 in texts, f"calibre {version}: {texts}"
     if q2:
         assert q2 in texts, f"calibre {version}: {texts}"
+
+
+@pytest.mark.parametrize(
+    ("css", "q1"),
+    [
+        # A book typing its own marks sets quotes: none (#503 QA).
+        ("q { quotes: none }", "Q1 a quoted inner run."),
+        ('q { quotes: "<<" ">>" "<" ">" }', "Q1 a <<quoted <inner>>> run."),
+        (
+            'q::before { content: "[[" } q::after { content: "]]" }',
+            "Q1 a [[quoted [[inner]]]] run.",
+        ),
+    ],
+    ids=["none", "strings", "before-after"],
+)
+def test_the_books_css_for_q(calibre, css, q1):  # noqa: F811
+    tmp, _env, version = calibre
+    name = f"qcss-{abs(hash(css))}"
+    epub, kfx = tmp / f"{name}.epub", tmp / f"{name}.kfx"
+    _epub(epub, None, css)
+    _ebook_convert(calibre, epub, kfx, True)
+    texts = [
+        str(t) for f in by_type(load_fragments(kfx), "$145") for t in val(f)["$146"]
+    ]
+    assert q1 in texts, f"calibre {version}: {texts}"
