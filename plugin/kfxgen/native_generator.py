@@ -3,7 +3,6 @@ import errno
 import hashlib
 import logging
 import os
-import posixpath
 import re
 import unicodedata
 from urllib.parse import unquote
@@ -981,7 +980,9 @@ def _safe_write_bytes(path, data):
     path = os.fspath(path)
     candidate = path
 
-    # Defense in depth — three independent layers, any of which rejects.
+    # Defense in depth — two independent layers, either of which rejects.
+    # (A third, normpath, could only find a '..' that layer 2 had already
+    # rejected: removed in #457.)
     #
     # Layer 1 (regex): catches Windows drive-relative '..' with no separator
     #   before the dots, e.g. 'C:..\\foo' or bare 'C:..'. These have no '/'
@@ -1000,24 +1001,6 @@ def _safe_write_bytes(path, data):
     raw_parts = candidate.replace("\\", "/").split("/")
     if any(p == ".." for p in raw_parts):
         _security_log.warning("rejected output path with traversal segment: %r", path)
-        raise ValueError("output path contains '..' segment: %r" % path)
-
-    # Layer 3 (canonical-form check): substitute '\\' → '/' first so the
-    #   path uses POSIX separators, then run posixpath.normpath. Using
-    #   posixpath (not os.path) makes this layer platform-independent —
-    #   os.path.normpath on POSIX hosts treats '\\' as a literal character
-    #   and would not collapse Windows-shaped inputs there. After our
-    #   '\\' → '/' substitution, posixpath sees a uniform path.
-    #
-    #   This catches inputs that pass layer 2 but post-normalize to '..',
-    #   e.g. 'foo/./../../bar' → '../bar' (layer 2 sees the literal '..',
-    #   so this is mostly belt-and-suspenders) and any future shape where
-    #   the '..' only emerges after redundant-segment collapse.
-    normalized = posixpath.normpath(candidate.replace("\\", "/"))
-    if any(p == ".." for p in normalized.split("/")):
-        _security_log.warning(
-            "rejected output path with traversal segment after normpath: %r", path
-        )
         raise ValueError("output path contains '..' segment: %r" % path)
 
     if os.path.islink(path):
@@ -1275,46 +1258,6 @@ class NativeKFXGenerator:
         self._footnote_keys = set()
         self._popup_anchors = set()  # link anchors of pop-up notes
         self._popup_positions = set()  # the note entries they land on
-
-    def generate_metadata_only(self, title, author, asin=None, output_path=None):
-        """
-        Generates a minimal KFX with metadata but no content.
-        Useful for verifying container structure.
-        """
-        # Reset state for clean generation
-        self.fragments = []
-        self.symtab = StandardSymbolTable()
-        self.entity_ids = {}
-        self.next_entity_id = 349
-        self.field_403_counter = 10
-
-        # Generate Container ID
-        # Format: CR! + 28 chars
-        # For testing we can use a fixed one or random
-        container_id = "CR!FEHAKUKMU05DIVSIJBZWPW44H9VH"
-
-        if asin is None:
-            asin = "ASIN_PLACEHOLDER"
-
-        # 1. Build Content Features ($585)
-        self.fragments.append(self.build_fragment_585())
-
-        # 2. Build Book Metadata ($490)
-        self.fragments.append(
-            self.build_fragment_490(title, author, asin, container_id)
-        )
-
-        # 3. Create Container
-        container = KfxContainer(self.symtab)
-        container.fragments = self.fragments
-
-        # Serialize
-        data = container.serialize()
-
-        if output_path:
-            _safe_write_bytes(output_path, data)
-
-        return data
 
     def build_fragment_585(self, table_version=1):
         """
@@ -1883,8 +1826,6 @@ class NativeKFXGenerator:
         Args:
             section_names: List of $260 section fids (e.g., ["c0"])
         """
-        if isinstance(section_names, str):
-            section_names = [section_names]
 
         for name in section_names:
             self.symtab.create_local_symbol(name)
@@ -1911,10 +1852,8 @@ class NativeKFXGenerator:
         $538.$169[0].$170 = list of $260 section fids
 
         Args:
-            section_names: List of $260 section fids (e.g., ["c0"]) or single string.
+            section_names: List of $260 section fids (e.g., ["c0"])
         """
-        if isinstance(section_names, str):
-            section_names = [section_names]
 
         for name in section_names:
             self.symtab.create_local_symbol(name)
@@ -2143,15 +2082,8 @@ class NativeKFXGenerator:
             YJFragment with type $265
         """
         entries = []
-        for item in position_ids:
-            eid_offset = None
-            if isinstance(item, (list, tuple)):
-                char_offset, position_id, *rest = item
-                eid_offset = rest[0] if rest else None
-            else:
-                # Legacy: plain list of position IDs
-                char_offset = len(entries)
-                position_id = item
+        for char_offset, position_id, *rest in position_ids:
+            eid_offset = rest[0] if rest else None
             entry = IonStruct(IS("$184"), char_offset, IS("$185"), position_id)
             if eid_offset:
                 entry[IS("$143")] = eid_offset
@@ -2176,7 +2108,6 @@ class NativeKFXGenerator:
             dict with keys:
                 'position_entries_265': List of (char_offset, position_id) for $265
                 'section_positions_264': Dict of section_name -> [position_ids] for $264
-                'all_position_ids': List of all position IDs for $550
                 'locations': [(position_id, offset)] for $550, one every
                     POSITIONS_PER_LOCATION positions (#227)
         """
@@ -2245,10 +2176,8 @@ class NativeKFXGenerator:
                     # synthetic; an image, a rule or a container takes one
                     # offset slot
                     chunk_text_len = 1
-                elif isinstance(chunk, dict):
-                    chunk_text_len = len(chunk["text"])
                 else:
-                    chunk_text_len = len(chunk)  # legacy: bare string
+                    chunk_text_len = len(chunk["text"])
                 entries_265_raw.append((char_offset, chunk_positions[chunk_idx]))
                 maths = math_by_position.get(chunk_positions[chunk_idx])
                 if maths:
@@ -2318,19 +2247,11 @@ class NativeKFXGenerator:
                         pids.extend(eids)
             section_positions_264[sec_name] = pids
 
-        # All position IDs for $550 (section + every chunk in reading order)
-        all_position_ids = list(section_positions)
-        for p in chunk_positions:
-            if p is not None:
-                all_position_ids.append(p)
-                for _k, _item, eids in (math_by_position.get(p) or ("", ()))[1]:
-                    all_position_ids.extend(eids)
         locations = place_locations(location_sections)
 
         return {
             "position_entries_265": entries_265_raw,
             "section_positions_264": section_positions_264,
-            "all_position_ids": all_position_ids,
             "locations": locations,
         }
 
@@ -2350,27 +2271,7 @@ class NativeKFXGenerator:
             YJFragment with type $ion_symbol_table
         """
         # Use the symbol table's create_import method to generate the data
-        symbol_table_data = self.symtab.create_import()
-
-        if symbol_table_data is None:
-            # Create minimal symbol table if none exists
-            symbol_table_data = IonStruct(
-                IS("imports"),
-                [
-                    IonStruct(
-                        IS("name"), "YJ_Symbols", IS("version"), 15, IS("max_id"), 1098
-                    )
-                ],
-                IS("symbols"),
-                self.symtab.get_local_symbols(),
-                IS("max_id"),
-                len(self.symtab.symbols),
-            )
-            symbol_table_data = IonAnnotation(
-                [IS("$ion_symbol_table")], symbol_table_data
-            )
-
-        return YJFragment(symbol_table_data)
+        return YJFragment(self.symtab.create_import())
 
     def build_fragment_270(self, container_id):
         """
@@ -2429,7 +2330,7 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS("$348"), ftype=IS("$419"), value=value)
 
-    def build_fragment_145(self, text_strings, content_name=None):
+    def build_fragment_145(self, text_strings, content_name):
         """
         Builds Fragment $145 (Content Strings)
 
@@ -2444,8 +2345,6 @@ class NativeKFXGenerator:
         Returns:
             YJFragment with type $145
         """
-        if content_name is None:
-            content_name = "content_1"
         self.symtab.create_local_symbol(content_name)
 
         value = IonStruct(IS("$4"), IS(content_name), IS("$146"), text_strings)
@@ -2526,9 +2425,6 @@ class NativeKFXGenerator:
         Returns:
             YJFragment with type $157
         """
-        if entity_name is None:
-            entity_name = f"s{self.next_entity_id}"
-            self.next_entity_id += 1
         self.symtab.create_local_symbol(entity_name)
 
         # $13 = font-weight: $350=normal, $361=bold
@@ -2819,42 +2715,21 @@ class NativeKFXGenerator:
     def build_fragment_157_image(
         self,
         entity_name,
-        kind="inline",
+        kind,
         width_pct=None,
         height_pct=None,
         float_side=None,
         clear=None,
     ):
-        """Builds a $157 style for inline image entries.
-
-        Three variants observed in Calibre KFX Output (jhowell) reference
-        on the maintainer's real-book test corpus:
-        - "small" (s7N8 shape): tiny square chapter ornaments / dingbats.
-          $56=3em, $57=3em, em-based fixed sizing.
-        - "inline" (s5J shape): wide rule-style decorations.
-          $56=9.626% caps height to a small viewport fraction.
-        - "page" (s4R shape): full-page images like maps and diagrams.
-          $56=100% lets the image take the full available height.
-
-        Decision is driven by the caller, who knows the image dimensions.
-        `height_pct` sizes a "sized" image by height ($57) instead of width —
-        Amazon's shape for `height="98%"` and `height: 100%`.
+        """Builds a $157 style for a picture entry, of one of two kinds:
+        - "sized": its own width against the text column, as Amazon sizes
+          it (#145); `height_pct` sizes it by height ($57) instead, Amazon's
+          shape for `height="98%"` and `height: 100%`.
+        - "small" (Calibre KFX Output's s7N8 shape): a small near-square
+          ornament, 3em by 3em.
         """
         self.symtab.create_local_symbol(entity_name)
-        if kind == "page":
-            value = IonStruct(
-                IS("$56"),
-                IonStruct(IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")),
-                IS("$785"),
-                IonStruct(IS("$131"), 2, IS("$132"), 2),
-                IS("$546"),
-                IS("$377"),
-                IS("$580"),
-                IS("$320"),
-                IS("$173"),
-                IS(entity_name),
-            )
-        elif kind == "sized":
+        if kind == "sized":
             # Width from the image's own pixel width against the text column,
             # capped at full width — what Amazon does. Everything else matches
             # the old "inline" style so only the width changes. (#145)
@@ -2881,7 +2756,7 @@ class NativeKFXGenerator:
                 IS("$173"),
                 IS(entity_name),
             )
-        elif kind == "small":
+        else:  # small
             # Reference s7N8 verbatim:
             #   $56: 3em (width), $57: 3em (height) — em unit ($308)
             #   $65: 100% (max-width, % unit $314) — prevents overflow
@@ -2900,23 +2775,6 @@ class NativeKFXGenerator:
                 IS(entity_name),
                 IS("$31"),
                 IonStruct(IS("$307"), IonDecimal("-9"), IS("$306"), IS("$318")),
-            )
-        else:  # inline (wide rule)
-            value = IonStruct(
-                IS("$56"),
-                IonStruct(IS("$307"), IonDecimal("9.626"), IS("$306"), IS("$314")),
-                IS("$65"),
-                IonStruct(IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")),
-                IS("$785"),
-                IonStruct(IS("$131"), 2, IS("$132"), 2),
-                IS("$546"),
-                IS("$377"),
-                IS("$42"),
-                IonStruct(IS("$307"), IonDecimal("1"), IS("$306"), IS("$310")),
-                IS("$580"),
-                IS("$320"),
-                IS("$173"),
-                IS(entity_name),
             )
         if float_side:
             # Floated: the text after it wraps beside it, and it isn't
@@ -3045,9 +2903,6 @@ class NativeKFXGenerator:
         Returns:
             YJFragment with type $259
         """
-        if entity_name is None:
-            entity_name = f"l{self.next_entity_id}"
-            self.next_entity_id += 1
         self.symtab.create_local_symbol(entity_name)
         for ref in content_refs or ():
             if ref:
@@ -3275,36 +3130,26 @@ class NativeKFXGenerator:
     def build_fragment_260(
         self,
         storyline_name,
-        section_name=None,
-        field_155_value=None,
-        is_first_section=False,
+        section_name,
+        field_155_value,
     ):
         """
         Builds Fragment $260 (Section)
 
         CRITICAL: $260.fid MUST equal $260.$174.
 
-        All sections use inline display ($269) with page-break-before ($326).
-        Block display ($270) with fixed dimensions causes text overlap and is
-        only appropriate for cover image sections.
+        All sections use inline display ($269) and no page break of their
+        own (see below). Block display ($270) with fixed dimensions causes
+        text overlap and is only appropriate for cover image sections.
 
         Args:
             storyline_name: Local symbol name of the $259 fragment (e.g., "l0")
             section_name: Local symbol name for BOTH fid AND $174 (e.g., "c0").
-                         Auto-generated if None.
-            field_155_value: Optional integer for Field $155 (defaults to 1800)
-            is_first_section: Unused (kept for API compatibility)
+            field_155_value: Position id for Field $155.
 
         Returns:
             (YJFragment, section_name): Fragment and its fid/name for use in $538
         """
-        if section_name is None:
-            section_name = f"c{self.next_entity_id}"
-            self.next_entity_id += 1
-
-        if field_155_value is None:
-            field_155_value = 1800
-
         self.symtab.create_local_symbol(section_name)
         self.symtab.create_local_symbol(storyline_name)
 
@@ -3503,8 +3348,6 @@ class NativeKFXGenerator:
         # image_resources is indexed by basename so <img src="../path/x.jpg">
         # in spine XHTML resolves against manifest href "OEBPS/path/x.jpg".
         def _img_basename(h):
-            if not h:
-                return ""
             h = h.split("#", 1)[0]
             return h.rsplit("/", 1)[-1]
 
@@ -3701,8 +3544,6 @@ class NativeKFXGenerator:
         toc_positions = ch_data["chapter_start_positions"]
 
         # 3. Build one $260 section per chapter/storyline
-        # Known-good: first section uses block display with dimensions,
-        # subsequent sections use minimal inline display
         section_names = []
         for i, sl_name in enumerate(storyline_names):
             sec_name = f"c{i}"
@@ -3710,7 +3551,6 @@ class NativeKFXGenerator:
                 sl_name,
                 section_name=sec_name,
                 field_155_value=section_positions[i],
-                is_first_section=(i == 0),
             )
             section_names.append(sec_name)
             self.fragments.append(frag_260)
@@ -3969,8 +3809,8 @@ class NativeKFXGenerator:
                 if i >= len(image_data) - 1 or image_data[i] != 0xFF:
                     break
                 marker = image_data[i + 1]
-                if marker == 0x00 or marker == 0xFF:
-                    # Stuffed byte or more padding
+                if marker == 0x00:
+                    # Stuffed byte (the padding loop above took any 0xFF)
                     i += 2
                     continue
                 if marker in (0xC0, 0xC1, 0xC2, 0xC3):
@@ -5124,19 +4964,8 @@ class NativeKFXGenerator:
                 if link_name not in extra_style_names:
                     extra_style_names.append(link_name)
 
-        # Image entries need their own $157 styles with image-specific
-        # layout attributes. Reference uses three styles based on image
-        # shape:
-        # - "small" (s7N8): tiny square chapter ornaments (~222px),
-        #   sized 3em x 3em.
-        # - "inline" (s5J): wide rule-style decorations (e.g. 1090x92),
-        #   capped at 9.626% viewport height.
-        # - "page" (s4R): full-page images (maps, diagrams, ~2200px),
-        #   sized 100% to fill the available height.
-        # Heuristic:
-        #   both dims >= 600px           -> page
-        #   both dims <= 300px, ~square  -> small
-        #   else                         -> inline
+        # Picture entries need their own $157 styles (build_fragment_157_image):
+        # "small" for a near-square picture up to 300px, "sized" for the rest.
         IMAGE_COLUMN_PX = _IMAGE_COLUMN_PX
 
         def _image_width_pct(w):

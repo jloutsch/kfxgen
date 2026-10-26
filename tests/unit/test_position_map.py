@@ -585,9 +585,7 @@ def test_table_containers_take_one_position_and_cells_their_length():
 
     real = [p for p in positions if p is not None]
     assert set(real) <= set(pd["section_positions_264"]["c0"])
-    assert set(real) <= set(pd["all_position_ids"])
     # no `close` marker has a position, so none may appear anywhere
-    assert None not in pd["all_position_ids"]
     assert None not in pd["section_positions_264"]["c0"]
     assert None not in [eid for _, eid in pd["position_entries_265"]]
     assert len(real) == len(set(real))
