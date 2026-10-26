@@ -1,5 +1,5 @@
 """
-Tier-1 unit tests for _normalize_href / _find_manifest_item path-traversal
+Tier-1 unit tests for _normalize_href / _resolve_doc_path path-traversal
 defense (#44).
 
 Threat: an EPUB whose manifest carries an href like '../../etc/passwd' must
@@ -11,14 +11,13 @@ memory. This is fail-closed defense in depth.
 
 import os
 import sys
-from unittest.mock import MagicMock
 
 import pytest
 from hypothesis import given, settings, strategies as st
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin"))
 
-from kfxgen.converter import _find_manifest_item, _is_unsafe_href, _normalize_href
+from kfxgen.converter import _is_unsafe_href, _normalize_href, _resolve_doc_path
 
 
 @pytest.mark.tier1
@@ -291,21 +290,10 @@ class TestNormalizeHrefProperty:
 
 @pytest.mark.tier1
 @pytest.mark.unit
-class TestFindManifestItemRejects:
-    """_find_manifest_item must return None for hrefs that would normalize to ''.
-
-    This guards against a future code path where a manifest's hrefs dict
-    happens to be keyed by the raw attacker string (Calibre normalizes its
-    OEB hrefs, so this is defense in depth).
-    """
-
-    def _book_with_hrefs(self, hrefs_dict):
-        book = MagicMock()
-        manifest = MagicMock()
-        manifest.hrefs = hrefs_dict
-        manifest.__iter__ = lambda self: iter([])
-        book.manifest = manifest
-        return book
+class TestResolveDocPathRejects:
+    """_resolve_doc_path, which resolves every link and picture href in a
+    conversion, names nothing outside the book. (Moved from the removed
+    _find_manifest_item, #457.)"""
 
     @pytest.mark.parametrize(
         "attacker_href",
@@ -316,14 +304,8 @@ class TestFindManifestItemRejects:
             "C:\\secrets",
         ],
     )
-    def test_returns_none_for_unsafe_href(self, attacker_href):
-        # Even if a manifest happens to contain the attacker's exact string as
-        # a key, the lookup must fail closed.
-        bait = MagicMock()
-        book = self._book_with_hrefs({attacker_href: bait})
-        assert _find_manifest_item(book, attacker_href) is None
+    def test_returns_empty_for_unsafe_href(self, attacker_href):
+        assert _resolve_doc_path("ch.xhtml", attacker_href) == ""
 
     def test_legit_lookup_still_works(self):
-        legit = MagicMock()
-        book = self._book_with_hrefs({"chapter1.xhtml": legit})
-        assert _find_manifest_item(book, "chapter1.xhtml") is legit
+        assert _resolve_doc_path("ch.xhtml", "chapter1.xhtml") == "chapter1.xhtml"

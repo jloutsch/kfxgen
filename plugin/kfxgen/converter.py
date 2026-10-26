@@ -979,8 +979,6 @@ def _with_initial(spans, n, add):
     out = []
     for i, flags in enumerate(head):
         flags = flags | add
-        if not flags:
-            continue
         if out and out[-1][0] + out[-1][1] == i and out[-1][2] == flags:
             out[-1] = (out[-1][0], out[-1][1] + 1, flags)
         else:
@@ -2796,8 +2794,6 @@ def _note_target_ids(root):
     "2", "3" are common.
     """
     ids = set()
-    if root is None:
-        return ids
     for elem in root.iter():
         if not isinstance(elem.tag, str):
             continue
@@ -4626,61 +4622,6 @@ def _is_calibre_inline_toc(element):
     return body is not None and body.get("id") == CALIBRE_INLINE_TOC_ID
 
 
-def _find_manifest_item(oeb_book, href):
-    """Return a manifest item whose href matches (exactly or by basename)."""
-    if not hasattr(oeb_book, "manifest") or oeb_book.manifest is None:
-        return None
-    norm = _normalize_href(href)
-    if not norm:
-        return None
-
-    hrefs = getattr(oeb_book.manifest, "hrefs", None)
-    if hrefs:
-        item = hrefs.get(href)
-        if item is not None:
-            return item
-        for h, manifest_item in hrefs.items():
-            if _normalize_href(h) == norm:
-                return manifest_item
-
-    try:
-        for manifest_item in oeb_book.manifest:
-            m_href = getattr(manifest_item, "href", "") or ""
-            if _normalize_href(m_href) == norm:
-                return manifest_item
-    except TypeError:
-        pass
-    return None
-
-
-def _extract_text_from_manifest_item(oeb_book, href, log):
-    """Extract chapter text from a manifest item, used when the href isn't in the spine.
-
-    Returns None when nothing usable is found — caller decides whether to drop
-    the TOC entry or warn.
-    """
-    try:
-        item = _find_manifest_item(oeb_book, href)
-    except Exception as e:
-        log.warn(f"  Manifest lookup failed for {_normalize_href(href)}: {e}")
-        return None
-    if item is None or not hasattr(item, "data") or item.data is None:
-        return None
-    media = (getattr(item, "media_type", "") or "").lower()
-    if "html" not in media and "xml" not in media:
-        # Empty/absent media_type or any non-XHTML type (image, font, ...) —
-        # don't try to parse the data as XHTML.
-        return None
-    try:
-        text = extract_text_from_html(item.data)
-    except Exception as e:
-        log.warn(f"  Manifest fallback failed for {_normalize_href(href)}: {e}")
-        return None
-    if text and text.strip():
-        return text
-    return None
-
-
 # Max length for treating a leading front-matter block's text as its own
 # heading/title; longer reads as body prose, so fall back to a neutral label
 # rather than dumping a paragraph into the nav entry.
@@ -5838,9 +5779,6 @@ def _replace_title_page(chapters, metadata, log, listings_kept=False):
             # whatever else its chapter held, such as a contents listing or a
             # page with no TOC entry of its own (#448).
             ch["_omit_title_heading"] = True
-        elif ch_title in ("copyright", "copyright page"):
-            ch["font_size"] = SMALL_FONT_SIZE
-            log.info(f"  Copyright page (font_size={SMALL_FONT_SIZE})")
         elif ch_title in _CONTENTS_TITLES and not listings_kept:
             # Rebuild contents page from actual chapter titles
             _rebuild_contents_page(ch, chapters, log)
@@ -5982,17 +5920,11 @@ def _extract_toc_with_hrefs(oeb_book, log):
                     f"  {'  ' * level}[{level}] {node.title} -> {_normalize_href(href)}"
                 )
 
-            try:
-                for child in node:
-                    process_toc_node(child, level + 1)
-            except (TypeError, AttributeError):
-                pass
+            for child in node:
+                process_toc_node(child, level + 1)
 
-        try:
-            for node in oeb_book.toc:
-                process_toc_node(node)
-        except (TypeError, AttributeError):
-            process_toc_node(oeb_book.toc)
+        for node in oeb_book.toc:
+            process_toc_node(node)
 
         if toc_entries:
             log.info(f"Extracted {len(toc_entries)} TOC entries with hrefs")
