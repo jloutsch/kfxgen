@@ -52,8 +52,10 @@ def test_a_second_entry_on_the_same_spot_is_kept(calibre):  # noqa: F811
     _build(epub, FILES, TOC, "toc459")
     _ebook_convert(calibre, epub, kfx, True)
     assert _contents_pane(load_fragments(kfx)) == [
-        ("Same spot A", "Same spot A"),
-        ("Same spot B", "Same spot A"),
+        # Both land on the book's heading, which prints in place of the
+        # label since #481.
+        ("Same spot A", "Chapter One"),
+        ("Same spot B", "Chapter One"),
         ("Chapter Two", "Chapter Two"),
         ("Middle", "M1 middle."),
         ("Chapter Three", "Chapter Three"),
