@@ -156,6 +156,36 @@ def _check_woff2(data, max_bytes):
         raise ValueError(f"its WOFF2 data does not inflate to its {expected} bytes")
 
 
+#: Tables every TrueType/OpenType font carries, and one of which holds its
+#: outlines.
+_SFNT_REQUIRED = {b"cmap", b"head", b"hhea", b"hmtx", b"maxp"}
+_SFNT_OUTLINES = {b"glyf", b"CFF ", b"CFF2"}
+
+
+def _check_sfnt(data):
+    """Raise ValueError, saying why, when a TrueType/OpenType font's table
+    directory doesn't hold up: cut short, a table past the file's end, or a
+    table every font has missing. A file with a font's magic bytes and junk
+    after them was embedded as a face (#471). A collection (ttcf) has a
+    header of its own and isn't read here."""
+    if data[:4] == b"ttcf":
+        return
+    if len(data) < 12:
+        raise ValueError("its header is cut short")
+    (num_tables,) = struct.unpack_from(">H", data, 4)
+    if 12 + 16 * num_tables > len(data):
+        raise ValueError("its table directory is cut short")
+    tags = set()
+    for i in range(num_tables):
+        tag, _sum, offset, length = struct.unpack_from(">4sLLL", data, 12 + 16 * i)
+        if offset + length > len(data):
+            raise ValueError(f"its table {tag!r} runs past the file's end")
+        tags.add(tag)
+    missing = sorted(_SFNT_REQUIRED - tags)
+    if missing or not tags & _SFNT_OUTLINES:
+        raise ValueError(f"it has no {(missing or [b'glyf'])[0].decode()!r} table")
+
+
 def sfnt_from_woff(data, max_bytes):
     """A WOFF or WOFF2 font unpacked to TrueType/OpenType bytes (#245).
 
@@ -325,6 +355,11 @@ def faces_from_rules(rules, manifest_lookup, log, max_font_bytes=MAX_FONT_BYTES)
                     f"{len(data)} bytes exceeds the {max_font_bytes}-byte cap "
                     f"(KFXGEN_MAX_FONT_BYTES)"
                 )
+                continue
+            try:
+                _check_sfnt(data)
+            except ValueError as e:
+                log.warn(f"  Skipping @font-face {family!r} src {href!r}: {e}")
                 continue
             chosen_href, chosen_data = href, data
             break

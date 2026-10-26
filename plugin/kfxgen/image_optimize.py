@@ -265,6 +265,21 @@ _MIN_MAX_DIM, _MAX_MAX_DIM = 16, 20000
 _MIN_MAX_BYTES, _MAX_MAX_BYTES = 1024, 1024 * 1024 * 1024
 
 
+def decodes(data):
+    """Whether calibre's image loader reads `data` as a picture (#471). A
+    JPEG cut short decodes, its missing part filled, as a browser shows it.
+    True when calibre isn't there to ask, as in the unit tests."""
+    try:
+        from calibre.utils.img import image_from_data
+    except ImportError:
+        return True
+    try:
+        image_from_data(data)
+    except Exception:  # noqa: BLE001 - any failure means it can't be read
+        return False
+    return True
+
+
 def optimize_images(cover_image, images, log):
     """Optimize the cover and every body image. Returns (cover, images)."""
     max_dim = _read_env_int(

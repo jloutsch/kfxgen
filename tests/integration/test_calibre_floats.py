@@ -20,7 +20,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "plugin"))
 sys.path.insert(0, str(REPO))
 
-from tests._helpers import jpeg_of  # noqa: E402
+from tests._helpers import decodable_jpeg_of  # noqa: E402
 from tests._kfx_introspect import (  # noqa: E402
     by_type,
     iter_entries,
@@ -87,7 +87,7 @@ def _build(path, cases=None, css=None):
         )
         z.writestr("c.xhtml", xhtml)
         z.writestr("s.css", css or CSS)
-        z.writestr("i.jpg", jpeg_of(600, 400))
+        z.writestr("i.jpg", decodable_jpeg_of(600, 400))
 
 
 @pytest.fixture(scope="module")

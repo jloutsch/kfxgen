@@ -74,6 +74,52 @@ def jpeg_of(width: int, height: int) -> bytes:
     )
 
 
+#: A real 8x8 grey baseline JPEG, made by calibre's own encoder (Qt).
+_REAL_JPEG_8X8 = bytes.fromhex(
+    "ffd8ffe000104a46494600010101006400640000ffdb004300100b0c0e0c0a100e0d0e12"
+    "1110131828 1a181616183123251d283a333d3c3933383740485c4e404457453738506d51"
+    "575f626768673e4d71797064785c656763ffdb0043011112121815182f1a1a2f6342384263"
+    "6363636363636363636363636363636363636363636363636363636363636363636363636363"
+    "6363636363636363636363ffc00011080008000803012200021101031101ffc40014000100"
+    "000000000000000000000000000000ffc40014100100000000000000000000000000000000"
+    "ffc40014010100000000000000000000000000000000ffc400141101000000000000000000"
+    "00000000000000ffda000c03010002110311003f00000fffd9".replace(" ", "")
+)
+
+
+def decodable_jpeg_of(width: int, height: int) -> bytes:
+    """A JPEG of `width` x `height` that calibre can decode, for tests that
+    convert through real calibre: since #471 a picture calibre can't decode
+    is dropped, and `jpeg_of` only declares its size. A real 8x8 JPEG with
+    its frame header set to the size; calibre's decoder fills the rest, as it
+    does for any JPEG cut short."""
+    i = _REAL_JPEG_8X8.index(b"\xff\xc0")
+    return (
+        _REAL_JPEG_8X8[: i + 5]
+        + height.to_bytes(2, "big")
+        + width.to_bytes(2, "big")
+        + _REAL_JPEG_8X8[i + 9 :]
+    )
+
+
+def sfnt_of(tail: bytes = b"") -> bytes:
+    """Bytes with a sound TrueType table directory, for tests that pass a
+    font through `faces_from_rules`, which since #471 skips a file whose
+    directory doesn't hold up. Not a font that draws: every table record
+    points at the same 4 bytes. `tail` makes two of them differ."""
+    import struct
+
+    tags = (b"cmap", b"glyf", b"head", b"hhea", b"hmtx", b"maxp")
+    body = 12 + 16 * len(tags)
+    return (
+        b"\x00\x01\x00\x00"
+        + struct.pack(">HHHH", len(tags), 0, 0, 0)
+        + b"".join(struct.pack(">4sLLL", t, 0, body, 4) for t in tags)
+        + bytes(4)
+        + tail
+    )
+
+
 class NullLog:
     """No-op logger satisfying the kfxgen `log` parameter protocol.
 

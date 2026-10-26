@@ -22,7 +22,13 @@ from ._img_tokens import (
     IMG_TOKEN_SPACE as _IMG_TOKEN_SPACE,
 )
 from .font_table import BOLD_WEIGHT_THRESHOLD, parse_style, parse_weight
-from .image_optimize import GIF_SIGNATURES, gif_to_png, optimize_images, svg_to_png
+from .image_optimize import (
+    GIF_SIGNATURES,
+    decodes,
+    gif_to_png,
+    optimize_images,
+    svg_to_png,
+)
 from .inline_style import (
     FLAG_BOLD,
     FLAG_ITALIC,
@@ -6324,6 +6330,22 @@ def _get_cover_image_data(item, log):
     return data
 
 
+def _drop_undecodable(cover, cover_href, images, log):
+    """The cover and pictures without those calibre can't decode, each named
+    in a warning. Written, they reached the book with no size, or a size
+    read from garbage (4294967295 x 4294967295) (#471)."""
+    if cover is not None and not decodes(cover):
+        log.warn(f"  Skipping the cover {cover_href!r}: it can't be decoded")
+        cover = None
+    kept = {}
+    for href, data in images.items():
+        if decodes(data):
+            kept[href] = data
+        else:
+            log.warn(f"  Skipping image {href!r}: it can't be decoded")
+    return cover, kept
+
+
 def extract_cover_image(oeb_book, log):
     """
     Extract cover image binary data from OEB book.
@@ -6497,6 +6519,8 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         display_dims=display_dims,
         own_size=_pictures_in_table_cells(oeb_book),
     )
+
+    cover_image, images = _drop_undecodable(cover_image, cover_href, images, log)
 
     # Optimize over-size images unless the user opted to embed originals (#11).
     if getattr(opts, "kfxgen_embed_original_images", False):

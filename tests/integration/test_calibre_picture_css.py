@@ -23,7 +23,7 @@ sys.path.insert(0, str(REPO / "plugin"))
 sys.path.insert(0, str(REPO))
 
 from kfxgen.native_generator import _IMAGE_COLUMN_PX  # noqa: E402
-from tests._helpers import jpeg_of  # noqa: E402
+from tests._helpers import decodable_jpeg_of  # noqa: E402
 from tests._kfx_introspect import by_type, iter_entries, load_fragments, val  # noqa: E402
 from tests.integration.test_calibre_table_rows import (  # noqa: E402
     _ebook_convert,
@@ -101,8 +101,8 @@ def _build_epub(path, pages=PAGES, css=CSS):
         for n, body in pages.items():
             z.writestr(f"{n}.xhtml", _page(n, body))
         z.writestr("s.css", css)
-        z.writestr("pic.jpg", jpeg_of(600, 400))
-        z.writestr("page.jpg", jpeg_of(800, 1200))
+        z.writestr("pic.jpg", decodable_jpeg_of(600, 400))
+        z.writestr("page.jpg", decodable_jpeg_of(800, 1200))
         z.writestr("toc.ncx", ncx)
 
 

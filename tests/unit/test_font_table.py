@@ -1,4 +1,6 @@
 import pytest
+
+from tests._helpers import sfnt_of
 from kfxgen.font_table import (
     Face,
     FontTable,
@@ -108,7 +110,7 @@ def test_faces_from_rules_emits_ttf_prefers_over_woff2():
             "src": "url(f.woff2) format('woff2'), url(f.ttf)",
         }
     ]
-    manifest = _mk_manifest({"f.woff2": b"wOF2xx", "f.ttf": b"\x00\x01\x00\x00yy"})
+    manifest = _mk_manifest({"f.woff2": b"wOF2xx", "f.ttf": sfnt_of(b"yy")})
     faces = faces_from_rules(rules, manifest, log)
     assert len(faces) == 1
     f = faces[0]
@@ -133,7 +135,7 @@ def test_faces_from_rules_dedups_same_href():
         {"font-family": "Foo", "src": "url(f.ttf)"},
         {"font-family": "Foo", "src": "url(f.ttf)"},
     ]
-    manifest = _mk_manifest({"f.ttf": b"\x00\x01\x00\x00yy"})
+    manifest = _mk_manifest({"f.ttf": sfnt_of(b"yy")})
     faces = faces_from_rules(rules, manifest, log)
     assert len(faces) == 1
 
@@ -168,7 +170,7 @@ def test_faces_from_rules_reads_cssfontfacerule_style_objects():
             }
         )
     ]
-    manifest = _mk_manifest({"fonts/f.ttf": b"\x00\x01\x00\x00yy"})
+    manifest = _mk_manifest({"fonts/f.ttf": sfnt_of(b"yy")})
     faces = faces_from_rules(rules, manifest, log)
     assert len(faces) == 1
     assert (
@@ -267,7 +269,7 @@ class _SpineItem:
 
 
 def test_build_manifest_lookup_resolves_by_href_and_basename():
-    oeb = _Oeb([_Item("OEBPS/fonts/x.ttf", b"\x00\x01\x00\x00zz")], spine=[])
+    oeb = _Oeb([_Item("OEBPS/fonts/x.ttf", sfnt_of(b"zz"))], spine=[])
     lookup = build_manifest_lookup(oeb)
     assert lookup("OEBPS/fonts/x.ttf")[:4] == b"\x00\x01\x00\x00"
     assert lookup("x.ttf")[:4] == b"\x00\x01\x00\x00"  # basename fallback
@@ -276,7 +278,7 @@ def test_build_manifest_lookup_resolves_by_href_and_basename():
 
 
 def test_build_font_table_aggregates_and_dedups_across_spine():
-    font = _Item("fonts/f.ttf", b"\x00\x01\x00\x00yy")
+    font = _Item("fonts/f.ttf", sfnt_of(b"yy"))
     oeb = _Oeb([font], spine=[_SpineItem("c1.xhtml"), _SpineItem("c2.xhtml")])
     rules = [{"font-family": "Foo", "src": "url(fonts/f.ttf)"}]
     table = build_font_table(
@@ -361,7 +363,7 @@ def test_faces_from_rules_skips_oversized_font():
 
 def test_faces_from_rules_accepts_font_within_cap():
     log = _Log()
-    ok = b"\x00\x01\x00\x00yy"
+    ok = sfnt_of(b"yy")
     faces = faces_from_rules(
         rules=[{"font-family": "Foo", "src": "url(f.ttf)"}],
         manifest_lookup=_mk_manifest({"f.ttf": ok}),
