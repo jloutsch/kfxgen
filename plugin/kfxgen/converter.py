@@ -1089,6 +1089,66 @@ def _draws_as_block(local, css):
     return display in _BLOCK_DISPLAYS
 
 
+#: The quotation marks a <q> is printed with, by its lang as a whole tag:
+#: (open, close, nested open, nested close). Measured from Kindle Previewer
+#: 4.0.3's output for 43 tags (#469); a tag not here, en-US among them, gets
+#: the plain pair Previewer writes for no lang at all.
+_Q_MARKS = {
+    "ar": "\u201d\u201c\u2019\u2018",
+    "bg": "\u201e\u201c\u201a\u2018",
+    "ca": "\u201c\u201d\u00ab\u00bb",
+    "cs": "\u201e\u201c\u201a\u2018",
+    "da": "\u201c\u201d\u2018\u2019",
+    "de": "\u201e\u201c\u201a\u2018",
+    "de-ch": "\u00ab\u00bb\u2039\u203a",
+    "el": "\u00ab\u00bb\u201c\u201d",
+    "en": "\u201c\u201d\u2018\u2019",
+    "en-gb": "\u201c\u201d\u2018\u2019",
+    "es": "\u201c\u201d\u00ab\u00bb",
+    "et": "\u201e\u201c\u201a\u2018",
+    "fi": "\u201d\u201d\u2019\u2019",
+    "fr": "\u00ab\u00bb\u00ab\u00bb",
+    "fr-ch": "\u00ab\u00bb\u2039\u203a",
+    "hr": "\u201e\u201c\u201a\u2018",
+    "hu": "\u201e\u201d\u00bb\u00ab",
+    "it": "\u00ab\u00bb\u201c\u201d",
+    "ja": "\u300c\u300d\u300e\u300f",
+    "ko": "\u201c\u201d\u2018\u2019",
+    "lt": "\u201e\u201c\u201e\u201c",
+    "lv": "\u201c\u201d\u2018\u2019",
+    "nb": "\u00ab\u00bb\u2018\u2019",
+    "nl": "\u201c\u201d\u2018\u2019",
+    "pl": "\u201e\u201d\u00ab\u00bb",
+    "pt": "\u201c\u201d\u2018\u2019",
+    "ro": "\u201e\u201d\u00ab\u00bb",
+    "ru": "\u00ab\u00bb\u201e\u201c",
+    "sk": "\u201e\u201c\u201a\u2018",
+    "sl": "\u201e\u201c\u201a\u2018",
+    "sv": "\u201d\u201d\u2019\u2019",
+    "tr": "\u201c\u201d\u2018\u2019",
+    "uk": "\u00ab\u00bb\u201e\u201c",
+    "zh": "\u201c\u201d\u2018\u2019",
+}
+_Q_PLAIN = "\"\"''"
+_XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
+
+
+def _q_marks(q):
+    """(open, close) for a <q>: its nearest lang's pair, the nested pair for
+    a <q> inside another, as Previewer prints them (#469)."""
+    lang = next(
+        (
+            a.get("lang") or a.get(_XML_LANG)
+            for a in (q, *q.iterancestors())
+            if a.get("lang") or a.get(_XML_LANG)
+        ),
+        "",
+    )
+    marks = _Q_MARKS.get(lang.lower(), _Q_PLAIN)
+    nested = any(_local_tag(a.tag) == "q" for a in q.iterancestors())
+    return (marks[2], marks[3]) if nested else (marks[0], marks[1])
+
+
 def _walk_inline(
     elem,
     flags=frozenset(),
@@ -1304,6 +1364,9 @@ def _walk_inline(
         if line:
             parts.append(("", frozenset({LINE_START})))
         return parts
+    quote = _q_marks(elem) if local == "q" else None
+    if quote:
+        parts.append((quote[0], cur))
     text = elem.text
     if text and local == "pre":
         # HTML ignores a newline straight after <pre>; the XML parser keeps it.
@@ -1379,6 +1442,8 @@ def _walk_inline(
             # inside an <a> lost the link, leaving entries half-underlined and
             # half-dead. (#59)
             parts.append((child.tail, cur))
+    if quote:
+        parts.append((quote[1], cur))
 
     # Close a cell with a boundary so the next one cannot fuse onto it. Emitted
     # unconditionally rather than only when the source lacks whitespace —
