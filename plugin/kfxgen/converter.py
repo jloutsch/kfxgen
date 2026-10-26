@@ -4475,6 +4475,30 @@ def extract_text_from_html(element):
     )
 
 
+def _iso639_1(code):
+    """calibre's two-letter form of an ISO 639 code, or None."""
+    try:
+        from calibre.utils.localization import lang_as_iso639_1
+    except ImportError:
+        return None
+    return lang_as_iso639_1(code)
+
+
+def _kfx_language(lang):
+    """The book's language as Kindle Previewer 4.0.3 writes it (#453): as the
+    book gives it, region and spelling kept ("en-GB", "pt_BR"); a three-letter
+    code in its two-letter form where one exists ("eng" is "en"), else as it
+    is ("haw"), never cut into another language's code; and "en" for none
+    (calibre's "und"). calibre hands over its own three-letter code with no
+    region, so in a conversion the region is already gone."""
+    primary, rest = re.match(r"([^-_]*)(.*)", lang).groups()
+    if not primary or primary.lower() == "und":
+        return "en"
+    if len(primary) == 3:
+        primary = _iso639_1(primary) or primary
+    return primary + rest
+
+
 def extract_metadata(oeb_book, log):
     """
     Extract metadata from OEB book.
@@ -4502,8 +4526,7 @@ def extract_metadata(oeb_book, log):
             metadata["author"] = ", ".join(str(c) for c in oeb_book.metadata.creator)
 
         if oeb_book.metadata.language:
-            lang = str(oeb_book.metadata.language[0])
-            metadata["language"] = lang[:2].lower()
+            metadata["language"] = _kfx_language(str(oeb_book.metadata.language[0]))
 
         if hasattr(oeb_book.metadata, "publisher") and oeb_book.metadata.publisher:
             metadata["publisher"] = str(oeb_book.metadata.publisher[0])

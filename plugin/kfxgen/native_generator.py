@@ -3364,7 +3364,8 @@ class NativeKFXGenerator:
             asin: Optional ASIN (auto-generated if None)
             output_path: Optional path to write KFX file
             cover_image: Optional bytes of cover image (JPEG or PNG)
-            language: Two-letter ISO language code (default 'en')
+            language: The book's language code, as Kindle Previewer writes
+                it: "en", "en-GB", "haw" (default 'en'; #453)
             publisher: Publisher string for $490 metadata
             issue_date: Optional ISO date string
             images: Optional dict of {href: raw bytes} for body images.
