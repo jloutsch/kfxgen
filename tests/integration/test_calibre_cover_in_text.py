@@ -40,7 +40,7 @@ def _page(body):
     )
 
 
-def _epub(path, opening=True):
+def _epub(path, opening=True, cover_first=False):
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
         z.writestr(
@@ -80,9 +80,12 @@ def _epub(path, opening=True):
         z.writestr(
             "c.xhtml",
             _page(
-                "<h1>One</h1><p>Text.</p>"
-                '<p><img src="cover.jpg" alt="again"/></p>'
-                '<p><img src="other.jpg" alt="other"/></p>'
+                (
+                    '<p><img src="cover.jpg" alt="again"/></p><h1>One</h1><p>Text.</p>'
+                    if cover_first
+                    else '<h1>One</h1><p>Text.</p><p><img src="cover.jpg" alt="again"/></p>'
+                )
+                + '<p><img src="other.jpg" alt="other"/></p>'
             ),
         )
         z.writestr("cover.jpg", decodable_jpeg_of(600, 800))
@@ -112,18 +115,34 @@ def test_the_covers_picture_in_the_text_is_written(calibre):  # noqa: F811
     ], f"calibre {version}"
 
 
-def test_a_first_page_showing_the_cover_shows_it_once(calibre):  # noqa: F811
-    """No opening page: the chapter showing the cover is the book's first,
-    so kfxgen writes no cover page of its own before it (#475)."""
+def test_a_first_page_showing_the_cover_after_text_keeps_the_cover_page(
+    calibre,  # noqa: F811
+):
+    """No opening page, and the book's first page shows the cover after its
+    heading and a paragraph: kfxgen's cover page still goes first, as
+    Kindle Previewer 4.0.3's does, or the book would open on that text
+    (#475, QA's c7 and c8 probes)."""
     tmp, _env, version = calibre
     epub, kfx = tmp / "cov475b.epub", tmp / "cov475b.kfx"
     _epub(epub, opening=False)
     _ebook_convert(calibre, epub, kfx, True)
-    frags = load_fragments(kfx)
-    pictures = [
+    assert _pictures(kfx) == ["cover_img", "cover_img", "img_0"], f"calibre {version}"
+
+
+def test_a_first_page_opening_with_the_cover_shows_it_once(calibre):  # noqa: F811
+    """No opening page, and the book's first page opens with the cover:
+    kfxgen writes no cover page of its own before it (#475)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "cov475c.epub", tmp / "cov475c.kfx"
+    _epub(epub, opening=False, cover_first=True)
+    _ebook_convert(calibre, epub, kfx, True)
+    assert _pictures(kfx) == ["cover_img", "img_0"], f"calibre {version}"
+
+
+def _pictures(kfx):
+    return [
         str(e["$175"])
-        for st in by_type(frags, "$259")
+        for st in by_type(load_fragments(kfx), "$259")
         for e in iter_entries(val(st)["$146"])
         if hasattr(e, "get") and e.get("$175") is not None
     ]
-    assert pictures == ["cover_img", "img_0"], f"calibre {version}"

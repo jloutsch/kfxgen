@@ -59,13 +59,48 @@ def test_a_different_picture_named_like_the_cover_is_its_own(tmp_path):
 
 
 @pytest.mark.unit
+def _first_page_book(tmp_path, first, href="cover.jpg"):
+    out = tmp_path / "f.kfx"
+    NativeKFXGenerator().generate_full_book(
+        title="T",
+        author="A",
+        chapters=[
+            {"title": "Title", "text": first, "blocks": [{"text": first, "spans": []}]},
+            {
+                "title": "One",
+                "text": "Body.",
+                "blocks": [{"text": "Body.", "spans": []}],
+            },
+        ],
+        cover_image=COVER,
+        images={href: COVER},
+        output_path=str(out),
+    )
+    return [
+        str(e["$175"])
+        for st in by_type(load_fragments(out), "$259")
+        for e in iter_entries(val(st)["$146"])
+        if hasattr(e, "get") and e.get("$175") is not None
+    ]
+
+
+@pytest.mark.unit
+def test_a_first_page_showing_the_cover_after_text_keeps_the_cover_page(tmp_path):
+    """The cover comes after the first page's text: kfxgen's cover page
+    stays first, as Kindle Previewer 4.0.3's does, or the book would open
+    on that text (#475, QA's c7 and c8 probes)."""
+    tok = "\x00IMG\x01{}\x01\x00".format
+    pictures = _first_page_book(tmp_path, f"One Text. {tok('cover.jpg')}")
+    assert pictures == ["cover_img", "cover_img"]
+
+
+@pytest.mark.unit
 def test_a_first_page_showing_the_cover_takes_the_cover_pages_place(tmp_path):
-    """The book's first page already shows the cover: kfxgen's own cover page
-    (#32) would print it twice in a row, where Kindle Previewer prints it
-    once (#475)."""
+    """The book's first page opens with the cover: kfxgen's own cover page
+    (#32) would print it twice in a row (#475)."""
     tok = "\x00IMG\x01{}\x01\x00".format
     out = tmp_path / "f.kfx"
-    first = f"A Title {tok('cover.jpg')}"
+    first = f"{tok('cover.jpg')} A Title"
     NativeKFXGenerator().generate_full_book(
         title="T",
         author="A",
@@ -98,7 +133,7 @@ def test_a_first_page_showing_the_cover_by_a_relative_href(tmp_path):
     goes before it (#475; a library book's own cover page)."""
     tok = "\x00IMG\x01{}\x01\x00".format
     out = tmp_path / "r.kfx"
-    first = f"Cover {tok('../images/c.jpg')}"
+    first = f"{tok('../images/c.jpg')} Cover"
     NativeKFXGenerator().generate_full_book(
         title="T",
         author="A",
