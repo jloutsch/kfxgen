@@ -269,22 +269,23 @@ def _q_css(stylizer, q):
 
 
 def _lang_of(elem):
-    """The nearest lang or xml:lang at or above `elem`, or None."""
+    """The nearest `lang` at or above `elem`, or None. Kindle Previewer
+    4.0.3 reads `lang` only, never `xml:lang`, for a <q>'s marks (#503 QA)."""
     for a in (elem, *elem.iterancestors()):
-        if a.get("lang") is not None or a.get(_XML_LANG) is not None:
-            return a.get("lang", a.get(_XML_LANG))
+        if a.get("lang") is not None:
+            return a.get("lang")
     return None
 
 
 def _starts_a_language(elem):
     """Whether `elem` sets a lang its parent doesn't have: there a browser's
-    own sheet gives that language's quotation marks (#503 QA)."""
-    own = elem.get("lang", elem.get(_XML_LANG))
+    own sheet gives that language's quotation marks (#503 QA). Compared as
+    written: Previewer takes lang="EN" under "en" as a change."""
+    own = elem.get("lang")
     if own is None:
         return False
     parent = elem.getparent()
-    above = _lang_of(parent) if parent is not None else None
-    return above is None or above.lower() != own.lower()
+    return own != (_lang_of(parent) if parent is not None else None)
 
 
 def _first_letter_css(stylizer, elem, cache):
@@ -1203,7 +1204,6 @@ _Q_MARKS = {
     "zu": "\u201c\u201d\u2018\u2019",
 }
 _Q_PLAIN = "\"\"''"
-_XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
 
 
 _CSS_STRING_RE = re.compile(r'"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\'')

@@ -38,11 +38,9 @@ def _texts(body, html_attrs=""):
         ('<p><q lang="en-US">a</q></p>', '"a"'),
         ('<p><q lang="pt-BR">a</q></p>', '"a"'),
         ('<p><q lang="xx">a</q></p>', '"a"'),
-        # xml:lang counts as lang does; the closer one wins.
-        (
-            '<p xml:lang="en"><q lang="fr">a</q></p>',
-            "«a»",
-        ),
+        # Only `lang` counts: Previewer ignores xml:lang (#503 QA).
+        ('<p xml:lang="de"><q>a</q></p>', '"a"'),
+        ('<p lang="en"><q xml:lang="de">a</q></p>', "“a”"),
     ],
 )
 def test_q_takes_its_languages_marks(body, text):
@@ -51,7 +49,9 @@ def test_q_takes_its_languages_marks(body, text):
 
 @pytest.mark.unit
 def test_the_documents_lang_reaches_q():
-    assert _texts("<p><q>a</q></p>", ' xml:lang="en"') == ["“a”"]
+    assert _texts("<p><q>a</q></p>", ' lang="en"') == ["“a”"]
+    # xml:lang alone, as 173 of QA's library books set it: plain (#503 QA).
+    assert _texts("<p><q>a</q></p>", ' xml:lang="fr"') == ['"a"']
 
 
 @pytest.mark.unit

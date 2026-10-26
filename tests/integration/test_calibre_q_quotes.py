@@ -158,3 +158,21 @@ def test_quotes_inherit_as_previewer_has_them(calibre, css, body, text):  # noqa
         str(t) for f in by_type(load_fragments(kfx), "$145") for t in val(f)["$146"]
     ]
     assert text in texts, f"calibre {version}: {texts}"
+
+
+def test_a_lang_written_in_other_capitals_is_a_change(calibre):  # noqa: F811
+    """Previewer's lang-change check is case-sensitive: lang="EN" under the
+    root's en brings the marks back under body { quotes: none } (#503 QA)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "qcase.epub", tmp / "qcase.kfx"
+    _epub(
+        epub,
+        "en",
+        "body { quotes: none }",
+        '<p>QI <span lang="EN"><q>a</q></span> b</p>',
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    texts = [
+        str(t) for f in by_type(load_fragments(kfx), "$145") for t in val(f)["$146"]
+    ]
+    assert "QI “a” b" in texts, f"calibre {version}: {texts}"
