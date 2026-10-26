@@ -102,7 +102,8 @@ def test_compute_block_style_align():
     assert ist.compute_block_style({"text-align": "center"})["align"] == "center"
     assert ist.compute_block_style({"text-align": "left"})["align"] == "left"
     assert ist.compute_block_style({"text-align": "JUSTIFY"})["align"] == "justify"
-    assert ist.compute_block_style({"text-align": "start"})["align"] is None
+    # A logical keyword reads as Previewer reads it (#486).
+    assert ist.compute_block_style({"text-align": "start"})["align"] == "left"
     assert ist.compute_block_style({})["align"] is None
 
 

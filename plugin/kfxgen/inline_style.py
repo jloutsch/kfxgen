@@ -66,7 +66,14 @@ _CSS_UNIT_TO_KFX = {
     "mm": "$316",
 }
 
-_LENGTH_RE = re.compile(r"^\s*([+-]?[0-9]*\.?[0-9]+)\s*(em|rem|%|pt|px|mm)\s*$", re.I)
+# No space before the unit: "2 em" is invalid CSS, ignored as browsers and
+# Kindle Previewer ignore it (#486).
+_LENGTH_RE = re.compile(
+    r"^\s*([+-]?[0-9]*\.?[0-9]+)(em|rem|%|pt|px|mm|in|cm|ex)\s*$", re.I
+)
+#: Units read as one kfxgen writes, as Kindle Previewer 4.0.3 reads them
+#: (#486): 1in = 72pt, 1cm = 10mm, 1ex = 0.44em.
+_UNIT_AS = {"in": (72, "pt"), "cm": (10, "mm"), "ex": (0.44, "em")}
 
 
 #: Marker for an anchor's position within a paragraph's segment stream. The
@@ -252,6 +259,9 @@ def parse_css_length(value):
             return None
     except ValueError:
         return None
+    if unit in _UNIT_AS:
+        factor, unit = _UNIT_AS[unit]
+        mag = f"{float(mag) * factor:.4f}"
     # Normalize "2.0" -> "2", "1.50" -> "1.5" without forcing a float repr.
     # (mag has no surrounding whitespace — the regex group excludes it.)
     if "." in mag:
@@ -718,6 +728,8 @@ def parse_vertical_align(value):
 
 #: CSS text-align keyword -> KFX $34 value symbol.
 ALIGN_MAP = {"left": "$59", "right": "$61", "center": "$320", "justify": "$321"}
+#: Logical and prefixed keywords, as Kindle Previewer 4.0.3 maps them (#486).
+_ALIGN_ALIASES = {"start": "left", "end": "right", "-webkit-center": "center"}
 # A table cell's vertical-align as $633, as Kindle Previewer 4 writes it. Any
 # other value (baseline, super, text-top, a length) gets no $633 there. (#269)
 VALIGN_MAP = {"top": "$58", "middle": "$320", "bottom": "$60"}
@@ -746,6 +758,7 @@ def compute_block_style(css):
     """
     align = None
     raw_align = (css.get("text-align") or "").strip().lower()
+    raw_align = _ALIGN_ALIASES.get(raw_align, raw_align)
     if raw_align in ALIGN_MAP:
         align = raw_align
     indent = parse_css_length(css.get("text-indent") or "")
