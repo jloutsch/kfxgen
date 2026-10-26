@@ -2313,7 +2313,7 @@ class NativeKFXGenerator:
 
     def build_fragment_157(
         self,
-        entity_name=None,
+        entity_name,
         font_size=1.0,
         line_height=1.0,
         underline=False,
