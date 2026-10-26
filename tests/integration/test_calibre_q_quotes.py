@@ -34,14 +34,14 @@ BODY = (
 )
 
 
-def _epub(path, html_lang, css=None):
+def _epub(path, html_lang, css=None, body=None):
     attrs = f' xml:lang="{html_lang}" lang="{html_lang}"' if html_lang else ""
     page = (
         '<?xml version="1.0" encoding="utf-8"?><html '
         f'xmlns="http://www.w3.org/1999/xhtml"{attrs}><head><title>c</title>'
         + (f"<style>{css}</style>" if css else "")
         + "</head>"
-        f"<body>{BODY}</body></html>"
+        f"<body>{body or BODY}</body></html>"
     )
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
@@ -119,3 +119,42 @@ def test_the_books_css_for_q(calibre, css, q1):  # noqa: F811
         str(t) for f in by_type(load_fragments(kfx), "$145") for t in val(f)["$146"]
     ]
     assert q1 in texts, f"calibre {version}: {texts}"
+
+
+INHERITED = [
+    # quotes inherits: from <body>, from an ancestor, and by `inherit`.
+    ("body { quotes: none }", "<p>QI <q>a</q> b</p>", "QI a b"),
+    (
+        'div.w { quotes: "<" ">" }',
+        '<div class="w"><p>QI <q>a</q> b</p></div>',
+        "QI <a> b",
+    ),
+    (
+        'div.w { quotes: "<" ">" } q { quotes: inherit }',
+        '<div class="w"><p>QI <q>a</q> b</p></div>',
+        "QI <a> b",
+    ),
+    # A lang that differs from its parent's brings the language's marks
+    # back, as a browser's own sheet sets them there; the root's own lang
+    # repeated doesn't (QA's probe on #503).
+    ("body { quotes: none }", '<p>QI <q lang="fr">a</q> b</p>', "QI «a» b"),
+    ("body { quotes: none }", '<p lang="de">QI <q>a</q> b</p>', "QI „a“ b"),
+    ("body { quotes: none }", '<p>QI <span lang="en"><q>a</q></span> b</p>', "QI a b"),
+]
+
+
+@pytest.mark.parametrize(
+    ("css", "body", "text"),
+    INHERITED,
+    ids=["body-none", "ancestor", "inherit", "q-lang", "p-lang", "same-lang"],
+)
+def test_quotes_inherit_as_previewer_has_them(calibre, css, body, text):  # noqa: F811
+    tmp, _env, version = calibre
+    name = f"qinh-{abs(hash(css + body))}"
+    epub, kfx = tmp / f"{name}.epub", tmp / f"{name}.kfx"
+    _epub(epub, "en", css, body)
+    _ebook_convert(calibre, epub, kfx, True)
+    texts = [
+        str(t) for f in by_type(load_fragments(kfx), "$145") for t in val(f)["$146"]
+    ]
+    assert text in texts, f"calibre {version}: {texts}"

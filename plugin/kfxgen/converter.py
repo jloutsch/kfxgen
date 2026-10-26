@@ -244,17 +244,47 @@ def _css_size_px(value, inherited, root_px):
     return inherited
 
 
-def _q_css(st):
+def _q_css(stylizer, q):
     """A <q>'s `quotes`, and its ::before and ::after `content`, as calibre's
     Stylizer has them: what Kindle Previewer prints in place of the
-    language's marks (#503 QA)."""
+    language's marks (#503 QA). `quotes` inherits: the nearest element
+    declaring it, up to one whose lang differs from its parent's, where a
+    browser's own sheet sets that language's marks."""
+    st = stylizer.style(q)
     pseudo = getattr(st, "pseudo_classes", None)
     rules = pseudo(()) if pseudo is not None else {}
+    quotes = None
+    for a in (q, *q.iterancestors()):
+        value = (stylizer.style(a).get("quotes") or "").strip()
+        if value and value.lower() != "inherit":
+            quotes = value
+            break
+        if _starts_a_language(a):
+            break
     return {
-        "quotes": st.get("quotes"),
+        "quotes": quotes,
         "before": dict(rules.get("before") or {}).get("content"),
         "after": dict(rules.get("after") or {}).get("content"),
     }
+
+
+def _lang_of(elem):
+    """The nearest lang or xml:lang at or above `elem`, or None."""
+    for a in (elem, *elem.iterancestors()):
+        if a.get("lang") is not None or a.get(_XML_LANG) is not None:
+            return a.get("lang", a.get(_XML_LANG))
+    return None
+
+
+def _starts_a_language(elem):
+    """Whether `elem` sets a lang its parent doesn't have: there a browser's
+    own sheet gives that language's quotation marks (#503 QA)."""
+    own = elem.get("lang", elem.get(_XML_LANG))
+    if own is None:
+        return False
+    parent = elem.getparent()
+    above = _lang_of(parent) if parent is not None else None
+    return above is None or above.lower() != own.lower()
 
 
 def _first_letter_css(stylizer, elem, cache):
@@ -348,7 +378,9 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                         else None
                     ),
                     # A <q>'s marks as the book styles them (#503 QA).
-                    "q-css": _q_css(st) if _local_tag(elem.tag) == "q" else None,
+                    "q-css": (
+                        _q_css(stylizer, elem) if _local_tag(elem.tag) == "q" else None
+                    ),
                     "float": st.get("float"),
                     # Declared: it doesn't inherit (#381).
                     "clear": st.get("clear"),
@@ -1198,14 +1230,7 @@ def _q_marks(q, css=None):
     #503 QA)."""
     css = css or {}
     depth = sum(1 for a in q.iterancestors() if _local_tag(a.tag) == "q")
-    lang = next(
-        (
-            a.get("lang", a.get(_XML_LANG))
-            for a in (q, *q.iterancestors())
-            if a.get("lang") is not None or a.get(_XML_LANG) is not None
-        ),
-        "",
-    )
+    lang = _lang_of(q) or ""
     marks = _Q_MARKS.get(lang.lower(), _Q_PLAIN)
     pair = (marks[2], marks[3]) if depth else (marks[0], marks[1])
     quotes = (css.get("quotes") or "").strip().lower()
