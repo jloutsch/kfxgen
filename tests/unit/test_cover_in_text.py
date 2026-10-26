@@ -19,7 +19,13 @@ def _book(tmp_path, images):
         title="T",
         author="A",
         chapters=[
-            {"title": "One", "text": text, "blocks": [{"text": text, "spans": []}]}
+            # An opening page, so the cover page (#32) is still written.
+            {
+                "title": "Open",
+                "text": "Open.",
+                "blocks": [{"text": "Open.", "spans": []}],
+            },
+            {"title": "One", "text": text, "blocks": [{"text": text, "spans": []}]},
         ],
         cover_image=COVER,
         images=images,
@@ -50,3 +56,36 @@ def test_a_different_picture_named_like_the_cover_is_its_own(tmp_path):
     )
     assert pictures == ["cover_img", "img_1", "img_0"]
     assert resources == ["cover_img", "img_0", "img_1"]
+
+
+@pytest.mark.unit
+def test_a_first_page_showing_the_cover_takes_the_cover_pages_place(tmp_path):
+    """The book's first page already shows the cover: kfxgen's own cover page
+    (#32) would print it twice in a row, where Kindle Previewer prints it
+    once (#475)."""
+    tok = "\x00IMG\x01{}\x01\x00".format
+    out = tmp_path / "f.kfx"
+    first = f"A Title {tok('cover.jpg')}"
+    NativeKFXGenerator().generate_full_book(
+        title="T",
+        author="A",
+        chapters=[
+            {"title": "Title", "text": first, "blocks": [{"text": first, "spans": []}]},
+            {
+                "title": "One",
+                "text": "One\n\nBody.",
+                "blocks": [{"text": "Body.", "spans": []}],
+            },
+        ],
+        cover_image=COVER,
+        images={"cover.jpg": COVER},
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    pictures = [
+        str(e["$175"])
+        for st in by_type(frags, "$259")
+        for e in iter_entries(val(st)["$146"])
+        if hasattr(e, "get") and e.get("$175") is not None
+    ]
+    assert pictures == ["cover_img"]

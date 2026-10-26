@@ -40,7 +40,7 @@ def _page(body):
     )
 
 
-def _epub(path):
+def _epub(path, opening=True):
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
         z.writestr(
@@ -59,12 +59,14 @@ def _epub(path):
             '<dc:language>en</dc:language><meta name="cover" content="cov"/>'
             "</metadata><manifest>"
             '<item id="cp" href="cover.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="o0" href="open.xhtml" media-type="application/xhtml+xml"/>'
             '<item id="c" href="c.xhtml" media-type="application/xhtml+xml"/>'
             '<item id="cov" href="cover.jpg" media-type="image/jpeg"/>'
             '<item id="o" href="other.jpg" media-type="image/jpeg"/>'
             '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
-            '</manifest><spine toc="ncx"><itemref idref="cp"/><itemref idref="c"/>'
-            "</spine></package>",
+            '</manifest><spine toc="ncx"><itemref idref="cp"/>'
+            + ('<itemref idref="o0"/>' if opening else "")
+            + '<itemref idref="c"/></spine></package>',
         )
         z.writestr(
             "toc.ncx",
@@ -74,6 +76,7 @@ def _epub(path):
             '<content src="c.xhtml"/></navPoint></navMap></ncx>',
         )
         z.writestr("cover.xhtml", _page('<p><img src="cover.jpg" alt="cover"/></p>'))
+        z.writestr("open.xhtml", _page("<h1>Opening</h1><p>First page.</p>"))
         z.writestr(
             "c.xhtml",
             _page(
@@ -107,3 +110,20 @@ def test_the_covers_picture_in_the_text_is_written(calibre):  # noqa: F811
         "cover_img",
         "img_0",
     ], f"calibre {version}"
+
+
+def test_a_first_page_showing_the_cover_shows_it_once(calibre):  # noqa: F811
+    """No opening page: the chapter showing the cover is the book's first,
+    so kfxgen writes no cover page of its own before it (#475)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "cov475b.epub", tmp / "cov475b.kfx"
+    _epub(epub, opening=False)
+    _ebook_convert(calibre, epub, kfx, True)
+    frags = load_fragments(kfx)
+    pictures = [
+        str(e["$175"])
+        for st in by_type(frags, "$259")
+        for e in iter_entries(val(st)["$146"])
+        if hasattr(e, "get") and e.get("$175") is not None
+    ]
+    assert pictures == ["cover_img", "img_0"], f"calibre {version}"

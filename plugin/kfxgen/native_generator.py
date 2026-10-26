@@ -3465,8 +3465,17 @@ class NativeKFXGenerator:
 
         # Prepend synthetic cover chapter (#32). All toc_link target indices
         # in subsequent chapters shift by +1 to account for the new chapter
-        # at index 0.
-        if cover_resource_name:
+        # at index 0. Not when the book's first page already shows the cover
+        # (#475): it would print twice in a row, where Previewer prints it
+        # once.
+        cover_keys = {
+            k for k, v in image_resources.items() if v[0] == cover_resource_name
+        }
+        first_shows_cover = bool(chapters) and any(
+            m.group(1) in cover_keys
+            for m in IMG_TOKEN_RE.finditer(chapters[0].get("text") or "")
+        )
+        if cover_resource_name and not first_shows_cover:
             chapters = [
                 {
                     **ch,
