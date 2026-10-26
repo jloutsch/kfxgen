@@ -3280,41 +3280,6 @@ def test_a_book_without_a_table_does_not_declare_the_table_viewer(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_book_whose_only_table_is_cut_as_its_title_does_not_declare_it(tmp_path):
-    # A table holding only the chapter title is cut by the title dedupe, so no
-    # $278 is written; declaring the viewer then names a feature the book
-    # doesn't use (#260 review: two library books do this).
-    gen = NativeKFXGenerator()
-    out = tmp_path / "t.kfx"
-    gen.generate_full_book(
-        "T",
-        "A",
-        [
-            {
-                "title": "Chapter One",
-                "text": "Chapter One\nBody.",
-                "blocks": [
-                    _table_block([["Chapter One"]]),
-                    {"text": "Body.", "spans": []},
-                ],
-            }
-        ],
-        output_path=str(out),
-    )
-    frags = load_fragments(out)
-    tables = [
-        e
-        for f in frags
-        if str(f.ftype) == "$259"
-        for e in iter_entries(val(f)["$146"])
-        if str(e["$159"]) == "$278"
-    ]
-    assert tables == []
-    f585 = next(val(f) for f in frags if str(f.ftype) == "$585")
-    assert "yj_table_viewer" not in [str(e["$492"]) for e in f585["$590"]]
-
-
-@pytest.mark.unit
 def test_790_goes_on_the_first_leaf_not_a_container(tmp_path):
     gen = NativeKFXGenerator()
     out = tmp_path / "t.kfx"
@@ -5015,30 +4980,6 @@ def test_a_title_split_over_a_paragraph_and_a_boxed_table_is_cut_as_without_the_
     entries, _, text, _ = _book(tmp_path, chapters)
     texts = [text(e) for e in entries if text(e)]
     assert texts == ["IV—Dawn", "Text."]
-
-
-@pytest.mark.unit
-def test_a_title_split_over_a_boxed_tables_rows_prints_once(tmp_path):
-    """QA review of #344: "The" / "Harbour" in two rows of a table inside a
-    box printed twice; in a plain table it was cut once."""
-    box = _box_block([_tiny_table([["The"], ["Harbour"], ["A quiet morning."]])])
-    chapters = [{"title": "The Harbour", "text": box["text"], "blocks": [box]}]
-    entries, _, text, _ = _book(tmp_path, chapters)
-    texts = [text(e) for e in entries if text(e)]
-    assert texts == ["The Harbour", "A quiet morning."]
-    assert [e for e in entries if str(e.get("$159")) == "$278"]
-
-
-@pytest.mark.unit
-def test_a_boxed_table_holding_only_the_title_goes_as_a_table_alone_does(tmp_path):
-    """#344: the cut leaves the table empty, and it goes, as a table on its
-    own does (#219); the box keeps the rest."""
-    box = _box_block([_tiny_table([["One"]]), _para("Text.")])
-    chapters = [{"title": "One", "text": box["text"], "blocks": [box]}]
-    entries, _, text, _ = _book(tmp_path, chapters)
-    assert not [e for e in entries if str(e.get("$159")) == "$278"]
-    texts = [text(e) for e in entries if text(e)]
-    assert texts.count("One") == 1 and "Text." in texts
 
 
 _SHADE = {"background-color": "#eeeeee"}

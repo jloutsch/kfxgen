@@ -5211,54 +5211,66 @@ def _cell_rows(chunks):
     return rows
 
 
+#: (title, body, rows written, whether kfxgen prints a heading). A table
+#: printing the chapter title is written whole, with no heading of kfxgen's,
+#: as Kindle Previewer prints it (#470); before, the title was cut from its
+#: cells and the heading printed it.
 _TITLE_TABLE_CASES = [
     (
         "CHAPTER I",
         "<table><tr><td>CHAPTER I</td></tr>"
         "<tr><td>The beginning</td><td>p. 1</td></tr></table>",
-        [["The beginning", "p. 1"]],
+        [["CHAPTER I"], ["The beginning", "p. 1"]],
+        False,
     ),
     (
         "CHAPTER I. The Title",
         "<table><tr><td>CHAPTER I.</td><td>The Title</td></tr>"
         "<tr><td>a</td><td>b</td></tr></table>",
-        [["a", "b"]],
+        [["CHAPTER I.", "The Title"], ["a", "b"]],
+        False,
     ),
     (
         "CHAPTER I",
         "<table><tr><td>CHAPTER I The Start of</td><td>x</td></tr>"
         "<tr><td>a</td><td>b</td></tr></table>",
-        [["The Start of", "x"], ["a", "b"]],
+        [["CHAPTER I The Start of", "x"], ["a", "b"]],
+        False,
     ),
     (
         "CHAPTER I",
         "<table><tr><td>CHAPTER</td><td>I</td><td>y</td></tr>"
         "<tr><td>a</td><td>b</td><td>c</td></tr></table>",
-        [[" ", " ", "y"], ["a", "b", "c"]],
+        [["CHAPTER", "I", "y"], ["a", "b", "c"]],
+        False,
     ),
     (
         "CHAPTER I. The Title",
         "<table><tr><td>CHAPTER I.</td></tr><tr><td>The Title</td></tr>"
         "<tr><td>a</td><td>b</td></tr></table>",
-        [["a", "b"]],
+        [["CHAPTER I."], ["The Title"], ["a", "b"]],
+        False,
     ),
+    # A paragraph opens the chapter: the cut reaches into the table, as before.
     (
         "CHAPTER I. The Title",
         "<p>CHAPTER I.</p><table><tr><td>The Title</td></tr>"
         "<tr><td>a</td><td>b</td></tr></table>",
         [["a", "b"]],
+        True,
     ),
     (
         "CHAPTER I",
         "<table><tr><td>a</td><td>b</td></tr></table>",
         [["a", "b"]],
+        True,
     ),
 ]
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "title, body, rows",
+    "title, body, rows, heading",
     _TITLE_TABLE_CASES,
     ids=[
         "row-is-title",
@@ -5270,14 +5282,14 @@ _TITLE_TABLE_CASES = [
         "no-cut",
     ],
 )
-def test_a_chapter_title_in_a_leading_table_is_shown_once(title, body, rows):
-    # QA-1: the title dedupe cut the title from the table block's text but
-    # wrote cells from its rows, so the heading and the first cell both
-    # showed it. The cut now reaches the cells, and the words a reader sees
-    # match the rows build (5.8.8's bytes).
+def test_a_chapter_title_in_a_leading_table_is_shown_once(title, body, rows, heading):
+    # QA-1: the heading and the first cell both showed the title. It shows
+    # once: in the table as written (#470), or in the heading when the cut
+    # starts outside the table; the words match the rows build (5.8.8's).
     native, chunks = _chapter_texts(title, body, native=True)
     rows_build, _ = _chapter_texts(title, body, native=False)
-    assert native[0] == title
+    first = next(c for c in chunks if c["type"] == "text")
+    assert ("cell" not in first and first["text"] == title) == heading
     assert _cell_rows(chunks) == rows
     assert _words(native) == _words(rows_build)
 
@@ -5290,14 +5302,15 @@ _POEM = "<h5>Mein.</h5><p>Du bist mein,</p><p>ich bin dein.</p>"
     "title, texts",
     [
         ("Mein.", ["Mein.", "Du bist mein,", "ich bin dein.", "x"]),
-        ("Mein. Du", ["Mein. Du", "bist mein,", "ich bin dein.", "x"]),
+        # The label's words reach the table, so it is kept whole (#470).
+        ("Mein. Du", ["Mein.", "Du bist mein,", "ich bin dein.", "x"]),
         ("Elsewhere", ["Elsewhere", "Mein.", "Du bist mein,", "ich bin dein.", "x"]),
     ],
     ids=["whole-paragraph", "into-a-paragraph", "no-cut"],
 )
 def test_the_title_cut_reaches_into_a_paragraph_cell(title, texts):
-    # #261: a cell holding blocks is written as paragraphs; the title the
-    # heading already shows is cut from them as the rows build cuts it.
+    # #261: a cell holding blocks is written as paragraphs. A title in them
+    # is printed there, with no heading of kfxgen's (#470).
     # Not compared with the rows build: it joins a cell's blocks with no
     # space when the source has none between the tags ("Mein.Du").
     body = f"<table><tr><td>{_POEM}</td><td>x</td></tr></table>"
@@ -5306,21 +5319,22 @@ def test_the_title_cut_reaches_into_a_paragraph_cell(title, texts):
 
 
 @pytest.mark.unit
-def test_a_title_cell_of_paragraphs_drops_its_row_and_keeps_its_ids():
+def test_a_title_cell_of_paragraphs_is_kept_with_its_ids():
     texts, chunks = _chapter_texts(
         "CHAPTER I",
         '<table><tr><td><p id="p1">CHAPTER</p><p>I</p></td></tr>'
         '<tr id="r2"><td>a</td></tr></table>',
         native=True,
     )
-    assert texts == ["CHAPTER I", "a"]
+    assert texts == ["CHAPTER", "I", "a"]
     row_keys = [c["anchor_keys"] for c in chunks if c.get("node") == "row"]
-    assert len(row_keys) == 1
-    assert {"ch0.xhtml#p1", "ch0.xhtml#r2"} <= set(row_keys[0])
+    assert len(row_keys) == 2
+    assert "ch0.xhtml#r2" in row_keys[1]
+    assert any("ch0.xhtml#p1" in (c.get("anchor_keys") or ()) for c in chunks)
 
 
 @pytest.mark.unit
-def test_a_dropped_title_row_moves_its_ids_to_the_next_row():
+def test_a_title_row_keeps_its_ids_where_they_are():
     _, chunks = _chapter_texts(
         "CHAPTER I",
         '<table><tr id="r1"><td id="c1">CHAPTER I</td></tr>'
@@ -5328,25 +5342,25 @@ def test_a_dropped_title_row_moves_its_ids_to_the_next_row():
         native=True,
     )
     row_keys = [c["anchor_keys"] for c in chunks if c.get("node") == "row"]
-    assert len(row_keys) == 1
-    assert {"ch0.xhtml#r1", "ch0.xhtml#c1", "ch0.xhtml#r2"} <= set(row_keys[0])
+    assert len(row_keys) == 2
+    assert "ch0.xhtml#r1" in row_keys[0] and "ch0.xhtml#r2" in row_keys[1]
 
 
 @pytest.mark.unit
-def test_a_table_that_is_only_the_title_is_dropped_and_keeps_its_ids():
+def test_a_table_that_is_only_the_title_is_kept():
     texts, chunks = _chapter_texts(
         "CHAPTER I",
         '<table id="t"><tr><td id="c1">CHAPTER I</td></tr></table><p>Body.</p>',
         native=True,
     )
     assert texts == ["CHAPTER I", "Body."]
-    assert not any(c.get("node") == "table" for c in chunks)
-    assert "ch0.xhtml#t" in chunks[0]["anchor_keys"]
-    assert "ch0.xhtml#c1" in chunks[0]["anchor_keys"]
+    assert any(c.get("node") == "table" for c in chunks)
+    keys = {k for c in chunks for k in c.get("anchor_keys") or ()}
+    assert {"ch0.xhtml#t", "ch0.xhtml#c1"} <= keys
 
 
 @pytest.mark.unit
-def test_a_trimmed_title_cell_keeps_its_spans_and_anchor_offsets():
+def test_a_title_cell_keeps_its_spans_and_anchor_offsets():
     _, chunks = _chapter_texts(
         "CHAPTER I",
         "<table><tr><td>CHAPTER I The <em>Start</em> <a id='m'></a>of</td>"
@@ -5354,9 +5368,9 @@ def test_a_trimmed_title_cell_keeps_its_spans_and_anchor_offsets():
         native=True,
     )
     cell = next(c for c in chunks if "cell" in c)
-    assert cell["text"] == "The Start of"
-    assert [(s, n) for s, n, _ in cell["spans"]] == [(4, 5)]
-    assert cell["anchor_offsets"] == {"ch0.xhtml#m": 10}
+    assert cell["text"] == "CHAPTER I The Start of"
+    assert [(s, n) for s, n, _ in cell["spans"]] == [(14, 5)]
+    assert cell["anchor_offsets"] == {"ch0.xhtml#m": 20}
 
 
 def _caption_and_table(html, **kw):
@@ -5523,32 +5537,31 @@ def test_a_toc_entry_and_a_link_to_a_captioned_table_land_on_its_caption(native)
 
 
 @pytest.mark.unit
-def test_a_title_row_in_a_leading_tfoot_is_cut_as_the_rows_build_cuts_it():
-    # Round 1, M1: rows are written head, body, foot, but the title cut
-    # follows source order, as the rows build saw the rows, so a footer
-    # written first that holds the title is still cut.
-    body = (
-        '<table><tfoot><tr id="f"><td>CHAPTER I</td></tr></tfoot>'
-        "<tbody><tr><td>a</td></tr><tr><td>b</td></tr></tbody></table>"
-    )
-    native, chunks = _chapter_texts("CHAPTER I", body, native=True)
-    rows_build, _ = _chapter_texts("CHAPTER I", body, native=False)
-    assert _words(native) == _words(rows_build) == ["CHAPTER", "I", "a", "b"]
-    assert _cell_rows(chunks) == [["a"], ["b"]]
-    first_row = next(c for c in chunks if c.get("node") == "row")
-    assert "ch0.xhtml#f" in first_row["anchor_keys"]
-
-
-@pytest.mark.unit
-def test_a_title_split_over_a_leading_tfoot_and_the_body_is_eaten():
-    body = (
-        "<table><tfoot><tr><td>CHAPTER I.</td></tr></tfoot>"
-        "<tbody><tr><td>The Title</td></tr><tr><td>a</td></tr></tbody></table>"
-    )
-    native, chunks = _chapter_texts("CHAPTER I. The Title", body, native=True)
-    rows_build, _ = _chapter_texts("CHAPTER I. The Title", body, native=False)
-    assert _words(native) == _words(rows_build)
-    assert _cell_rows(chunks) == [["a"]]
+@pytest.mark.parametrize(
+    ("title", "body", "rows"),
+    [
+        # A footer written first that holds the title: rows are written
+        # head, body, foot, and the table is kept whole (#470).
+        (
+            "CHAPTER I",
+            '<table><tfoot><tr id="f"><td>CHAPTER I</td></tr></tfoot>'
+            "<tbody><tr><td>a</td></tr><tr><td>b</td></tr></tbody></table>",
+            [["a"], ["b"], ["CHAPTER I"]],
+        ),
+        (
+            "CHAPTER I. The Title",
+            "<table><tfoot><tr><td>CHAPTER I.</td></tr></tfoot>"
+            "<tbody><tr><td>The Title</td></tr><tr><td>a</td></tr></tbody></table>",
+            [["The Title"], ["a"], ["CHAPTER I."]],
+        ),
+    ],
+    ids=["foot-holds-title", "title-split-over-foot-and-body"],
+)
+def test_a_title_in_a_leading_tfoot_keeps_the_table(title, body, rows):
+    native, chunks = _chapter_texts(title, body, native=True)
+    rows_build, _ = _chapter_texts(title, body, native=False)
+    assert sorted(_words(native)) == sorted(_words(rows_build))
+    assert _cell_rows(chunks) == rows
 
 
 @pytest.mark.unit

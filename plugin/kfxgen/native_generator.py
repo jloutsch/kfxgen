@@ -328,67 +328,6 @@ def _trim_text(part, cut):
     return {**part, "text": rest, "spans": spans, "anchor_offsets": offsets}
 
 
-def _cut_paragraphs(cell, cut):
-    """Copy of a cell holding paragraphs with the first `cut` characters of its
-    text cut, its text being the paragraphs joined by spaces (#261).
-
-    A paragraph the cut covers is dropped and its anchor keys move to the
-    next paragraph kept, at its start; the one it reaches into is trimmed.
-    With nothing left, the cell is empty and keeps the keys itself."""
-    kept, moved = [], []
-    pos = 0
-    for para in cell["paragraphs"]:
-        pcut = min(max(cut - pos, 0), len(para["text"]))
-        pos += len(para["text"]) + 1
-        if pcut == len(para["text"]):
-            moved.extend(para.get("anchor_keys") or [])
-            continue
-        para = _trim_text(para, pcut) if pcut else para
-        if moved:
-            para = {
-                **para,
-                "anchor_keys": _dedupe_keys(moved + (para.get("anchor_keys") or [])),
-                "anchor_offsets": {
-                    **dict.fromkeys(moved, 0),
-                    **(para.get("anchor_offsets") or {}),
-                },
-            }
-            moved = []
-        kept.append(para)
-    out = {**cell, "paragraphs": kept, "text": " ".join(p["text"] for p in kept)}
-    if moved:
-        out["anchor_keys"] = _dedupe_keys((cell.get("anchor_keys") or []) + moved)
-        out["anchor_offsets"] = {
-            **(cell.get("anchor_offsets") or {}),
-            **dict.fromkeys(moved, 0),
-        }
-    return out
-
-
-def _cut_row_text(row, removed):
-    """Copy of `row` with the first `removed` characters of its text cut.
-
-    The cut runs cell by cell over `_row_text`'s layout. A cell it covers
-    becomes empty but stays, so later columns keep their places; a cell it
-    reaches into is trimmed (`_trim_text`), or, when it holds paragraphs,
-    cut paragraph by paragraph (`_cut_paragraphs`). (#219, #261)
-    """
-    cells = []
-    pos = 0
-    for cell in row["cells"]:
-        text = cell["text"]
-        cut = min(max(removed - pos, 0), len(text)) if text else 0
-        if text:
-            pos += len(text) + 1
-        if not cut:
-            cells.append(cell)
-        elif cell.get("paragraphs"):
-            cells.append(_cut_paragraphs(cell, cut))
-        else:
-            cells.append(_trim_text(cell, cut))
-    return {**row, "cells": cells}
-
-
 _SMALL_CAPS_SYMBOLS = {"small-caps": "$369", "normal": "$349"}
 _TRANSFORM_SYMBOLS = {
     "uppercase": "$372",
@@ -552,6 +491,23 @@ def _title_runs_in(blocks, title):
     )
 
 
+def _title_in_table(blocks, title):
+    """Whether the chapter opens with a table, or a box opening with one,
+    whose first rows print its title: in one row, or spelled over rows, as
+    the title cut reads a table. The table is printed as written and kfxgen
+    prints no heading, as Kindle Previewer has it; the cut left an empty
+    cell, or ate the rows (#470)."""
+    blocks = _drop_edge_rules(blocks or ())
+    first = next(iter(blocks), None)
+    while first is not None and first.get("type") == "box":
+        first = next(iter(first.get("blocks") or ()), None)
+    if first is None or first.get("type") != "table":
+        return False
+    if _table_opens_with_title(first, title):
+        return True
+    return _eat_split_title(blocks, title)[0] != blocks
+
+
 def _ruby_heading_title(blocks, title):
     """(The base text of a chapter's first block, its runs) when that block,
     each reading run in after its base, is `title`; else (`title`, None)
@@ -674,10 +630,9 @@ def _cut_title_from_box(box, title):
     """(box, carried anchor keys) with `title` cut from the box's first
     paragraph, as the chapter title cut does for a paragraph (#238), or None
     when the box doesn't open with it. A box opening with a box is followed
-    into it (#310), and one opening with a native table has the title cut
-    from the table as a table on its own does (#219): left in it, the title
-    printed twice (#344). The box is None when nothing is left in it; its own
-    keys are then carried too."""
+    into it (#310); one opening with a table printing the title is kept
+    whole and never reaches here (#470). The box is None when nothing is
+    left in it; its own keys are then carried too."""
     kids = box["blocks"]
     first = kids[0]
     if first.get("type") == "box":
@@ -686,12 +641,6 @@ def _cut_title_from_box(box, title):
             return None
         inner, carried = cut
         kids = ([inner] if inner else []) + kids[1:]
-    elif first.get("type") == "table":
-        table, matched = _cut_title_from_table(first, title)
-        if not matched:
-            return None
-        kids = ([table] if table else []) + kids[1:]
-        carried = [] if table else list(first.get("anchor_keys") or [])
     elif not _is_text_block(first):
         return None
     else:
@@ -767,29 +716,12 @@ def _drop_box_lines(box, path):
     return {**box, "blocks": rest, "text": text}, carried
 
 
-def _cut_title_from_table(block, title):
-    """Cut a chapter title from a native table's first row with text.
-
-    The rows build wrote that row as the chapter's first paragraph, and the
-    title dedupe cut the title from it; this does the same to the row's
-    cells. Returns (block, matched); the block is None when nothing with
-    text is left of the table. (#219)
-    """
+def _table_opens_with_title(block, title):
+    """Whether a native table's first row with text opens with `title`, as
+    the rows build read it as the chapter's first paragraph (#219)."""
     rows = block["table"]["rows"]
-    order = _source_order(rows)
-    j = next((j for j in order if _row_text(rows[j])), None)
-    if j is None:
-        return block, False
-    text = _row_text(rows[j])
-    stripped = text.lstrip()
-    if not _opens_with_title(stripped, title):
-        return block, False
-    remainder = stripped[len(title) :].lstrip()
-    row = _cut_row_text(rows[j], len(text) - len(remainder))
-    cut = _with_rows(block, rows[:j] + [row] + rows[j + 1 :])
-    if any(c["text"] for c in row["cells"]):
-        return cut, True
-    return _drop_table_rows(cut, set(order[: order.index(j) + 1])), True
+    j = next((j for j in _source_order(rows) if _row_text(rows[j])), None)
+    return j is not None and _opens_with_title(_row_text(rows[j]).lstrip(), title)
 
 
 def _eat_split_title(blocks, title):
@@ -4423,6 +4355,9 @@ class NativeKFXGenerator:
             title_runs_in = not toc_links and _title_runs_in(
                 chapter.get("blocks"), title
             )
+            title_in_table = not toc_links and _title_in_table(
+                chapter.get("blocks"), title
+            )
             omit_heading = (
                 chapter.get("_is_cover")
                 # An empty title: its heading sat at the next paragraph's
@@ -4432,6 +4367,7 @@ class NativeKFXGenerator:
                 or body_is_image_only
                 or title_after_pictures
                 or title_runs_in
+                or title_in_table
             )
             heading_chunk = None
             if not omit_heading:
@@ -4464,6 +4400,7 @@ class NativeKFXGenerator:
                     not chapter.get("_omit_title_heading")
                     and not body_is_image_only
                     and not title_runs_in
+                    and not title_in_table
                 )
                 text = chapter["text"]
                 stripped = text.lstrip()
@@ -4473,29 +4410,16 @@ class NativeKFXGenerator:
                     blocks = chapter.get("blocks")
                     if blocks is not None:
                         iter_blocks = _drop_edge_rules(blocks)
-                        if iter_blocks and cut_title:
+                        # An opening table printing the title is kept whole
+                        # (title_in_table); one that doesn't has none to cut.
+                        if (
+                            iter_blocks
+                            and cut_title
+                            and iter_blocks[0].get("type") != "table"
+                        ):
                             first = iter_blocks[0]
                             first_stripped = first["text"].lstrip()
-                            table_cut = None
-                            if first.get("type") == "table":
-                                # A table's text joins all its rows; the
-                                # title can only be cut from its first row's
-                                # cells, which are what get written. (#219)
-                                table_cut = _cut_title_from_table(first, title)
-                            if table_cut is not None and table_cut[1]:
-                                if table_cut[0] is None:
-                                    carried_anchor_keys.extend(
-                                        first.get("anchor_keys") or []
-                                    )
-                                    iter_blocks = iter_blocks[1:]
-                                else:
-                                    iter_blocks[0] = table_cut[0]
-                            elif table_cut is not None:
-                                iter_blocks, eaten_keys = _eat_split_title(
-                                    iter_blocks, title
-                                )
-                                carried_anchor_keys.extend(eaten_keys)
-                            elif first.get("type") == "box" and (
+                            if first.get("type") == "box" and (
                                 box_cut := _cut_title_from_box(first, title)
                             ):
                                 kept_box, keys = box_cut

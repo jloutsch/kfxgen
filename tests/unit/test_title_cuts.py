@@ -2,8 +2,8 @@
 
 Six mutations the #282 recheck found every test still passes, in the code
 that cuts a printed chapter title out of the body: the split opener over
-up to three blocks (#64) and the cut from a native table's first rows
-(#219, #261).
+up to three blocks (#64). The cut from a native table's first rows (#219,
+#261) is gone: a table printing the title is kept whole (#470).
 """
 
 import os
@@ -14,11 +14,10 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "plugin"))
 
-from kfxgen.inline_style import FLAG_ITALIC  # noqa: E402
 from tests.unit.test_book_headings import _printed  # noqa: E402
 from tests._kfx_introspect import by_type, iter_entries, load_fragments, val  # noqa: E402
 from tests.unit.test_link_landings import _landings, _link  # noqa: E402
-from tests.unit.test_native_generator import _book, _para, _tiny_table  # noqa: E402
+from tests.unit.test_native_generator import _book, _para  # noqa: E402
 
 pytestmark = pytest.mark.unit
 
@@ -72,47 +71,3 @@ def test_the_first_eaten_blocks_id_still_lands(tmp_path):
     other = {"title": "Two", "text": "x", "blocks": [_link("To three", "c.xhtml#c3")]}
     _texts(tmp_path, "III Title", blocks, [other])
     assert _landings(tmp_path / "b.kfx")["To three"] == "III\nTitle"
-
-
-def test_an_empty_cell_before_the_title_leaves_no_letter_of_it(tmp_path):
-    # Cut and empty cells stay as blanks, so later columns keep their places.
-    _, texts, _ = _texts(tmp_path, "One", [_tiny_table([["", "", "One", "x"]])])
-    assert texts[0] == "One"
-    assert [t.strip() for t in texts[1:]] == ["", "", "", "x"]
-
-
-def test_a_run_crossing_the_cut_starts_where_the_cell_now_does(tmp_path):
-    table = _tiny_table([["One more"]])
-    cell = table["table"]["rows"][0]["cells"][0]
-    cell["spans"] = [(2, 6, frozenset({FLAG_ITALIC}))]
-    entries, texts, _ = _texts(tmp_path, "One", [table])
-    assert "more" in texts
-    starts = [int(r["$143"]) for e in entries for r in e.get("$142") or ()]
-    assert starts and min(starts) >= 0
-
-
-def test_a_table_left_with_only_empty_rows_goes(tmp_path):
-    entries, texts, _ = _texts(
-        tmp_path, "One", [_tiny_table([["One"], [""]]), _para("Text.")]
-    )
-    assert texts == ["One", "Text."]
-    assert not [e for e in entries if str(e.get("$159")) == "$278"]
-
-
-def test_a_cut_cell_paragraphs_id_lands_on_the_next_row(tmp_path):
-    # A title split over two rows drops both; an id on a paragraph in a
-    # dropped cell goes on the first row kept. It used to go to the table's
-    # last row, rows away from the title.
-    table = _tiny_table([["One"], ["Two"], ["Row three"], ["Row four"]])
-    cell = table["table"]["rows"][0]["cells"][0]
-    cell["paragraphs"] = [
-        {
-            "text": "One",
-            "spans": [],
-            "anchor_keys": ["c.xhtml#p1"],
-            "anchor_offsets": {"c.xhtml#p1": 0},
-        }
-    ]
-    other = {"title": "Next", "text": "x", "blocks": [_link("To one", "c.xhtml#p1")]}
-    _texts(tmp_path, "One Two", [table], [other])
-    assert _landing_text(tmp_path / "b.kfx", "To one") == "Row three"
