@@ -395,6 +395,8 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     "background-image": st.get("background-image"),
                     # A box's fill (#238). Declared: it doesn't inherit.
                     "background-color": st.get("background-color"),
+                    # Its colour when written as the shorthand (#464).
+                    "background": st.get("background"),
                     # What the text is drawn on (#383).
                     "background-behind": behind(elem),
                     "background-repeat": st.get("background-repeat"),
@@ -2375,10 +2377,27 @@ def _box_width_px(css):
     return float(width[0]) * _CSS_PX[width[1]]
 
 
+#: A `background:` shorthand's parts: a function such as rgb(...) or url(...)
+#: whole, or a run of anything else between spaces, commas and slashes.
+_BACKGROUND_PART_RE = re.compile(r"[\w-]+\([^)]*\)|[^\s,/]+")
+
+
 def _box_background(css):
     """A box's fill as the ARGB integer Previewer writes ($70), or None for
     none, transparent, white (the page) or anything unreadable (#238)."""
-    value = (css or {}).get("background-color")
+    css = css or {}
+    value = css.get("background-color")
+    if not value or _is_transparent(value):
+        # calibre leaves the shorthand unexpanded: its colour is the part
+        # that reads as one, as Previewer takes it (#464).
+        value = next(
+            (
+                part
+                for part in _BACKGROUND_PART_RE.findall(css.get("background") or "")
+                if css_rgb(part) is not None
+            ),
+            None,
+        )
     if not value or _is_transparent(value):
         return None
     # Not _border_colour, which reads black as the default: a black fill is
