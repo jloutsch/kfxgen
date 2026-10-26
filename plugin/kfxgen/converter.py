@@ -5423,18 +5423,24 @@ def _spine_in_order(oeb_book, toc_entries):
     while tail and not getattr(spine[tail - 1], "linear", True):
         tail -= 1
     own = spine[:tail] + [i for i in spine[tail:] if file(i.href) in listed]
+
     # A link written "C2.XHTML" for c2.xhtml makes calibre, on a file system
     # that ignores case, add the same file again: it is left out (#476).
-    seen = {unquote((i.href or "").split("#")[0]).lower() for i in own}
-    added = [
-        i
-        for i in spine[tail:]
-        if file(i.href) not in listed
-        and unquote((i.href or "").split("#")[0]).lower() not in seen
-    ]
-    return own + sorted(
-        added, key=lambda i: (toc.get(file(i.href), len(toc)), file(i.href))
-    )
+    # Two added files differing only in case are one too: the first in the
+    # sorted order is kept, so the same one every time (#506 QA).
+    def folded(i):
+        return unquote((i.href or "").split("#")[0]).lower()
+
+    seen = {folded(i) for i in own}
+    added = []
+    for i in sorted(
+        (i for i in spine[tail:] if file(i.href) not in listed),
+        key=lambda i: (toc.get(file(i.href), len(toc)), file(i.href)),
+    ):
+        if folded(i) not in seen:
+            seen.add(folded(i))
+            added.append(i)
+    return own + added
 
 
 def _has_media_overlays(oeb_book):

@@ -145,3 +145,21 @@ def test_files_in_other_folders_with_one_name_are_both_kept(tmp_path):
         ["a/notes.xhtml", "b/Notes.xhtml"],
     )
     assert _order(book, _toc("a/notes.xhtml")) == ["a/notes.xhtml", "b/Notes.xhtml"]
+
+
+def test_two_added_files_differing_in_case_are_one(tmp_path):
+    """Neither in the book's spine, linked as "EXTRA.XHTML" and "extra.xhtml":
+    calibre adds both, in either order, and only one is kept, the same one
+    every time (#506 QA)."""
+    orders = []
+    for n, spine in enumerate(
+        (
+            ["c1.xhtml", "extra.xhtml", "EXTRA.XHTML"],
+            ["c1.xhtml", "EXTRA.XHTML", "extra.xhtml"],
+        )
+    ):
+        (tmp_path / str(n)).mkdir()
+        book = _book(tmp_path / str(n), [("c1.xhtml", True)], spine)
+        orders.append(_order(book, _toc("c1.xhtml")))
+    assert len(orders[0]) == 2
+    assert orders[0] == orders[1]
