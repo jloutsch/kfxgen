@@ -15,6 +15,8 @@ import subprocess
 import uuid
 from pathlib import Path
 
+from .native_generator import _safe_write_bytes
+
 
 def _kfxlib(name=""):
     """kfxlib, or its module `name`: KFX Input's copy, as calibre loads that
@@ -28,6 +30,12 @@ def _kfxlib(name=""):
     raise ImportError(
         "the Kindle Previewer fallback needs the KFX Input plugin, for its kfxlib"
     )
+
+
+def _previewer_timeout(epub_bytes):
+    """15 s per MB of EPUB, at least 10 minutes: QA's 81 MB book took 379 s
+    (#513)."""
+    return max(600, round(15 * epub_bytes / (1024 * 1024)))
 
 
 def _convert_args(previewer):
@@ -214,6 +222,12 @@ class KPCalibreConverter:
             self._log_error("Kindle Previewer not found")
             self._log_error("Please install Kindle Previewer 4 from Amazon")
             return False
+        # Before Previewer's conversion, which can take minutes (#513).
+        try:
+            _kfxlib()
+        except ImportError as e:
+            self._log_error(f"Failed to import kfxlib: {e}")
+            return False
 
         self._log_info("=" * 70)
         self._log_info("kfxgen - Kindle Previewer KFX Converter")
@@ -236,6 +250,7 @@ class KPCalibreConverter:
             kpf_dir = os.path.join(temp_dir, "kpf_output")
             os.makedirs(kpf_dir, exist_ok=True)
 
+            timeout = _previewer_timeout(os.path.getsize(epub_path))
             try:
                 result = subprocess.run(
                     [
@@ -246,7 +261,7 @@ class KPCalibreConverter:
                     ],
                     capture_output=True,
                     text=True,
-                    timeout=600,  # 10 minute timeout
+                    timeout=timeout,
                 )
 
                 if (
@@ -261,7 +276,7 @@ class KPCalibreConverter:
                 self._log_info("  KPF created successfully")
 
             except subprocess.TimeoutExpired:
-                self._log_error("Kindle Previewer timed out after 10 minutes")
+                self._log_error(f"Kindle Previewer timed out after {timeout} s")
                 return False
             except Exception as e:
                 self._log_error(f"Failed to run Kindle Previewer: {e}")
@@ -286,7 +301,6 @@ class KPCalibreConverter:
 
             try:
                 YJ_Book = _kfxlib().YJ_Book
-                file_write_binary = _kfxlib("utilities").file_write_binary
 
                 book = YJ_Book(kpf_path)
                 book.decode_book()
@@ -301,7 +315,7 @@ class KPCalibreConverter:
                     self._log_error("Failed to convert KPF to KFX")
                     return False
 
-                file_write_binary(output_path, kfx_data)
+                _safe_write_bytes(output_path, kfx_data)
                 self._log_info("  KFX created successfully")
 
             except ImportError as e:
