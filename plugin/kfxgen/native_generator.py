@@ -4845,12 +4845,28 @@ class NativeKFXGenerator:
 
         body_anchor_map = {}  # anchor key -> anchor name
         if referenced_targets:
+            # A link written in other capitals, "C2.XHTML#t" for c2.xhtml#t,
+            # still lands; an exact match comes first (#476).
+            folded_keys, folded_files = {}, {}
+            for k in sorted(key_to_chunk):
+                folded_keys.setdefault(k.lower(), k)
+            for f in sorted(file_to_chunk):
+                folded_files.setdefault(f.lower(), f)
             for target in sorted(referenced_targets):
-                chunk_idx = key_to_chunk.get(target)
-                offset = key_to_offset.get(target, 0)
+                key = (
+                    target
+                    if target in key_to_chunk
+                    else folded_keys.get(target.lower())
+                )
+                chunk_idx = key_to_chunk.get(key)
+                offset = key_to_offset.get(key, 0)
                 if chunk_idx is None and "#" not in target:
                     # A whole-file target names the file's start, not a marker.
-                    chunk_idx = file_to_chunk.get(target)
+                    chunk_idx = file_to_chunk.get(
+                        target
+                        if target in file_to_chunk
+                        else folded_files.get(target.lower())
+                    )
                     offset = 0
                 if chunk_idx is None:
                     continue  # nothing declares it — leave the run unlinked

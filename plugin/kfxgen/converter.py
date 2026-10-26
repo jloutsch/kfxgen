@@ -5423,7 +5423,15 @@ def _spine_in_order(oeb_book, toc_entries):
     while tail and not getattr(spine[tail - 1], "linear", True):
         tail -= 1
     own = spine[:tail] + [i for i in spine[tail:] if file(i.href) in listed]
-    added = [i for i in spine[tail:] if file(i.href) not in listed]
+    # A link written "C2.XHTML" for c2.xhtml makes calibre, on a file system
+    # that ignores case, add the same file again: it is left out (#476).
+    seen = {unquote((i.href or "").split("#")[0]).lower() for i in own}
+    added = [
+        i
+        for i in spine[tail:]
+        if file(i.href) not in listed
+        and unquote((i.href or "").split("#")[0]).lower() not in seen
+    ]
     return own + sorted(
         added, key=lambda i: (toc.get(file(i.href), len(toc)), file(i.href))
     )

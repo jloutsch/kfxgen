@@ -120,3 +120,28 @@ def test_a_linear_file_the_opf_names_differently_stays_in_place(tmp_path):
     book = _book(tmp_path, [("b.xhtml", True)], ["b.xhtml", "renamed.xhtml", "a.xhtml"])
     book.spine[1].linear = True
     assert _order(book, _toc("a.xhtml")) == ["b.xhtml", "renamed.xhtml", "a.xhtml"]
+
+
+def test_a_file_calibre_added_again_under_other_capitals_is_left_out(tmp_path):
+    """A link to "C2.XHTML" on a case-insensitive file system: calibre adds
+    the file again under that name, and kfxgen printed its chapter twice;
+    Kindle Previewer prints it once (#476)."""
+    book = _book(
+        tmp_path,
+        [("text/c1.xhtml", True), ("text/c2.xhtml", True)],
+        ["text/c1.xhtml", "text/c2.xhtml", "text/C2.XHTML", "text/c3.xhtml"],
+    )
+    assert _order(book, _toc("text/c1.xhtml", "text/c2.xhtml", "text/c3.xhtml")) == [
+        "text/c1.xhtml",
+        "text/c2.xhtml",
+        "text/c3.xhtml",
+    ]
+
+
+def test_files_in_other_folders_with_one_name_are_both_kept(tmp_path):
+    book = _book(
+        tmp_path,
+        [("a/notes.xhtml", True)],
+        ["a/notes.xhtml", "b/Notes.xhtml"],
+    )
+    assert _order(book, _toc("a/notes.xhtml")) == ["a/notes.xhtml", "b/Notes.xhtml"]
