@@ -495,12 +495,12 @@ def test_a_chapter_of_only_a_maths_heading_keeps_its_runs(tmp_path):
     assert found["The a/b = 1 rule"] > 0
 
 
-def test_a_different_label_still_prints_above_the_heading(tmp_path):
+def test_a_different_label_gives_way_to_the_heading(tmp_path):
     blocks = _blocks(FRAC_HEADING + "<p>Body.</p>")
     found = _chapter_texts(
         [{"title": "Another label", "text": "x", "blocks": blocks}], tmp_path
     )
-    assert list(found) == ["Another label", "The a/b = 1 rule", "Body."]
+    assert list(found) == ["The a/b = 1 rule", "Body."]
 
 
 def test_a_pretty_printed_maths_heading_matches_its_label(tmp_path):

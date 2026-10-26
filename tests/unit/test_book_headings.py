@@ -81,17 +81,18 @@ def test_a_heading_keeps_its_own_runs(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_different_label_still_prints_above_the_heading(tmp_path):
+def test_a_different_label_gives_way_to_the_heading(tmp_path):
+    """The book's heading prints alone, as on Kindle Previewer's page; the
+    label stays in the TOC (#481)."""
     lines = _printed(tmp_path, "Another label", "<h1>Part<br/>One</h1><p>Body.</p>")
-    assert [t for t, _ in lines] == ["Another label", "Part\nOne", "Body."]
+    assert [t for t, _ in lines] == ["Part\nOne", "Body."]
 
 
 @pytest.mark.unit
-def test_a_label_opening_a_plain_heading_still_cuts_it(tmp_path):
-    """Out of #409: a label of a plain heading's first words prints, and the
-    rest of the heading follows, as before."""
+def test_a_label_opening_a_plain_heading_prints_it_whole(tmp_path):
+    """A label of a heading's first words doesn't split it (#481)."""
     lines = _printed(tmp_path, "Chapter 1", "<h1>Chapter 1 The Storm</h1><p>Body.</p>")
-    assert [t for t, _ in lines] == ["Chapter 1", "The Storm", "Body."]
+    assert [t for t, _ in lines] == ["Chapter 1 The Storm", "Body."]
 
 
 @pytest.mark.unit

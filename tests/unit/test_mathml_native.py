@@ -392,12 +392,12 @@ def test_a_drawn_heading_split_over_two_blocks_prints_once(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_different_label_still_prints_above_a_drawn_heading(tmp_path):
+def test_a_different_label_gives_way_to_a_drawn_heading(tmp_path):
     body = f"<h1>The <math {M}>{FRAC}</math> rule</h1><p>Body.</p>"
     frags = _book(
         tmp_path, [{"title": "Another label", "text": "x", "blocks": _blocks(body)}]
     )
-    assert _lines(frags) == ["Another label", "The [EQ] rule", "Body."]
+    assert _lines(frags) == ["The [EQ] rule", "Body."]
 
 
 @pytest.mark.unit
@@ -511,18 +511,15 @@ def test_a_label_opening_a_drawn_heading_names_the_whole_heading(tmp_path):
 @pytest.mark.parametrize(
     ("body", "label"),
     [
-        (PREFIX_HEADING, "The x ru"),
         (
             f"<p>The <math {M}><mi>x</mi></math> rule and more</p><p>Body.</p>",
             "The x rule",
         ),
     ],
 )
-def test_a_label_ending_mid_word_or_opening_a_paragraph_prints_above_it(
-    tmp_path, body, label
-):
-    """Only whole words, and only a heading: prose that opens with the label's
-    words is not the chapter's heading (#408)."""
+def test_a_label_opening_a_paragraph_prints_above_it(tmp_path, body, label):
+    """Only a heading: prose that opens with the label's words is not the
+    chapter's heading (#408)."""
     frags = _book(tmp_path, [{"title": label, "text": "x", "blocks": _blocks(body)}])
     assert _lines(frags) == [label, "The [EQ] rule and more", "Body."]
 
@@ -542,6 +539,8 @@ def test_a_label_ending_mid_word_or_opening_a_paragraph_prints_above_it(
         ),
         # An empty label opens nothing.
         (PREFIX_HEADING, "", ["The [EQ] rule and more", "Body."]),
+        # A label ending mid-word gives way to the heading too (#481).
+        (PREFIX_HEADING, "The x ru", ["The [EQ] rule and more", "Body."]),
     ],
 )
 def test_a_label_opening_a_drawn_heading_after_a_rule_or_by_alttext(

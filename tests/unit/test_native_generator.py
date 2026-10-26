@@ -198,22 +198,17 @@ class TestPerParagraphChunking:
         assert texts == ["Chapter 1", "body"]
 
     @pytest.mark.unit
-    def test_blocks_title_prefix_span_rebased(self):
-        # When blocks[0] has "Title rest" with an italic span on "rest",
-        # stripping the title prefix must rebase the span offset correctly.
+    def test_blocks_heading_opening_with_the_title_keeps_its_span(self):
+        # A heading "Chapter 1 italic" under the label "Chapter 1" prints
+        # whole, its italic run where the book has it (#481).
         from kfxgen.inline_style import FLAG_ITALIC
 
         gen = NativeKFXGenerator()
-        # First block: "Chapter 1 italic" where "italic" (chars 10-16) is italic.
-        # Title "Chapter 1" (len 9) + space = 10 chars removed after lstrip.
-        # Span (10, 6, {FLAG_ITALIC}) -> rebased to (0, 6, {FLAG_ITALIC}).
         chapters = [
             {
                 "title": "Chapter 1",
                 "text": "Chapter 1 italic\n\nbody",
                 "blocks": [
-                    # A heading: a paragraph that runs the title in is
-                    # printed whole (#468).
                     {
                         "text": "Chapter 1 italic",
                         "spans": [(10, 6, {FLAG_ITALIC})],
@@ -225,17 +220,11 @@ class TestPerParagraphChunking:
         ]
         result = gen._build_chapter_content(chapters)
         texts = [c["text"] for c in result["all_chunks"] if c["type"] == "text"]
-        assert texts[0] == "Chapter 1", f"Expected heading first, got: {texts}"
-        assert texts[1] == "italic", f"Expected rebased remainder second, got: {texts}"
-        italic_chunk = next(
-            c
-            for c in result["all_chunks"]
-            if c["type"] == "text" and c["text"] == "italic"
-        )
-        spans = italic_chunk.get("spans", [])
-        assert len(spans) == 1, f"Expected one span on 'italic' chunk, got: {spans}"
+        assert texts == ["Chapter 1 italic", "body"]
+        spans = result["all_chunks"][0].get("spans", [])
+        assert len(spans) == 1, f"Expected one span on the heading, got: {spans}"
         s, length, flags = spans[0]
-        assert s == 0, f"Rebased span start should be 0, got {s}"
+        assert s == 10, f"Span start should stay 10, got {s}"
         assert length == 6, f"Rebased span length should be 6, got {length}"
         assert FLAG_ITALIC in flags, f"Expected FLAG_ITALIC in flags, got {flags}"
 
@@ -4545,15 +4534,12 @@ def test_a_missing_pictures_id_with_no_other_entry_lands_on_the_placeholder():
 
 
 @pytest.mark.unit
-def test_anchor_offset_follows_the_title_cut(tmp_path):
-    """The chapter title is cut from the first paragraph (it becomes the
-    heading); the return link must still land on the marker, not title-length
-    characters later."""
+def test_anchor_in_a_heading_opening_with_the_title_lands_on_it(tmp_path):
+    """A heading that opens with the chapter title prints whole (#481), and a
+    return link to a marker in it lands on the heading."""
     body = "Chapter One. It was a long day and the road went on and on1 until night."
     offset = body.index("1 until")
-    cut = len("Chapter One")
     chapters = _round_trip_chapters(body, offset)
-    # A heading: a paragraph that runs the title in is printed whole (#468).
     chapters[0]["blocks"][0]["heading"] = True
     gen = NativeKFXGenerator()
     gen.generate_full_book(
@@ -4562,9 +4548,11 @@ def test_anchor_offset_follows_the_title_cut(tmp_path):
         chapters=chapters,
         output_path=str(tmp_path / "o.kfx"),
     )
-    # The note's own anchor sits at its paragraph's start (no offset).
+    # Both anchors sit at their paragraph's start: the heading's, carried
+    # from its block as #62 carries a duplicate heading's, and the note's.
     found = dict(_anchor_named_by_return_link(gen))
-    assert {off for _pos, off in found.values()} == {None, offset - cut}
+    assert len(found) == 2
+    assert {off for _pos, off in found.values()} == {None}
 
 
 @pytest.mark.unit
@@ -5575,12 +5563,11 @@ def test_other_openings_keep_their_heading(tmp_path, blocks, expected):
             {"text": "The Harbour."},
             ["H:The Harbour.", "Text."],
         ),
-        # A book heading that starts with the title is still cut, unchanged
-        # here: the title prints once, and the rest of the heading under it.
-        # #481 revisits printing the label over a book's heading.
+        # A book heading that starts with the title prints whole, as the
+        # book writes it (#481).
         (
             {"text": "The Harbour at Dawn", "heading": True},
-            ["H:The Harbour", "at Dawn", "Text."],
+            ["H:The Harbour at Dawn", "Text."],
         ),
     ],
     ids=["sentence", "title-alone", "heading"],
