@@ -89,3 +89,36 @@ def test_a_first_page_showing_the_cover_takes_the_cover_pages_place(tmp_path):
         if hasattr(e, "get") and e.get("$175") is not None
     ]
     assert pictures == ["cover_img"]
+
+
+@pytest.mark.unit
+def test_a_first_page_showing_the_cover_by_a_relative_href(tmp_path):
+    """The page's <img> left unresolved ("../images/c.jpg"): it still names
+    the cover, as the generator resolves it, so no cover page of kfxgen's
+    goes before it (#475; a library book's own cover page)."""
+    tok = "\x00IMG\x01{}\x01\x00".format
+    out = tmp_path / "r.kfx"
+    first = f"Cover {tok('../images/c.jpg')}"
+    NativeKFXGenerator().generate_full_book(
+        title="T",
+        author="A",
+        chapters=[
+            {"title": "Cover", "text": first, "blocks": [{"text": first, "spans": []}]},
+            {
+                "title": "One",
+                "text": "Body.",
+                "blocks": [{"text": "Body.", "spans": []}],
+            },
+        ],
+        cover_image=COVER,
+        images={"ops/images/c.jpg": COVER},
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    pictures = [
+        str(e["$175"])
+        for st in by_type(frags, "$259")
+        for e in iter_entries(val(st)["$146"])
+        if hasattr(e, "get") and e.get("$175") is not None
+    ]
+    assert pictures == ["cover_img"]

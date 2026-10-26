@@ -1011,6 +1011,20 @@ def _picture_link(at, spans):
     return None
 
 
+def _token_resource(href, image_resources, resolved_image_refs):
+    """The (resource, location) a picture token's href names, or None: its
+    exact manifest href, then its decoded form; its basename only for hrefs
+    that were never resolved (`_may_fall_back_by_basename`). A query string
+    names no different file."""
+    bare = href.split("#", 1)[0].split("?", 1)[0] if href else ""
+    resource = image_resources.get(bare)
+    if resource is None:
+        resource = image_resources.get(unquote(bare))
+    if resource is None and _may_fall_back_by_basename(bare, resolved_image_refs):
+        resource = image_resources.get(bare.rsplit("/", 1)[-1])
+    return resource
+
+
 def _may_fall_back_by_basename(href, resolved_image_refs):
     """Whether an image href that matched no key may try its bare filename.
 
@@ -3468,11 +3482,12 @@ class NativeKFXGenerator:
         # at index 0. Not when the book's first page already shows the cover
         # (#475): it would print twice in a row, where Previewer prints it
         # once.
-        cover_keys = {
-            k for k, v in image_resources.items() if v[0] == cover_resource_name
-        }
-        first_shows_cover = bool(chapters) and any(
-            m.group(1) in cover_keys
+        first_shows_cover = bool(chapters and cover_resource_name) and any(
+            (
+                _token_resource(m.group(1), image_resources, self._resolved_image_refs)
+                or (None,)
+            )[0]
+            == cover_resource_name
             for m in IMG_TOKEN_RE.finditer(chapters[0].get("text") or "")
         )
         if cover_resource_name and not first_shows_cover:
@@ -3937,14 +3952,9 @@ class NativeKFXGenerator:
                 # Exact manifest href, then its decoded form; basename only
                 # for hrefs that were never resolved — see _img_basename
                 # helper above. A query string names no different file.
-                bare = href.split("#", 1)[0].split("?", 1)[0] if href else ""
-                resource = image_resources.get(bare)
-                if resource is None:
-                    resource = image_resources.get(unquote(bare))
-                if resource is None and _may_fall_back_by_basename(
-                    bare, self._resolved_image_refs
-                ):
-                    resource = image_resources.get(bare.rsplit("/", 1)[-1])
+                resource = _token_resource(
+                    href, image_resources, self._resolved_image_refs
+                )
                 if resource is not None:
                     chunk = {
                         "type": "image",
