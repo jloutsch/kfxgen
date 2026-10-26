@@ -8,12 +8,34 @@ This approach produces correct formatting, TOC navigation, and cover thumbnails
 because it uses Amazon's own conversion engine.
 """
 
+import importlib
 import os
-import sys
 import tempfile
 import subprocess
 import uuid
 from pathlib import Path
+
+
+def _kfxlib(name=""):
+    """kfxlib, or its module `name`: KFX Input's copy, as calibre loads that
+    plugin, else a kfxlib on the path (development). kfxgen ships none, so
+    the fallback needs KFX Input (#498)."""
+    for base in ("calibre_plugins.kfx_input.kfxlib", "kfxlib"):
+        try:
+            return importlib.import_module(base + (f".{name}" if name else ""))
+        except ImportError:
+            continue
+    raise ImportError(
+        "the Kindle Previewer fallback needs the KFX Input plugin, for its kfxlib"
+    )
+
+
+def _convert_args(previewer):
+    """Kindle Previewer 4's CLI takes --convert/--output; 3 took single
+    dashes, and 4 refuses those (#498)."""
+    if "Previewer 4" in previewer or "Previewer4" in previewer:
+        return ["--convert", "--output"]
+    return ["-convert", "-output"]
 
 
 class KPCalibreConverter:
@@ -26,7 +48,11 @@ class KPCalibreConverter:
 
     # Default Kindle Previewer locations (standard install paths)
     KP_PATHS = [
-        # macOS
+        # macOS, Kindle Previewer 4 first: the current one, and its CLI (#498)
+        "/Applications/Kindle Previewer 4.app/Contents/MacOS/KindlePreviewer4CLI",
+        os.path.expanduser(
+            "~/Applications/Kindle Previewer 4.app/Contents/MacOS/KindlePreviewer4CLI"
+        ),
         "/Applications/Kindle Previewer 3.app/Contents/MacOS/Kindle Previewer 3",
         os.path.expanduser(
             "~/Applications/Kindle Previewer 3.app/Contents/MacOS/Kindle Previewer 3"
@@ -52,8 +78,6 @@ class KPCalibreConverter:
             kindle_previewer_path or self._find_kindle_previewer()
         )
         self.log = log
-        self._kfxlib_path = None
-        self._setup_kfxlib()
 
     def _log_info(self, msg):
         if self.log:
@@ -74,22 +98,6 @@ class KPCalibreConverter:
                 return path
         return None
 
-    def _setup_kfxlib(self):
-        """Set up kfxlib import paths."""
-        module_dir = os.path.dirname(os.path.abspath(__file__))
-
-        candidates = [
-            os.path.join(module_dir, "kfxlib"),
-            os.path.join(module_dir, "..", "..", "research", "kfxlib_extracted"),
-        ]
-
-        for path in candidates:
-            if os.path.isdir(path):
-                if path not in sys.path:
-                    sys.path.insert(0, path)
-                self._kfxlib_path = path
-                break
-
     def _fix_cover_metadata(self, book):
         """
         Fix cover metadata to ensure thumbnail displays on Kindle.
@@ -97,7 +105,7 @@ class KPCalibreConverter:
         Adds the $162 (mime type) field if missing.
         """
         try:
-            from kfxlib.ion import IonSymbol as IS
+            IS = _kfxlib("ion").IonSymbol
 
             cover_id = book.get_metadata_value("cover_image")
             if not cover_id:
@@ -133,7 +141,8 @@ class KPCalibreConverter:
         Adds ASIN, asset_id, and cde_content_type if missing.
         """
         try:
-            from kfxlib.ion import IonSymbol as IS, IonStruct
+            ion = _kfxlib("ion")
+            IS, IonStruct = ion.IonSymbol, ion.IonStruct
 
             for frag in book.fragments:
                 if str(frag.ftype) == "$490":
@@ -203,7 +212,7 @@ class KPCalibreConverter:
         """
         if not self.kindle_previewer_path:
             self._log_error("Kindle Previewer not found")
-            self._log_error("Please install Kindle Previewer 3 from Amazon")
+            self._log_error("Please install Kindle Previewer 4 from Amazon")
             return False
 
         self._log_info("=" * 70)
@@ -232,8 +241,7 @@ class KPCalibreConverter:
                     [
                         self.kindle_previewer_path,
                         epub_path,
-                        "-convert",
-                        "-output",
+                        *_convert_args(self.kindle_previewer_path),
                         kpf_dir,
                     ],
                     capture_output=True,
@@ -277,8 +285,8 @@ class KPCalibreConverter:
             self._log_info("Step 3: kfxlib (KPF -> KFX)...")
 
             try:
-                from kfxlib import YJ_Book
-                from kfxlib.utilities import file_write_binary
+                YJ_Book = _kfxlib().YJ_Book
+                file_write_binary = _kfxlib("utilities").file_write_binary
 
                 book = YJ_Book(kpf_path)
                 book.decode_book()
