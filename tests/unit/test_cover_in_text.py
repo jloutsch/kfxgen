@@ -145,3 +145,87 @@ def test_a_first_page_opening_with_the_cover_in_a_box(tmp_path):
     sections = _first_page_book(tmp_path, [box, "Words after it."])
     assert sections[0] == ["cover_img"]
     assert _pictures(sections) == ["cover_img"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("boxed", [False, True], ids=["plain", "box"])
+def test_a_link_to_the_left_out_cover_still_lands(tmp_path, boxed):
+    """A link to the id on the first page's cover picture: that picture is
+    left out, and the link lands on what follows it, not dropped (#475; 2
+    links in one library book, whose first page held a copy of the cover)."""
+    from lxml import etree
+
+    from kfxgen import converter as _conv
+    from tests.unit.test_link_landings import _link
+
+    pic = (
+        '<div id="cv"><p><img src="cover.jpg"/></p></div>'
+        if boxed
+        else '<p id="cv"><img src="cover.jpg"/></p>'
+    )
+    xhtml = (
+        '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+        f"{pic}<p>Words after it.</p></body></html>"
+    )
+    blocks = _conv.extract_blocks_from_html(
+        etree.fromstring(xhtml.encode()), base_href="c.xhtml"
+    )
+    if boxed:
+        from tests.unit.test_native_generator import _box_block
+
+        box = _box_block([blocks[0]])
+        box["anchor_keys"] = blocks[0]["anchor_keys"]
+        blocks = [box, *blocks[1:]]
+    out = tmp_path / "l.kfx"
+    NativeKFXGenerator().generate_full_book(
+        title="T",
+        author="A",
+        chapters=[
+            {"title": "Cover", "text": "x", "blocks": blocks},
+            {"title": "Links", "text": "x", "blocks": [_link("L1", "c.xhtml#cv")]},
+        ],
+        cover_image=COVER,
+        images={"cover.jpg": COVER},
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    content = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    entries = [
+        e
+        for st in by_type(frags, "$259")
+        for e in iter_entries(val(st)["$146"])
+        if hasattr(e, "get")
+    ]
+    anchors = {str(f.fid): val(f)["$183"]["$155"] for f in by_type(frags, "$266")}
+    by_id = {e["$155"]: e for e in entries if "$155" in e}
+    link = next(
+        e
+        for e in entries
+        if e.get("$145")
+        and str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])]) == "L1"
+    )
+    targets = [sp["$179"] for sp in link.get("$142") or [] if "$179" in sp]
+    assert len(targets) == 1
+    landing = by_id[anchors[str(targets[0])]]
+    text = landing.get("$145")
+    assert text and str(content[str(text["name"])][int(text["$403"])]) == (
+        "Words after it."
+    )
+    assert [str(e["$175"]) for e in entries if e.get("$175") is not None] == [
+        "cover_img"
+    ]
+
+
+@pytest.mark.unit
+def test_a_box_holding_the_cover_and_more_keeps_the_rest(tmp_path):
+    """Only the cover picture leaves the box: its other paragraphs print in
+    it, once (#475)."""
+    from tests.unit.test_native_generator import _box_block
+
+    box = _box_block(
+        [{"text": TOK("cover.jpg"), "spans": []}, {"text": "Inside.", "spans": []}]
+    )
+    sections = _first_page_book(tmp_path, [box, "Words after it."])
+    assert sections[0] == ["cover_img"]
+    assert "cover_img" not in sections[1]
+    assert _pictures(sections) == ["cover_img"]

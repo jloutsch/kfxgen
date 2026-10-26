@@ -1011,6 +1011,23 @@ def _picture_link(at, spans):
     return None
 
 
+def _with_anchors(block, source):
+    """`block` also holding `source`'s anchors, at its start."""
+    keys = list(source.get("anchor_keys") or [])
+    return {
+        **block,
+        "anchor_keys": [*keys, *(block.get("anchor_keys") or [])],
+        "anchor_ids": [
+            *(source.get("anchor_ids") or []),
+            *(block.get("anchor_ids") or []),
+        ],
+        "anchor_offsets": {
+            **dict.fromkeys(keys, 0),
+            **(block.get("anchor_offsets") or {}),
+        },
+    }
+
+
 def _token_resource(href, image_resources, resolved_image_refs):
     """The (resource, location) a picture token's href names, or None: its
     exact manifest href, then its decoded form; its basename only for hrefs
@@ -3861,31 +3878,61 @@ class NativeKFXGenerator:
     HEADING_FONT_SIZE = 1.2
 
     def _without_leading_cover(self, chapter, cover_resource_name):
-        """`chapter`'s blocks with its first one emptied when that block is
-        a picture of the cover alone, or None. Emptied, not removed, so its
-        anchors still land at the page's start. A cover sharing its
-        paragraph with text stays, as Kindle Previewer 4.0.3 prints it twice
-        there (QA's c1 probe on #516). A styled box (#238) is looked into:
-        its own blocks print it."""
-        blocks = list(chapter.get("blocks") or [])
+        """`chapter`'s blocks without its first one when that block is a
+        picture of the cover alone, or None. Its anchors move to the block
+        after it, at its start, so links to the picture still land (#475). A
+        cover sharing its paragraph with text stays, as Kindle Previewer
+        4.0.3 prints it twice there (QA's c1 probe on #516). A styled box
+        (#238) is looked into: its own blocks print it."""
+        found = self._drop_leading_cover(
+            chapter.get("blocks") or [], cover_resource_name
+        )
+        if found is None:
+            return None
+        blocks, pending = found
+        if pending:
+            # Nothing after it: an empty block holds its anchors.
+            blocks = [_with_anchors({"text": "", "spans": []}, pending), *blocks]
+        return blocks
+
+    def _drop_leading_cover(self, blocks, cover_resource_name):
+        """(blocks less the leading cover picture, anchors left to place), or
+        None when the first block with text isn't that picture."""
+        blocks = list(blocks)
         for n, block in enumerate(blocks):
             text = (block.get("text") or "").strip()
             if not text:
                 continue
-            m = IMG_TOKEN_RE.fullmatch(text)
+            is_box = block.get("type") == "box"
+            m = None if is_box else IMG_TOKEN_RE.fullmatch(text)
             resource = m and _token_resource(
                 m.group(1), self.image_resources, self._resolved_image_refs
             )
-            if not resource or resource[0] != cover_resource_name:
+            if not is_box and (not resource or resource[0] != cover_resource_name):
                 return None
-            if block.get("type") == "box":
-                kids = self._without_leading_cover(block, cover_resource_name)
-                if kids is None:
+            pending = block
+            if is_box:
+                found = self._drop_leading_cover(
+                    block.get("blocks") or [], cover_resource_name
+                )
+                if found is None:
                     return None
-                blocks[n] = {**block, "text": "", "blocks": kids}
-            else:
-                blocks[n] = {**block, "text": ""}
-            return blocks
+                kids, inner = found
+                if kids:
+                    if inner:
+                        kids = [_with_anchors(kids[0], inner), *kids[1:]]
+                    blocks[n] = {
+                        **block,
+                        "text": "\n\n".join(k.get("text") or "" for k in kids),
+                        "blocks": kids,
+                    }
+                    return blocks, None
+                pending = _with_anchors(block, inner) if inner else block
+            del blocks[n]
+            if n < len(blocks):
+                blocks[n] = _with_anchors(blocks[n], pending)
+                return blocks, None
+            return blocks, pending
         return None
 
     def _build_chapter_content(self, chapters):
