@@ -501,7 +501,7 @@ def test_optimization_runs_by_default(monkeypatch, tmp_path):
     monkeypatch.setattr(
         _conv,
         "optimize_images",
-        lambda cover, images, log: (
+        lambda cover, images, log, cover_href: (
             called.setdefault("yes", True),
             (b"C2", {"x.jpg": b"Y"}),
         )[1],
