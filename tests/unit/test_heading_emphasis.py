@@ -123,12 +123,13 @@ def test_a_plain_heading_has_no_runs(tmp_path):
 @pytest.mark.unit
 def test_a_block_longer_than_the_title_keeps_its_own_runs(tmp_path):
     """Only a block that is exactly the title gives its runs to the heading;
-    a longer one keeps its words and runs, as before."""
+    a longer one keeps its words and runs. A paragraph that runs the title
+    in is printed whole, with no heading of kfxgen's over it (#468)."""
     ch = _chapter("The Harbour", "<p>The Harbour and the <i>boats</i>.</p>")
     frags = _book(tmp_path, [ch])
-    _, _, runs = _heading(frags, "The Harbour")
-    assert runs == []
+    assert [e[0] for e in _entries(frags) if e[0] == "The Harbour"] == []
     (rest,) = [e for e in _entries(frags) if "boats" in e[0]]
+    assert rest[0] == "The Harbour and the boats."
     (word,) = [s for t, s in rest[2] if t == "boats"]
     assert _italic(word)
 

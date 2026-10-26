@@ -212,7 +212,13 @@ class TestPerParagraphChunking:
                 "title": "Chapter 1",
                 "text": "Chapter 1 italic\n\nbody",
                 "blocks": [
-                    {"text": "Chapter 1 italic", "spans": [(10, 6, {FLAG_ITALIC})]},
+                    # A heading: a paragraph that runs the title in is
+                    # printed whole (#468).
+                    {
+                        "text": "Chapter 1 italic",
+                        "spans": [(10, 6, {FLAG_ITALIC})],
+                        "heading": True,
+                    },
                     {"text": "body", "spans": []},
                 ],
             }
@@ -4546,11 +4552,14 @@ def test_anchor_offset_follows_the_title_cut(tmp_path):
     body = "Chapter One. It was a long day and the road went on and on1 until night."
     offset = body.index("1 until")
     cut = len("Chapter One")
+    chapters = _round_trip_chapters(body, offset)
+    # A heading: a paragraph that runs the title in is printed whole (#468).
+    chapters[0]["blocks"][0]["heading"] = True
     gen = NativeKFXGenerator()
     gen.generate_full_book(
         title="T",
         author="A",
-        chapters=_round_trip_chapters(body, offset),
+        chapters=chapters,
         output_path=str(tmp_path / "o.kfx"),
     )
     # The note's own anchor sits at its paragraph's start (no offset).
@@ -4588,6 +4597,8 @@ def test_trim_text_clamps_anchor_offsets_to_the_text_left():
 def test_an_anchor_inside_the_cut_title_lands_on_the_paragraph_start(tmp_path):
     body = "Chapter One. It was a long day.X"
     chapters = _round_trip_chapters(body, len(body) - 1)
+    # A heading: a paragraph that runs the title in is printed whole (#468).
+    chapters[0]["blocks"][0]["heading"] = True
     # `<p>Chapter <a id="ref1"/>One. ...`: the id sits inside the title.
     chapters[0]["blocks"][0]["anchor_offsets"] = {"chapter_001.xhtml#ref1": 8}
     gen = NativeKFXGenerator()
@@ -5545,6 +5556,38 @@ def test_a_title_in_other_case_and_spacing_after_a_picture_prints_once(tmp_path)
 )
 def test_other_openings_keep_their_heading(tmp_path, blocks, expected):
     assert _chapter_texts(tmp_path, blocks()) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "first, expected",
+    [
+        # #468: a paragraph that runs the title into its text prints it
+        # there. It stays whole, not cut into a heading and its tail, and
+        # kfxgen prints no heading over it, as Kindle Previewer has it.
+        (
+            {"text": "The Harbour lay quiet that morning."},
+            ["The Harbour lay quiet that morning.", "Text."],
+        ),
+        # A paragraph that is the title alone is the book's heading: printed
+        # once, as the book writes it (#64, #409).
+        (
+            {"text": "The Harbour."},
+            ["H:The Harbour.", "Text."],
+        ),
+        # A book heading that starts with the title is still cut, unchanged
+        # here: the title prints once, and the rest of the heading under it.
+        # #481 revisits printing the label over a book's heading.
+        (
+            {"text": "The Harbour at Dawn", "heading": True},
+            ["H:The Harbour", "at Dawn", "Text."],
+        ),
+    ],
+    ids=["sentence", "title-alone", "heading"],
+)
+def test_a_chapter_opening_with_the_titles_words(tmp_path, first, expected):
+    blocks = [{**_para(first["text"]), **first}, _para("Text.")]
+    assert _chapter_texts(tmp_path, blocks) == expected
 
 
 # ── #226: a paragraph over 2,000 characters stays one paragraph ─────────────

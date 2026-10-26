@@ -537,6 +537,21 @@ def _title_after_pictures(blocks, title):
     return False
 
 
+def _title_runs_in(blocks, title):
+    """Whether the chapter's first block is a paragraph that runs its title
+    into its text ("Chapter One was a long day"). The book prints the title
+    there, so kfxgen prints no heading of its own and cuts nothing, as
+    Kindle Previewer has it (#468). A heading, and a paragraph that is the
+    title alone, are cut as before."""
+    first = next(iter(_drop_edge_rules(blocks or ())), None)
+    if first is None or first.get("type") not in (None, "text") or first.get("heading"):
+        return False
+    text = (first.get("text") or "").lstrip()
+    return _opens_with_title(text, title) and any(
+        c.isalnum() for c in text[len(title) :]
+    )
+
+
 def _ruby_heading_title(blocks, title):
     """(The base text of a chapter's first block, its runs) when that block,
     each reading run in after its base, is `title`; else (`title`, None)
@@ -4563,11 +4578,15 @@ class NativeKFXGenerator:
             title_after_pictures = not toc_links and _title_after_pictures(
                 chapter.get("blocks") or [], title
             )
+            title_runs_in = not toc_links and _title_runs_in(
+                chapter.get("blocks"), title
+            )
             omit_heading = (
                 chapter.get("_is_cover")
                 or chapter.get("_omit_title_heading")
                 or body_is_image_only
                 or title_after_pictures
+                or title_runs_in
             )
             heading_chunk = None
             if not omit_heading:
@@ -4597,7 +4616,9 @@ class NativeKFXGenerator:
                 # heading and a picture, which prints no heading of
                 # kfxgen's (#33; #409 QA: a part page lost its heading).
                 cut_title = (
-                    not chapter.get("_omit_title_heading") and not body_is_image_only
+                    not chapter.get("_omit_title_heading")
+                    and not body_is_image_only
+                    and not title_runs_in
                 )
                 text = chapter["text"]
                 stripped = text.lstrip()
