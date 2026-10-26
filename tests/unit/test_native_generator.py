@@ -4501,7 +4501,7 @@ def test_a_missing_pictures_id_with_no_other_entry_lands_on_the_placeholder():
 @pytest.mark.unit
 def test_anchor_in_a_heading_opening_with_the_title_lands_on_it(tmp_path):
     """A heading that opens with the chapter title prints whole (#481), and a
-    return link to a marker in it lands on the heading."""
+    return link to a marker in it lands on the marker (#491)."""
     body = "Chapter One. It was a long day and the road went on and on1 until night."
     offset = body.index("1 until")
     chapters = _round_trip_chapters(body, offset)
@@ -4513,11 +4513,11 @@ def test_anchor_in_a_heading_opening_with_the_title_lands_on_it(tmp_path):
         chapters=chapters,
         output_path=str(tmp_path / "o.kfx"),
     )
-    # Both anchors sit at their paragraph's start: the heading's, carried
-    # from its block as #62 carries a duplicate heading's, and the note's.
+    # The note's anchor sits at its paragraph's start; the marker's keeps
+    # its offset in the heading that prints its block (#491).
     found = dict(_anchor_named_by_return_link(gen))
     assert len(found) == 2
-    assert {off for _pos, off in found.values()} == {None}
+    assert {off for _pos, off in found.values()} == {None, offset}
 
 
 @pytest.mark.unit
@@ -4547,7 +4547,7 @@ def test_trim_text_clamps_anchor_offsets_to_the_text_left():
 
 
 @pytest.mark.unit
-def test_an_anchor_inside_the_cut_title_lands_on_the_paragraph_start(tmp_path):
+def test_an_anchor_inside_the_title_heading_keeps_its_offset(tmp_path):
     body = "Chapter One. It was a long day.X"
     chapters = _round_trip_chapters(body, len(body) - 1)
     # A heading: a paragraph that runs the title in is printed whole (#468).
@@ -4558,8 +4558,9 @@ def test_an_anchor_inside_the_cut_title_lands_on_the_paragraph_start(tmp_path):
     gen.generate_full_book(
         title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
     )
+    # The heading prints the block's text, so the id stays at "One" (#491).
     found = dict(_anchor_named_by_return_link(gen))
-    assert {off for _pos, off in found.values()} == {None}
+    assert {off for _pos, off in found.values()} == {None, 8}
 
 
 # ── #238 stage 2: a box is a `$270` around its paragraphs ────────────────────

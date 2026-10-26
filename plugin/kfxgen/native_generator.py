@@ -590,6 +590,16 @@ def _book_heading_title(blocks, title):
     return title, None
 
 
+def _heading_offsets(block, title):
+    """`block`'s anchor offsets in kfxgen's heading, which prints its text
+    from the first character after any leading space (#491)."""
+    lead = len(block["text"]) - len(block["text"].lstrip())
+    return {
+        k: min(max(off - lead, 0), len(title))
+        for k, off in (block.get("anchor_offsets") or {}).items()
+    }
+
+
 def _title_spans(block, length):
     """`block`'s runs, moved onto a heading printing its first `length`
     characters after any leading space: the block is the book's own heading,
@@ -4321,6 +4331,8 @@ class NativeKFXGenerator:
             # chunk below so links to those ids still resolve. (#62) A page the
             # converter rebuilt names the keys of the blocks it replaced (#436).
             carried_anchor_keys = list(chapter.get("anchor_keys") or ())
+            # Offsets in kfxgen's heading for ids of the block it prints (#491).
+            heading_offsets = {}
             title = chapter["title"]
             toc_links = chapter.get("toc_links")
             title, title_spans = _ruby_heading_title(chapter.get("blocks"), title)
@@ -4459,6 +4471,7 @@ class NativeKFXGenerator:
                                     # Its italic or bold words go on the
                                     # heading that prints it (#366).
                                     if heading_chunk is not None:
+                                        heading_offsets = _heading_offsets(first, title)
                                         heading_chunk["spans"] = _title_spans(
                                             first, len(title)
                                         )
@@ -4552,6 +4565,13 @@ class NativeKFXGenerator:
                     # a heading (#338).
                     for b in chapter["blocks"]:
                         carried_anchor_keys.extend(_block_keys(b))
+                    first = next(iter(_drop_edge_rules(chapter["blocks"])), None)
+                    if (
+                        heading_chunk is not None
+                        and first is not None
+                        and (first.get("text") or "").strip() == title
+                    ):
+                        heading_offsets = _heading_offsets(first, title)
 
             # Illustrations the source printed in a contents section that was
             # replaced. They arrive as their own key rather than inside
@@ -4615,9 +4635,11 @@ class NativeKFXGenerator:
                     (first_chunk.get("anchor_keys") or []) + carried_anchor_keys
                 )
                 # The block these came from is gone, so its offsets went with
-                # it — they land at the chapter's start. (#62)
+                # it — they land at the chapter's start (#62), unless kfxgen's
+                # heading prints that block's words (#491).
+                offsets = heading_offsets if first_chunk is heading_chunk else {}
                 first_chunk.setdefault("anchor_offsets", {}).update(
-                    dict.fromkeys(carried_anchor_keys, 0)
+                    {k: offsets.get(k, 0) for k in carried_anchor_keys}
                 )
 
             chapter_chunk_ranges.append((start_idx, len(all_chunks)))
