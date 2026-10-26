@@ -3329,6 +3329,7 @@ class NativeKFXGenerator:
             return h.rsplit("/", 1)[-1]
 
         image_resources = {}
+        cover_hrefs = []  # body pictures that are the cover's (#475)
         self._image_dims = {}  # basename -> (width, height) for style picker
         self._footnote_keys = set(footnote_keys or ())
         self._popup_anchors, self._popup_positions = set(), set()
@@ -3353,6 +3354,11 @@ class NativeKFXGenerator:
             valid = []
             for href, data in sorted(images.items()):
                 if not data or len(data) <= 100:
+                    continue
+                if cover_resource_name and data == cover_image:
+                    # The cover's picture used in the text: shown there from
+                    # the cover's resource, not stored twice (#475).
+                    cover_hrefs.append(href)
                     continue
                 if data[:3] == b"\xff\xd8\xff":
                     fmt = "jpeg"
@@ -3412,6 +3418,13 @@ class NativeKFXGenerator:
                     face.emitted_family, face.location, face.weight, face.italic
                 )
             )
+
+        for href in cover_hrefs:
+            dims = (display_dims or {}).get(href) or cover_dims
+            for key in (_img_basename(href), href, unquote(href)):
+                if key not in image_resources:
+                    image_resources[key] = (cover_resource_name, cover_location_name)
+                    self._image_dims[key] = dims
 
         # Cover-in-reading-flow (#32): make the cover image visible as the
         # first reading page by registering its resource under a synthetic
@@ -3666,7 +3679,14 @@ class NativeKFXGenerator:
         if cover_resource_name:
             all_entity_names.append(cover_resource_name)
             all_entity_names.append(cover_location_name)
+        cover_listed = False
         for resource_name, location_name in image_resources.values():
+            if resource_name == cover_resource_name:
+                # Its aliases in the text name the same pair: listed once, as
+                # before they existed (#475).
+                if cover_listed:
+                    continue
+                cover_listed = True
             all_entity_names.append(resource_name)
             all_entity_names.append(location_name)
         # Embedded fonts (#15): register the $418 raw-font locations so the

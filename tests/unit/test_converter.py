@@ -238,10 +238,11 @@ class TestCoverImageReturnsHref:
         assert href is None
 
 
-class TestImagesExcludeCover:
-    """Body-image extraction must skip the cover href."""
+class TestImagesKeepCover:
+    """The cover's file is extracted with the body's pictures: the text may
+    show it too, and the generator shares the cover's resource (#475)."""
 
-    def test_cover_excluded_from_body_images(self):
+    def test_cover_extracted_with_body_images(self):
         cover = _ManifestItem("cover", "images/cover.jpg", media_type="image/jpeg")
         cover.data = JPEG_BYTES
         body = _ManifestItem("fig1", "images/figure1.jpg", media_type="image/jpeg")
@@ -249,12 +250,8 @@ class TestImagesExcludeCover:
         manifest = _Manifest([cover, body])
         oeb = _OEBBook(spine=[], toc=[], manifest=manifest)
 
-        result = extract_images_from_oeb(
-            oeb, _silent_log(), exclude_hrefs=["images/cover.jpg"]
-        )
-        hrefs = list(result.keys())
-        assert "images/cover.jpg" not in hrefs
-        assert "images/figure1.jpg" in hrefs
+        result = extract_images_from_oeb(oeb, _silent_log())
+        assert {"images/cover.jpg", "images/figure1.jpg"} <= set(result)
 
     def test_unsupported_format_skipped_with_warning(self):
         body = _ManifestItem("gif1", "images/animated.gif", media_type="image/gif")

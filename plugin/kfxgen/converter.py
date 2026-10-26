@@ -6211,20 +6211,17 @@ def _extract_toc_with_hrefs(oeb_book, log):
     return toc_entries
 
 
-def extract_images_from_oeb(
-    oeb_book, log, exclude_hrefs=None, display_dims=None, own_size=()
-):
+def extract_images_from_oeb(oeb_book, log, display_dims=None, own_size=()):
     """
     Walk OEB manifest for image/* items and return their raw bytes.
 
-    Used by Phase 4 to emit $164 + $417 resource pairs. The cover image is
-    typically excluded (handled separately via extract_cover_image), so callers
-    pass its href in `exclude_hrefs`.
+    Used by Phase 4 to emit $164 + $417 resource pairs. The cover's file is
+    among them: where the text shows it too, the generator gives it the
+    cover's resource rather than a second copy (#475).
 
     Args:
         oeb_book: Calibre OEB book object
         log: Calibre logger
-        exclude_hrefs: Optional iterable of normalized hrefs to skip
         display_dims: Optional dict, filled with {href: (width, height)} for
             each SVG drawn at twice its size: the size to show it at (#440)
         own_size: hrefs of SVGs to draw at their own size: those shown in a
@@ -6232,13 +6229,12 @@ def extract_images_from_oeb(
             size (#441 device check)
 
     Returns:
-        dict: { href: bytes } for every image manifest item that's not excluded
+        dict: { href: bytes } for every image manifest item
     """
     images = {}
     skipped_unsupported = 0
     converted_gifs = 0
     converted_svgs = 0
-    excluded = {_normalize_href(h) for h in (exclude_hrefs or [])}
     try:
         for item in oeb_book.manifest:
             media = (getattr(item, "media_type", "") or "").lower()
@@ -6247,7 +6243,7 @@ def extract_images_from_oeb(
             data = getattr(item, "data", None)
             href = getattr(item, "href", "") or ""
             if media == "image/svg+xml":
-                if not href or _normalize_href(href) in excluded:
+                if not href:
                     continue
                 # calibre hands an SVG over parsed, not as bytes, so the
                 # check below dropped every one without a word (#438).
@@ -6266,7 +6262,7 @@ def extract_images_from_oeb(
                 continue
             if not isinstance(data, (bytes, bytearray)) or len(data) <= 100:
                 continue
-            if not href or _normalize_href(href) in excluded:
+            if not href:
                 continue
             # Pre-filter to formats the generator handles (JPEG, PNG). The
             # generator silently drops unrecognized magic bytes; doing the
@@ -6532,7 +6528,6 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
     images = extract_images_from_oeb(
         oeb_book,
         log,
-        exclude_hrefs=[cover_href] if cover_href else [],
         display_dims=display_dims,
         own_size=_pictures_in_table_cells(oeb_book),
     )
