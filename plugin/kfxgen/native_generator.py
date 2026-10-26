@@ -2791,7 +2791,7 @@ class NativeKFXGenerator:
         self,
         story_names,
         content_refs,
-        entity_name=None,
+        entity_name,
         positions=None,
         link_targets=None,
         link_styles=None,
