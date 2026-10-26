@@ -1339,7 +1339,8 @@ def _walk_inline(
                 for aid in _subtree_anchor_ids(node):
                     parts.append(make_anchor_mark(aid))
                 parts.append((f"{text} ", frozenset()))
-        elif clocal in _CELL_BLOCK_TAGS:
+        elif clocal in _CELL_BLOCK_TAGS or clocal == "option":
+            # A <select>'s options are separate words too (#477).
             # A block walked inline (a cell on the rows path, a native cell
             # mixing text and a block): its edges are a word boundary even
             # when the HTML puts no whitespace there.
@@ -2901,14 +2902,23 @@ _NON_RENDERED_EPUB_TYPES = {"page-list", "landmarks"}
 _EPUB_TYPE_ATTR = "{http://www.idpf.org/2007/ops}type"
 
 
+#: Elements whose content a browser never shows: a <template>'s, and an
+#: <iframe>'s fallback children, which HTML5 ignores (#477).
+_NEVER_SHOWN_TAGS = {"template", "iframe"}
+
+
 def _is_non_rendered(elem):
     """True when `elem` heads a subtree that is markup, not reading content.
 
-    Two signals: the HTML5 `hidden` attribute (the general rule — the producer
-    said not to display this), and an `epub:type` naming a navigation kind that
-    is structural by definition, which catches producers that omit `hidden`.
+    Three signals: the HTML5 `hidden` attribute (the general rule — the
+    producer said not to display this), an element whose content a browser
+    never shows (`_NEVER_SHOWN_TAGS`, #477), and an `epub:type` naming a
+    navigation kind that is structural by definition, which catches producers
+    that omit `hidden`.
     """
     if elem.get("hidden") is not None:
+        return True
+    if isinstance(elem.tag, str) and _local_tag(elem.tag) in _NEVER_SHOWN_TAGS:
         return True
     raw = elem.get(_EPUB_TYPE_ATTR) or elem.get("epub:type") or ""
     return any(part in _NON_RENDERED_EPUB_TYPES for part in raw.lower().split())
