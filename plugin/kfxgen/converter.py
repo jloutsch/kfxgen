@@ -1228,36 +1228,108 @@ def _css_strings(value):
     return [unescape(a or b) for a, b in _CSS_STRING_RE.findall(value or "")]
 
 
-def _q_marks(q, css=None):
-    """(open, close) for a <q>, as Kindle Previewer 4.0.3 prints them: its
-    ::before and ::after content when the book sets one, else its `quotes`
-    (none, or pairs by depth), else its nearest lang's pair (an empty lang is
-    unknown, so plain); the nested pair for a <q> inside another (#469,
-    #503 QA)."""
-    css = css or {}
-    depth = sum(1 for a in q.iterancestors() if _local_tag(a.tag) == "q")
+_CONTENT_TOKEN_RE = re.compile(
+    r'"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\'|([a-zA-Z-]+)\(([^)]*)\)|([a-zA-Z-]+)'
+)
+
+
+def _q_pair(q, css, depth):
+    """The (open, close) pair a quote keyword prints at `depth`: the <q>'s
+    `quotes` (none, or pairs by depth), else its nearest lang's, the second
+    pair at any depth past the first (#469, #503 QA)."""
     lang = _lang_of(q) or ""
     marks = _Q_MARKS.get(lang.lower(), _Q_PLAIN)
     pair = (marks[2], marks[3]) if depth else (marks[0], marks[1])
     quotes = (css.get("quotes") or "").strip().lower()
     if quotes == "none":
-        pair = ("", "")
-    elif strings := _css_strings(css.get("quotes")):
+        return ("", "")
+    if strings := _css_strings(css.get("quotes")):
         pairs = list(zip(strings[0::2], strings[1::2]))
         if pairs:
-            pair = pairs[min(depth, len(pairs) - 1)]
+            return pairs[min(depth, len(pairs) - 1)]
+    return pair
 
-    def content(value, i):
-        value = (value or "").strip()
-        if value in ("", "normal"):
-            return pair[i]
-        if value == "none":
-            return ""
-        if value in ("open-quote", "close-quote"):
-            return pair[i]
-        return "".join(_css_strings(value))
 
-    return content(css.get("before"), 0), content(css.get("after"), 1)
+def _q_content(q, css, side, depth):
+    """What a <q>'s ::before or ::after prints, and the quote depth after it,
+    as Kindle Previewer 4.0.3 counts it (#504): open-quote raises the depth
+    and close-quote lowers it, never below 0, as in CSS; a keyword prints
+    its mark only alone, open-quote in ::before and close-quote in ::after.
+    Strings and attr() print; counter() and counters() print nothing."""
+    value = (css.get(side) or "").strip()
+    if value in ("", "normal"):
+        value = "open-quote" if side == "before" else "close-quote"
+    if value == "none":
+        return "", depth
+    tokens = _CONTENT_TOKEN_RE.findall(value)
+    alone = len(tokens) == 1
+    out = []
+    for dq, sq, fn, arg, word in tokens:
+        if fn:
+            if fn.lower() == "attr":
+                out.append(q.get(arg.strip()) or "")
+        elif word:
+            word = word.lower()
+            if word in ("open-quote", "no-open-quote"):
+                if word == "open-quote" and alone and side == "before":
+                    out.append(_q_pair(q, css, depth)[0])
+                depth += 1
+            elif word in ("close-quote", "no-close-quote") and depth:
+                depth -= 1
+                if word == "close-quote" and alone and side == "after":
+                    out.append(_q_pair(q, css, depth)[1])
+        else:
+            # A string, its escapes read.
+            out.extend(_css_strings(f"'{sq}'" if sq else f'"{dq}"'))
+    return "".join(out), depth
+
+
+def _document_q_marks(root, css_of):
+    """{q: (open, close)} for every <q> in `root`'s document, the quote depth
+    running on across it in reading order, as Previewer counts it (#504)."""
+    from lxml import etree
+
+    marks, depth = {}, 0
+    for event, q in etree.iterwalk(root, events=("start", "end")):
+        if not isinstance(q.tag, str) or _local_tag(q.tag) != "q":
+            continue
+        css = css_of(q) or {}
+        if event == "start":
+            text, depth = _q_content(q, css, "before", depth)
+            marks[q] = [text, ""]
+        else:
+            marks[q][1], depth = _q_content(q, css, "after", depth)
+    return {q: tuple(m) for q, m in marks.items()}
+
+
+# The last document's marks: a document's blocks are walked in turn, with one
+# resolver for the document (#504).
+_Q_DOCUMENT = {}
+
+
+def _q_marks(q, style_resolver=None):
+    """(open, close) for a <q>, as Kindle Previewer 4.0.3 prints them: its
+    ::before and ::after content, else its `quotes`, else its nearest lang's
+    pair, at the quote depth its document has reached (#469, #503 QA,
+    #504)."""
+    root = q.getroottree().getroot()
+    cache = _Q_DOCUMENT
+    if cache.get("root") is not root or cache.get("resolver") is not style_resolver:
+        cache.update(
+            root=root,
+            resolver=style_resolver,
+            marks=_document_q_marks(
+                root,
+                lambda e: (
+                    (style_resolver(e) or {}).get("q-css") if style_resolver else None
+                ),
+            ),
+        )
+    marks = cache["marks"].get(q)
+    if marks is None:
+        # Not in its document's walk (a copy): counted on its own.
+        marks = _document_q_marks(q, lambda e: None).get(q, ("", ""))
+    return marks
 
 
 def _walk_inline(
@@ -1475,13 +1547,7 @@ def _walk_inline(
         if line:
             parts.append(("", frozenset({LINE_START})))
         return parts
-    quote = (
-        _q_marks(
-            elem, (style_resolver(elem) or {}).get("q-css") if style_resolver else None
-        )
-        if local == "q"
-        else None
-    )
+    quote = _q_marks(elem, style_resolver) if local == "q" else None
     if quote:
         parts.append((quote[0], cur))
     text = elem.text

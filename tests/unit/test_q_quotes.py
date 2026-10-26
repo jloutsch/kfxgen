@@ -125,3 +125,76 @@ def _styled(css_for_q, body='<p lang="en"><q>a <q>b</q></q></p>'):
 )
 def test_the_books_css_for_q(css, text):
     assert _styled(css) == [text]
+
+
+def _styled_by_class(css_by_class, body):
+    """Text of `body` (lang en), each <q> taking the CSS of its class."""
+    xhtml = (
+        '<html xmlns="http://www.w3.org/1999/xhtml" lang="en"><body>'
+        f"{body}</body></html>"
+    )
+
+    def resolver(elem):
+        if _conv._local_tag(elem.tag) != "q":
+            return {}
+        return {"q-css": css_by_class.get(elem.get("class"), {})}
+
+    blocks = _conv.extract_blocks_from_html(
+        etree.fromstring(xhtml.encode()), style_resolver=resolver, base_href="c.xhtml"
+    )
+    return [b["text"] for b in blocks]
+
+
+# Each as Kindle Previewer 4.0.3 printed it, one spine file per case (#504).
+_DEPTH = {
+    "b1": {"before": '"[["'},
+    "bnone": {"before": "none"},
+    "battr": {"before": 'attr(lang) ": "'},
+    "bctr": {"before": "counter(c)"},
+    "ctr2": {"before": 'counters(c, ".") "|"'},
+    "aopen": {"after": "open-quote"},
+    "anone": {"after": "none"},
+    "noopen": {"before": "no-open-quote"},
+    "noclose": {"after": "no-close-quote"},
+    "mix": {"before": '"<" open-quote'},
+    "bopen": {"before": "open-quote"},
+    "bopen2": {"before": 'open-quote "<"'},
+    "aclose": {"after": "close-quote"},
+    "aclose2": {"after": '">" close-quote'},
+    "aclose3": {"after": 'close-quote ">"'},
+    "bs": {"before": '"<"'},
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("body", "texts"),
+    [
+        # The depth rises only with an open-quote: no close mark after one
+        # that never rose (#504).
+        ('<p><q class="b1">x</q></p>', ["[[x"]),
+        ('<p><q class="bnone">x</q></p>', ["x"]),
+        ('<p><q class="battr" lang="fr">x</q></p>', ["fr: x"]),
+        ('<p><q class="bctr">x</q></p>', ["x"]),
+        ('<p><q class="ctr2">x</q></p>', ["|x"]),
+        ('<p><q class="b1">a <q>b</q> c</q></p>', ["[[a “b” c"]),
+        ('<p><q class="b1">x</q> <q>y</q></p>', ["[[x “y”"]),
+        # An open-quote in ::after prints nothing.
+        ('<p><q class="aopen">x</q></p>', ["“x"]),
+        ('<p><q class="aopen">x</q> <q>y</q></p>', ["“x ‘y’"]),
+        # The depth runs on across paragraphs.
+        ('<p><q class="anone">x</q> then</p><p><q>y</q></p>', ["“x then", "‘y’"]),
+        ('<p><q class="noopen">x</q> <q>y</q></p>', ["x” “y”"]),
+        ('<p><q class="noclose">x</q> <q>y</q></p>', ["“x “y”"]),
+        # A keyword alone prints its mark; beside a string, only the string.
+        ('<p><q class="bopen">x</q></p>', ["“x”"]),
+        ('<p><q class="aclose">x</q></p>', ["“x”"]),
+        ('<p><q class="mix">x</q> <q>y</q></p>', ["<x” “y”"]),
+        ('<p><q class="bopen2">x</q> <q>y</q></p>', ["<x” “y”"]),
+        ('<p><q class="aclose2">x</q></p>', ["“x>"]),
+        ('<p><q class="aclose3">x</q></p>', ["“x>"]),
+        ('<p><q class="bs">x</q> <q>y</q></p>', ["<x “y”"]),
+    ],
+)
+def test_quote_depth_as_previewer_counts_it(body, texts):
+    assert _styled_by_class(_DEPTH, body) == texts
