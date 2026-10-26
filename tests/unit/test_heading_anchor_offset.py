@@ -44,3 +44,14 @@ def _offset(tmp_path, label, body):
 def test_an_id_in_the_heading_keeps_its_offset(tmp_path, label):
     body = '<h1>Chapter <span id="hx">Nine</span> Begins</h1><p>Body.</p>'
     assert 8 in _offset(tmp_path, label, body)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("label", ["Nine", "Chapter Nine"], ids=["differs", "equal"])
+def test_an_id_at_the_headings_end_lands_on_its_last_character(tmp_path, label):
+    """Kindle Previewer 4.0.3 puts it at len - 1, on the heading's last
+    character, not past it at len (QA's probe on #517)."""
+    body = '<h1>Chapter Nine<span id="hx"/></h1><p>Body.</p>'
+    offsets = _offset(tmp_path, label, body)
+    assert 11 in offsets
+    assert 12 not in offsets

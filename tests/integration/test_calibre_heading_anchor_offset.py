@@ -30,10 +30,13 @@ from tests.integration.test_calibre_table_rows import (  # noqa: E402
 pytestmark = [pytest.mark.slow, pytest.mark.integration]
 
 FILES = {
-    "c1.xhtml": '<h1>One</h1><p>See <a href="c2.xhtml#hx">L1</a>.</p>',
+    "c1.xhtml": '<h1>One</h1><p>See <a href="c2.xhtml#hx">L1</a>.</p>'
+    '<p>And <a href="c3.xhtml#hz">L2</a>.</p>',
     "c2.xhtml": '<h1>Chapter <span id="hx">Nine</span> Begins</h1><p>Body.</p>',
+    # An id at the heading's end: Previewer puts it on the last character.
+    "c3.xhtml": '<h1>Chapter Ten<span id="hz"/></h1><p>More.</p>',
 }
-TOC = [("One", "c1.xhtml"), ("Chapter Nine", "c2.xhtml")]
+TOC = [("One", "c1.xhtml"), ("Chapter Nine", "c2.xhtml"), ("Ten", "c3.xhtml")]
 
 
 def test_a_link_into_the_heading_lands_on_its_word(calibre):  # noqa: F811
@@ -56,8 +59,12 @@ def test_a_link_into_the_heading_lands_on_its_word(calibre):  # noqa: F811
 
     anchors = {str(f.fid): val(f)["$183"] for f in by_type(frags, "$266")}
     by_id = {e["$155"]: e for e in entries}
-    link = next(e for e in entries if text(e) == "See L1.")
-    (target,) = [sp["$179"] for sp in link.get("$142") or [] if "$179" in sp]
-    anchor = anchors[str(target)]
-    assert text(by_id[anchor["$155"]]) == "Chapter Nine Begins", f"calibre {version}"
-    assert int(anchor.get("$143", 0) or 0) == 8, f"calibre {version}"
+    for source, heading, offset in (
+        ("See L1.", "Chapter Nine Begins", 8),
+        ("And L2.", "Chapter Ten", 10),
+    ):
+        link = next(e for e in entries if text(e) == source)
+        (target,) = [sp["$179"] for sp in link.get("$142") or [] if "$179" in sp]
+        anchor = anchors[str(target)]
+        assert text(by_id[anchor["$155"]]) == heading, f"calibre {version}"
+        assert int(anchor.get("$143", 0) or 0) == offset, f"calibre {version}"

@@ -610,10 +610,11 @@ def _book_heading_title(blocks, title):
 
 def _heading_offsets(block, title):
     """`block`'s anchor offsets in kfxgen's heading, which prints its text
-    from the first character after any leading space (#491)."""
+    from the first character after any leading space (#491). One at the end
+    lands on the last character, as Kindle Previewer 4.0.3 places it."""
     lead = len(block["text"]) - len(block["text"].lstrip())
     return {
-        k: min(max(off - lead, 0), len(title))
+        k: min(max(off - lead, 0), max(len(title) - 1, 0))
         for k, off in (block.get("anchor_offsets") or {}).items()
     }
 
