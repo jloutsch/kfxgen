@@ -4897,7 +4897,11 @@ def _assemble_chapters_by_coordinate(
             # starts: it keeps the listing as a page with no blocks, for the
             # rebuild, rather than taking this entry's (#433). The listing's
             # ids, carried onto this entry's block, are the page's (#436).
-            empty_listing[len(coords) - 1] = [
+            # A second entry into the listing is a place on that page (#459).
+            page = len(coords) - 1
+            while page in same_spot:
+                page = same_spot[page]
+            empty_listing[page] = [
                 _entry_key(spine_items_ordered[coords[-1][1]], i)
                 for i in sorted(listing_entry)
             ]
