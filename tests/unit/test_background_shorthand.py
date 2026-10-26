@@ -16,6 +16,10 @@ from kfxgen.converter import _box_background
         ({"background": "none"}, None),
         ({"background": "url(a.png)"}, None),
         ({"background": "transparent"}, None),
+        # A gradient's colours are its stops, not the box's fill: Previewer
+        # writes none, with rgb() stops too (#499 QA).
+        ({"background": "linear-gradient(rgb(200,0,0) 0%, rgb(0,0,200) 100%)"}, None),
+        ({"background": "linear-gradient(#c00, #00c) #ddeeff"}, 0xFFDDEEFF),
         # The longhand, when set, is the fill.
         ({"background-color": "#112233", "background": "#eeeeee"}, 0xFF112233),
         ({"background-color": "transparent", "background": "#eeeeee"}, 0xFFEEEEEE),

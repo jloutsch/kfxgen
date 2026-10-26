@@ -2377,9 +2377,20 @@ def _box_width_px(css):
     return float(width[0]) * _CSS_PX[width[1]]
 
 
-#: A `background:` shorthand's parts: a function such as rgb(...) or url(...)
-#: whole, or a run of anything else between spaces, commas and slashes.
-_BACKGROUND_PART_RE = re.compile(r"[\w-]+\([^)]*\)|[^\s,/]+")
+def _background_parts(value):
+    """A `background:` shorthand's parts: split at spaces, commas and slashes
+    outside parentheses, so a function such as rgb(...), url(...) or a
+    gradient holding rgb() stops stays one part (#464, #499 QA)."""
+    parts, part, depth = [], "", 0
+    for ch in value:
+        depth += (ch == "(") - (ch == ")")
+        if depth <= 0 and ch in " \t\n,/":
+            if part:
+                parts.append(part)
+            part, depth = "", 0
+        else:
+            part += ch
+    return parts + [part] if part else parts
 
 
 def _box_background(css):
@@ -2393,7 +2404,7 @@ def _box_background(css):
         value = next(
             (
                 part
-                for part in _BACKGROUND_PART_RE.findall(css.get("background") or "")
+                for part in _background_parts(css.get("background") or "")
                 if css_rgb(part) is not None
             ),
             None,
