@@ -3479,24 +3479,13 @@ class NativeKFXGenerator:
 
         # Prepend synthetic cover chapter (#32). All toc_link target indices
         # in subsequent chapters shift by +1 to account for the new chapter
-        # at index 0. Not when the book's first page opens with the cover
-        # (#475): it would print twice in a row. A cover after text on that
-        # page keeps the cover page, as Previewer does, or the book would
-        # open on the text.
-        first_text = (chapters[0].get("text") or "") if chapters else ""
-        first_pic = IMG_TOKEN_RE.search(first_text)
-        first_shows_cover = (
-            bool(cover_resource_name and first_pic)
-            and not first_text[: first_pic.start()].strip()
-            and (
-                _token_resource(
-                    first_pic.group(1), image_resources, self._resolved_image_refs
-                )
-                or (None,)
-            )[0]
-            == cover_resource_name
-        )
-        if cover_resource_name and not first_shows_cover:
+        # at index 0.
+        if cover_resource_name:
+            # The book's first page opening with the cover: that picture is
+            # the cover page's, not printed again under it (#475).
+            blocks = self._without_leading_cover(chapters[0], cover_resource_name)
+            if blocks is not None:
+                chapters = [{**chapters[0], "blocks": blocks}, *chapters[1:]]
             chapters = [
                 {
                     **ch,
@@ -3517,10 +3506,6 @@ class NativeKFXGenerator:
                 "_is_cover": True,
             }
             chapters = [cover_chapter] + chapters
-        elif first_shows_cover:
-            # That page stands in for the cover page: the book opens on the
-            # cover, not on its TOC label printed as a heading (#475 review).
-            chapters = [{**chapters[0], "_omit_title_heading": True}, *chapters[1:]]
 
         ch_data = self._build_chapter_content(chapters)
 
@@ -3874,6 +3859,27 @@ class NativeKFXGenerator:
     # Heading style: font size multiplier relative to chapter body font size
     # 1.2 keeps headings distinct but readable on small Kindle screens
     HEADING_FONT_SIZE = 1.2
+
+    def _without_leading_cover(self, chapter, cover_resource_name):
+        """`chapter`'s blocks with its first one emptied when that block is
+        a picture of the cover alone, or None. Emptied, not removed, so its
+        anchors still land at the page's start. A cover sharing its
+        paragraph with text stays, as Kindle Previewer 4.0.3 prints it twice
+        there (QA's c1 probe on #516)."""
+        blocks = list(chapter.get("blocks") or [])
+        for n, block in enumerate(blocks):
+            text = (block.get("text") or "").strip()
+            if not text:
+                continue
+            m = IMG_TOKEN_RE.fullmatch(text)
+            resource = m and _token_resource(
+                m.group(1), self.image_resources, self._resolved_image_refs
+            )
+            if not resource or resource[0] != cover_resource_name:
+                return None
+            blocks[n] = {**block, "text": ""}
+            return blocks
+        return None
 
     def _build_chapter_content(self, chapters):
         """

@@ -58,14 +58,22 @@ def test_a_different_picture_named_like_the_cover_is_its_own(tmp_path):
     assert resources == ["cover_img", "img_0", "img_1"]
 
 
-@pytest.mark.unit
-def _first_page_book(tmp_path, first, href="cover.jpg"):
+TOK = "\x00IMG\x01{}\x01\x00".format
+
+
+def _first_page_book(tmp_path, blocks, href="cover.jpg"):
+    """Each section's entries, a picture's resource or "text", for a book
+    whose first page holds `blocks`."""
     out = tmp_path / "f.kfx"
     NativeKFXGenerator().generate_full_book(
         title="T",
         author="A",
         chapters=[
-            {"title": "Title", "text": first, "blocks": [{"text": first, "spans": []}]},
+            {
+                "title": "Cover",
+                "text": "\n\n".join(blocks),
+                "blocks": [{"text": b, "spans": []} for b in blocks],
+            },
             {
                 "title": "One",
                 "text": "Body.",
@@ -77,122 +85,49 @@ def _first_page_book(tmp_path, first, href="cover.jpg"):
         output_path=str(out),
     )
     return [
-        str(e["$175"])
+        [
+            str(e["$175"]) if e.get("$175") is not None else "text"
+            for e in iter_entries(val(st)["$146"])
+            if hasattr(e, "get") and (e.get("$175") is not None or e.get("$145"))
+        ]
         for st in by_type(load_fragments(out), "$259")
-        for e in iter_entries(val(st)["$146"])
-        if hasattr(e, "get") and e.get("$175") is not None
     ]
 
 
-@pytest.mark.unit
-def test_a_first_page_showing_the_cover_after_text_keeps_the_cover_page(tmp_path):
-    """The cover comes after the first page's text: kfxgen's cover page
-    stays first, as Kindle Previewer 4.0.3's does, or the book would open
-    on that text (#475, QA's c7 and c8 probes)."""
-    tok = "\x00IMG\x01{}\x01\x00".format
-    pictures = _first_page_book(tmp_path, f"One Text. {tok('cover.jpg')}")
-    assert pictures == ["cover_img", "cover_img"]
+def _pictures(sections):
+    return [e for s in sections for e in s if e != "text"]
 
 
 @pytest.mark.unit
-def test_a_first_page_showing_the_cover_takes_the_cover_pages_place(tmp_path):
-    """The book's first page opens with the cover: kfxgen's own cover page
-    (#32) would print it twice in a row (#475)."""
-    tok = "\x00IMG\x01{}\x01\x00".format
-    out = tmp_path / "f.kfx"
-    first = f"{tok('cover.jpg')} A Title"
-    NativeKFXGenerator().generate_full_book(
-        title="T",
-        author="A",
-        chapters=[
-            {"title": "Title", "text": first, "blocks": [{"text": first, "spans": []}]},
-            {
-                "title": "One",
-                "text": "One\n\nBody.",
-                "blocks": [{"text": "Body.", "spans": []}],
-            },
-        ],
-        cover_image=COVER,
-        images={"cover.jpg": COVER},
-        output_path=str(out),
-    )
-    frags = load_fragments(out)
-    pictures = [
-        str(e["$175"])
-        for st in by_type(frags, "$259")
-        for e in iter_entries(val(st)["$146"])
-        if hasattr(e, "get") and e.get("$175") is not None
-    ]
-    assert pictures == ["cover_img"]
+def test_a_first_page_showing_the_cover_after_text_shows_it_there(tmp_path):
+    """kfxgen's cover page first, as Kindle Previewer 4.0.3's, then the
+    page's text and its cover (#475, QA's c7 and c8 probes)."""
+    sections = _first_page_book(tmp_path, [f"One Text. {TOK('cover.jpg')}"])
+    assert _pictures(sections) == ["cover_img", "cover_img"]
 
 
 @pytest.mark.unit
-def test_a_first_page_showing_the_cover_by_a_relative_href(tmp_path):
-    """The page's <img> left unresolved ("../images/c.jpg"): it still names
-    the cover, as the generator resolves it, so no cover page of kfxgen's
-    goes before it (#475; a library book's own cover page)."""
-    tok = "\x00IMG\x01{}\x01\x00".format
-    out = tmp_path / "r.kfx"
-    first = f"{tok('../images/c.jpg')} Cover"
-    NativeKFXGenerator().generate_full_book(
-        title="T",
-        author="A",
-        chapters=[
-            {"title": "Cover", "text": first, "blocks": [{"text": first, "spans": []}]},
-            {
-                "title": "One",
-                "text": "Body.",
-                "blocks": [{"text": "Body.", "spans": []}],
-            },
-        ],
-        cover_image=COVER,
-        images={"ops/images/c.jpg": COVER},
-        output_path=str(out),
-    )
-    frags = load_fragments(out)
-    pictures = [
-        str(e["$175"])
-        for st in by_type(frags, "$259")
-        for e in iter_entries(val(st)["$146"])
-        if hasattr(e, "get") and e.get("$175") is not None
-    ]
-    assert pictures == ["cover_img"]
+@pytest.mark.parametrize(
+    ("href", "token"),
+    [("cover.jpg", "cover.jpg"), ("ops/images/c.jpg", "../images/c.jpg")],
+    ids=["plain", "relative"],
+)
+def test_a_first_page_opening_with_the_cover_alone_shows_it_once(tmp_path, href, token):
+    """The book's own cover page, or a first page opening with the cover in
+    a paragraph of its own: that picture is kfxgen's cover page's, which
+    stays a page of its own, as on main and in Previewer. Printed again under
+    it, the cover showed twice in a row (#475); with no cover page, the
+    page's text ran on under the cover (#516 review). A relative href names
+    the cover as the generator resolves it."""
+    sections = _first_page_book(tmp_path, [TOK(token), "Words after it."], href)
+    assert sections[0] == ["cover_img"]
+    assert _pictures(sections) == ["cover_img"]
 
 
 @pytest.mark.unit
-def test_a_first_page_opening_with_the_cover_prints_no_label_over_it(tmp_path):
-    """That page stands in for kfxgen's cover page, so the book opens on
-    the cover: its TOC label ("Cover" in QA's 3 library books) isn't printed
-    as a heading above it (#475 review)."""
-    from tests.unit.test_book_heading_prints import _lines
-
-    tok = "\x00IMG\x01{}\x01\x00".format
-    text = f"{tok('cover.jpg')} Words after it."
-    out = tmp_path / "h.kfx"
-    NativeKFXGenerator().generate_full_book(
-        title="T",
-        author="A",
-        chapters=[
-            {
-                "title": "Cover",
-                "text": text,
-                "blocks": [{"text": text, "spans": []}],
-            },
-            {
-                "title": "One",
-                "text": "Body.",
-                "blocks": [{"text": "Body.", "spans": []}],
-            },
-        ],
-        cover_image=COVER,
-        images={"cover.jpg": COVER},
-        output_path=str(out),
-    )
-    frags = load_fragments(out)
-    assert "Cover" not in _lines(frags)
-    first = [
-        e
-        for e in iter_entries(val(by_type(frags, "$259")[0])["$146"])
-        if hasattr(e, "get")
-    ][0]
-    assert str(first.get("$175")) == "cover_img"
+def test_a_cover_sharing_its_paragraph_with_text_stays(tmp_path):
+    """Kindle Previewer 4.0.3 prints it twice there: its cover page, then the
+    page as written (QA's c1 probe on #516)."""
+    sections = _first_page_book(tmp_path, [f"{TOK('cover.jpg')} Words after it."])
+    assert sections[0] == ["cover_img"]
+    assert _pictures(sections) == ["cover_img", "cover_img"]
