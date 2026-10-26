@@ -268,6 +268,29 @@ class TestSafeWriteCleanup:
         assert target.read_bytes() == b"existing"
         assert not (tmp_path / "book.kfx.tmp").exists()
 
+    def test_tmp_removed_when_the_replace_fails(self, tmp_path):
+        # A directory at the destination: the write succeeds, os.replace
+        # fails, and the finished .tmp must not be left behind (#458).
+        target = tmp_path / "isdir.kfx"
+        target.mkdir()
+        with pytest.raises(OSError):
+            _safe_write_bytes(str(target), b"new-data")
+        assert not (tmp_path / "isdir.kfx.tmp").exists()
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="no POSIX permission bits")
+def test_overwriting_keeps_the_files_mode(tmp_path):
+    """A book the user made private (0600) stays private when re-converted,
+    not reset to 0644 (#458)."""
+    target = tmp_path / "book.kfx"
+    target.write_bytes(b"old")
+    target.chmod(0o600)
+    _safe_write_bytes(str(target), b"new")
+    assert target.read_bytes() == b"new"
+    assert target.stat().st_mode & 0o777 == 0o600
+
 
 @pytest.mark.tier1
 @pytest.mark.unit

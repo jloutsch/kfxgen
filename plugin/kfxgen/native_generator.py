@@ -5,6 +5,7 @@ import logging
 import os
 import posixpath
 import re
+import stat
 import unicodedata
 from urllib.parse import unquote
 
@@ -20,13 +21,13 @@ from .inline_style import (
     without_math,
     without_ruby,
 )
+from .kfxlib_minimal.ion import IS, IonAnnotation, IonBLOB, IonDecimal, IonStruct
 from .kfxlib_minimal.kfx_container import KfxContainer
 from .kfxlib_minimal.standard_symbols import StandardSymbolTable
-from .kfxlib_minimal.ion import IonStruct, IonDecimal, IonAnnotation, IonBLOB, IS
 from .kfxlib_minimal.yj_container import (
+    CONTAINER_FORMAT_KFX_MAIN,
     YJFragment,
     YJFragmentList,
-    CONTAINER_FORMAT_KFX_MAIN,
 )
 
 # Windows drive-relative '..' patterns like 'C:..\foo' or 'C:..' have no
@@ -1026,17 +1027,29 @@ def _safe_write_bytes(path, data):
 
     tmp = path + ".tmp"
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _NOFOLLOW
+    try:
+        # A file being replaced keeps its mode: a book made private stays
+        # private when re-converted (#458).
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+    except OSError:
+        mode = None
     fd = os.open(tmp, flags, 0o644)
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
+            if mode is not None and hasattr(os, "fchmod"):
+                os.fchmod(f.fileno(), mode)
+            f.flush()
+            # On disk before the rename, so a crash can't leave an empty book.
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
     except BaseException:
+        # Also when the replace fails, e.g. a directory at `path` (#458).
         try:
             os.unlink(tmp)
         except OSError:
             pass
         raise
-    os.replace(tmp, path)
 
 
 def _picture_link(at, spans):
