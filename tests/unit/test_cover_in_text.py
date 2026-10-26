@@ -63,7 +63,8 @@ TOK = "\x00IMG\x01{}\x01\x00".format
 
 def _first_page_book(tmp_path, blocks, href="cover.jpg"):
     """Each section's entries, a picture's resource or "text", for a book
-    whose first page holds `blocks`."""
+    whose first page holds `blocks` (strings, or block dicts)."""
+    blocks = [b if isinstance(b, dict) else {"text": b, "spans": []} for b in blocks]
     out = tmp_path / "f.kfx"
     NativeKFXGenerator().generate_full_book(
         title="T",
@@ -71,8 +72,8 @@ def _first_page_book(tmp_path, blocks, href="cover.jpg"):
         chapters=[
             {
                 "title": "Cover",
-                "text": "\n\n".join(blocks),
-                "blocks": [{"text": b, "spans": []} for b in blocks],
+                "text": "\n\n".join(b["text"] for b in blocks),
+                "blocks": blocks,
             },
             {
                 "title": "One",
@@ -131,3 +132,16 @@ def test_a_cover_sharing_its_paragraph_with_text_stays(tmp_path):
     sections = _first_page_book(tmp_path, [f"{TOK('cover.jpg')} Words after it."])
     assert sections[0] == ["cover_img"]
     assert _pictures(sections) == ["cover_img", "cover_img"]
+
+
+@pytest.mark.unit
+def test_a_first_page_opening_with_the_cover_in_a_box(tmp_path):
+    """The cover inside a styled box (#238), as an SVG cover page reached
+    one library book: the box's own blocks hold the picture, so it is left
+    out there (#516 recheck)."""
+    from tests.unit.test_native_generator import _box_block
+
+    box = _box_block([{"text": TOK("cover.jpg"), "spans": []}])
+    sections = _first_page_book(tmp_path, [box, "Words after it."])
+    assert sections[0] == ["cover_img"]
+    assert _pictures(sections) == ["cover_img"]

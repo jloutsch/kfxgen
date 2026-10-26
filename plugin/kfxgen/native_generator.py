@@ -3865,7 +3865,8 @@ class NativeKFXGenerator:
         a picture of the cover alone, or None. Emptied, not removed, so its
         anchors still land at the page's start. A cover sharing its
         paragraph with text stays, as Kindle Previewer 4.0.3 prints it twice
-        there (QA's c1 probe on #516)."""
+        there (QA's c1 probe on #516). A styled box (#238) is looked into:
+        its own blocks print it."""
         blocks = list(chapter.get("blocks") or [])
         for n, block in enumerate(blocks):
             text = (block.get("text") or "").strip()
@@ -3877,7 +3878,13 @@ class NativeKFXGenerator:
             )
             if not resource or resource[0] != cover_resource_name:
                 return None
-            blocks[n] = {**block, "text": ""}
+            if block.get("type") == "box":
+                kids = self._without_leading_cover(block, cover_resource_name)
+                if kids is None:
+                    return None
+                blocks[n] = {**block, "text": "", "blocks": kids}
+            else:
+                blocks[n] = {**block, "text": ""}
             return blocks
         return None
 
