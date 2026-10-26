@@ -51,7 +51,7 @@ def _book_via_metadata(
     book.manifest = MagicMock()
     book.manifest.__iter__ = lambda self: iter([item])
     book.manifest.hrefs = {href: item}
-    book.guide = []
+    book.guide = {}
     return book
 
 
@@ -67,7 +67,9 @@ def _book_via_guide(data, item_id="some-id", href="cover.jpg", media_type="image
     guide_ref = MagicMock()
     guide_ref.type = "cover"
     guide_ref.href = href
-    book.guide = [guide_ref]
+    # A calibre Guide is a mapping of type to reference; iterating it gives
+    # the type strings (#495).
+    book.guide = {"cover": guide_ref}
     return book
 
 
@@ -83,7 +85,7 @@ def _book_via_manifest_scan(
     book.manifest.__iter__ = lambda self: iter([item])
     book.manifest.hrefs = {href: item}
     # Method 2 must miss: no guide entry of type 'cover'.
-    book.guide = []
+    book.guide = {}
     return book
 
 
@@ -218,3 +220,16 @@ class TestGeneratorDefenseInDepth:
             cover_image=_VALID_JPEG,
         )
         assert isinstance(data, bytes) and len(data) > 0
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
+def test_a_cover_only_the_guide_names_is_found():
+    """No meta cover, and no "cover" in the file's id or name, so only the
+    guide finds it: iterating a calibre Guide gives type strings, so the
+    lookup found nothing (#495)."""
+    from kfxgen.converter import extract_cover_image
+
+    book = _book_via_guide(_VALID_JPEG, item_id="x1", href="images/plate1.jpg")
+    data, href = extract_cover_image(book, MagicMock())
+    assert data == _VALID_JPEG and href == "images/plate1.jpg"

@@ -6383,7 +6383,9 @@ def extract_cover_image(oeb_book, log):
     # Method 2: guide entries with type='cover'
     try:
         if hasattr(oeb_book, "guide") and oeb_book.guide:
-            for ref in oeb_book.guide:
+            # A calibre Guide maps types to references: iterating it gives
+            # the type strings, so this found nothing (#495).
+            for ref in oeb_book.guide.values():
                 ref_type = getattr(ref, "type", "") or ""
                 if ref_type.lower() in ("cover", "other.ms-coverimage-standard"):
                     href = getattr(ref, "href", "")
