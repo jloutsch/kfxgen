@@ -320,3 +320,43 @@ def test_converting_a_nested_contents_keeps_its_nesting(tmp_path):
         log=NullLog(),
     )
     assert _tree(load_fragments(out)) == NESTED
+
+
+@pytest.mark.parametrize(
+    ("toc", "subs"),
+    [
+        pytest.param(
+            [
+                {"title": "Chapter One", "href": "ch1.xhtml", "level": 0},
+                {"title": "Twin", "href": "ch1.xhtml", "level": 0},
+            ],
+            [("Twin", None)],
+            id="twin-of-the-section",
+        ),
+        pytest.param(
+            [
+                {"title": "Chapter One", "href": "ch1.xhtml", "level": 0},
+                {"title": "Section A", "href": "ch1.xhtml#s1", "level": 1},
+                {"title": "Twin", "href": "ch1.xhtml#s1", "level": 1},
+                {"title": "Twin again", "href": "ch1.xhtml#s1", "level": 1},
+            ],
+            [
+                ("Section A", "ch1.xhtml#s1"),
+                ("Twin", "ch1.xhtml#s1"),
+                ("Twin again", "ch1.xhtml#s1"),
+            ],
+            id="twin-of-a-place",
+        ),
+    ],
+)
+def test_a_second_entry_on_the_same_spot_lands_with_its_twin(toc, subs):
+    # #459: it was dropped as "out of document order". It is now a place in
+    # its twin's section, landing where the twin does: the section's start
+    # (no key) for the section's own entry, the twin's key for a place.
+    spine = [
+        _spine_item("ch1.xhtml", CH1, True),
+        _spine_item("ch2.xhtml", CH2, True),
+    ]
+    chapters = _conv._assemble_chapters_by_coordinate(spine, toc, NullLog())
+    assert [c["title"] for c in chapters] == ["Chapter One"]
+    assert [(s["title"], s["key"]) for s in chapters[0]["sub_entries"]] == subs

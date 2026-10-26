@@ -4852,6 +4852,7 @@ def _assemble_chapters_by_coordinate(
     prev_flat = -1
     listing_entry = None  # the listing ids the entry before named
     empty_listing = {}  # coord -> its listing's keys, for a page with no blocks (#433)
+    same_spot = {}  # coord -> the entry before it, on the same block (#459)
     for entry in toc_entries:
         norm = _normalize_href(entry["href"])
         try:
@@ -4900,7 +4901,11 @@ def _assemble_chapters_by_coordinate(
                 _entry_key(spine_items_ordered[coords[-1][1]], i)
                 for i in sorted(listing_entry)
             ]
-        elif fi <= prev_flat:
+        elif fi == prev_flat:
+            # A second entry on the same block: a place in its twin's
+            # section, landing where the twin does (#459).
+            same_spot[len(coords)] = len(coords) - 1
+        elif fi < prev_flat:
             log.warn(
                 f"  TOC entry {entry['title']!r} out of document order; skipping split"
             )
@@ -5025,6 +5030,8 @@ def _assemble_chapters_by_coordinate(
                 chapters.append(ch)
 
     heads = _section_heads(coords, flat, spine_items_ordered, nav_flat, file_offset)
+    for k in same_spot:
+        heads[k] = False
     for k, (fi, si, title, _key, _level) in enumerate(coords):
         if not heads[k]:
             continue
@@ -5050,10 +5057,14 @@ def _assemble_chapters_by_coordinate(
                 _retitle_from_heading(ch)
             # Its depth in the book's contents, for the nesting (#313).
             ch["toc_level"] = coords[k][4]
-            subs = [
-                {"title": c[2], "key": c[3], "level": c[4]}
-                for c in coords[k + 1 : nxt if nxt is not None else None]
-            ]
+            subs = []
+            for j in range(k + 1, nxt if nxt is not None else len(coords)):
+                twin = j
+                while twin in same_spot:
+                    twin = same_spot[twin]
+                # On the section's own block: it opens the section (None).
+                key = None if twin == k else coords[twin][3]
+                subs.append({"title": coords[j][2], "key": key, "level": coords[j][4]})
             if subs:
                 ch["sub_entries"] = subs
             chapters.append(ch)
