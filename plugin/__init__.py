@@ -147,6 +147,8 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
         log.info("kfxgen v{}.{}.{} - Starting conversion".format(*self.version))
         self._apply_prefs(opts, log)
 
+        import traceback
+
         # Try native generation first
         try:
             from .kfxgen.converter import convert_oeb_to_kfx
@@ -154,10 +156,11 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
             convert_oeb_to_kfx(oeb_book, output_path, opts, log)
             return
         except Exception as e:
-            log.warn("Native KFX generation failed: {}".format(str(e)))
-            import traceback
-
-            log.debug(traceback.format_exc())
+            # Its type and traceback where a user sees them: an exception with
+            # no message logged nothing after the colon (#434, #472).
+            native_error = e
+            log.warn("Native KFX generation failed: {}: {}".format(type(e).__name__, e))
+            log.warn(traceback.format_exc())
 
         # Fall back to Kindle Previewer if available
         log.info("Attempting Kindle Previewer fallback...")
@@ -166,8 +169,10 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
 
             kp_convert(oeb_book, output_path, opts, log)
         except Exception as e:
-            log.error("Kindle Previewer fallback also failed: {}".format(str(e)))
-            import traceback
-
+            log.error(
+                "Kindle Previewer fallback also failed: {}: {}".format(
+                    type(e).__name__, e
+                )
+            )
             log.error(traceback.format_exc())
-            raise
+            raise e from native_error
