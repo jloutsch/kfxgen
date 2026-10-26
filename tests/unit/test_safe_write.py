@@ -321,3 +321,21 @@ def _current_umask():
     mask = os.umask(0)
     os.umask(mask)
     return mask
+
+
+@pytest.mark.tier1
+@pytest.mark.unit
+@pytest.mark.skipif(not hasattr(os, "fchmod"), reason="no os.fchmod")
+def test_a_filesystem_refusing_chmod_still_gets_the_book(tmp_path, monkeypatch):
+    """Keeping the mode is best-effort: where chmod is refused (Linux vfat
+    without "quiet" returns EPERM), the book is still written (#493 QA)."""
+    target = tmp_path / "book.kfx"
+    target.write_bytes(b"old")
+
+    def refuse(fd, mode):
+        raise PermissionError(errno.EPERM, "Operation not permitted")
+
+    monkeypatch.setattr(os, "fchmod", refuse)
+    _safe_write_bytes(str(target), b"new")
+    assert target.read_bytes() == b"new"
+    assert not (tmp_path / "book.kfx.tmp").exists()

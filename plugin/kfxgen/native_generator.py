@@ -1038,7 +1038,10 @@ def _safe_write_bytes(path, data):
         with os.fdopen(fd, "wb") as f:
             f.write(data)
             if mode is not None and hasattr(os, "fchmod"):
-                os.fchmod(f.fileno(), mode)
+                try:
+                    os.fchmod(f.fileno(), mode)
+                except OSError:
+                    pass  # best-effort: vfat refuses chmod (#493 QA)
             f.flush()
             # On disk before the rename, so a crash can't leave an empty book.
             os.fsync(f.fileno())
