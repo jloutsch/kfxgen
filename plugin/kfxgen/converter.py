@@ -6361,6 +6361,16 @@ def _drop_undecodable(cover, cover_href, images, log):
     return cover, kept
 
 
+def _check_and_optimize(cover, cover_href, images, opts, log):
+    """Pictures calibre can't decode left out (#471), and over-size ones
+    optimized unless the user opted to embed originals (#11). The optimizer
+    checks as it goes, so each picture is decoded once (#514)."""
+    if getattr(opts, "kfxgen_embed_original_images", False):
+        log.info("  Image optimization disabled (embed original images)")
+        return _drop_undecodable(cover, cover_href, images, log)
+    return optimize_images(cover, images, log, cover_href)
+
+
 def extract_cover_image(oeb_book, log):
     """
     Extract cover image binary data from OEB book.
@@ -6537,13 +6547,9 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         own_size=_pictures_in_table_cells(oeb_book),
     )
 
-    cover_image, images = _drop_undecodable(cover_image, cover_href, images, log)
-
-    # Optimize over-size images unless the user opted to embed originals (#11).
-    if getattr(opts, "kfxgen_embed_original_images", False):
-        log.info("  Image optimization disabled (embed original images)")
-    else:
-        cover_image, images = optimize_images(cover_image, images, log)
+    cover_image, images = _check_and_optimize(
+        cover_image, cover_href, images, opts, log
+    )
 
     # Extract structured chapters
     log.info("Extracting chapters...")

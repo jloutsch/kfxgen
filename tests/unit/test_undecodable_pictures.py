@@ -8,6 +8,7 @@ import pytest
 
 from kfxgen import converter as _conv
 from kfxgen import image_optimize as _io
+from tests._helpers import jpeg_of
 
 
 class _Log:
@@ -71,3 +72,58 @@ def test_a_good_cover_is_kept(monkeypatch):
     log = _Log()
     assert _conv._drop_undecodable(b"good", "c.jpg", {}, log) == (b"good", {})
     assert log.warns == []
+
+
+def _calibre_counting(monkeypatch, bad):
+    """A stub calibre.utils.img that refuses `bad`, counting every decode:
+    image_from_data's, and scale_image's own."""
+    count = {"decodes": 0}
+    fake = types.ModuleType("calibre.utils.img")
+
+    def image_from_data(data):
+        count["decodes"] += 1
+        if data in bad:
+            raise ValueError("Not a valid image")
+        return object()
+
+    def scale_image(data, width, height, as_png, compression_quality):
+        count["decodes"] += 1
+        if data in bad:
+            raise ValueError("Not a valid image")
+        return width, height, b"small"
+
+    fake.image_from_data, fake.scale_image = image_from_data, scale_image
+    monkeypatch.setitem(sys.modules, "calibre", types.ModuleType("calibre"))
+    monkeypatch.setitem(sys.modules, "calibre.utils", types.ModuleType("calibre.utils"))
+    monkeypatch.setitem(sys.modules, "calibre.utils.img", fake)
+    return count
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("width", [4000, 400], ids=["scaled", "kept"])
+def test_each_picture_is_decoded_once(monkeypatch, width):
+    """Checked, then scaled: one decode, not two (#514). QA measured the
+    check's decoding at 8% of a heavy picture book's conversion."""
+    count = _calibre_counting(monkeypatch, bad=set())
+    cover, images = _conv._check_and_optimize(
+        None, None, {"a.jpg": jpeg_of(width, 300)}, object(), _Log()
+    )
+    assert list(images) == ["a.jpg"]
+    assert count["decodes"] == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("width", [4000, 400], ids=["scaled", "kept"])
+@pytest.mark.parametrize("embed", [False, True], ids=["optimised", "embed-originals"])
+def test_an_undecodable_picture_is_still_dropped(monkeypatch, width, embed):
+    bad = jpeg_of(width, 300) + b"bad"
+    _calibre_counting(monkeypatch, bad={bad})
+    log = _Log()
+    opts = types.SimpleNamespace(kfxgen_embed_original_images=embed)
+    cover, images = _conv._check_and_optimize(
+        bad, "cover.jpg", {"a.jpg": bad, "b.jpg": jpeg_of(400, 300)}, opts, log
+    )
+    assert cover is None
+    assert list(images) == ["b.jpg"]
+    assert any("'cover.jpg'" in w for w in log.warns)
+    assert any("'a.jpg'" in w for w in log.warns)

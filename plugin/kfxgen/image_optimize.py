@@ -126,16 +126,14 @@ def optimize_image(
     detail for no reason.
 
     Returns optimized bytes, or the original bytes unchanged when no
-    optimization applies, calibre is unavailable, or anything fails.
-    Never raises.
+    optimization applies, calibre is unavailable, or anything fails. None
+    when calibre can't decode it (#471): a picture is decoded once, here,
+    whether it is scaled or only checked (#514). Never raises.
     """
     size = _read_image_size(data)
-    if size is None:
-        return data
+    if size is None or (max(size) <= max_dim and len(data) <= max_bytes):
+        return data if decodes(data) else None
     over_dim = max(size) > max_dim
-    over_bytes = len(data) > max_bytes
-    if not over_dim and not over_bytes:
-        return data
     # Fit into the dimension box only when the dimensions are the problem.
     target_w, target_h = (max_dim, max_dim) if over_dim else size
     is_png = data[:8] == _PNG_SIG
@@ -159,6 +157,8 @@ def optimize_image(
             compression_quality=jpeg_quality,
         )
     except Exception as e:  # noqa: BLE001 - never fail a conversion over an image
+        if not decodes(data):
+            return None
         if log:
             log.warn(f"  image optimize failed ({e}); keeping original")
         return data
@@ -280,8 +280,9 @@ def decodes(data):
     return True
 
 
-def optimize_images(cover_image, images, log):
-    """Optimize the cover and every body image. Returns (cover, images)."""
+def optimize_images(cover_image, images, log, cover_href=None):
+    """Optimize the cover and every body image, leaving out, each named in a
+    warning, those calibre can't decode (#471). Returns (cover, images)."""
     max_dim = _read_env_int(
         "KFXGEN_IMAGE_MAX_DIM", DEFAULT_MAX_DIM, _MIN_MAX_DIM, _MAX_MAX_DIM, log
     )
@@ -292,15 +293,17 @@ def optimize_images(cover_image, images, log):
     before = after = 0
     new_images = {}
     for href, data in images.items():
-        before += len(data)
         opt = optimize_image(
             data, max_dim=max_dim, max_bytes=max_bytes, jpeg_quality=quality, log=log
         )
+        if opt is None:
+            log.warn(f"  Skipping image {href!r}: it can't be decoded")
+            continue
+        before += len(data)
         after += len(opt)
         new_images[href] = opt
     new_cover = cover_image
     if cover_image:
-        before += len(cover_image)
         new_cover = optimize_image(
             cover_image,
             max_dim=max_dim,
@@ -308,7 +311,11 @@ def optimize_images(cover_image, images, log):
             jpeg_quality=quality,
             log=log,
         )
-        after += len(new_cover)
+        if new_cover is None:
+            log.warn(f"  Skipping the cover {cover_href!r}: it can't be decoded")
+        else:
+            before += len(cover_image)
+            after += len(new_cover)
     if before and after < before:
         saved = before - after
         log.info(
