@@ -4568,6 +4568,9 @@ class NativeKFXGenerator:
             )
             omit_heading = (
                 chapter.get("_is_cover")
+                # An empty title: its heading sat at the next paragraph's
+                # position, an entry of no length (#473).
+                or not title.strip()
                 or chapter.get("_omit_title_heading")
                 or body_is_image_only
                 or title_after_pictures
