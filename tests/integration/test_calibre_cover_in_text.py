@@ -40,7 +40,7 @@ def _page(body):
     )
 
 
-def _epub(path, opening=True, cover_first=False):
+def _epub(path, opening=True, cover_first=False, label="One"):
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
         z.writestr(
@@ -72,7 +72,7 @@ def _epub(path, opening=True, cover_first=False):
             "toc.ncx",
             '<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" '
             'version="2005-1"><head/><docTitle><text>C</text></docTitle><navMap>'
-            '<navPoint id="n" playOrder="1"><navLabel><text>One</text></navLabel>'
+            f'<navPoint id="n" playOrder="1"><navLabel><text>{label}</text></navLabel>'
             '<content src="c.xhtml"/></navPoint></navMap></ncx>',
         )
         z.writestr("cover.xhtml", _page('<p><img src="cover.jpg" alt="cover"/></p>'))
@@ -134,9 +134,23 @@ def test_a_first_page_opening_with_the_cover_shows_it_once(calibre):  # noqa: F8
     kfxgen writes no cover page of its own before it (#475)."""
     tmp, _env, version = calibre
     epub, kfx = tmp / "cov475c.epub", tmp / "cov475c.kfx"
-    _epub(epub, opening=False, cover_first=True)
+    # Labelled "Cover", as in QA's 3 library books: not the page's words.
+    _epub(epub, opening=False, cover_first=True, label="Cover")
     _ebook_convert(calibre, epub, kfx, True)
     assert _pictures(kfx) == ["cover_img", "img_0"], f"calibre {version}"
+    # The book opens on the cover, with no TOC label printed above it, and
+    # its heading prints once (#475 review).
+    frags = load_fragments(kfx)
+    content = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    order = [
+        str(e["$175"])
+        if e.get("$175") is not None
+        else str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+        for st in by_type(frags, "$259")
+        for e in iter_entries(val(st)["$146"])
+        if hasattr(e, "get") and (e.get("$175") is not None or e.get("$145"))
+    ]
+    assert order == ["cover_img", "One", "Text.", "img_0"], f"calibre {version}"
 
 
 def _pictures(kfx):

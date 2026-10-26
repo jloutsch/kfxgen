@@ -157,3 +157,42 @@ def test_a_first_page_showing_the_cover_by_a_relative_href(tmp_path):
         if hasattr(e, "get") and e.get("$175") is not None
     ]
     assert pictures == ["cover_img"]
+
+
+@pytest.mark.unit
+def test_a_first_page_opening_with_the_cover_prints_no_label_over_it(tmp_path):
+    """That page stands in for kfxgen's cover page, so the book opens on
+    the cover: its TOC label ("Cover" in QA's 3 library books) isn't printed
+    as a heading above it (#475 review)."""
+    from tests.unit.test_book_heading_prints import _lines
+
+    tok = "\x00IMG\x01{}\x01\x00".format
+    text = f"{tok('cover.jpg')} Words after it."
+    out = tmp_path / "h.kfx"
+    NativeKFXGenerator().generate_full_book(
+        title="T",
+        author="A",
+        chapters=[
+            {
+                "title": "Cover",
+                "text": text,
+                "blocks": [{"text": text, "spans": []}],
+            },
+            {
+                "title": "One",
+                "text": "Body.",
+                "blocks": [{"text": "Body.", "spans": []}],
+            },
+        ],
+        cover_image=COVER,
+        images={"cover.jpg": COVER},
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    assert "Cover" not in _lines(frags)
+    first = [
+        e
+        for e in iter_entries(val(by_type(frags, "$259")[0])["$146"])
+        if hasattr(e, "get")
+    ][0]
+    assert str(first.get("$175")) == "cover_img"

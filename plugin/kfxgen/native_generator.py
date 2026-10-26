@@ -3517,6 +3517,10 @@ class NativeKFXGenerator:
                 "_is_cover": True,
             }
             chapters = [cover_chapter] + chapters
+        elif first_shows_cover:
+            # That page stands in for the cover page: the book opens on the
+            # cover, not on its TOC label printed as a heading (#475 review).
+            chapters = [{**chapters[0], "_omit_title_heading": True}, *chapters[1:]]
 
         ch_data = self._build_chapter_content(chapters)
 
