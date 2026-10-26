@@ -5304,7 +5304,8 @@ _POEM = "<h5>Mein.</h5><p>Du bist mein,</p><p>ich bin dein.</p>"
         ("Mein.", ["Mein.", "Du bist mein,", "ich bin dein.", "x"]),
         # The label's words reach the table, so it is kept whole (#470).
         ("Mein. Du", ["Mein.", "Du bist mein,", "ich bin dein.", "x"]),
-        ("Elsewhere", ["Elsewhere", "Mein.", "Du bist mein,", "ich bin dein.", "x"]),
+        # A heading in a cell opens the section: no label over it (#492).
+        ("Elsewhere", ["Mein.", "Du bist mein,", "ich bin dein.", "x"]),
     ],
     ids=["whole-paragraph", "into-a-paragraph", "no-cut"],
 )

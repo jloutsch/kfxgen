@@ -508,6 +508,24 @@ def _title_in_table(blocks, title):
     return _eat_split_title(blocks, title)[0] != blocks
 
 
+def _heading_near_start(blocks):
+    """Whether the book prints its own heading among the section's first
+    blocks, past the first: after an epigraph or a picture, or in a table
+    cell. kfxgen then prints no label of its own, as Kindle Previewer has
+    it; a section with no heading near its start keeps its label (#492).
+    A first block that is the heading prints in the label's place (#481)."""
+    for block in _drop_edge_rules(blocks or ())[:_MAX_SPLIT_TITLE_BLOCKS]:
+        if block.get("heading"):
+            return True
+        for row in (block.get("table") or {}).get("rows") or ():
+            for cell in row["cells"]:
+                if cell.get("heading") or any(
+                    p.get("heading") for p in cell.get("paragraphs") or ()
+                ):
+                    return True
+    return False
+
+
 def _ruby_heading_title(blocks, title):
     """(The base text of a chapter's first block, its runs) when that block,
     each reading run in after its base, is `title`; else (`title`, None)
@@ -4358,6 +4376,12 @@ class NativeKFXGenerator:
             title_in_table = not toc_links and _title_in_table(
                 chapter.get("blocks"), title
             )
+            # Only when no book heading took the label's place (#481).
+            heading_near_start = (
+                not toc_links
+                and title_spans is None
+                and _heading_near_start(chapter.get("blocks"))
+            )
             omit_heading = (
                 chapter.get("_is_cover")
                 # An empty title: its heading sat at the next paragraph's
@@ -4368,6 +4392,7 @@ class NativeKFXGenerator:
                 or title_after_pictures
                 or title_runs_in
                 or title_in_table
+                or heading_near_start
             )
             heading_chunk = None
             if not omit_heading:
@@ -4401,6 +4426,7 @@ class NativeKFXGenerator:
                     and not body_is_image_only
                     and not title_runs_in
                     and not title_in_table
+                    and not heading_near_start
                 )
                 text = chapter["text"]
                 stripped = text.lstrip()

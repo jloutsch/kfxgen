@@ -95,17 +95,18 @@ def test_the_label_stays_in_the_toc(tmp_path):
 @pytest.mark.parametrize(
     ("heading", "lines"),
     [
-        ("\x00IMG\x01images/x.jpg\x01\x00", ["Chapter One", "[PIC]", "Body."]),
+        ("\x00IMG\x01images/x.jpg\x01\x00", ["[PIC]", "Body."]),
         (
             "Map \x00IMG\x01images/x.jpg\x01\x00",
-            ["Chapter One", "Map", "[PIC]", "Body."],
+            ["Map", "[PIC]", "Body."],
         ),
     ],
     ids=["picture", "words-and-picture"],
 )
 def test_a_heading_holding_a_picture_keeps_it(tmp_path, heading, lines):
-    """The picture prints as a picture, under the label as before, not as
-    the heading's text."""
+    """The picture prints as a picture, not as the heading's text, and the
+    book's heading prints with no label over it: a heading opens the section
+    (#492)."""
     from kfxgen.native_generator import NativeKFXGenerator
     from tests._helpers import MINIMAL_JPEG
 

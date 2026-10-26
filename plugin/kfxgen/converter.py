@@ -2719,6 +2719,12 @@ def _table_cell(cell, style_resolver, base_href):
         "anchor_offsets": {aid: marks.get(aid, 0) for aid in ids},
         "block_style": compute_block_style(css) if css is not None else None,
         "header": _local_tag(cell.tag) == "th",
+        # A heading written in a cell: the section's opening, as a heading
+        # outside a table is (#492).
+        "heading": any(
+            isinstance(d.tag, str) and _local_tag(d.tag) in _HEADING_TAGS
+            for d in cell.iter()
+        ),
         "colspan": _span_attr(cell, "colspan"),
         "rowspan": _span_attr(cell, "rowspan"),
         "valign": _cell_valign(cell, style_resolver),
