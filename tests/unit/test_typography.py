@@ -474,6 +474,9 @@ def test_the_books_heading_css_goes_on_the_chapter_heading(tmp_path):
             "text-transform": "uppercase",
             "color": "#800000",
             "letter-spacing": "0.1em",
+            # calibre's own sheet makes an h2 bold; the book's heading
+            # keeps its weight (#490).
+            "font-weight": "bold",
         }
     }
     body = '<h2 class="h">One</h2>' + FILLER

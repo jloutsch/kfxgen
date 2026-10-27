@@ -17,6 +17,10 @@ FLAG_ITALIC = "italic"
 FLAG_BOLD = "bold"
 FLAG_SUPER = "super"
 FLAG_SUB = "sub"
+#: vertical-align text-top and text-bottom: aligned with the line's top or
+#: bottom, neither raised nor shrunk; Previewer writes $447 and $449 (#485).
+FLAG_TEXT_TOP = "text-top"
+FLAG_TEXT_BOTTOM = "text-bottom"
 #: Text decoration lines (#237). Kindle Previewer writes them as $23 and $27.
 FLAG_UNDERLINE = "underline"
 FLAG_STRIKE = "line-through"
@@ -276,6 +280,10 @@ def parse_css_length(value, negative=False):
 #: different notes stay separate runs, one <a> split by a nested tag rejoins.
 #: (#53)
 LINK_FLAG = "link"
+#: A link target leaving the book (http, https, mailto): the address after
+#: this prefix. An in-book target never has a scheme, so the two never meet
+#: (#474).
+EXTERNAL_LINK_PREFIX = "url:"
 
 
 def make_link_flag(target):
@@ -689,8 +697,8 @@ def link_target(flags):
 
 
 #: vertical-align keywords that mean "raise"/"lower" without a length.
-_VALIGN_UP = {"super", "text-top"}
-_VALIGN_DOWN = {"sub", "text-bottom"}
+_VALIGN_UP = {"super"}
+_VALIGN_DOWN = {"sub"}
 
 _VALIGN_LENGTH_RE = re.compile(
     r"^\s*([+-]?[0-9]*\.?[0-9]+)\s*(em|rem|%|pt|px|mm)\s*$", re.I
@@ -698,7 +706,8 @@ _VALIGN_LENGTH_RE = re.compile(
 
 
 def parse_vertical_align(value):
-    """Classify a CSS vertical-align value as "super", "sub", or None.
+    """Classify a CSS vertical-align value as "super", "sub", "text-top",
+    "text-bottom", or None.
 
     Publisher EPUBs rarely use `<sup>`; they wrap the marker in a span whose
     class carries `vertical-align`, and the value is as often a raw length
@@ -713,6 +722,8 @@ def parse_vertical_align(value):
         return "super"
     if raw in _VALIGN_DOWN:
         return "sub"
+    if raw in ("text-top", "text-bottom"):
+        return raw
     m = _VALIGN_LENGTH_RE.match(raw)
     if not m:
         return None
@@ -767,6 +778,15 @@ def _length_percent(length):
     return float(length[0]) * _PERCENT_PER_UNIT[length[1]]
 
 
+def _line_height_factor(value):
+    """A resolved line-height factor, or None."""
+    try:
+        factor = float(value)
+    except (TypeError, ValueError):
+        return None
+    return factor if factor > 0 else None
+
+
 def compute_block_style(css):
     """Map a computed-CSS dict to kfxgen's block_style shape.
 
@@ -802,6 +822,9 @@ def compute_block_style(css):
         "margin_left": margin_left,
         "margin_right": margin_right,
         "font_family": _parse_font_family(css.get("font-family")),
+        # Its line height as a factor of its own font size (#463), when the
+        # resolver gives one.
+        "line_height": _line_height_factor(css.get("line-height")),
         # Block-level emphasis: a paragraph made bold/italic via CSS
         # (e.g. `p.lead { font-weight: bold }`) rather than an inline tag.
         # Used to select the embedded bold/italic face for the whole block.

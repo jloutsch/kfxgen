@@ -169,9 +169,10 @@ def test_compute_block_style_captures_italic_from_font_style():
         ("super", "super"),
         ("SUPER", "super"),
         ("  super  ", "super"),
-        ("text-top", "super"),
+        # Aligned with the line, not raised: Previewer writes $447 (#485).
+        ("text-top", "text-top"),
         ("sub", "sub"),
-        ("text-bottom", "sub"),
+        ("text-bottom", "text-bottom"),
         # Publisher CSS commonly uses a raw length instead of the keyword.
         ("0.25em", "super"),
         ("30%", "super"),
