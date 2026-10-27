@@ -5243,6 +5243,8 @@ class NativeKFXGenerator:
             FLAG_STRIKE,
             FLAG_SUB,
             FLAG_SUPER,
+            FLAG_TEXT_BOTTOM,
+            FLAG_TEXT_TOP,
             FLAG_UNDERLINE,
             TYPOGRAPHY_FLAGS,
             flag_value,
@@ -5375,6 +5377,10 @@ class NativeKFXGenerator:
                 attrs["font_size"], attrs["baseline_style"] = superscript_metrics()
             elif FLAG_SUB in flags:
                 attrs["font_size"], attrs["baseline_style"] = subscript_metrics()
+            elif FLAG_TEXT_TOP in flags:
+                attrs["baseline_style"] = "$447"  # no size change (#485)
+            elif FLAG_TEXT_BOTTOM in flags:
+                attrs["baseline_style"] = "$449"
             # Set only when drawn, so every other style keeps its key (#237).
             if FLAG_UNDERLINE in flags:
                 attrs["underline"] = True
@@ -5724,6 +5730,8 @@ class NativeKFXGenerator:
                             FLAG_NOT_ITALIC,
                             FLAG_SUPER,
                             FLAG_SUB,
+                            FLAG_TEXT_TOP,
+                            FLAG_TEXT_BOTTOM,
                             FLAG_UNDERLINE,
                             FLAG_STRIKE,
                         )

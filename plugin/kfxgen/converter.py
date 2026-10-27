@@ -39,6 +39,8 @@ from .inline_style import (
     FLAG_STRIKE,
     FLAG_SUB,
     FLAG_SUPER,
+    FLAG_TEXT_BOTTOM,
+    FLAG_TEXT_TOP,
     FLAG_UNDERLINE,
     HARD_BREAK,
     LINE_START,
@@ -1442,6 +1444,10 @@ def _walk_inline(
                 cur.add(FLAG_SUPER)
             elif shift == "sub":
                 cur.add(FLAG_SUB)
+            elif shift == "text-top":
+                cur.add(FLAG_TEXT_TOP)
+            elif shift == "text-bottom":
+                cur.add(FLAG_TEXT_BOTTOM)
         if parent_emphasis is None and elem.getparent() is not None:
             parent_emphasis = _css_emphasis(style_resolver(elem.getparent()))
         if emphasis is not None and parent_emphasis is not None:
