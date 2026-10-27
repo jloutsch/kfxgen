@@ -11,6 +11,7 @@ from urllib.parse import unquote
 from ._img_tokens import IMG_TOKEN_RE
 from .inline_style import (
     ALIGN_MAP,
+    EXTERNAL_LINK_PREFIX,
     NOTEREF_FLAG,
     TYPOGRAPHY_KEYS,
     VALIGN_MAP,
@@ -2793,6 +2794,17 @@ class NativeKFXGenerator:
         _write_clear(value, clear)
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
+    def build_fragment_266_uri(self, anchor_name, uri):
+        """A $266 anchor for a link leaving the book: its name ($180) and the
+        address ($186), as Kindle Previewer 4.0.3 writes http, https and
+        mailto links (#474)."""
+        self.symtab.create_local_symbol(anchor_name)
+        return YJFragment(
+            fid=IS(anchor_name),
+            ftype=IS("$266"),
+            value=IonStruct(IS("$180"), IS(anchor_name), IS("$186"), uri),
+        )
+
     def build_fragment_266(self, anchor_name, position_id, offset=0):
         """
         Builds Fragment $266 (Anchor / Bookmark)
@@ -4935,6 +4947,18 @@ class NativeKFXGenerator:
             for f in sorted(file_to_chunk):
                 folded_files.setdefault(f.lower(), f)
             for target in sorted(referenced_targets):
+                if target.startswith(EXTERNAL_LINK_PREFIX):
+                    # Leaving the book: an anchor holding the address, one
+                    # per address, as Kindle Previewer writes it (#474).
+                    anchor_name = f"ext_anchor_{len(body_anchor_map)}"
+                    self.fragments.append(
+                        self.build_fragment_266_uri(
+                            anchor_name, target[len(EXTERNAL_LINK_PREFIX) :]
+                        )
+                    )
+                    body_anchor_map[target] = anchor_name
+                    anchor_names.append(anchor_name)
+                    continue
                 key = (
                     target
                     if target in key_to_chunk

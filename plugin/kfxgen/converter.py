@@ -56,6 +56,7 @@ from .inline_style import (
     is_transparent,
     is_monospace,
     make_anchor_mark,
+    EXTERNAL_LINK_PREFIX,
     make_link_flag,
     make_mono_flag,
     make_math_flag,
@@ -924,6 +925,17 @@ def _prepend_keys(block, keys):
         )
 
 
+_EXTERNAL_LINK_RE = re.compile(r"^(?:https?|mailto):", re.I)
+
+
+def _external_link_target(href):
+    """An http, https or mailto `<a href>` as a link target, which Kindle
+    Previewer keeps as a link (#474); None for anything else, javascript:
+    and tel: among them."""
+    href = (href or "").strip()
+    return EXTERNAL_LINK_PREFIX + href if _EXTERNAL_LINK_RE.match(href) else None
+
+
 def _resolve_link_target(href, base_href):
     """Normalize an in-book `<a href>` to a "<file>#<fragment>" anchor key.
 
@@ -1402,7 +1414,9 @@ def _walk_inline(
         cur.add(FLAG_SUB)
     starts_link = False
     if local == "a":
-        target = _resolve_link_target(elem.get("href"), base_href)
+        target = _resolve_link_target(
+            elem.get("href"), base_href
+        ) or _external_link_target(elem.get("href"))
         if target:
             starts_link = True
             # A link inside a link (invalid, but the WordDumb plugin writes

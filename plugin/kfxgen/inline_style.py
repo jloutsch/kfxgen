@@ -275,6 +275,10 @@ def parse_css_length(value):
 #: different notes stay separate runs, one <a> split by a nested tag rejoins.
 #: (#53)
 LINK_FLAG = "link"
+#: A link target leaving the book (http, https, mailto): the address after
+#: this prefix. An in-book target never has a scheme, so the two never meet
+#: (#474).
+EXTERNAL_LINK_PREFIX = "url:"
 
 
 def make_link_flag(target):
