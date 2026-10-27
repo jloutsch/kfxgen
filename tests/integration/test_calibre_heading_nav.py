@@ -115,3 +115,31 @@ def test_a_book_without_headings_has_no_heading_navigation(calibre):  # noqa: F8
     """Previewer writes no $798 for it (#575, probed 2026-10-27)."""
     files = {f"c{n}.xhtml": STYLED.format(n=n) for n in range(1, 5)}
     assert _units(calibre, "hn575n", files, CHAPTERS) is None, f"calibre {calibre[2]}"
+
+
+@pytest.mark.parametrize(
+    ("heading", "listed"),
+    [
+        ("<h1>Contents</h1>", ["Contents", "Chapter One", "Chapter Two"]),
+        ("<p style='font-size:2em'>Contents</p>", ["Chapter One", "Chapter Two"]),
+    ],
+    ids=["h1", "paragraph"],
+)
+def test_a_rebuilt_contents_page_keeps_its_headings_level(calibre, heading, listed):  # noqa: F811
+    """kfxgen rebuilds a contents page and prints its title as its own
+    label; the book's <h1> it replaces is listed, as Previewer lists it, and
+    a styled paragraph is not (#580: #577 dropped the <h1>)."""
+    files = {
+        "toc.xhtml": heading
+        + "<p><a href='c1.xhtml'>Chapter One</a></p>"
+        + "<p><a href='c2.xhtml'>Chapter Two</a></p>",
+        "c1.xhtml": "<h1>Chapter One</h1><p>One text.</p>",
+        "c2.xhtml": "<h1>Chapter Two</h1><p>Two text.</p>",
+    }
+    toc = [
+        ("Contents", "toc.xhtml"),
+        ("Chapter One", "c1.xhtml"),
+        ("Chapter Two", "c2.xhtml"),
+    ]
+    got = _units(calibre, f"hn580{heading[1]}", files, toc)
+    assert got == [("$799", listed)], f"calibre {calibre[2]}: {got}"

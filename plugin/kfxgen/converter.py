@@ -6460,6 +6460,18 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     for link in toc_links:
         lines.append(link["text"])
     contents_ch["text"] = "\n\n".join(lines)
+    # The title prints as kfxgen's own label in place of the page's heading,
+    # which keeps its level for the heading navigation (#580).
+    level = next(
+        (
+            b["heading_level"]
+            for b in contents_ch.get("blocks") or ()
+            if b.get("heading_level")
+        ),
+        None,
+    )
+    if level:
+        contents_ch["heading_level"] = level
     contents_ch.pop("blocks", None)
 
     # Structured link data for the native generator

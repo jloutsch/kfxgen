@@ -4793,6 +4793,9 @@ class NativeKFXGenerator:
                 # First chunk: chapter title (heading)
                 heading_chunk_indices.add(len(all_chunks))
                 heading_chunk = {"type": "text", "text": title}
+                if chapter.get("heading_level"):
+                    # A rebuilt contents page's own heading (#580).
+                    heading_chunk["heading_level"] = chapter["heading_level"]
                 if title_spans:
                     # Its readings, even when the chapter is the heading
                     # alone and no block is left to cut it from.
