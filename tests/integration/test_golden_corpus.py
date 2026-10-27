@@ -215,7 +215,8 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     branch last produced.
 
     Every fragment matches but the `$550` location map, which every book
-    now writes with a location every 110 positions (#227)."""
+    now writes with a location every 110 positions (#227), and the metadata:
+    no invented description or date (#454)."""
     from types import SimpleNamespace
 
     from tests._kfx_introspect import load_fragments, val
@@ -235,10 +236,25 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
         return {
             (str(f.ftype), str(f.fid)): repr(val(f))
             for f in load_fragments(path)
-            if str(f.ftype) != "$550"
+            if str(f.ftype) not in ("$550", "$490")
         }
 
-    assert fragments(fresh_path) == fragments(EXPECTED_DIR / "table_cells_rows.kfx")
+    def title_metadata(path):
+        (meta,) = [val(f) for f in load_fragments(path) if str(f.ftype) == "$490"]
+        return [
+            repr(f)
+            for section in meta["$491"]
+            if str(section.get("$495")) == "kindle_title_metadata"
+            for f in section["$258"]
+        ]
+
+    old_path = EXPECTED_DIR / "table_cells_rows.kfx"
+    assert fragments(fresh_path) == fragments(old_path)
+    assert title_metadata(fresh_path) == [
+        f
+        for f in title_metadata(old_path)
+        if "'description'" not in f and "'issue_date'" not in f
+    ]
 
 
 # ---------------------------------------------------------------------------
