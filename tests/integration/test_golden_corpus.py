@@ -219,8 +219,10 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     features (#455): `$585` declares reflow-section-size, yj_hdv and
     yj_jpg_rst_marker_present only when a book has them, so their three
     symbols are gone and `$270`'s symbol ids after them move down by 3; and
-    the heading navigation, built from the book's headings (#461): `$389`'s
-    other containers are unchanged."""
+    the landmarks: the book has no cover, so `$389` has no `$236` container
+    and the symbol table no `nL` (#460); and the heading navigation, built
+    from the book's headings (#461): `$389`'s other containers are
+    unchanged."""
     from types import SimpleNamespace
 
     from tests._kfx_introspect import load_fragments, val
@@ -252,7 +254,7 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     assert fragments(fresh_path) == fragments(old_path)
     old_symbols = list(by_type(old_path, "$ion_symbol_table")["symbols"])
     assert list(by_type(fresh_path, "$ion_symbol_table")["symbols"]) == [
-        x for x in old_symbols if x not in features
+        x for x in old_symbols if x not in (*features, "nL")
     ]
     assert [t for t, _ in by_type(fresh_path, "$270")["$181"]] == [
         t for t, _ in by_type(old_path, "$270")["$181"]
@@ -263,15 +265,14 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
         if str(f["$492"]) not in features
     ]
 
-    def navigation(path):
-        (nav,) = [val(f) for f in load_fragments(path) if str(f.ftype) == "$389"]
+    def navigation(path, leave_out):
         return [
             repr(c)
-            for c in nav[0]["$392"]
-            if str(getattr(c, "value", c)["$235"]) != "$798"
+            for c in by_type(path, "$389")[0]["$392"]
+            if str(getattr(c, "value", c)["$235"]) not in leave_out
         ]
 
-    assert navigation(fresh_path) == navigation(old_path)
+    assert navigation(fresh_path, ("$798",)) == navigation(old_path, ("$798", "$236"))
 
 
 # ---------------------------------------------------------------------------
