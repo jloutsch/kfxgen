@@ -56,18 +56,20 @@ def _landing_text(kfx, label):
 
 
 def test_a_three_block_opener_prints_once(tmp_path):
+    """Each block once, as the book writes it, with no heading of kfxgen's
+    over them (#552)."""
     lines = _printed(
         tmp_path,
         "IV Dawn Breaks",
         "<h1>IV</h1><h2>Dawn</h2><h3>Breaks</h3><p>Body.</p>",
     )
-    assert [t for t, _ in lines] == ["IV\nDawn\nBreaks", "Body."]
+    assert [t for t, _ in lines] == ["IV", "Dawn", "Breaks", "Body."]
 
 
 def test_the_first_eaten_blocks_id_still_lands(tmp_path):
-    # <h2 id="c3">III</h2><h2>Title</h2>: the id is on the block before the
-    # last one eaten, and goes on the heading.
+    # <h2 id="c3">III</h2><h2>Title</h2>: the label spells both blocks, which
+    # print as they are (#552), so the id stays on its own block.
     blocks = [_para("III", ["c.xhtml#c3"]), _para("Title"), _para("Body.")]
     other = {"title": "Two", "text": "x", "blocks": [_link("To three", "c.xhtml#c3")]}
     _texts(tmp_path, "III Title", blocks, [other])
-    assert _landings(tmp_path / "b.kfx")["To three"] == "III\nTitle"
+    assert _landings(tmp_path / "b.kfx")["To three"] == "III"

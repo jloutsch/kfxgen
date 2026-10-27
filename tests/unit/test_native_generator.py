@@ -1994,9 +1994,10 @@ def test_split_number_and_title_not_repeated_after_heading(tmp_path):
         title="T", author="A", chapters=chapters, output_path=str(tmp_path / "o.kfx")
     )
     texts = _first_texts(gen, "l0")
-    # The book's two lines, as it writes them (#409; the label until then).
-    assert texts[0] == "3\nChapter Title Here", "heading missing"
-    assert "Chapter Title Here" not in texts[1:], (
+    # The book's two blocks, as it writes them (#552; one heading on two
+    # lines since #409, the label before that).
+    assert texts[:2] == ["3", "Chapter Title Here"], "opener missing"
+    assert "Chapter Title Here" not in texts[2:], (
         f"chapter title repeated in body: {texts}"
     )
     assert "Body text follows." in texts, "body text was eaten"

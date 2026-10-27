@@ -65,13 +65,35 @@ def test_a_heading_prints_as_the_book_writes_it(tmp_path, label, heading, printe
 
 
 @pytest.mark.unit
-def test_a_heading_split_over_two_blocks_prints_on_two_lines(tmp_path):
-    lines = _printed(
-        tmp_path,
-        "Chapter 1 The Storm",
-        "<h1>Chapter 1</h1><h2>The <i>Storm</i></h2><p>Body.</p>",
-    )
-    assert lines == [("Chapter 1\nThe Storm", 1), ("Body.", 0)]
+@pytest.mark.parametrize(
+    ("label", "body", "printed"),
+    [
+        (
+            "Chapter 1 The Storm",
+            "<h1>Chapter 1</h1><h2>The <i>Storm</i></h2>",
+            [("Chapter 1", 0), ("The Storm", 1)],
+        ),
+        (
+            "3. Chapter Title",
+            "<p>3</p><p>Chapter Title</p>",
+            [("3", 0), ("Chapter Title", 0)],
+        ),
+        (
+            "Part Four Act One Scene",
+            "<h1>Part Four</h1><h2>Act One</h2><h3>Scene</h3>",
+            [("Part Four", 0), ("Act One", 0), ("Scene", 0)],
+        ),
+    ],
+    ids=["headings", "paragraphs", "three"],
+)
+def test_a_label_over_several_blocks_leaves_each_its_own(
+    tmp_path, label, body, printed
+):
+    """A label spelling out a heading split over blocks prints no heading of
+    kfxgen's: each block prints as the book writes it, its own entry, as on
+    Kindle Previewer 4.0.3's page (#552; #409 joined them on two lines)."""
+    lines = _printed(tmp_path, label, body + "<p>Body.</p>")
+    assert lines == printed + [("Body.", 0)]
 
 
 @pytest.mark.unit
