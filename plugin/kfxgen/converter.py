@@ -39,6 +39,8 @@ from .inline_style import (
     FLAG_STRIKE,
     FLAG_SUB,
     FLAG_SUPER,
+    FLAG_TEXT_BOTTOM,
+    FLAG_TEXT_TOP,
     FLAG_UNDERLINE,
     HARD_BREAK,
     LINE_START,
@@ -56,6 +58,7 @@ from .inline_style import (
     is_transparent,
     is_monospace,
     make_anchor_mark,
+    EXTERNAL_LINK_PREFIX,
     make_link_flag,
     make_mono_flag,
     make_math_flag,
@@ -215,6 +218,37 @@ def _font_size_px(stylizer, elem, cache):
     return size
 
 
+def _line_height_factor(stylizer, elem, cache):
+    """`elem`'s line height as a factor of its own font size, from the
+    nearest element declaring one: a unitless value is inherited as that
+    factor, a length or a % as the length it comes to where it is declared;
+    normal, or none set, is 1.2 (#463). calibre raises one below 1.2 to 1.2
+    before kfxgen sees it (its minimum line height)."""
+    own = _font_size_px(stylizer, elem, cache)
+    for a in (elem, *elem.iterancestors()):
+        if not isinstance(a.tag, str):
+            continue
+        value = str(stylizer.style(a).get("line-height") or "").strip().lower()
+        if not value or value == "inherit":
+            continue
+        if value == "normal":
+            return 1.2
+        try:
+            return round(float(value), 4)
+        except ValueError:
+            pass
+        m = _FONT_SIZE_RE.match(value.replace(" ", ""))
+        if not m or not own:
+            return None
+        px = _css_size_px(
+            value,
+            _font_size_px(stylizer, a, cache),
+            lambda a=a: _root_size_px(stylizer, a, cache),
+        )
+        return round(px / own, 4)
+    return 1.2
+
+
 def _root_size_px(stylizer, elem, cache):
     """The root element's font size in CSS px, which `rem` is measured by."""
     root = elem.getroottree().getroot()
@@ -357,7 +391,8 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
             if elem in fills:
                 return fills[elem]
             fill = None
-            if _local_tag(elem.tag) in _BOX_TAGS:
+            # A table cell draws its fill too (#502).
+            if _local_tag(elem.tag) in _BOX_TAGS | _CELL_TAGS:
                 fill = _box_background(stylizer.style(elem))
             if fill is None:
                 parent = elem.getparent()
@@ -375,6 +410,8 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # A number, in CSS px; the generator measures it
                     # against the book's main text size (#241).
                     "font-size": round(_font_size_px(stylizer, elem, sizes), 3),
+                    # A factor of its own font size, for $42 (#463).
+                    "line-height": _line_height_factor(stylizer, elem, sizes),
                     # A drop cap: the paragraph's `::first-letter`, and a
                     # floated span's float (#240). Declared: neither
                     # inherits. Only a <p> is read for an initial, and
@@ -924,6 +961,17 @@ def _prepend_keys(block, keys):
         )
 
 
+_EXTERNAL_LINK_RE = re.compile(r"^(?:https?|mailto):", re.I)
+
+
+def _external_link_target(href):
+    """An http, https or mailto `<a href>` as a link target, which Kindle
+    Previewer keeps as a link (#474); None for anything else, javascript:
+    and tel: among them."""
+    href = (href or "").strip()
+    return EXTERNAL_LINK_PREFIX + href if _EXTERNAL_LINK_RE.match(href) else None
+
+
 def _resolve_link_target(href, base_href):
     """Normalize an in-book `<a href>` to a "<file>#<fragment>" anchor key.
 
@@ -1402,7 +1450,9 @@ def _walk_inline(
         cur.add(FLAG_SUB)
     starts_link = False
     if local == "a":
-        target = _resolve_link_target(elem.get("href"), base_href)
+        target = _resolve_link_target(
+            elem.get("href"), base_href
+        ) or _external_link_target(elem.get("href"))
         if target:
             starts_link = True
             # A link inside a link (invalid, but the WordDumb plugin writes
@@ -1442,6 +1492,10 @@ def _walk_inline(
                 cur.add(FLAG_SUPER)
             elif shift == "sub":
                 cur.add(FLAG_SUB)
+            elif shift == "text-top":
+                cur.add(FLAG_TEXT_TOP)
+            elif shift == "text-bottom":
+                cur.add(FLAG_TEXT_BOTTOM)
         if parent_emphasis is None and elem.getparent() is not None:
             parent_emphasis = _css_emphasis(style_resolver(elem.getparent()))
         if emphasis is not None and parent_emphasis is not None:
@@ -2772,6 +2826,43 @@ def _cell_valign(cell, style_resolver):
     return None
 
 
+def _only_block_child(cell):
+    """The one block element a cell holds and nothing beside it, or None."""
+    kids = [k for k in cell if isinstance(k.tag, str)]
+    if len(kids) != 1 or _local_tag(kids[0].tag) not in (
+        {"p", "div", "blockquote"} | _HEADING_TAGS
+    ):
+        return None
+    if (cell.text or "").strip() or (kids[0].tail or "").strip():
+        return None
+    return kids[0]
+
+
+def _cell_block_style(cell, css, block_style=None, style_resolver=None):
+    """A cell's, or a cell paragraph's, block style with its alignment: the
+    book's, else left, or right under a right-to-left `dir`, as Kindle
+    Previewer 4.0.3 writes every cell (#479). A header cell is left unset,
+    so it stays centred."""
+    if block_style is None:
+        block_style = compute_block_style(css) if css is not None else None
+    if _local_tag(cell.tag) == "th" or (block_style or {}).get("align"):
+        return block_style
+    inner = _only_block_child(cell)
+    if inner is not None and style_resolver is not None:
+        # `<td><p style="text-align: right">`: the paragraph's own, as
+        # Previewer writes it (QA on #532).
+        own = compute_block_style(style_resolver(inner) or {})["align"]
+        if own:
+            return {**(block_style or compute_block_style({})), "align": own}
+    rtl = next(
+        (a.get("dir") for a in (cell, *cell.iterancestors()) if a.get("dir")), ""
+    )
+    return {
+        **(block_style or compute_block_style({})),
+        "align": "right" if rtl.lower() == "rtl" else "left",
+    }
+
+
 def _table_cell(cell, style_resolver, base_href):
     text, spans, marks = normalize_runs_with_anchors(
         _walk_inline(cell, style_resolver=style_resolver, base_href=base_href)
@@ -2783,7 +2874,7 @@ def _table_cell(cell, style_resolver, base_href):
         "spans": spans,
         "anchor_ids": ids,
         "anchor_offsets": {aid: marks.get(aid, 0) for aid in ids},
-        "block_style": compute_block_style(css) if css is not None else None,
+        "block_style": _cell_block_style(cell, css, style_resolver=style_resolver),
         "header": _local_tag(cell.tag) == "th",
         # A heading written in a cell: the section's opening, as a heading
         # outside a table is (#492).
@@ -2794,6 +2885,8 @@ def _table_cell(cell, style_resolver, base_href):
         "colspan": _span_attr(cell, "colspan"),
         "rowspan": _span_attr(cell, "rowspan"),
         "valign": _cell_valign(cell, style_resolver),
+        # Its fill, as Kindle Previewer writes it on the cell (#502).
+        "background": _box_background(css),
     }
 
 
@@ -2803,7 +2896,11 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
     `walk_cell` walks the cell as the body is walked, so its headings, list
     items, loose text and anchors become the same blocks they would outside
     a table. Returns None when that leaves no text."""
-    paragraphs = [p for p in walk_cell(cell) if p.get("text")]
+    paragraphs = [
+        {**p, "block_style": _cell_block_style(cell, None, p.get("block_style"))}
+        for p in walk_cell(cell)
+        if p.get("text")
+    ]
     if not paragraphs:
         return None
     css = style_resolver(cell) if style_resolver is not None else None
@@ -2812,11 +2909,12 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
         "spans": [],
         "anchor_ids": [],
         "anchor_offsets": {},
-        "block_style": compute_block_style(css) if css is not None else None,
+        "block_style": _cell_block_style(cell, css),
         "header": _local_tag(cell.tag) == "th",
         "colspan": _span_attr(cell, "colspan"),
         "rowspan": _span_attr(cell, "rowspan"),
         "valign": _cell_valign(cell, style_resolver),
+        "background": _box_background(css),
         "paragraphs": paragraphs,
     }
 
@@ -5123,6 +5221,9 @@ def _assemble_chapters_by_coordinate(
     listing_entry = None  # the listing ids the entry before named
     empty_listing = {}  # coord -> its listing's keys, for a page with no blocks (#433)
     same_spot = {}  # coord -> the entry before it, on the same block (#459)
+    # Coords pointing before the entry listed above them: places, in the
+    # book's TOC order, landing on their own block (#484).
+    out_of_order = set()
     for entry in toc_entries:
         norm = _normalize_href(entry["href"])
         try:
@@ -5180,11 +5281,19 @@ def _assemble_chapters_by_coordinate(
             # section, landing where the twin does (#459).
             same_spot[len(coords)] = len(coords) - 1
         elif fi < prev_flat:
-            log.warn(
-                f"  TOC entry {entry['title']!r} out of document order; skipping split"
+            # Kept where the book lists it, as Kindle Previewer keeps it,
+            # landing on its own block; the sections still follow the
+            # document (#484).
+            log.info(
+                f"  TOC entry {entry['title']!r} out of document order; kept as a "
+                "place, no section of its own"
             )
-            continue
+            out_of_order.add(len(coords))
         key = _entry_key(spine_items_ordered[si], frag)
+        if key is None and len(coords) in out_of_order:
+            # A whole-file entry out of order: the file's key, on its first
+            # block, so it lands there and not at the section's start.
+            key = _key_doc(spine_items_ordered[si]["href"], "")
         if (
             key
             and frag not in amap
@@ -5193,7 +5302,8 @@ def _assemble_chapters_by_coordinate(
             flat[fi]["anchor_keys"].append(key)
             flat[fi].setdefault("anchor_offsets", {})[key] = 0
         coords.append((fi, si, entry["title"], key, entry.get("level", 0)))
-        prev_flat = fi
+        if len(coords) - 1 not in out_of_order:
+            prev_flat = fi
         listing_entry = names_listing
         last_block_in_file[si] = bi
 
@@ -5267,6 +5377,10 @@ def _assemble_chapters_by_coordinate(
     chapters = []
 
     first_fi = coords[0][0]
+    # An out-of-order entry into the blocks before the first section names
+    # that place itself: the head chapter takes no TOC entry of its own, or
+    # the pane listed it twice (#484).
+    head_listed = any(coords[k][0] < first_fi for k in out_of_order)
     # A head block that carries an anchor referenced (even non-monotonically) in
     # the TOC is NOT front matter — fold it into the first chapter instead.
     # NOTE: Known limitation — a malformed EPUB where genuine front matter
@@ -5283,6 +5397,13 @@ def _assemble_chapters_by_coordinate(
         else:
             ch = _flag_nav(_mk(_leading_chapter_title(head), head), 0, first_fi)
             if ch:
+                if ch["title"] != LEADING_TITLE_FALLBACK and _IMG_TOKEN_RE.search(
+                    head[0].get("text") or ""
+                ):
+                    # Titled with the words beside a picture: that paragraph
+                    # prints them, so a heading of them would print them
+                    # twice. Kindle Previewer 4.0.3 prints them once (#525).
+                    ch["_omit_title_heading"] = True
                 if ch["title"] == LEADING_TITLE_FALLBACK:
                     # No title of its own, and not in the source TOC either —
                     # this chapter exists precisely because these blocks
@@ -5301,10 +5422,12 @@ def _assemble_chapters_by_coordinate(
                     # chapter "Front Matter" comes through `coords` and keeps
                     # its heading. (#133)
                     ch["_omit_title_heading"] = True
+                if head_listed:
+                    ch["_omit_from_toc"] = True
                 chapters.append(ch)
 
     heads = _section_heads(coords, flat, spine_items_ordered, nav_flat, file_offset)
-    for k in same_spot:
+    for k in (*same_spot, *out_of_order):
         heads[k] = False
     for k, (fi, si, title, _key, _level) in enumerate(coords):
         if not heads[k]:
@@ -5336,14 +5459,20 @@ def _assemble_chapters_by_coordinate(
                 twin = j
                 while twin in same_spot:
                     twin = same_spot[twin]
-                # On the section's own block: it opens the section (None).
-                key = None if twin == k else coords[twin][3]
+                # On the section's own block: it opens the section (None). One
+                # out of order lands on its own block (#484).
+                key = (
+                    coords[j][3]
+                    if twin in out_of_order
+                    else (None if twin == k else coords[twin][3])
+                )
                 subs.append({"title": coords[j][2], "key": key, "level": coords[j][4]})
             if subs:
                 ch["sub_entries"] = subs
             chapters.append(ch)
 
-    last_si = coords[-1][1]
+    # The furthest file reached: an entry out of order can point back (#484).
+    last_si = max(c[1] for c in coords)
     # Tail orphans use filename-stem titles; TOC titles drove the inline splits
     # above so they are not available to reassign here (intentional).
     for si in range(last_si + 1, len(spine_items_ordered)):
@@ -5592,6 +5721,11 @@ def extract_chapters_from_oeb(
     # already on the page and the second is no part of the book (#304).
     chapters = []
     for i, item in enumerate(spine_items_ordered):
+        if not _page_shows_something(item["text"], cover_href):
+            # The book's own cover page: the cover page shows it, as on the
+            # TOC's path (#32, #524).
+            log.info(f"  Skipping cover-only spine item {i + 1}")
+            continue
         first = (item.get("blocks") or [{}])[0]
         heading = first.get("heading") and " ".join((first.get("text") or "").split())
         chapter = {"title": heading or f"Section {i + 1}", "text": item["text"]}

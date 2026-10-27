@@ -375,12 +375,12 @@ def test_an_in_chapter_heading_gets_its_size(tmp_path):
 
 
 @pytest.mark.unit
-def test_kfxgens_chapter_heading_keeps_its_size(tmp_path):
-    """The book's heading is cut and kfxgen prints the title (1.2): a sized
-    run in the book's heading doesn't change it."""
+def test_the_books_heading_keeps_its_own_size(tmp_path):
+    """The book's heading prints at its own size, as Kindle Previewer prints
+    it (#490): a sized run in it doesn't change that size."""
     body = '<h2>The <span class="big">Harbour</span></h2>' + FILLER
     style, runs = _found(_book(tmp_path, body, title="The Harbour"))["The Harbour"]
-    assert _fs(style) == pytest.approx(NativeKFXGenerator.HEADING_FONT_SIZE)
+    assert _fs(style) == pytest.approx(1.5)  # an h2's own 1.5em
     # The word's run is carried onto the heading (#366), without its size.
     assert [t for t, _ in runs] == ["Harbour"]
     assert all(_fs(s) is None for _, s in runs)
