@@ -148,6 +148,70 @@ def test_a_picture_over_the_cap_is_scaled_even_if_it_grows(monkeypatch):
     assert io.optimize_image(big, max_dim=1920, log=_Log()) == b"Z" * 100000
 
 
+def _fake_img(monkeypatch, scaled, quantized, calls):
+    """calibre.utils.img with `scale_image` giving `scaled` and a re-quantize
+    giving `quantized`; `calls` records each quantize's arguments."""
+    fake = types.ModuleType("calibre.utils.img")
+    fake.scale_image = lambda *a, **k: (1920, 1407, scaled)
+    fake.image_from_data = lambda data: ("image", data)
+    fake.quantize_image = lambda img, **k: calls.append((img, k)) or "quantized"
+    fake.image_to_data = lambda img, **k: quantized if img == "quantized" else None
+    monkeypatch.setitem(sys.modules, "calibre", types.ModuleType("calibre"))
+    monkeypatch.setitem(sys.modules, "calibre.utils", types.ModuleType("calibre.utils"))
+    monkeypatch.setitem(sys.modules, "calibre.utils.img", fake)
+
+
+def _colour_type(png, kind):
+    return png[:25] + bytes([kind]) + png[26:]
+
+
+def _palette_png(w, h):
+    return _colour_type(_png(w, h), 3)
+
+
+#: What scaling a palette PNG gives: RGB, or RGBA when it had transparency.
+SCALED_RGB = _png(1920, 1407) + b"R" * 1000
+SCALED_RGBA = _colour_type(SCALED_RGB, 6)
+
+
+@pytest.mark.unit
+def test_a_scaled_palette_png_is_a_palette_again(monkeypatch):
+    """Scaled, a palette PNG came back RGB, several times its bytes: 357 KB
+    to 1,130 KB in QA's sample (#557). It is quantized back to 256 colours,
+    undithered, which kept a 64-colour picture near its own size."""
+    calls = []
+    _fake_img(monkeypatch, SCALED_RGB, b"Q" * 300, calls)
+    out = io.optimize_image(_palette_png(2000, 1466), max_dim=1920, log=_Log())
+    assert out == b"Q" * 300
+    assert calls == [(("image", SCALED_RGB), {"max_colors": 256, "dither": False})]
+
+
+@pytest.mark.unit
+def test_a_palette_png_keeps_the_smaller_copy(monkeypatch):
+    _fake_img(monkeypatch, SCALED_RGB, b"Q" * 1200, [])
+    out = io.optimize_image(_palette_png(2000, 1466), max_dim=1920, log=_Log())
+    assert out == SCALED_RGB
+
+
+@pytest.mark.unit
+def test_an_rgb_png_is_not_quantized(monkeypatch):
+    calls = []
+    _fake_img(monkeypatch, SCALED_RGB, b"Q" * 300, calls)
+    assert io.optimize_image(_png(2000, 1466), max_dim=1920, log=_Log()) == SCALED_RGB
+    assert calls == []
+
+
+@pytest.mark.unit
+def test_a_transparent_palette_png_keeps_its_transparency(monkeypatch):
+    """A palette with a transparent colour scales to RGBA; quantized, its
+    transparent pixels came back opaque in calibre 9.17.0, so it stays RGBA."""
+    calls = []
+    _fake_img(monkeypatch, SCALED_RGBA, b"Q" * 300, calls)
+    out = io.optimize_image(_palette_png(2000, 1466), max_dim=1920, log=_Log())
+    assert out == SCALED_RGBA
+    assert calls == []
+
+
 @pytest.mark.unit
 def test_optimize_images_maps_all_and_handles_none_cover(monkeypatch):
     # Force the per-image optimizer to a deterministic stub.

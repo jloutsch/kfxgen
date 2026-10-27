@@ -201,11 +201,28 @@ def optimize_image(
         if log:
             log.warn(f"  image optimize failed ({e}); keeping original")
         return data
+    # Scaled, a palette PNG comes back RGB, several times its bytes (#557).
+    # One with a transparent colour comes back RGBA, which quantizing would
+    # make opaque.
+    if out and is_png and data[25:26] == b"\x03" and out[25:26] == b"\x02":
+        out = min(out, _as_palette(out) or out, key=len)
     # Over the cap, the scaled one even if it grew: Previewer caps every
     # picture at 1920 px (#467). Re-encoded for its bytes alone, never larger.
     if not out or (len(out) >= len(data) and not over_dim):
         return data
     return out
+
+
+def _as_palette(png):
+    """`png` quantized to 256 colours, undithered, or None. Undithered was
+    both smaller and nearer the RGB copy's colours in a 256-colour probe."""
+    try:
+        from calibre.utils.img import image_from_data, image_to_data, quantize_image
+
+        img = quantize_image(image_from_data(png), max_colors=256, dither=False)
+        return image_to_data(img, fmt="PNG")
+    except Exception:  # noqa: BLE001 - the RGB copy still shows
+        return None
 
 
 def gif_to_png(data, log=None):
