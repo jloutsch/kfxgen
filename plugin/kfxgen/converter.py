@@ -5232,7 +5232,10 @@ def _assemble_chapters_by_coordinate(
         acc += len(b)
 
     flat = []
-    for b in spine_blocks:
+    for si, b in enumerate(spine_blocks):
+        for block in b:
+            # Its file, so a Contents page can tell its own (#551 review).
+            block["_spine_file"] = si
         flat.extend(b)
 
     # Collect all anchor fragments referenced in the TOC (even non-monotonic ones)
@@ -5575,6 +5578,8 @@ def extract_chapters_from_oeb(
     )
 
     toc_entries = _extract_toc_with_hrefs(oeb_book, log)
+    spine_items = _spine_in_order(oeb_book, toc_entries)
+    _respell_toc_hrefs(toc_entries, spine_items)
     # Fragment ids the TOC names, per file, matched the way chapter assembly
     # matches them, so a table holding one past its start keeps rows. (#219)
     toc_targets = {}
@@ -5596,7 +5601,7 @@ def extract_chapters_from_oeb(
     orphan_keys = []
     svg_text_files = 0  # files whose SVG draws words, said once (#231)
 
-    for i, item in enumerate(_spine_in_order(oeb_book, toc_entries)):
+    for i, item in enumerate(spine_items):
         # Per-item try/except (#73): a single bad item logs a warning and
         # the loop continues. The previous shape wrapped the whole loop in
         # a bare except Exception, which aborted iteration on the first
@@ -5828,6 +5833,25 @@ def _container_parser(oeb_book):
             return None
 
     return parse
+
+
+def _respell_toc_hrefs(entries, spine):
+    """Each TOC href that names a spine file only up to letter case or
+    %-encoding, in the spine's spelling, when one file fits (#549). An NCX
+    writing `01_Cover.xhtml` for the OPF's `01_cover.xhtml` lost every
+    entry: calibre adds that spelling as a file of its own, which #476 drops
+    as the same file. Files are matched by name, as chapters are."""
+    names = {_normalize_href(i.href) for i in spine}
+    loose = {}
+    for i in spine:
+        loose.setdefault(_normalize_href(unquote(i.href)).lower(), set()).add(i.href)
+    for entry in entries:
+        path, sep, frag = entry["href"].partition("#")
+        if _normalize_href(path) in names:
+            continue
+        fits = loose.get(_normalize_href(unquote(path)).lower(), set())
+        if len(fits) == 1:
+            entry["href"] = next(iter(fits)) + sep + frag
 
 
 def _spine_in_order(oeb_book, toc_entries):
@@ -6152,6 +6176,39 @@ def _split_text_above_listing(ch):
     return lead
 
 
+def _split_files_after_contents(ch):
+    """The pages from files after the contents page's own, as a chapter of
+    their own, or None (#551 review).
+
+    A contents entry's section runs on to the next TOC entry, so files the
+    TOC doesn't list after it are part of it, and the rebuild replaced them:
+    a foreword and an introduction, 64 blocks, in one library book. Kindle
+    Previewer 4.0.3 prints them. They follow the rebuilt page, out of the
+    navigation and with no heading, as #393's front matter does."""
+    blocks = ch.get("blocks") or []
+    own = blocks[0].get("_spine_file") if blocks else None
+    cut = next(
+        (
+            n
+            for n, b in enumerate(blocks)
+            if b.get("_spine_file") is not None and b["_spine_file"] != own
+        ),
+        None,
+    )
+    if own is None or cut is None or not _count_text_blocks(blocks[cut:]):
+        return None
+    kept, ch["blocks"] = blocks[cut:], blocks[:cut]
+    ch["text"] = "\n\n".join(b["text"] for b in ch["blocks"] if b.get("text"))
+    return {
+        "title": LEADING_TITLE_FALLBACK,
+        "text": "\n\n".join(b["text"] for b in kept if b.get("text")),
+        "blocks": kept,
+        "toc_level": ch.get("toc_level", 0),
+        "_omit_from_toc": True,
+        "_omit_title_heading": True,
+    }
+
+
 def _split_front_matter_below_listing(ch):
     """The front matter printed after `ch`'s listing, as a chapter of its
     own, or None.
@@ -6254,6 +6311,10 @@ def _replace_title_page(chapters, metadata, log, listings_kept=False):
     # (#393). Only a chapter that dropped a listing has a place for it.
     for ch in list(chapters):
         if ch is nav_contents_ch or _normalize_title(ch["title"]) in _CONTENTS_TITLES:
+            later = _split_files_after_contents(ch)
+            if later is not None:
+                chapters.insert(chapters.index(ch) + 1, later)
+                log.info("  Kept the pages after the contents page")
             after = _split_front_matter_below_listing(ch)
             if after is not None:
                 chapters.insert(chapters.index(ch) + 1, after)
