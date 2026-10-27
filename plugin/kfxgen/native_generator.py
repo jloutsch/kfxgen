@@ -66,6 +66,29 @@ def _size_in_box(hint, box):
     return f"w={pct:.3f}%"
 
 
+#: An inline picture's vertical-align as Kindle Previewer 4.0.3 writes it,
+#: `$44` (#565, probed with all eight).
+_INLINE_VALIGN_SYMBOLS = {
+    "middle": "$320",
+    "top": "$58",
+    "bottom": "$60",
+    "text-top": "$447",
+    "text-bottom": "$449",
+    "baseline": "$350",
+    "super": "$370",
+    "sub": "$371",
+}
+
+
+def _inline_length_em(m, font_size):
+    """A size hint's length (`_SIZE_HINT_RE` match, not %) in the
+    paragraph's em: em as written, px at 0.45pt and pt with 1em = 12pt."""
+    number, unit = float(m.group(2)), m.group(3) or "px"
+    if unit == "em":
+        return number
+    return number * (0.45 if unit == "px" else 1.0) / 12 / (font_size or 1)
+
+
 def _parse_size_hint(hint, column_px):
     """('w' | 'h', percent) for a token size hint, or None to size by pixels.
 
@@ -1533,8 +1556,12 @@ class NativeKFXGenerator:
         markup gives is kept: a % of Previewer 4's 512 px column, em as
         written, px at 0.45pt and pt with 1em = 12pt (as #541 measured
         margins); its height follows the picture's shape. A height given
-        alone is kept the same way, the width following it."""
-        _kind, resource, alt, hint, font_size = item
+        alone is kept the same way, the width following it; a height given
+        with a width is kept too, its shape aside, as is a vertical-align
+        (#565). A picture the markup sizes is marked `$546: $377`, as
+        Previewer marks it."""
+        _kind, resource, alt, hint, font_size, extra = item
+        extras = dict(e.split("=", 1) for e in (extra or "").split(";") if "=" in e)
         (eid,) = eids
         dims = {}
         for key, (res, _loc) in (self.image_resources or {}).items():
@@ -1556,15 +1583,16 @@ class NativeKFXGenerator:
                 pt = number * (0.45 if unit == "px" else 1.0)
                 w_em = pt / 12 / (font_size or 1)
             h_em = w_em * height / width
+            given = _SIZE_HINT_RE.match(f"h={extras.get('h', '')}")
+            if given and (given.group(3) or "px") != "%":
+                h_em = _inline_length_em(given, font_size)
         elif m and unit != "%":
             # A height alone, the same rule on the other axis (QA on #564:
             # 2em stays 2em, height="30" is 1.125em).
-            if unit == "em":
-                h_em = number
-            else:
-                h_em = number * (0.45 if unit == "px" else 1.0) / 12 / (font_size or 1)
+            h_em = _inline_length_em(m, font_size)
             w_em = h_em * width / height
-        size = (f"{round(w_em, 5):g}", f"{round(h_em, 5):g}", fill)
+        valign = _INLINE_VALIGN_SYMBOLS.get(extras.get("va"))
+        size = (f"{round(w_em, 5):g}", f"{round(h_em, 5):g}", fill, bool(m), valign)
         if size not in self._inline_picture_styles:
             name = f"s_ipic{len(self._inline_picture_styles)}"
             self.symtab.create_local_symbol(name)
@@ -1578,6 +1606,10 @@ class NativeKFXGenerator:
                 value[IS("$65")] = IonStruct(
                     IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")
                 )
+            if m:
+                value[IS("$546")] = IS("$377")
+            if valign:
+                value[IS("$44")] = IS(valign)
             value[IS("$173")] = IS(name)
             self._inline_picture_styles[size] = (name, value)
         return IonStruct(
@@ -3698,7 +3730,7 @@ class NativeKFXGenerator:
             resource
             for c in ch_data["all_chunks"]
             if isinstance(c, dict)
-            for _k, (resource, _alt, _size) in c.get("pictures") or ()
+            for _k, (resource, *_rest) in c.get("pictures") or ()
         }
         _orphans = {
             (res, loc)
@@ -4291,7 +4323,12 @@ class NativeKFXGenerator:
                     pictures.append(
                         (
                             at,
-                            (resource[0], m.group(2).replace("\x02", " "), m.group(3)),
+                            (
+                                resource[0],
+                                m.group(2).replace("\x02", " "),
+                                m.group(3),
+                                m.group(5),
+                            ),
                         )
                     )
                     text.append(INLINE_PICTURE)
@@ -6035,10 +6072,10 @@ class NativeKFXGenerator:
                 maths += [
                     (
                         k,
-                        ("picture", resource, alt, size, blk_fs),
+                        ("picture", resource, alt, size, blk_fs, extra),
                         picture_eids[chunk_idx, n],
                     )
-                    for n, (k, (resource, alt, size)) in enumerate(
+                    for n, (k, (resource, alt, size, extra)) in enumerate(
                         chunk.get("pictures") or ()
                     )
                 ]

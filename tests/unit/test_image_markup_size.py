@@ -72,7 +72,7 @@ class TestImageSizeHint:
 
     def test_two_field_token_still_matches(self):
         m = IMG_TOKEN_RE.fullmatch("\x00IMG\x01a.jpg\x01alt\x00")
-        assert m.groups() == ("a.jpg", "alt", None, None)
+        assert m.groups() == ("a.jpg", "alt", None, None, None)
 
 
 # ── generator: the $157 the size becomes ────────────────────────────────────
