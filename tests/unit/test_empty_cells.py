@@ -52,8 +52,9 @@ def _row_cells(tmp_path, row_html):
 
 @pytest.mark.unit
 def test_an_empty_cell_has_no_text_entry(tmp_path):
-    cells = _row_cells(tmp_path, "<td>a</td><td></td><td> </td>")
-    assert cells == [("text", "a"), ("cell", 0), ("cell", 0)]
+    cells = _row_cells(tmp_path, "<td>a</td><td></td><td> </td><td>&#160;</td>")
+    # An NBSP-only cell is empty too, as Previewer writes it (QA on #533).
+    assert cells == [("text", "a"), ("cell", 0), ("cell", 0), ("cell", 0)]
 
 
 @pytest.mark.unit

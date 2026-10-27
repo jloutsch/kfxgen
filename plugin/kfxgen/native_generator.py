@@ -4413,13 +4413,13 @@ class NativeKFXGenerator:
                             )
                         all_chunks.append({"type": "close"})
                         continue
-                    if not (cell["text"] or "").strip(" \t\r\n") and not cell.get(
+                    if not (cell["text"] or "").strip(" \t\r\n\xa0") and not cell.get(
                         "anchor_keys"
                     ):
                         # An empty cell: a cell with nothing in it, as Kindle
                         # Previewer writes it, not a text entry of a space
-                        # (#480). One holding an id keeps its entry, for a
-                        # link to land on.
+                        # (#480), an NBSP-only one too, as Previewer does. One
+                        # holding an id keeps its entry, for a link to land on.
                         all_chunks.append(
                             {
                                 "type": "open",
