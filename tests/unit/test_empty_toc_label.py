@@ -162,3 +162,27 @@ def test_a_pretty_printed_ncxs_empty_label_is_empty(tmp_path):
         container=SimpleNamespace(rootdir=str(tmp_path), opfname="content.opf"),
     )
     assert _entries(book) == [("One", "c1.xhtml", 0), ("", "c1.xhtml#mid", 1)]
+
+
+def test_calibres_entries_past_the_ncxs_leave_its_toc_as_given(tmp_path):
+    """An EPUB 3 whose nav lists One, Two, Three while its NCX lists One
+    (with blank entries) and Two: the NCX stops short of calibre's TOC, so
+    nothing is put in and Three is kept (QA on #561: without the length
+    check, Three was lost)."""
+    book = _book(
+        tmp_path,
+        [
+            ("One", "c1.xhtml", [("", "c1.xhtml#a", []), (" ", "c1.xhtml#b", [])]),
+            ("Two", "c2.xhtml", []),
+        ],
+        [
+            _Node("One", "c1.xhtml"),
+            _Node("Two", "c2.xhtml"),
+            _Node("Three", "c3.xhtml"),
+        ],
+    )
+    assert _entries(book) == [
+        ("One", "c1.xhtml", 0),
+        ("Two", "c2.xhtml", 0),
+        ("Three", "c3.xhtml", 0),
+    ]
