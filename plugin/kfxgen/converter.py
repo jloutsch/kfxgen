@@ -5414,6 +5414,8 @@ def extract_chapters_from_oeb(
     )
 
     toc_entries = _extract_toc_with_hrefs(oeb_book, log)
+    spine_items = _spine_in_order(oeb_book, toc_entries)
+    _respell_toc_hrefs(toc_entries, spine_items)
     # Fragment ids the TOC names, per file, matched the way chapter assembly
     # matches them, so a table holding one past its start keeps rows. (#219)
     toc_targets = {}
@@ -5435,7 +5437,7 @@ def extract_chapters_from_oeb(
     orphan_keys = []
     svg_text_files = 0  # files whose SVG draws words, said once (#231)
 
-    for i, item in enumerate(_spine_in_order(oeb_book, toc_entries)):
+    for i, item in enumerate(spine_items):
         # Per-item try/except (#73): a single bad item logs a warning and
         # the loop continues. The previous shape wrapped the whole loop in
         # a bare except Exception, which aborted iteration on the first
@@ -5662,6 +5664,25 @@ def _container_parser(oeb_book):
             return None
 
     return parse
+
+
+def _respell_toc_hrefs(entries, spine):
+    """Each TOC href that names a spine file only up to letter case or
+    %-encoding, in the spine's spelling, when one file fits (#549). An NCX
+    writing `01_Cover.xhtml` for the OPF's `01_cover.xhtml` lost every
+    entry: calibre adds that spelling as a file of its own, which #476 drops
+    as the same file. Files are matched by name, as chapters are."""
+    names = {_normalize_href(i.href) for i in spine}
+    loose = {}
+    for i in spine:
+        loose.setdefault(_normalize_href(unquote(i.href)).lower(), set()).add(i.href)
+    for entry in entries:
+        path, sep, frag = entry["href"].partition("#")
+        if _normalize_href(path) in names:
+            continue
+        fits = loose.get(_normalize_href(unquote(path)).lower(), set())
+        if len(fits) == 1:
+            entry["href"] = next(iter(fits)) + sep + frag
 
 
 def _spine_in_order(oeb_book, toc_entries):
