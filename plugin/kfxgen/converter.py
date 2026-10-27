@@ -5227,9 +5227,8 @@ def _assemble_chapters_by_coordinate(
     # class="toc">`); otherwise it belongs to the chapter holding the block
     # before it. A listing at the start of its file stays with that file. (#276)
     starts = {}
-    for k, (fi, si, _title, _key, _level) in enumerate(coords):
-        if k not in out_of_order:
-            starts[fi] = si
+    for fi, si, _title, _key, _level in coords:
+        starts[fi] = si
     toc_frag_at = {}
     for entry in toc_entries:
         frag = _href_fragment(entry["href"])
