@@ -255,17 +255,21 @@ def test_a_heading_with_maths_prints_once_under_a_flattened_label(converted):
 
 @pytest.mark.parametrize(
     ("label", "printed"),
-    [(ALT_LABEL, "The [a over b equals 1] rule"), (SPLIT_LABEL, "The [a/b]\nrule")],
+    [
+        (ALT_LABEL, ["The [a over b equals 1] rule"]),
+        (SPLIT_LABEL, ["The [a/b]", "rule"]),
+    ],
 )
 def test_a_heading_with_maths_prints_once_under_any_label_for_it(
     converted, label, printed
 ):
     """A label from the equation's `alttext`, or one naming a heading split
     over two blocks: the book's heading prints once, drawn (#404), a split
-    one on its two lines (#409)."""
+    one as its blocks, each its own entry (#552)."""
     (paragraphs, _frags), version = converted
     assert label not in paragraphs, f"calibre {version}: {list(paragraphs)}"
-    assert printed in paragraphs, f"calibre {version}: {list(paragraphs)}"
+    for line in printed:
+        assert line in paragraphs, f"calibre {version}: {list(paragraphs)}"
 
 
 def test_the_book_declares_its_drawings(converted):
