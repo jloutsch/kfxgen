@@ -133,15 +133,19 @@ def test_optimize_image_keeps_png_format(monkeypatch):
 
 
 @pytest.mark.unit
-def test_optimize_image_keeps_original_if_result_larger(monkeypatch):
+def test_a_picture_over_the_cap_is_scaled_even_if_it_grows(monkeypatch):
+    """Over the size cap, the scaled picture is kept even when its bytes
+    come out larger, as Kindle Previewer 4.0.3 caps every picture at 1920 px
+    (#467). A 1280 x 2026 cover had kept its original. Only the byte path
+    never grows a picture (below)."""
     fake = types.ModuleType("calibre.utils.img")
-    fake.scale_image = lambda *a, **k: (2048, 1536, b"Z" * 100000)
+    fake.scale_image = lambda *a, **k: (1920, 1440, b"Z" * 100000)
     monkeypatch.setitem(sys.modules, "calibre", types.ModuleType("calibre"))
     monkeypatch.setitem(sys.modules, "calibre.utils", types.ModuleType("calibre.utils"))
     monkeypatch.setitem(sys.modules, "calibre.utils.img", fake)
 
     big = _jpeg(4000, 3000)
-    assert io.optimize_image(big, max_dim=2048, log=_Log()) == big
+    assert io.optimize_image(big, max_dim=1920, log=_Log()) == b"Z" * 100000
 
 
 @pytest.mark.unit
