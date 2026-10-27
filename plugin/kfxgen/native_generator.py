@@ -2498,7 +2498,11 @@ class NativeKFXGenerator:
                     IS("$306"),
                     IS("$310"),
                 )
-        elif not is_heading and text_indent is None:
+        elif not is_heading and (
+            # A first-line indent replaces the space; a hanging one doesn't
+            # (#465).
+            text_indent is None or float(text_indent[0]) < 0
+        ):
             value[IS("$47")] = IonStruct(
                 IS("$307"), IonDecimal("1"), IS("$306"), IS("$310")
             )  # margin-top: 1lh

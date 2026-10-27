@@ -236,7 +236,7 @@ def normalize_runs_with_anchors(
     return text_out, spans, anchors
 
 
-def parse_css_length(value):
+def parse_css_length(value, negative=False):
     """Parse a CSS length string into (magnitude_str, kfx_unit_symbol).
 
     Returns None for empty/auto/inherit, unsupported units, a zero magnitude
@@ -246,7 +246,8 @@ def parse_css_length(value):
     line off the left edge and clips leading characters (observed on Gutenberg
     front-matter metadata lists). Dropping it falls back to the default 0 indent.
     Magnitude is returned as a trimmed string so the caller can hand it to
-    IonDecimal unchanged.
+    IonDecimal unchanged. With `negative`, a negative magnitude is returned
+    too, for a hanging indent its margin covers (#465).
     """
     if not value:
         return None
@@ -255,7 +256,7 @@ def parse_css_length(value):
         return None
     mag, unit = m.group(1), m.group(2).lower()
     try:
-        if float(mag) <= 0.0:
+        if float(mag) == 0.0 or (float(mag) < 0.0 and not negative):
             return None
     except ValueError:
         return None
@@ -747,6 +748,22 @@ def _parse_font_family(value):
     return out
 
 
+_PX_PER_UNIT = {
+    "$308": 16.0,
+    "$505": 16.0,
+    "$319": 1.0,
+    "$318": 4 / 3,
+    "$316": 96 / 25.4,
+}
+
+
+def _length_px(length):
+    """A parsed length in CSS px, or None for a share of the page or none."""
+    if not length or length[1] not in _PX_PER_UNIT:
+        return None
+    return float(length[0]) * _PX_PER_UNIT[length[1]]
+
+
 def compute_block_style(css):
     """Map a computed-CSS dict to kfxgen's block_style shape.
 
@@ -763,6 +780,13 @@ def compute_block_style(css):
         align = raw_align
     indent = parse_css_length(css.get("text-indent") or "")
     margin_left = parse_css_length(css.get("margin-left") or "")
+    if indent is None and margin_left is not None:
+        # A hanging indent its left margin covers, as Previewer writes it
+        # (#465); alone it would pull the first line off the page.
+        hang = parse_css_length(css.get("text-indent") or "", negative=True)
+        hang_px, margin_px = _length_px(hang), _length_px(margin_left)
+        if hang_px is not None and margin_px is not None and -hang_px <= margin_px:
+            indent = hang
     margin_right = parse_css_length(css.get("margin-right") or "")
     return {
         "align": align,
