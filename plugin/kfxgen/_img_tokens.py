@@ -19,6 +19,10 @@ two-field token still matches; the group is simply None.
 
 The optional fourth field is ``left`` or ``right`` for a floated image
 (#243); its size field may then be empty.
+
+The optional fifth is what a picture inside a paragraph's words keeps
+besides its size (#565): ``h=<height>`` when a width is also given, and
+``va=<vertical-align>``, joined by ``;``. The fields before it may be empty.
 """
 
 import re
@@ -29,9 +33,10 @@ IMG_TOKEN_DELIM = "\x00"
 IMG_TOKEN_FIELD = "\x01"
 IMG_TOKEN_SPACE = "\x02"
 
-#: Matches one whole IMG token, capturing ``(href, alt, size, float)``. converter uses it
+#: Matches one whole IMG token, capturing ``(href, alt, size, float, extra)``. converter uses it
 #: to strip tokens (the capture groups are ignored by ``.sub``);
 #: native_generator uses the groups to rebuild image chunks.
 IMG_TOKEN_RE = re.compile(
-    r"\x00IMG\x01([^\x01]*)\x01([^\x00\x01]*)(?:\x01([^\x00\x01]*))?(?:\x01([^\x00]*))?\x00"
+    r"\x00IMG\x01([^\x01]*)\x01([^\x00\x01]*)(?:\x01([^\x00\x01]*))?"
+    r"(?:\x01([^\x00\x01]*))?(?:\x01([^\x00]*))?\x00"
 )

@@ -640,19 +640,21 @@ def _strip_token_controls(value):
     return value
 
 
-def _make_img_token(href, alt, size=None, float_side=None):
+def _make_img_token(href, alt, size=None, float_side=None, extra=None):
     """Encode an <img> reference as a placeholder token string.
 
     Spaces in alt text are escaped to a control char so str.split() doesn't
     fragment the token during whitespace normalization. `size` is the hint
-    from `_img_size_hint`, carried as an optional third field, and
-    `float_side` ("left" or "right") as a fourth (#243).
+    from `_img_size_hint`, carried as an optional third field,
+    `float_side` ("left" or "right") as a fourth (#243), and `extra` from
+    `_img_inline_extras` as a fifth (#565).
     """
     safe_href = _strip_token_controls(href or "")
     escaped_alt = _strip_token_controls(alt or "").replace(" ", _IMG_TOKEN_SPACE)
-    size_field = f"{_IMG_TOKEN_FIELD}{size or ''}" if size or float_side else ""
-    if float_side:
-        size_field += f"{_IMG_TOKEN_FIELD}{float_side}"
+    fields = [size or "", float_side or "", extra or ""]
+    while fields and not fields[-1]:
+        fields.pop()
+    size_field = "".join(f"{_IMG_TOKEN_FIELD}{f}" for f in fields)
     return (
         f"{_IMG_TOKEN_DELIM}IMG{_IMG_TOKEN_FIELD}{safe_href}"
         f"{_IMG_TOKEN_FIELD}{escaped_alt}{size_field}{_IMG_TOKEN_DELIM}"
@@ -683,6 +685,29 @@ def _img_size_hint(elem, style_resolver=None):
         if raw and raw != "auto" and _IMG_SIZE_RE.match(raw):
             return f"{axis[0]}={raw}"
     return None
+
+
+#: vertical-align keywords Kindle Previewer 4.0.3 keeps on a picture inside
+#: a paragraph's words (#565).
+_INLINE_VALIGNS = frozenset(
+    {"middle", "top", "bottom", "text-top", "text-bottom", "baseline", "super", "sub"}
+)
+
+
+def _img_inline_extras(elem, style_resolver=None):
+    """What a picture inside a paragraph's words keeps besides its
+    `_img_size_hint`, as ``h=1em;va=middle``, or None (#565): its height,
+    which Previewer stretches it to when a width is also given, and its
+    vertical-align."""
+    css = (style_resolver(elem) if style_resolver is not None else None) or {}
+    out = []
+    raw = str(css.get("height") or elem.get("height") or "").strip()
+    if _IMG_SIZE_RE.match(raw):
+        out.append(f"h={raw}")
+    valign = str(css.get("vertical-align") or "").strip().lower()
+    if valign in _INLINE_VALIGNS:
+        out.append(f"va={valign}")
+    return ";".join(out) or None
 
 
 def _float_side(css):
@@ -1629,9 +1654,10 @@ def _walk_inline(
             alt = child.get("alt", "") or ""
             size = _img_size_hint(child, style_resolver)
             side, size = _img_float(child, elem, size, style_resolver)
+            extra = _img_inline_extras(child, style_resolver)
             # Only a link carries over: tapping the picture follows it (#355).
             link = frozenset(f for f in cur if _is_link_flag(f))
-            parts.append((_make_img_token(href, alt, size, side), link))
+            parts.append((_make_img_token(href, alt, size, side, extra), link))
         elif clocal == "svg":
             for aid in _own_anchor_ids(child):
                 parts.append(make_anchor_mark(aid))

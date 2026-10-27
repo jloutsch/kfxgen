@@ -207,3 +207,73 @@ def test_the_paragraph_resumes_one_character_after_each_picture(tmp_path):
     assert [o - start for o, p, _k in records if p in pictures] == [4, 10]
     assert (start + 5, para, 5) in records
     assert (start + 11, para, 11) in records
+
+
+def _picture_style(tmp_path, img):
+    """{property: value} of the inline picture's style, `img` its markup."""
+    _book(tmp_path, f"<h1>One</h1><p>Q <img src='b.jpg' {img} alt='x'/> after.</p>")
+    frags = load_fragments(tmp_path / "i.kfx")
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    (style,) = [
+        styles[str(part["$157"])]
+        for st in by_type(frags, "$259")
+        for e in val(st)["$146"]
+        for part in (getattr(e, "value", e).get("$146") or ())
+        if hasattr(part, "get") and str(part.get("$159")) == "$271"
+    ]
+
+    def show(v):
+        return f"{v['$307']}{v['$306']}" if hasattr(v, "get") else str(v)
+
+    return {str(k): show(v) for k, v in style.items() if str(k) != "$173"}
+
+
+@pytest.mark.parametrize(
+    ("img", "size"),
+    [
+        ("style='width:2em;height:1em'", {"$56": "2$308", "$57": "1$308"}),
+        ("width='40' height='40'", {"$56": "1.5$308", "$57": "1.5$308"}),
+    ],
+    ids=["em", "attributes"],
+)
+def test_a_width_and_height_given_are_both_kept(tmp_path, img, size):
+    """Kindle Previewer 4.0.3 stretches the picture to both, its shape aside
+    (#565): 2 x 1em, not 2 x 1.467em."""
+    style = _picture_style(tmp_path, img)
+    assert {k: style[k] for k in size} == size
+
+
+@pytest.mark.parametrize(
+    ("img", "marked"),
+    [
+        ("", False),
+        ("style='width:2em'", True),
+        ("height='30'", True),
+        ("width='40' height='40'", True),
+        ("style='vertical-align:middle'", False),
+    ],
+    ids=["own-size", "width", "height", "both", "align-only"],
+)
+def test_a_picture_the_markup_sizes_is_marked(tmp_path, img, marked):
+    """Previewer writes `$546: $377` on a picture the markup sizes, and on
+    no other (#565, probed)."""
+    assert (_picture_style(tmp_path, img).get("$546") == "$377") is marked
+
+
+@pytest.mark.parametrize(
+    ("value", "symbol"),
+    [
+        ("middle", "$320"),
+        ("top", "$58"),
+        ("bottom", "$60"),
+        ("text-top", "$447"),
+        ("text-bottom", "$449"),
+        ("baseline", "$350"),
+        ("super", "$370"),
+        ("sub", "$371"),
+    ],
+)
+def test_vertical_align_is_kept(tmp_path, value, symbol):
+    """As Previewer writes it, `$44` (#565, probed with all eight)."""
+    style = _picture_style(tmp_path, f"style='vertical-align:{value}'")
+    assert style.get("$44") == symbol
