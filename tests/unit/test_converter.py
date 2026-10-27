@@ -6720,7 +6720,9 @@ def _picture_cells(table_html):
         ('<td><img src="a.png"/></td><td>text</td>', [["[img]"], ["text"]]),
         (
             '<td><img src="a.png"/><br/>Captain Smith</td><td>x</td>',
-            [["[img]", "Captain Smith"], ["x"]],
+            # One paragraph since #565; the generator cuts the picture alone
+            # on its line out as an entry of its own.
+            [["[img]\nCaptain Smith"], ["x"]],
         ),
         (
             '<td><p><img src="a.png"/></p><p>Captain Smith</p></td><td>x</td>',
@@ -6728,11 +6730,11 @@ def _picture_cells(table_html):
         ),
         (
             '<td>Captain Smith<br/><img src="a.png"/></td><td>x</td>',
-            [["Captain Smith", "[img]"], ["x"]],
+            [["Captain Smith\n[img]"], ["x"]],
         ),
         (
             '<td><img src="a.png"/><img src="b.png"/></td><td>x</td>',
-            [["[img]", "[img]"], ["x"]],
+            [["[img][img]"], ["x"]],
         ),
     ],
     ids=[

@@ -4654,11 +4654,13 @@ class NativeKFXGenerator:
                         unplaced = []
                         for para in cell["paragraphs"]:
                             if IMG_TOKEN_RE.search(para["text"]):
-                                # A picture is an image entry in the cell,
-                                # with no style of its own, as Kindle
-                                # Previewer writes it (#262).
+                                # A picture alone, or alone on its line, is
+                                # an image entry in the cell, with no style
+                                # of its own (#262); one inside the words
+                                # stays in them (#565), as Kindle Previewer
+                                # writes both.
                                 first = len(all_chunks)
-                                unplaced += _emit_paragraph(para, inline_pictures=False)
+                                unplaced += _emit_paragraph(para)
                                 for ch in all_chunks[first:]:
                                     if (
                                         ch["type"] == "image"

@@ -3819,6 +3819,12 @@ def _picture_book(tmp_path, blocks):
     def shape(e):
         if str(e["$159"]) == "$271":
             return ("picture", "$157" in e, "$175" in e)
+        if not e.get("$145"):
+            # A mixed entry: its words and pictures (#565).
+            return (
+                "mixed",
+                [k if isinstance(k, str) else "picture" for k in e["$146"]],
+            )
         ref = e["$145"]
         return ("text", str(content[str(ref["name"])][int(ref["$403"])]))
 
@@ -3848,12 +3854,26 @@ def test_a_picture_only_cell_is_a_container_of_one_unstyled_picture(tmp_path):
             [_para(f"{_pic()}{_pic('b.png')}")],
             [("picture", False, True), ("picture", False, True)],
         ),
+        # Inside the words: one entry, as Kindle Previewer 4.0.3 writes it
+        # in a cell (#565; #262 cut it into three).
         (
             [_para(f"Press {_pic('b.png')} to stop.")],
-            [("text", "Press"), ("picture", False, True), ("text", "to stop.")],
+            [("mixed", ["Press ", "picture", " to stop."])],
+        ),
+        # A cell of words and pictures is one paragraph since #565: a
+        # picture alone on its line is still an entry of its own.
+        (
+            [_para(f"{_pic()}\nCaptain Smith")],
+            [("picture", False, True), ("text", "Captain Smith")],
         ),
     ],
-    ids=["caption-below", "caption-above", "two-pictures", "inside-a-line"],
+    ids=[
+        "caption-below",
+        "caption-above",
+        "two-pictures",
+        "inside-a-line",
+        "own-line-one-paragraph",
+    ],
 )
 def test_a_cells_pictures_and_text_are_entries_in_order(tmp_path, paragraphs, expected):
     _, _, shapes = _picture_book(tmp_path, [_picture_table(paragraphs)])

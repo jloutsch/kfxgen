@@ -4054,6 +4054,8 @@ def extract_blocks_from_html(
     # The index from which the next block shown follows a page break, set by
     # an element's `page-break-before` or the one before it's `-after` (#363).
     break_at = []
+    # Cells walked as a paragraph when they hold no blocks (#565).
+    leaf_cells = set()
     # (index, side): the next block shown from that index starts below the
     # floats on that side, set by an element's `clear`. An empty clearing
     # element passes it on, as Kindle Previewer does (#381).
@@ -4172,7 +4174,12 @@ def extract_blocks_from_html(
         clear_at.clear()
         start = len(blocks)
         listings = len(nav_listing_at) if nav_listing_at is not None else 0
+        # A cell of words and pictures is one paragraph, as a <div> is in
+        # the body, so a picture inside its words stays in them (#565). One
+        # holding blocks is still walked block by block.
+        leaf_cells.add(id(cell))
         _walk_element(cell)
+        leaf_cells.discard(id(cell))
         out = blocks[start:]
         del blocks[start:]
         if nav_listing_at is not None:
@@ -4438,7 +4445,11 @@ def extract_blocks_from_html(
 
         # An equation walked as a block is a paragraph of its own; its
         # children are MathML, not blocks to walk one by one (#235).
-        is_block = elem.tag in block_tags or _local_tag(elem.tag) == "math"
+        is_block = (
+            elem.tag in block_tags
+            or _local_tag(elem.tag) == "math"
+            or id(elem) in leaf_cells
+        )
         has_block_child = any(_holds_blocks(child) for child in elem)
 
         if (
