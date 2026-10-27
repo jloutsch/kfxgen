@@ -5587,6 +5587,11 @@ def extract_chapters_from_oeb(
     # already on the page and the second is no part of the book (#304).
     chapters = []
     for i, item in enumerate(spine_items_ordered):
+        if not _page_shows_something(item["text"], cover_href):
+            # The book's own cover page: the cover page shows it, as on the
+            # TOC's path (#32, #524).
+            log.info(f"  Skipping cover-only spine item {i + 1}")
+            continue
         first = (item.get("blocks") or [{}])[0]
         heading = first.get("heading") and " ".join((first.get("text") or "").split())
         chapter = {"title": heading or f"Section {i + 1}", "text": item["text"]}
