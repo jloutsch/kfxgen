@@ -220,9 +220,9 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     yj_jpg_rst_marker_present only when a book has them, so their three
     symbols are gone and `$270`'s symbol ids after them move down by 3; and
     the landmarks: the book has no cover, so `$389` has no `$236` container
-    and the symbol table no `nL` (#460); and the heading navigation, built
-    from the book's headings (#461): `$389`'s other containers are
-    unchanged."""
+    and the symbol table no `nL` (#460); the metadata: no invented
+    description or date (#454); and the heading navigation, built from the
+    book's headings (#461): `$389`'s other containers are unchanged."""
     from types import SimpleNamespace
 
     from tests._kfx_introspect import load_fragments, val
@@ -244,11 +244,21 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
         return {
             (str(f.ftype), str(f.fid)): repr(val(f))
             for f in load_fragments(path)
-            if str(f.ftype) not in ("$550", "$585", "$270", "$389", "$ion_symbol_table")
+            if str(f.ftype)
+            not in ("$550", "$585", "$270", "$389", "$490", "$ion_symbol_table")
         }
 
     def by_type(path, ftype):
         return next(val(f) for f in load_fragments(path) if str(f.ftype) == ftype)
+
+    def title_metadata(path):
+        (meta,) = [val(f) for f in load_fragments(path) if str(f.ftype) == "$490"]
+        return [
+            repr(f)
+            for section in meta["$491"]
+            if str(section.get("$495")) == "kindle_title_metadata"
+            for f in section["$258"]
+        ]
 
     old_path = EXPECTED_DIR / "table_cells_rows.kfx"
     assert fragments(fresh_path) == fragments(old_path)
@@ -273,6 +283,11 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
         ]
 
     assert navigation(fresh_path, ("$798",)) == navigation(old_path, ("$798", "$236"))
+    assert title_metadata(fresh_path) == [
+        f
+        for f in title_metadata(old_path)
+        if "'description'" not in f and "'issue_date'" not in f
+    ]
 
 
 # ---------------------------------------------------------------------------

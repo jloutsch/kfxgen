@@ -4931,6 +4931,12 @@ def extract_metadata(oeb_book, log):
 
         if oeb_book.metadata.creator:
             metadata["author"] = ", ".join(str(c) for c in oeb_book.metadata.creator)
+            # One entry each, as Kindle Previewer writes them (#454).
+            metadata["authors"] = [str(c) for c in oeb_book.metadata.creator]
+
+        description = getattr(oeb_book.metadata, "description", None)
+        if description:
+            metadata["description"] = str(description[0])
 
         if oeb_book.metadata.language:
             metadata["language"] = _kfx_language(str(oeb_book.metadata.language[0]))
@@ -4941,11 +4947,37 @@ def extract_metadata(oeb_book, log):
         if hasattr(oeb_book.metadata, "date") and oeb_book.metadata.date:
             raw_date = str(oeb_book.metadata.date[0])
             metadata["issue_date"] = raw_date[:10]  # YYYY-MM-DD from ISO format
+            # calibre fills a year alone out to a day: the book's own OPF
+            # says which it gave. Only a full date is one, as Previewer
+            # takes it (#454).
+            own = _opf_raw_dates(oeb_book)
+            if own is not None:
+                first = (own[0] if own else "").strip()
+                metadata["issue_date"] = (
+                    first[:10] if _FULL_DATE_RE.match(first) else None
+                )
 
     except Exception as e:
         log.error(f"Error extracting metadata: {e}")
 
     return metadata
+
+
+_FULL_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+
+def _opf_raw_dates(oeb_book):
+    """The book's own dc:date texts, as its OPF writes them, or None when
+    the OPF can't be read (#454)."""
+    parse = _container_parser(oeb_book)
+    name = getattr(getattr(oeb_book, "container", None), "opfname", None)
+    opf = parse(name) if parse and name else None
+    if opf is None:
+        return None
+    return [
+        "".join(d.itertext())
+        for d in opf.xpath("//*[local-name()='metadata']/*[local-name()='date']")
+    ]
 
 
 _DRIVE_LETTER_RE = re.compile(r"^[A-Za-z]:")
@@ -6853,6 +6885,8 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         language=metadata["language"],
         publisher=metadata["publisher"],
         issue_date=metadata.get("issue_date"),
+        authors=metadata.get("authors"),
+        description=metadata.get("description"),
         font_table=font_table,
         # Every <img src> went through _resolve_img_src, so a miss means the
         # file is absent, not that the href is spelled differently. (#195)
