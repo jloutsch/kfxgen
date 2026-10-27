@@ -1276,18 +1276,15 @@ class NativeKFXGenerator:
         - yj_table: table support
         - yj_table_viewer: added by `_declare_table_viewer` once a native
           table has been written (#254)
-        - reflow-section-size: multi-section content support
         - reflow-style: basic reflowable styling
         - CanonicalFormat: standard format marker
-        - yj_hdv: high-definition visual support
-        - yj_jpg_rst_marker_present: JPEG restart marker support
+        reflow-section-size, yj_hdv and yj_jpg_rst_marker_present are added
+        by `_declare_content_features` once the content is built, only when
+        the book has them (#455).
         """
         self.symtab.create_local_symbol("com.amazon.yjconversion")
         self.symtab.create_local_symbol("reflow-style")
-        self.symtab.create_local_symbol("reflow-section-size")
         self.symtab.create_local_symbol("yj_table")
-        self.symtab.create_local_symbol("yj_hdv")
-        self.symtab.create_local_symbol("yj_jpg_rst_marker_present")
         self.symtab.create_local_symbol("version")
         self.symtab.create_local_symbol("SDK.Marker")
         self.symtab.create_local_symbol("CanonicalFormat")
@@ -1310,14 +1307,6 @@ class NativeKFXGenerator:
                 IS("$586"),
                 "com.amazon.yjconversion",
                 IS("$492"),
-                "reflow-section-size",
-                IS("$589"),
-                make_version(9),
-            ),
-            IonStruct(
-                IS("$586"),
-                "com.amazon.yjconversion",
-                IS("$492"),
                 "reflow-style",
                 IS("$589"),
                 make_version(1),
@@ -1330,26 +1319,58 @@ class NativeKFXGenerator:
                 IS("$589"),
                 make_version(1),
             ),
-            IonStruct(
-                IS("$586"),
-                "com.amazon.yjconversion",
-                IS("$492"),
-                "yj_hdv",
-                IS("$589"),
-                make_version(1),
-            ),
-            IonStruct(
-                IS("$586"),
-                "com.amazon.yjconversion",
-                IS("$492"),
-                "yj_jpg_rst_marker_present",
-                IS("$589"),
-                make_version(1),
-            ),
         ]
 
         value = IonStruct(IS("$590"), features_list)
         return YJFragment(fid=IS("$348"), ftype=IS("$585"), value=value)
+
+    def _declare_content_features(self, max_section_pids):
+        """Add the content features the built book has to $585, by kfxlib's
+        rules (#455): reflow-section-size from its largest section's
+        positions, left at 1 (undeclared) up to 65,536; yj_hdv for a picture
+        over 1920 px on a side; yj_jpg_rst_marker_present for a JPEG holding
+        a restart marker. Symbols are created here, last, as
+        `_declare_table_viewer`'s is."""
+        features = next(f for f in self.fragments if f.ftype == IS("$585")).value[
+            IS("$590")
+        ]
+
+        def feature(name, major):
+            self.symtab.create_local_symbol(name)
+            return IonStruct(
+                IS("$586"),
+                "com.amazon.yjconversion",
+                IS("$492"),
+                name,
+                IS("$589"),
+                IonStruct(IS("version"), IonStruct(IS("$587"), major, IS("$588"), 0)),
+            )
+
+        n = max_section_pids
+        size = min((n - 65536) // 16384 + 2, 256) if n > 65536 else 1
+        if size > 1:
+            # After yj_table and its viewer, where it stood before (#455).
+            at = sum(
+                1
+                for f in features
+                if str(f.get(IS("$492"))) in ("yj_table", "yj_table_viewer")
+            )
+            features.insert(at, feature("reflow-section-size", size))
+        resources = [f.value for f in self.fragments if f.ftype == IS("$164")]
+        if any(
+            max(int(r.get(IS("$422"), 0) or 0), int(r.get(IS("$423"), 0) or 0)) > 1920
+            for r in resources
+        ):
+            features.append(feature("yj_hdv", 1))
+        jpeg_locations = {
+            str(r.get(IS("$165"))) for r in resources if r.get(IS("$161")) == IS("$285")
+        }
+        if any(
+            re.search(rb"\xff[\xd0-\xd7]", bytes(f.value))
+            for f in self.fragments
+            if f.ftype == IS("$417") and str(f.fid) in jpeg_locations
+        ):
+            features.append(feature("yj_jpg_rst_marker_present", 1))
 
     def _declare_ruby(self):
         """Add `yj_ruby` 1.0 to the built $585 once a ruby is written, as Kindle
@@ -2261,6 +2282,14 @@ class NativeKFXGenerator:
             "position_entries_265": entries_265_raw,
             "section_positions_264": section_positions_264,
             "locations": locations,
+            # kfxlib's pid count of each section, for reflow-section-size.
+            "max_section_pids": max(
+                (
+                    sum(max(length, 0) for _eid, length, *_ in sec)
+                    for sec in location_sections
+                ),
+                default=0,
+            ),
         }
 
     def build_ion_symbol_table_fragment(self):
@@ -3718,6 +3747,7 @@ class NativeKFXGenerator:
             self._declare_ruby()
         if ch_data.get("math_names"):
             self._declare_feature("yj_mathml")
+        self._declare_content_features(pos_data["max_section_pids"])
 
         # 16. Build $ion_symbol_table fragment (REQUIRED for Kindle)
         # Must be added last so all symbols used by other fragments are registered
