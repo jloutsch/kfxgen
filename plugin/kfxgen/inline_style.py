@@ -747,15 +747,19 @@ VALIGN_MAP = {"top": "$58", "middle": "$320", "bottom": "$60"}
 
 
 def _parse_font_family(value):
-    """Split a CSS font-family value into normalized, lowercased names."""
+    """Split a CSS font-family value into normalized, lowercased names. A
+    comma inside a quoted name is part of it (#487)."""
     if not value:
         return []
     out = []
-    for part in str(value).split(","):
-        name = part.strip().strip("\"'").strip().lower()
+    for dq, sq, bare in _FONT_FAMILY_PART_RE.findall(str(value)):
+        name = (dq or sq or bare).strip().lower()
         if name:
             out.append(name)
     return out
+
+
+_FONT_FAMILY_PART_RE = re.compile(r'"([^"]*)"|\'([^\']*)\'|([^,"\']+)')
 
 
 def _line_height_factor(value):
