@@ -215,7 +215,9 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     branch last produced.
 
     Every fragment matches but the `$550` location map, which every book
-    now writes with a location every 110 positions (#227)."""
+    now writes with a location every 110 positions (#227), and the landmarks:
+    the book has no cover, so `$389` has no `$236` container and the symbol
+    table no `nL` (#460)."""
     from types import SimpleNamespace
 
     from tests._kfx_introspect import load_fragments, val
@@ -235,10 +237,22 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
         return {
             (str(f.ftype), str(f.fid)): repr(val(f))
             for f in load_fragments(path)
-            if str(f.ftype) != "$550"
+            if str(f.ftype) not in ("$550", "$389", "$ion_symbol_table")
         }
 
-    assert fragments(fresh_path) == fragments(EXPECTED_DIR / "table_cells_rows.kfx")
+    def by_type(path, ftype):
+        return next(val(f) for f in load_fragments(path) if str(f.ftype) == ftype)
+
+    old_path = EXPECTED_DIR / "table_cells_rows.kfx"
+    assert fragments(fresh_path) == fragments(old_path)
+    assert list(by_type(fresh_path, "$ion_symbol_table")["symbols"]) == [
+        x for x in by_type(old_path, "$ion_symbol_table")["symbols"] if x != "nL"
+    ]
+    assert [repr(c) for c in by_type(fresh_path, "$389")[0]["$392"]] == [
+        repr(c)
+        for c in by_type(old_path, "$389")[0]["$392"]
+        if str(getattr(c, "value", c)["$235"]) != "$236"
+    ]
 
 
 # ---------------------------------------------------------------------------
