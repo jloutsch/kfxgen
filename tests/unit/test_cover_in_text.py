@@ -229,3 +229,16 @@ def test_a_box_holding_the_cover_and_more_keeps_the_rest(tmp_path):
     assert sections[0] == ["cover_img"]
     assert "cover_img" not in sections[1]
     assert _pictures(sections) == ["cover_img"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "rest", [[], ["\xa0"], [" ", "\xa0"]], ids=["alone", "nbsp", "spaces"]
+)
+def test_a_first_page_of_only_the_cover_keeps_it(tmp_path, rest):
+    """A first page holding only a copy of the cover, and at most spaces:
+    left out, the page was a near-blank one of a lone NBSP (QA's c5 probe on
+    #516). The copy stays shown there, as on main and in Kindle Previewer
+    4.0.3 (#524)."""
+    sections = _first_page_book(tmp_path, [TOK("cover.jpg"), *rest])
+    assert _pictures(sections) == ["cover_img", "cover_img"]

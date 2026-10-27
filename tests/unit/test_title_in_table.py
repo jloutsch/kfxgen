@@ -30,11 +30,12 @@ pytestmark = pytest.mark.unit
             "Chapter Eight",
             ["Chapter", "Eight", "S8 row three"],
         ),
-        # An empty spacer row above the title's row.
+        # An empty spacer row above the title's row: its cell holds no text
+        # entry (#480).
         (
             lambda: [_table_block([[""], ["Chapter Four", "S4 page twelve"]])],
             "Chapter Four",
-            [" ", "Chapter Four", "S4 page twelve"],
+            ["Chapter Four", "S4 page twelve"],
         ),
         # A table that is the title alone stays too.
         (
