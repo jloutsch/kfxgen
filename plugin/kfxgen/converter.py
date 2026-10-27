@@ -2826,6 +2826,43 @@ def _cell_valign(cell, style_resolver):
     return None
 
 
+def _only_block_child(cell):
+    """The one block element a cell holds and nothing beside it, or None."""
+    kids = [k for k in cell if isinstance(k.tag, str)]
+    if len(kids) != 1 or _local_tag(kids[0].tag) not in (
+        {"p", "div", "blockquote"} | _HEADING_TAGS
+    ):
+        return None
+    if (cell.text or "").strip() or (kids[0].tail or "").strip():
+        return None
+    return kids[0]
+
+
+def _cell_block_style(cell, css, block_style=None, style_resolver=None):
+    """A cell's, or a cell paragraph's, block style with its alignment: the
+    book's, else left, or right under a right-to-left `dir`, as Kindle
+    Previewer 4.0.3 writes every cell (#479). A header cell is left unset,
+    so it stays centred."""
+    if block_style is None:
+        block_style = compute_block_style(css) if css is not None else None
+    if _local_tag(cell.tag) == "th" or (block_style or {}).get("align"):
+        return block_style
+    inner = _only_block_child(cell)
+    if inner is not None and style_resolver is not None:
+        # `<td><p style="text-align: right">`: the paragraph's own, as
+        # Previewer writes it (QA on #532).
+        own = compute_block_style(style_resolver(inner) or {})["align"]
+        if own:
+            return {**(block_style or compute_block_style({})), "align": own}
+    rtl = next(
+        (a.get("dir") for a in (cell, *cell.iterancestors()) if a.get("dir")), ""
+    )
+    return {
+        **(block_style or compute_block_style({})),
+        "align": "right" if rtl.lower() == "rtl" else "left",
+    }
+
+
 def _table_cell(cell, style_resolver, base_href):
     text, spans, marks = normalize_runs_with_anchors(
         _walk_inline(cell, style_resolver=style_resolver, base_href=base_href)
@@ -2837,7 +2874,7 @@ def _table_cell(cell, style_resolver, base_href):
         "spans": spans,
         "anchor_ids": ids,
         "anchor_offsets": {aid: marks.get(aid, 0) for aid in ids},
-        "block_style": compute_block_style(css) if css is not None else None,
+        "block_style": _cell_block_style(cell, css, style_resolver=style_resolver),
         "header": _local_tag(cell.tag) == "th",
         # A heading written in a cell: the section's opening, as a heading
         # outside a table is (#492).
@@ -2859,7 +2896,11 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
     `walk_cell` walks the cell as the body is walked, so its headings, list
     items, loose text and anchors become the same blocks they would outside
     a table. Returns None when that leaves no text."""
-    paragraphs = [p for p in walk_cell(cell) if p.get("text")]
+    paragraphs = [
+        {**p, "block_style": _cell_block_style(cell, None, p.get("block_style"))}
+        for p in walk_cell(cell)
+        if p.get("text")
+    ]
     if not paragraphs:
         return None
     css = style_resolver(cell) if style_resolver is not None else None
@@ -2868,7 +2909,7 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
         "spans": [],
         "anchor_ids": [],
         "anchor_offsets": {},
-        "block_style": compute_block_style(css) if css is not None else None,
+        "block_style": _cell_block_style(cell, css),
         "header": _local_tag(cell.tag) == "th",
         "colspan": _span_attr(cell, "colspan"),
         "rowspan": _span_attr(cell, "rowspan"),

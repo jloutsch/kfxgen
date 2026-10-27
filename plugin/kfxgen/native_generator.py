@@ -3742,14 +3742,7 @@ class NativeKFXGenerator:
         if cover_resource_name:
             all_entity_names.append(cover_resource_name)
             all_entity_names.append(cover_location_name)
-        cover_listed = False
         for resource_name, location_name in image_resources.values():
-            if resource_name == cover_resource_name:
-                # Its aliases in the text name the same pair: listed once, as
-                # before they existed (#475).
-                if cover_listed:
-                    continue
-                cover_listed = True
             all_entity_names.append(resource_name)
             all_entity_names.append(location_name)
         # Embedded fonts (#15): register the $418 raw-font locations so the
@@ -3758,7 +3751,11 @@ class NativeKFXGenerator:
         # so it is not listed here by name — only its $418 location is.
         for face in self.font_table.faces:
             all_entity_names.append(face.location)
-        self.fragments.append(self.build_fragment_419(container_id, all_entity_names))
+        # Each once, as Kindle Previewer writes it: the cover and a shared
+        # style were listed again where the text used them (#520).
+        self.fragments.append(
+            self.build_fragment_419(container_id, list(dict.fromkeys(all_entity_names)))
+        )
 
         # 15. Build $270 container info fragment (REQUIRED)
         self.fragments.append(self.build_fragment_270(container_id))
@@ -4125,7 +4122,12 @@ class NativeKFXGenerator:
             mine = [k for k in anchor_keys or () if base <= offsets.get(k, 0) <= end]
             if mine:
                 chunk["anchor_keys"] = mine
-                chunk["anchor_offsets"] = {k: offsets.get(k, 0) - base for k in mine}
+                # One after the last word lands on the last character, as
+                # Kindle Previewer writes it, not one past the text (#487).
+                last = max(len(chunk_text) - 1, 0)
+                chunk["anchor_offsets"] = {
+                    k: min(offsets.get(k, 0) - base, last) for k in mine
+                }
             all_chunks.append(chunk)
             return set(mine)
 
