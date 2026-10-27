@@ -360,3 +360,55 @@ def test_a_second_entry_on_the_same_spot_lands_with_its_twin(toc, subs):
     chapters = _conv._assemble_chapters_by_coordinate(spine, toc, NullLog())
     assert [c["title"] for c in chapters] == ["Chapter One"]
     assert [(s["title"], s["key"]) for s in chapters[0]["sub_entries"]] == subs
+
+
+@pytest.mark.unit
+def test_an_entry_out_of_document_order_is_kept_where_the_book_lists_it():
+    # #484: it was dropped as "out of document order". It is now a place, in
+    # the book's TOC order, landing on its own block; sections still follow
+    # the document.
+    spine = [
+        _spine_item("ch1.xhtml", CH1, True),
+        _spine_item("ch2.xhtml", CH2, True),
+    ]
+    toc = [
+        {"title": "Chapter Two", "href": "ch2.xhtml", "level": 0},
+        {"title": "Chapter One", "href": "ch1.xhtml", "level": 0},
+    ]
+    chapters = _conv._assemble_chapters_by_coordinate(spine, toc, NullLog())
+    head, two = chapters
+    assert head.get("_omit_from_toc") is True
+    assert two["title"] == "Chapter Two"
+    assert [(s["title"], s["key"]) for s in two["sub_entries"]] == [
+        ("Chapter One", "ch1.xhtml")
+    ]
+
+
+@pytest.mark.unit
+def test_a_last_entry_out_of_order_does_not_repeat_the_files_after_it():
+    # #484 review: the book's last TOC entry pointing back to the first file
+    # printed every later file a second time, as pages the TOC never listed
+    # (one library book's text doubled).
+    spine = [
+        _spine_item("ch1.xhtml", CH1, True),
+        _spine_item("ch2.xhtml", CH2, True),
+        _spine_item(
+            "ch3.xhtml", '<h1 id="c3">Chapter Three</h1><p>Para three.</p>', True
+        ),
+    ]
+    for item in spine:
+        item["text"] = "\n\n".join(b["text"] for b in item["blocks"])
+    toc = [
+        {"title": "Chapter One", "href": "ch1.xhtml", "level": 0},
+        {"title": "Chapter Two", "href": "ch2.xhtml", "level": 0},
+        {"title": "Chapter Three", "href": "ch3.xhtml", "level": 0},
+        {"title": "Back to A", "href": "ch1.xhtml#s1", "level": 0},
+    ]
+    chapters = _conv._assemble_chapters_by_coordinate(spine, toc, NullLog())
+    texts = [b["text"] for c in chapters for b in c["blocks"]]
+    assert texts == [b["text"] for s in spine for b in s["blocks"]]
+    assert [c["title"] for c in chapters] == [
+        "Chapter One",
+        "Chapter Two",
+        "Chapter Three",
+    ]
