@@ -1012,6 +1012,70 @@ def _picture_link(at, spans):
     return None
 
 
+#: The heading navigation's unit for each heading level (#461).
+_HEADING_LEVEL_UNITS = {
+    1: "$799",
+    2: "$800",
+    3: "$801",
+    4: "$802",
+    5: "$803",
+    6: "$804",
+}
+
+
+def _book_headings(ch_data):
+    """[(position, level)] of the book's headings in reading order: its own,
+    with their levels, and kfxgen's printed labels at level 1 (#461)."""
+    out = []
+    for idx, chunk in enumerate(ch_data["all_chunks"]):
+        level = chunk.get("heading_level")
+        if not level and idx in ch_data["heading_chunk_indices"]:
+            level = 1
+        position = ch_data["chunk_positions"][idx]
+        if level and position is not None:
+            out.append((position, level))
+    return out
+
+
+def _heading_levels(headings):
+    """$798's units: one per level present, at its first heading, holding a
+    child per heading, as Kindle Previewer 4.0.3 writes them (#461)."""
+    units = []
+    for level in sorted({lv for _p, lv in headings}):
+        positions = [p for p, lv in headings if lv == level]
+
+        def target(position):
+            return IonStruct(IS("$155"), position, IS("$143"), 0)
+
+        units.append(
+            IonAnnotation(
+                [IS("$393")],
+                IonStruct(
+                    IS("$238"),
+                    IS(_HEADING_LEVEL_UNITS[level]),
+                    IS("$241"),
+                    IonStruct(IS("$244"), "heading-nav-unit"),
+                    IS("$246"),
+                    target(positions[0]),
+                    IS("$247"),
+                    [
+                        IonAnnotation(
+                            [IS("$393")],
+                            IonStruct(
+                                IS("$241"),
+                                IonStruct(IS("$244"), "heading-nav-unit"),
+                                IS("$246"),
+                                target(p),
+                            ),
+                        )
+                        for p in positions
+                    ],
+                ),
+            )
+        )
+    return units
+
+
 def _with_anchors(block, source):
     """`block` also holding `source`'s anchors, at its start."""
     keys = list(source.get("anchor_keys") or [])
@@ -1896,7 +1960,7 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS("$348"), ftype=IS("$538"), value=value)
 
-    def build_fragment_389_toc(self, toc_entries, cover_position=None):
+    def build_fragment_389_toc(self, toc_entries, cover_position=None, headings=None):
         """
         Builds Fragment $389 (Navigation) with TOC and landmarks.
 
@@ -1925,8 +1989,22 @@ class NativeKFXGenerator:
         self.symtab.create_local_symbol(toc_name)
         self.symtab.create_local_symbol(landmarks_name)
 
-        # Build $798 heading nav container (required by Kindle for navigation)
-        # Contains heading-based navigation mirroring the TOC structure
+        # Build $798 heading nav container (required by Kindle for navigation).
+        # From the book's headings, a unit per level at its first heading
+        # holding one child per heading, as Kindle Previewer 4.0.3 builds it
+        # (#461); from the TOC only for a book with no headings.
+        if headings:
+            heading_container = IonAnnotation(
+                [IS("$391")],
+                IonStruct(
+                    IS("$235"),
+                    IS("$798"),
+                    IS("$239"),
+                    IS(heading_name),
+                    IS("$247"),
+                    _heading_levels(headings),
+                ),
+            )
         heading_units = []
         for entry in toc_entries:
             position = entry["position"]
@@ -1959,17 +2037,18 @@ class NativeKFXGenerator:
             ),
         )
 
-        heading_container = IonAnnotation(
-            [IS("$391")],
-            IonStruct(
-                IS("$235"),
-                IS("$798"),
-                IS("$239"),
-                IS(heading_name),
-                IS("$247"),
-                [heading_top],
-            ),
-        )
+        if not headings:
+            heading_container = IonAnnotation(
+                [IS("$391")],
+                IonStruct(
+                    IS("$235"),
+                    IS("$798"),
+                    IS("$239"),
+                    IS(heading_name),
+                    IS("$247"),
+                    [heading_top],
+                ),
+            )
 
         # Build TOC nav_units, each annotated with $393. An entry's children
         # go in its own $247, as Kindle Previewer 4 nests them (#313).
@@ -3617,7 +3696,11 @@ class NativeKFXGenerator:
         # The synthetic cover chapter is always first when present (#32).
         cover_position = section_positions[0] if chapters[0].get("_is_cover") else None
         self.fragments.append(
-            self.build_fragment_389_toc(nav_entries, cover_position=cover_position)
+            self.build_fragment_389_toc(
+                nav_entries,
+                cover_position=cover_position,
+                headings=_book_headings(ch_data),
+            )
         )
 
         # 7. Build Fragment $258 (Reading Order Metadata)
@@ -4171,6 +4254,15 @@ class NativeKFXGenerator:
                 first.setdefault("anchor_offsets", {}).update(
                     dict.fromkeys(block_anchor_keys, 0)
                 )
+            level = block.get("heading_level")
+            if level:
+                # A book heading, for the heading navigation (#461).
+                first_text = next(
+                    (c for c in all_chunks[block_first_chunk:] if c["type"] == "text"),
+                    None,
+                )
+                if first_text is not None:
+                    first_text["heading_level"] = level
             if space is not None and len(all_chunks) > block_first_chunk:
                 # On the first piece only: the pieces after a picture
                 # continue the paragraph.
@@ -4619,6 +4711,11 @@ class NativeKFXGenerator:
                                             for k in TYPOGRAPHY_KEYS
                                             if bs.get(k) is not None
                                         }
+                                        # And its level (#461).
+                                        if first.get("heading_level"):
+                                            heading_chunk["heading_level"] = first[
+                                                "heading_level"
+                                            ]
                             else:
                                 # Publishers routinely split the opener across
                                 # elements — the numeral in one, the title in
@@ -5881,6 +5978,7 @@ class NativeKFXGenerator:
             "outer_positions": outer_positions,
             "chapter_chunk_ranges": chapter_chunk_ranges,
             "all_chunks": all_chunks,
+            "heading_chunk_indices": heading_chunk_indices,
             "anchor_names": anchor_names,
             "extra_style_names": extra_style_names,
         }

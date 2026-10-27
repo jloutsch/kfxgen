@@ -4357,6 +4357,12 @@ def extract_blocks_from_html(
                         # A chapter with no TOC entry takes its title from
                         # its file's first heading (#304).
                         "heading": _local_tag(elem.tag) in _HEADING_TAGS,
+                        # Its level, for the heading navigation (#461).
+                        **(
+                            {"heading_level": int(_local_tag(elem.tag)[1])}
+                            if _local_tag(elem.tag) in _HEADING_TAGS
+                            else {}
+                        ),
                         # A table row written as a paragraph (#219).
                         "row": _local_tag(elem.tag) == "tr",
                         # Its text as a producer writes it into a TOC label:
