@@ -41,10 +41,10 @@ _log = logging.getLogger(__name__)
 #: A token size hint: axis, number, unit (bare = px).
 _SIZE_HINT_RE = re.compile(r"^([wh])=(\d+(?:\.\d+)?)(%|px|em|pt)?$")
 _CSS_PX_PER_UNIT = {"px": 1.0, "em": 16.0, "pt": 4.0 / 3.0}
-#: Text column width Amazon sizes against, in CSS pixels. Recovered by
-#: dividing each sub-100% width it emits by the image's pixel width: every
-#: one resolves to this, across seven books. (#145)
-_IMAGE_COLUMN_PX = 496.0
+#: Text column width Amazon sizes against, in CSS pixels: 512 in Kindle
+#: Previewer 4.0.3 (#467, probed 1 to 400 px). It was 496, recovered from
+#: Previewer 3.106's output across seven books (#145).
+_IMAGE_COLUMN_PX = 512.0
 
 
 def _size_in_box(hint, box):
@@ -3419,7 +3419,7 @@ class NativeKFXGenerator:
             # let the content decide the order, never the iteration.
             valid = []
             for href, data in sorted(images.items()):
-                if not data or len(data) <= 100:
+                if not data:
                     continue
                 if cover_resource_name and data == cover_image:
                     # The cover's picture used in the text: shown there from
@@ -5182,8 +5182,8 @@ class NativeKFXGenerator:
         def _image_width_pct(w):
             """CSS width for an image `w` pixels wide, as Amazon computes it.
 
-            `min(100, px / 496 * 100)`, which reproduces 1,411 of the 1,422
-            percent widths in decoded Previewer output. An image at least as
+            `min(100, px / 512 * 100)`, as Kindle Previewer 4.0.3 writes it
+            (#467; 496 in Previewer 3.106, #145). An image at least as
             wide as the column fills it; a narrower one keeps its natural
             proportion instead of being stretched.
             """

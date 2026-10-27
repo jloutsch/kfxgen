@@ -6553,7 +6553,7 @@ def extract_images_from_oeb(oeb_book, log, display_dims=None, own_size=()):
                 if own and display_dims is not None:
                     display_dims[href] = own
                 continue
-            if not isinstance(data, (bytes, bytearray)) or len(data) <= 100:
+            if not isinstance(data, (bytes, bytearray)) or not data:
                 continue
             if not href:
                 continue
