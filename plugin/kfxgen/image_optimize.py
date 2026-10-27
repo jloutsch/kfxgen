@@ -201,16 +201,33 @@ def optimize_image(
         if log:
             log.warn(f"  image optimize failed ({e}); keeping original")
         return data
-    # Scaled, a palette PNG comes back RGB, several times its bytes (#557).
-    # One with a transparent colour comes back RGBA, which quantizing would
-    # make opaque.
-    if out and is_png and data[25:26] == b"\x03" and out[25:26] == b"\x02":
-        out = min(out, _as_palette(out) or out, key=len)
+    # Scaled, a PNG comes back RGB, several times its bytes when it was a
+    # palette (#557). The smallest of it, a palette again for a palette
+    # source, and a JPEG, as Previewer writes it, is kept. A copy with an
+    # alpha channel or a transparent colour stays as it is: quantizing made
+    # its transparent pixels opaque, and a JPEG has no transparency.
+    if out and is_png and out[25:26] in (b"\x00", b"\x02") and b"tRNS" not in out:
+        rgb = out
+        if data[25:26] == b"\x03":
+            out = min(out, _as_palette(rgb) or out, key=len)
+        out = min(out, _as_jpeg(rgb, jpeg_quality) or out, key=len)
     # Over the cap, the scaled one even if it grew: Previewer caps every
     # picture at 1920 px (#467). Re-encoded for its bytes alone, never larger.
     if not out or (len(out) >= len(data) and not over_dim):
         return data
     return out
+
+
+def _as_jpeg(png, quality):
+    """`png` as a JPEG at `quality`, or None."""
+    try:
+        from calibre.utils.img import image_from_data, image_to_data
+
+        return image_to_data(
+            image_from_data(png), fmt="JPEG", compression_quality=quality
+        )
+    except Exception:  # noqa: BLE001 - the PNG still shows
+        return None
 
 
 def _as_palette(png):

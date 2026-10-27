@@ -148,14 +148,23 @@ def test_a_picture_over_the_cap_is_scaled_even_if_it_grows(monkeypatch):
     assert io.optimize_image(big, max_dim=1920, log=_Log()) == b"Z" * 100000
 
 
-def _fake_img(monkeypatch, scaled, quantized, calls):
-    """calibre.utils.img with `scale_image` giving `scaled` and a re-quantize
-    giving `quantized`; `calls` records each quantize's arguments."""
+def _fake_img(monkeypatch, scaled, quantized, calls, jpeg=None, jpegs=None):
+    """calibre.utils.img with `scale_image` giving `scaled`, a re-quantize
+    giving `quantized` and a JPEG encode giving `jpeg`; `calls` records each
+    quantize's arguments and `jpegs` each JPEG encode's."""
     fake = types.ModuleType("calibre.utils.img")
     fake.scale_image = lambda *a, **k: (1920, 1407, scaled)
     fake.image_from_data = lambda data: ("image", data)
     fake.quantize_image = lambda img, **k: calls.append((img, k)) or "quantized"
-    fake.image_to_data = lambda img, **k: quantized if img == "quantized" else None
+
+    def image_to_data(img, **k):
+        if k.get("fmt") == "JPEG":
+            if jpegs is not None:
+                jpegs.append((img, k))
+            return jpeg
+        return quantized if img == "quantized" else None
+
+    fake.image_to_data = image_to_data
     monkeypatch.setitem(sys.modules, "calibre", types.ModuleType("calibre"))
     monkeypatch.setitem(sys.modules, "calibre.utils", types.ModuleType("calibre.utils"))
     monkeypatch.setitem(sys.modules, "calibre.utils.img", fake)
@@ -337,3 +346,45 @@ def test_reencode_larger_than_original_is_discarded(monkeypatch):
     monkeypatch.setitem(sys.modules, "calibre.utils.img", fake)
     heavy = _jpeg(1161, 1800) + b"\x00" * 2_000_000
     assert io.optimize_image(heavy, max_dim=2048, max_bytes=1_000_000) == heavy
+
+
+@pytest.mark.unit
+def test_a_scaled_rgb_png_becomes_a_jpeg_when_smaller(monkeypatch):
+    """Scaled, an RGB PNG grew from 89 KB to 270 KB in QA's sample (#557).
+    Kindle Previewer 4.0.3 writes such a picture as a JPEG; kfxgen keeps the
+    smaller of the two, at the conversion's JPEG quality."""
+    jpegs = []
+    _fake_img(monkeypatch, SCALED_RGB, None, [], jpeg=b"J" * 300, jpegs=jpegs)
+    out = io.optimize_image(_png(2000, 1466), max_dim=1920, jpeg_quality=80, log=_Log())
+    assert out == b"J" * 300
+    assert jpegs == [
+        (("image", SCALED_RGB), {"fmt": "JPEG", "compression_quality": 80})
+    ]
+
+
+@pytest.mark.unit
+def test_a_png_stays_a_png_when_the_jpeg_is_larger(monkeypatch):
+    _fake_img(monkeypatch, SCALED_RGB, None, [], jpeg=b"J" * 5000)
+    assert io.optimize_image(_png(2000, 1466), max_dim=1920, log=_Log()) == SCALED_RGB
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "scaled",
+    [SCALED_RGBA, SCALED_RGB[:-1000] + b"tRNS" + b"R" * 996],
+    ids=["alpha", "transparent-colour"],
+)
+def test_a_png_with_transparency_never_becomes_a_jpeg(monkeypatch, scaled):
+    """A JPEG has no transparency: its transparent pixels would print as a
+    solid colour (QA, ahead of #557's RGB half)."""
+    jpegs = []
+    _fake_img(monkeypatch, scaled, None, [], jpeg=b"J" * 300, jpegs=jpegs)
+    assert io.optimize_image(_png(2000, 1466), max_dim=1920, log=_Log()) == scaled
+    assert jpegs == []
+
+
+@pytest.mark.unit
+def test_a_palette_png_keeps_the_smallest_of_three(monkeypatch):
+    _fake_img(monkeypatch, SCALED_RGB, b"Q" * 600, [], jpeg=b"J" * 400)
+    out = io.optimize_image(_palette_png(2000, 1466), max_dim=1920, log=_Log())
+    assert out == b"J" * 400
