@@ -747,6 +747,15 @@ def _parse_font_family(value):
     return out
 
 
+def _line_height_factor(value):
+    """A resolved line-height factor, or None."""
+    try:
+        factor = float(value)
+    except (TypeError, ValueError):
+        return None
+    return factor if factor > 0 else None
+
+
 def compute_block_style(css):
     """Map a computed-CSS dict to kfxgen's block_style shape.
 
@@ -770,6 +779,9 @@ def compute_block_style(css):
         "margin_left": margin_left,
         "margin_right": margin_right,
         "font_family": _parse_font_family(css.get("font-family")),
+        # Its line height as a factor of its own font size (#463), when the
+        # resolver gives one.
+        "line_height": _line_height_factor(css.get("line-height")),
         # Block-level emphasis: a paragraph made bold/italic via CSS
         # (e.g. `p.lead { font-weight: bold }`) rather than an inline tag.
         # Used to select the embedded bold/italic face for the whole block.

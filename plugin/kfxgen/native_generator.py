@@ -2494,14 +2494,16 @@ class NativeKFXGenerator:
             if space_above:
                 value[IS("$47")] = IonStruct(
                     IS("$307"),
-                    IonDecimal(f"{space_above / _LINE_EM:.6g}"),
+                    IonDecimal(f"{space_above / _LINE_EM / line_height:.6g}"),
                     IS("$306"),
                     IS("$310"),
                 )
         elif not is_heading and text_indent is None:
+            # margin-top: a line of the main text, in this paragraph's own
+            # line heights, as Previewer measures it (#463).
             value[IS("$47")] = IonStruct(
-                IS("$307"), IonDecimal("1"), IS("$306"), IS("$310")
-            )  # margin-top: 1lh
+                IS("$307"), IonDecimal(f"{1 / line_height:.6g}"), IS("$306"), IS("$310")
+            )
 
         # Only set font-size when non-default — lets Kindle use its default for normal text
         # Reference KFX files omit font-size on most styles and only set it for headings/small text
@@ -5285,6 +5287,24 @@ class NativeKFXGenerator:
             text_px.update(_chars_by_px(chunk))
         main_px = _most(text_px)
 
+        # The book's main line height, as a factor of each paragraph's own
+        # font size: the one most of its text has. A paragraph's $42 is
+        # written against it, so the main text is 1lh, as Kindle Previewer
+        # writes it (#463).
+        line_counts = collections.Counter()
+        for chunk in all_chunks:
+            factor = (chunk.get("block_style") or {}).get("line_height")
+            if chunk.get("type") == "text" and factor:
+                line_counts[factor] += len(chunk.get("text") or "")
+        main_line = _most(line_counts)
+
+        def _line_ratio(chunk):
+            factor = (chunk.get("block_style") or {}).get("line_height")
+            if not factor or not main_line:
+                return 1.0
+            # Previewer writes none below 0.6 (probed to 0.5).
+            return float(f"{max(factor / main_line, 0.6):.6g}")
+
         def _rem(px):
             # A CSS px size as `$16` says it: against the main text size.
             if not px or not main_px:
@@ -5617,6 +5637,8 @@ class NativeKFXGenerator:
                 else:
                     bs = chunk.get("block_style") or {}
                     attrs = {"font_size": _block_font_size(ch_idx, chunk)}
+                    if _line_ratio(chunk) != 1.0:
+                        attrs["line_height"] = _line_ratio(chunk)
                     if bs.get("align"):
                         attrs["align"] = bs["align"]
                     if bs.get("indent"):

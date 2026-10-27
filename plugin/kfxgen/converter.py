@@ -215,6 +215,37 @@ def _font_size_px(stylizer, elem, cache):
     return size
 
 
+def _line_height_factor(stylizer, elem, cache):
+    """`elem`'s line height as a factor of its own font size, from the
+    nearest element declaring one: a unitless value is inherited as that
+    factor, a length or a % as the length it comes to where it is declared;
+    normal, or none set, is 1.2 (#463). calibre raises one below 1.2 to 1.2
+    before kfxgen sees it (its minimum line height)."""
+    own = _font_size_px(stylizer, elem, cache)
+    for a in (elem, *elem.iterancestors()):
+        if not isinstance(a.tag, str):
+            continue
+        value = str(stylizer.style(a).get("line-height") or "").strip().lower()
+        if not value or value == "inherit":
+            continue
+        if value == "normal":
+            return 1.2
+        try:
+            return round(float(value), 4)
+        except ValueError:
+            pass
+        m = _FONT_SIZE_RE.match(value.replace(" ", ""))
+        if not m or not own:
+            return None
+        px = _css_size_px(
+            value,
+            _font_size_px(stylizer, a, cache),
+            lambda a=a: _root_size_px(stylizer, a, cache),
+        )
+        return round(px / own, 4)
+    return 1.2
+
+
 def _root_size_px(stylizer, elem, cache):
     """The root element's font size in CSS px, which `rem` is measured by."""
     root = elem.getroottree().getroot()
@@ -375,6 +406,8 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # A number, in CSS px; the generator measures it
                     # against the book's main text size (#241).
                     "font-size": round(_font_size_px(stylizer, elem, sizes), 3),
+                    # A factor of its own font size, for $42 (#463).
+                    "line-height": _line_height_factor(stylizer, elem, sizes),
                     # A drop cap: the paragraph's `::first-letter`, and a
                     # floated span's float (#240). Declared: neither
                     # inherits. Only a <p> is read for an initial, and
