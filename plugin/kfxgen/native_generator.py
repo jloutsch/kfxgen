@@ -4619,6 +4619,8 @@ class NativeKFXGenerator:
                                             for k in TYPOGRAPHY_KEYS
                                             if bs.get(k) is not None
                                         }
+                                        # And the rest of its style (#490).
+                                        heading_chunk["book_style"] = bs
                             else:
                                 # Publishers routinely split the opener across
                                 # elements — the numeral in one, the title in
@@ -4628,9 +4630,21 @@ class NativeKFXGenerator:
                                 # rendered twice. (#64)
                                 # A native table among them counts one block
                                 # per row, as the rows build saw it. (#219)
+                                first_style = (
+                                    (iter_blocks[0].get("block_style") or {})
+                                    if iter_blocks
+                                    else {}
+                                )
+                                before = len(iter_blocks)
                                 iter_blocks, eaten_keys = _eat_split_title(
                                     iter_blocks, title
                                 )
+                                if (
+                                    heading_chunk is not None
+                                    and len(iter_blocks) < before
+                                ):
+                                    # The book's heading prints: its style (#490).
+                                    heading_chunk["book_style"] = first_style
                                 carried_anchor_keys.extend(eaten_keys)
                         para_iter = iter_blocks
                     else:
@@ -5586,11 +5600,34 @@ class NativeKFXGenerator:
                     # The book's heading's small caps, transform, spacing
                     # and colour go on kfxgen's (#239).
                     typo = chunk.get("typography")
-                    entry_styles.append(
-                        _allocate_style("_h", **heading_attrs[ch_idx], **typo)
-                        if typo
-                        else heading_style_names[ch_idx]
-                    )
+                    book = chunk.get("book_style")
+                    if book:
+                        # The book's own heading prints: its weight, size,
+                        # alignment and side margins, as Kindle Previewer
+                        # prints it, over kfxgen's spacing (#490).
+                        attrs = {
+                            **heading_attrs[ch_idx],
+                            "bold": bool(book.get("bold")),
+                            "font_size": _rem(book.get("font_size")),
+                        }
+                        for key in ("align", "margin_left", "margin_right"):
+                            if book.get(key):
+                                attrs[key] = book[key]
+                        if not book.get("align"):
+                            # None set: none written, as Previewer writes it,
+                            # not kfxgen's justified body default.
+                            attrs["no_align"] = True
+                        if book.get("italic"):
+                            attrs["italic"] = True
+                        entry_styles.append(
+                            _allocate_style("_h", **attrs, **(typo or {}))
+                        )
+                    else:
+                        entry_styles.append(
+                            _allocate_style("_h", **heading_attrs[ch_idx], **typo)
+                            if typo
+                            else heading_style_names[ch_idx]
+                        )
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)
