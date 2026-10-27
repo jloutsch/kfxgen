@@ -2943,9 +2943,10 @@ def test_close_markers_take_no_position_and_opens_take_one():
 
 @pytest.mark.unit
 def test_empty_cell_is_still_a_cell():
+    """With nothing in it, as Kindle Previewer writes it (#480)."""
     ch = _content([_table_block([["a", "", "c"]])])
     cells = [c for c in ch["all_chunks"] if "cell" in c]
-    assert [c["text"] for c in cells] == ["a", " ", "c"]
+    assert [c.get("text", c["type"]) for c in cells] == ["a", "open", "c"]
 
 
 @pytest.mark.unit
