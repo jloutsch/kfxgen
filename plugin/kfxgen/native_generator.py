@@ -2672,6 +2672,7 @@ class NativeKFXGenerator:
         text_transform=None,
         letter_spacing=None,
         colour=None,
+        background=None,
     ):
         """$157 for a table cell: Previewer's padding, plus the cell's own
         alignment, header weight and spans (#219), its vertical alignment
@@ -2718,6 +2719,9 @@ class NativeKFXGenerator:
         if border_box:
             # A cell that sets its own width, as Previewer writes it (#264).
             value[IS("$546")] = IS("$377")
+        if background is not None:
+            # Its fill, as Previewer writes it on the cell (#502).
+            value[IS("$70")] = background
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_fragment_157_image(
@@ -4353,6 +4357,7 @@ class NativeKFXGenerator:
                         "border": cell.get("border"),
                         "width_set": cell.get("width_set"),
                         "padding": cell.get("padding"),
+                        "background": cell.get("background"),
                         "table_width": tbl.get("width"),
                     }
                     if cell.get("paragraphs"):
@@ -4429,6 +4434,7 @@ class NativeKFXGenerator:
                                 "border": cell.get("border"),
                                 "width_set": cell.get("width_set"),
                                 "padding": cell.get("padding"),
+                                "background": cell.get("background"),
                                 "table_width": tbl.get("width"),
                             },
                         }
@@ -5029,7 +5035,11 @@ class NativeKFXGenerator:
         open_fills = []
 
         def _allocate_style(kind, builder=None, **attrs):
-            if attrs.get("colour") is not None and not any(open_fills):
+            if (
+                attrs.get("colour") is not None
+                and not any(open_fills)
+                and attrs.get("background") is None
+            ):
                 # Text written on the page is measured against it: a colour
                 # already readable there is unchanged (#383).
                 attrs["colour"] = _on_page(attrs["colour"])
@@ -5411,6 +5421,7 @@ class NativeKFXGenerator:
                 "border_box": bool(cell.get("width_set")),
                 "padding": _border_key(cell.get("padding")),
                 "table_width": cell.get("table_width") if cell.get("padding") else None,
+                "background": cell.get("background"),
                 **_typography(bs),
             }
             if cell_fam:
@@ -5437,7 +5448,9 @@ class NativeKFXGenerator:
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
                 if chunk.get("type") == "open":
-                    open_fills.append((chunk.get("box") or {}).get("background"))
+                    open_fills.append(
+                        (chunk.get("box") or chunk.get("cell") or {}).get("background")
+                    )
                 elif chunk.get("type") == "close" and open_fills:
                     open_fills.pop()
                 if chunk.get("type") in ("open", "close"):

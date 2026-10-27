@@ -357,7 +357,8 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
             if elem in fills:
                 return fills[elem]
             fill = None
-            if _local_tag(elem.tag) in _BOX_TAGS:
+            # A table cell draws its fill too (#502).
+            if _local_tag(elem.tag) in _BOX_TAGS | _CELL_TAGS:
                 fill = _box_background(stylizer.style(elem))
             if fill is None:
                 parent = elem.getparent()
@@ -2794,6 +2795,8 @@ def _table_cell(cell, style_resolver, base_href):
         "colspan": _span_attr(cell, "colspan"),
         "rowspan": _span_attr(cell, "rowspan"),
         "valign": _cell_valign(cell, style_resolver),
+        # Its fill, as Kindle Previewer writes it on the cell (#502).
+        "background": _box_background(css),
     }
 
 
@@ -2817,6 +2820,7 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
         "colspan": _span_attr(cell, "colspan"),
         "rowspan": _span_attr(cell, "rowspan"),
         "valign": _cell_valign(cell, style_resolver),
+        "background": _box_background(css),
         "paragraphs": paragraphs,
     }
 
