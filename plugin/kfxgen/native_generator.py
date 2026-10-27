@@ -4093,7 +4093,12 @@ class NativeKFXGenerator:
             mine = [k for k in anchor_keys or () if base <= offsets.get(k, 0) <= end]
             if mine:
                 chunk["anchor_keys"] = mine
-                chunk["anchor_offsets"] = {k: offsets.get(k, 0) - base for k in mine}
+                # One after the last word lands on the last character, as
+                # Kindle Previewer writes it, not one past the text (#487).
+                last = max(len(chunk_text) - 1, 0)
+                chunk["anchor_offsets"] = {
+                    k: min(offsets.get(k, 0) - base, last) for k in mine
+                }
             all_chunks.append(chunk)
             return set(mine)
 

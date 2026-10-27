@@ -5596,8 +5596,9 @@ def test_an_anchor_past_2000_characters_keeps_its_offset(tmp_path):
 @pytest.mark.unit
 def test_an_anchor_at_a_long_paragraphs_end_stays_at_the_end(tmp_path):
     """An id clamped to the paragraph's very end has no character after it.
-    It belongs at the end of the one entry, not at its start, which would
-    land a link 2,000 or more characters early."""
+    It belongs at the end of the one entry, on its last character as Kindle
+    Previewer places it (#487), not at its start, which would land a link
+    2,000 or more characters early."""
     text = (_WORDS * 40).strip()
     gen = NativeKFXGenerator()
     gen.generate_full_book(
@@ -5607,7 +5608,7 @@ def test_an_anchor_at_a_long_paragraphs_end_stays_at_the_end(tmp_path):
         output_path=str(tmp_path / "o.kfx"),
     )
     offsets = {off for _pos, off in dict(_anchor_named_by_return_link(gen)).values()}
-    assert len(text) in offsets
+    assert len(text) - 1 in offsets
 
 
 # ── #227: a location every 110 positions, so progress follows the text ──────
