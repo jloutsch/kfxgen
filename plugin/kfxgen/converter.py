@@ -6392,7 +6392,13 @@ def _with_ncx_empty_labels(oeb_book, entries):
 
     def walk(node, depth):
         for point in node.xpath("./*[local-name()='navPoint']"):
-            label = "".join(point.xpath("./*[local-name()='navLabel']//text()"))
+            # The label's own text: not the line breaks around its <text>
+            # in a pretty-printed NCX (QA on #459).
+            label = "".join(
+                point.xpath(
+                    "./*[local-name()='navLabel']/*[local-name()='text']//text()"
+                )
+            )
             src = (point.xpath("./*[local-name()='content']/@src") or [""])[0]
             points.append((label, src, depth))
             walk(point, depth + 1)

@@ -138,3 +138,27 @@ def test_at_the_top_level_only_a_label_with_no_text_at_all_is_dropped(
         [_Node("One", "c1.xhtml")],
     )
     assert _entries(book) == [("One", "c1.xhtml", 0), *kept]
+
+
+def test_a_pretty_printed_ncxs_empty_label_is_empty(tmp_path):
+    """The spaces and line breaks around `<text>` are no part of the label
+    (QA on #459: 2 of the library's 4 such entries are written so)."""
+    (tmp_path / "content.opf").write_text(
+        '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" '
+        'version="2.0"><manifest><item id="ncx" href="toc.ncx" '
+        'media-type="application/x-dtbncx+xml"/></manifest></package>'
+    )
+    (tmp_path / "toc.ncx").write_text(
+        '<?xml version="1.0"?>\n<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">\n'
+        "  <navMap>\n    <navPoint>\n      <navLabel>\n        <text>One</text>\n"
+        '      </navLabel>\n      <content src="c1.xhtml"/>\n      <navPoint>\n'
+        "        <navLabel>\n          <text></text>\n        </navLabel>\n"
+        '        <content src="c1.xhtml#mid"/>\n      </navPoint>\n    </navPoint>\n'
+        "    <navPoint>\n      <navLabel>\n        <text></text>\n      </navLabel>\n"
+        '      <content src="c2.xhtml"/>\n    </navPoint>\n  </navMap>\n</ncx>\n'
+    )
+    book = SimpleNamespace(
+        toc=[_Node("One", "c1.xhtml")],
+        container=SimpleNamespace(rootdir=str(tmp_path), opfname="content.opf"),
+    )
+    assert _entries(book) == [("One", "c1.xhtml", 0), ("", "c1.xhtml#mid", 1)]
