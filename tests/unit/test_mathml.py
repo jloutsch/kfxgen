@@ -441,8 +441,8 @@ def test_a_heading_with_maths_prints_once_under_any_label_for_it(
 
 
 def test_a_maths_heading_split_over_two_blocks_prints_once(tmp_path):
-    """The heading prints once, on its two lines as on Kindle Previewer's
-    page, keeping its runs (#404, #409)."""
+    """The heading prints once, each block its own entry as on Kindle
+    Previewer's page, keeping its runs (#404, #552)."""
     blocks = _blocks(
         f"<h1>The <math {M}><mfrac><mi>a</mi><mi>b</mi></mfrac></math></h1>"
         "<h1>rule</h1><p>Body.</p>"
@@ -450,8 +450,8 @@ def test_a_maths_heading_split_over_two_blocks_prints_once(tmp_path):
     found = _chapter_texts(
         [{"title": "The ab rule", "text": "x", "blocks": blocks}], tmp_path
     )
-    assert list(found) == ["The a/b\nrule", "Body."]
-    assert found["The a/b\nrule"] > 0
+    assert list(found) == ["The a/b", "rule", "Body."]
+    assert found["The a/b"] > 0
 
 
 def test_a_label_opening_a_maths_heading_names_the_whole_heading(tmp_path):

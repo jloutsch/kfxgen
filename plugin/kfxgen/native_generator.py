@@ -559,23 +559,19 @@ def _ruby_heading_title(blocks, title):
     return base, _title_spans(first, len(base))
 
 
-def _book_heading_title(blocks, title):
-    """(The text of a chapter's first blocks, their runs) when `title` is
-    those blocks, else (`title`, None). The book's heading then prints in
-    place of the label, once and as the book writes it, as on Kindle
-    Previewer's page: its line breaks, runs and spacing, and a heading split
-    over up to three blocks on as many lines (#409). `title` matches when it
-    is their text without case, spaces or punctuation, as a duplicate
-    heading has always been found (#64), or, spaces ignored, when it writes
-    an equation as a producer does: its source text run together ("The
-    ab=1 rule" for "The a/b = 1 rule", #402), its `alttext`, or its text
-    (#404); or when it is the first words of a heading holding one (#408)."""
+def _label_blocks(blocks, title):
+    """The chapter's first text blocks, up to three, that `title` spells out,
+    or []. `title` matches when it is their text without case, spaces or
+    punctuation, as a duplicate heading has always been found (#64), or,
+    spaces ignored, when it writes an equation as a producer does: its
+    source text run together ("The ab=1 rule" for "The a/b = 1 rule",
+    #402), its `alttext`, or its text (#404)."""
     want = "".join(title.split())
     target = _normalize_title(title)
     matched = []
     for block in _drop_edge_rules(blocks or ())[:_MAX_SPLIT_TITLE_BLOCKS]:
         if block.get("type") not in (None, "text"):
-            return title, None
+            return []
         matched.append(block)
         forms = max(
             (len(b["label_texts"]) for b in matched if b.get("label_texts")), default=1
@@ -584,16 +580,23 @@ def _book_heading_title(blocks, title):
         if (
             target and _normalize_title("".join(b["text"] for b in matched)) == target
         ) or (want in {"".join("".join(r).split()) for r in readings}):
-            base, spans = "", []
-            for b in matched:
-                part = b["text"].strip()
-                if base:
-                    base += "\n"
-                spans += [
-                    (s + len(base), n, f) for s, n, f in _title_spans(b, len(part))
-                ]
-                base += part
-            return base, spans
+            return matched
+    return []
+
+
+def _book_heading_title(blocks, title):
+    """(The text of a chapter's first block, its runs) when `title` is that
+    block (see `_label_blocks`), else (`title`, None). The book's heading
+    then prints in place of the label, once and as the book writes it, as
+    on Kindle Previewer's page: its line breaks, runs and spacing (#409);
+    or when it is the first words of a heading holding one (#408). A label
+    spelling out several blocks leaves them to print as they are (#552)."""
+    matched = _label_blocks(blocks, title)
+    if len(matched) == 1:
+        base = matched[0]["text"].strip()
+        return base, _title_spans(matched[0], len(base))
+    if matched:
+        return title, None
     # A section opening with the book's own heading prints that heading
     # alone, whatever its label, as on Kindle Previewer's page; the label
     # stays in the TOC (#408, #481). Prose opening with it doesn't, nor a
@@ -4810,6 +4813,12 @@ class NativeKFXGenerator:
                 and title_spans is None
                 and _heading_near_start(chapter.get("blocks"))
             )
+            # A label spelling out the book's first blocks, a heading split
+            # over them: they print as they are, each its own entry, and
+            # kfxgen prints no heading, as Kindle Previewer 4.0.3 has it (#552).
+            label_over_blocks = (
+                not toc_links and len(_label_blocks(chapter.get("blocks"), title)) > 1
+            )
             omit_heading = (
                 chapter.get("_is_cover")
                 # An empty title: its heading sat at the next paragraph's
@@ -4821,6 +4830,7 @@ class NativeKFXGenerator:
                 or title_runs_in
                 or title_in_table
                 or heading_near_start
+                or label_over_blocks
             )
             heading_chunk = None
             if not omit_heading:
@@ -4855,6 +4865,7 @@ class NativeKFXGenerator:
                     and not title_runs_in
                     and not title_in_table
                     and not heading_near_start
+                    and not label_over_blocks
                 )
                 text = chapter["text"]
                 stripped = text.lstrip()

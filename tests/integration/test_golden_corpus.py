@@ -770,12 +770,14 @@ def test_fixture_publisher_structure_shape(tmp_path):
         "inline text of a container with block children was dropped"
     )
     # #64: the chapter whose nav title is "3. Split Opener" prints the numeral
-    # and title as separate blocks; the synthesized heading must replace them,
-    # not sit on top of them.
-    assert "Split Opener" not in [t.strip() for t in texts], (
+    # and title as separate blocks. They print once, as the book writes them,
+    # with no heading of kfxgen's over them (#552); the label is the Contents
+    # page's line.
+    stripped = [t.strip() for t in texts]
+    assert stripped.count("Split Opener") == 1, (
         f"split chapter opener duplicated below the heading: {texts}"
     )
-    assert "3. Split Opener" in [t.strip() for t in texts], "heading missing"
+    assert stripped.count("3. Split Opener") == 1, f"label printed twice: {texts}"
     # #229: a <dl>'s term and definition are separate paragraphs.
     assert "Glossary term" in [t.strip() for t in texts], (
         f"definition list term not its own paragraph: {texts}"

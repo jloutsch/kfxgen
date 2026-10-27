@@ -388,7 +388,7 @@ def test_a_drawn_heading_split_over_two_blocks_prints_once(tmp_path):
     frags = _book(
         tmp_path, [{"title": "The ab rule", "text": "x", "blocks": _blocks(body)}]
     )
-    assert _lines(frags) == ["The [EQ]\nrule", "Body."]
+    assert _lines(frags) == ["The [EQ]", "rule", "Body."]
 
 
 @pytest.mark.unit
@@ -425,7 +425,7 @@ def test_an_equation_in_a_split_headings_second_block_stays_in_place(tmp_path):
         tmp_path,
         [{"title": "The rule for x", "text": "x", "blocks": _blocks(body)}],
     )
-    assert _lines(frags) == ["The rule\nfor [EQ]", "Body."]
+    assert _lines(frags) == ["The rule", "for [EQ]", "Body."]
 
 
 RUBY_MATHS = (
@@ -469,14 +469,16 @@ def test_rp_fallbacks_and_an_empty_reading_are_not_in_the_label(tmp_path, ruby, 
 def test_a_split_heading_matches_under_its_alttext_label(tmp_path):
     """A block without an equation is read the same way in every label form
     (#410 mutations)."""
+    # Paragraphs: unmatched, the book's first heading would print alone and
+    # look the same.
     body = (
-        f'<h1>The <math {M} alttext="a over b"><mfrac><mi>a</mi><mi>b</mi></mfrac>'
-        "</math></h1><h1>rule</h1><p>Body.</p>"
+        f'<p>The <math {M} alttext="a over b"><mfrac><mi>a</mi><mi>b</mi></mfrac>'
+        "</math></p><p>rule</p><p>Body.</p>"
     )
     frags = _book(
         tmp_path, [{"title": "The a over b rule", "text": "x", "blocks": _blocks(body)}]
     )
-    assert _lines(frags) == ["The [EQ]\nrule", "Body."]
+    assert _lines(frags) == ["The [EQ]", "rule", "Body."]
 
 
 @pytest.mark.unit
