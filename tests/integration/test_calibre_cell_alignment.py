@@ -36,6 +36,8 @@ FILES = {
     "<table><tr><td>T3 plain</td><td>T3b</td></tr></table>"
     '<table dir="rtl"><tr><td>T4 rtl</td><td>T4b</td></tr></table>'
     "<table><tr><td><p>T5 one</p><p>T5 two</p></td><td>T5b</td></tr></table>"
+    '<table><tr><td><p style="text-align: right">T6 p right</p></td>'
+    "<td>T6b</td></tr></table>"
     "<p>After.</p>"
 }
 ALIGN = {"$59": "left", "$61": "right", "$320": "center", "$321": "justify"}
@@ -70,4 +72,6 @@ def test_cells_are_aligned_as_previewer_writes_them(calibre):  # noqa: F811
         "T5 one": "left",
         "T5 two": "left",
         "T5b": "left",
+        "T6 p right": "right",
+        "T6b": "left",
     }, f"calibre {version}"

@@ -45,3 +45,29 @@ def test_a_cell_with_no_alignment_of_its_own(html, aligns):
 def test_a_header_cell_is_left_for_the_generator_to_centre():
     (cell,) = _cells("<table><tr><th>h</th></tr></table>")
     assert _align(cell) is None
+
+
+@pytest.mark.unit
+def test_a_cells_one_paragraph_keeps_its_own_alignment():
+    """`<td><p style="text-align: right">`: Previewer writes right (QA on
+    #532). The cell is written from its own style, so the paragraph's
+    alignment is read when the cell sets none."""
+    xhtml = (
+        '<html xmlns="http://www.w3.org/1999/xhtml"><body><table><tr>'
+        "<td><p>R</p></td><td>b</td></tr></table></body></html>"
+    )
+    root = etree.fromstring(xhtml.encode())
+    p = root.find(".//{http://www.w3.org/1999/xhtml}p")
+
+    def resolver(elem):
+        return {"text-align": "right"} if elem is p else {}
+
+    (table,) = [
+        b
+        for b in _conv.extract_blocks_from_html(
+            root, style_resolver=resolver, base_href="c.xhtml", native_tables=True
+        )
+        if b.get("table")
+    ]
+    cells = table["table"]["rows"][0]["cells"]
+    assert [_align(c) for c in cells] == ["right", "left"]

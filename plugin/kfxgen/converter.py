@@ -2772,7 +2772,19 @@ def _cell_valign(cell, style_resolver):
     return None
 
 
-def _cell_block_style(cell, css, block_style=None):
+def _only_block_child(cell):
+    """The one block element a cell holds and nothing beside it, or None."""
+    kids = [k for k in cell if isinstance(k.tag, str)]
+    if len(kids) != 1 or _local_tag(kids[0].tag) not in (
+        {"p", "div", "blockquote"} | _HEADING_TAGS
+    ):
+        return None
+    if (cell.text or "").strip() or (kids[0].tail or "").strip():
+        return None
+    return kids[0]
+
+
+def _cell_block_style(cell, css, block_style=None, style_resolver=None):
     """A cell's, or a cell paragraph's, block style with its alignment: the
     book's, else left, or right under a right-to-left `dir`, as Kindle
     Previewer 4.0.3 writes every cell (#479). A header cell is left unset,
@@ -2781,6 +2793,13 @@ def _cell_block_style(cell, css, block_style=None):
         block_style = compute_block_style(css) if css is not None else None
     if _local_tag(cell.tag) == "th" or (block_style or {}).get("align"):
         return block_style
+    inner = _only_block_child(cell)
+    if inner is not None and style_resolver is not None:
+        # `<td><p style="text-align: right">`: the paragraph's own, as
+        # Previewer writes it (QA on #532).
+        own = compute_block_style(style_resolver(inner) or {})["align"]
+        if own:
+            return {**(block_style or compute_block_style({})), "align": own}
     rtl = next(
         (a.get("dir") for a in (cell, *cell.iterancestors()) if a.get("dir")), ""
     )
@@ -2801,7 +2820,7 @@ def _table_cell(cell, style_resolver, base_href):
         "spans": spans,
         "anchor_ids": ids,
         "anchor_offsets": {aid: marks.get(aid, 0) for aid in ids},
-        "block_style": _cell_block_style(cell, css),
+        "block_style": _cell_block_style(cell, css, style_resolver=style_resolver),
         "header": _local_tag(cell.tag) == "th",
         # A heading written in a cell: the section's opening, as a heading
         # outside a table is (#492).
