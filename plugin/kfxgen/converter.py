@@ -6468,6 +6468,64 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     log.info(f"  Rebuilt contents page with {len(toc_links)} linked entries")
 
 
+def _with_ncx_empty_labels(oeb_book, entries):
+    """`entries` with the NCX's entries whose label is empty or only spaces
+    put back where the NCX has them, their label as written (#459). calibre's
+    TOC leaves them all out. Kindle Previewer 4.0.3 keeps them, but drops an
+    entry with no label at all at the top level (6 probes). Unchanged unless
+    calibre's entries are the NCX's other ones, in order: when calibre read
+    another TOC, such as an EPUB 3 nav document, nothing is put in."""
+    parse = _container_parser(oeb_book)
+    opfname = getattr(getattr(oeb_book, "container", None), "opfname", None)
+    opf = parse(opfname) if parse and opfname else None
+    if opf is None:
+        return entries
+    ncx_hrefs = opf.xpath(
+        "//*[local-name()='manifest']/*[local-name()='item']"
+        "[@media-type='application/x-dtbncx+xml']/@href"
+    )
+    if not ncx_hrefs:
+        return entries
+    opf_dir = posixpath.dirname(opfname)
+    ncx_path = posixpath.normpath(posixpath.join(opf_dir, unquote(ncx_hrefs[0])))
+    ncx = parse(ncx_path)
+    if ncx is None:
+        return entries
+    points = []
+
+    def walk(node, depth):
+        for point in node.xpath("./*[local-name()='navPoint']"):
+            # The label's own text: not the line breaks around its <text>
+            # in a pretty-printed NCX (QA on #459).
+            label = "".join(
+                point.xpath(
+                    "./*[local-name()='navLabel']/*[local-name()='text']//text()"
+                )
+            )
+            src = (point.xpath("./*[local-name()='content']/@src") or [""])[0]
+            points.append((label, src, depth))
+            walk(point, depth + 1)
+
+    for nav_map in ncx.xpath("//*[local-name()='navMap']"):
+        walk(nav_map, 0)
+    if all(label.strip() for label, _src, _depth in points):
+        return entries
+    # The NCX's hrefs are written from its own folder; calibre's from the OPF's.
+    ncx_dir = posixpath.relpath(posixpath.dirname(ncx_path) or ".", opf_dir or ".")
+    out, i = [], 0
+    for label, src, depth in points:
+        if label.strip():
+            if i >= len(entries) or entries[i]["title"].split() != label.split():
+                return entries
+            out.append(entries[i])
+            i += 1
+        elif src and (label or depth):
+            path, sep, frag = src.partition("#")
+            href = posixpath.normpath(posixpath.join(ncx_dir, path)) + sep + frag
+            out.append({"title": label, "href": href, "level": depth})
+    return out if i == len(entries) else entries
+
+
 def _extract_toc_with_hrefs(oeb_book, log):
     """
     Extract TOC entries preserving href targets for chapter mapping.
@@ -6503,6 +6561,13 @@ def _extract_toc_with_hrefs(oeb_book, log):
         for node in oeb_book.toc:
             process_toc_node(node)
 
+        kept = _with_ncx_empty_labels(oeb_book, toc_entries)
+        if len(kept) > len(toc_entries):
+            log.info(
+                f"  Kept {len(kept) - len(toc_entries)} TOC entries with an empty "
+                "label, from the book's NCX"
+            )
+            toc_entries[:] = kept
         if toc_entries:
             log.info(f"Extracted {len(toc_entries)} TOC entries with hrefs")
         else:
