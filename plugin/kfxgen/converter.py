@@ -24,6 +24,7 @@ from ._img_tokens import (
 from .font_table import BOLD_WEIGHT_THRESHOLD, parse_style, parse_weight
 from .image_optimize import (
     GIF_SIGNATURES,
+    cmyk_to_rgb,
     decodes,
     gif_to_png,
     optimize_images,
@@ -6742,6 +6743,7 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         own_size=_pictures_in_table_cells(oeb_book),
     )
 
+    cover_image, images = cmyk_to_rgb(cover_image, images, log)
     cover_image, images = _check_and_optimize(
         cover_image, cover_href, images, opts, log
     )
