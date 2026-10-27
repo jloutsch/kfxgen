@@ -748,25 +748,23 @@ def _parse_font_family(value):
     return out
 
 
-_PX_PER_UNIT = {
-    "$308": 16.0,
-    "$505": 16.0,
-    "$319": 1.0,
-    "$318": 4 / 3,
-    "$316": 96 / 25.4,
+#: A unit in the % Kindle Previewer 4.0.3 writes a margin or indent in:
+#: 1em = 12pt, 1px = 0.45pt (#239), and 100% = 384pt (#541 probes).
+_PERCENT_PER_UNIT = {
+    "$308": 3.125,
+    "$505": 3.125,
+    "$318": 3.125 / 12,
+    "$319": 0.45 * 3.125 / 12,
+    "$316": 72 / 25.4 * 3.125 / 12,
+    "$314": 1.0,
 }
 
 
-def _length_px(length):
-    """A parsed length in CSS px, a % as a share of Previewer's 512 px column
-    (QA on #541), or None for none."""
-    if not length:
+def _length_percent(length):
+    """A parsed length as the % Previewer writes it, or None for none."""
+    if not length or length[1] not in _PERCENT_PER_UNIT:
         return None
-    if length[1] == "$314":
-        return float(length[0]) * 5.12
-    if length[1] not in _PX_PER_UNIT:
-        return None
-    return float(length[0]) * _PX_PER_UNIT[length[1]]
+    return float(length[0]) * _PERCENT_PER_UNIT[length[1]]
 
 
 def compute_block_style(css):
@@ -790,11 +788,11 @@ def compute_block_style(css):
         # (#465): one past it is clamped to it. With no margin it would pull
         # the first line off the page, so it is dropped.
         hang = parse_css_length(css.get("text-indent") or "", negative=True)
-        hang_px, margin_px = _length_px(hang), _length_px(margin_left)
-        if hang_px is not None and margin_px is not None:
+        hang_pct, margin_pct = _length_percent(hang), _length_percent(margin_left)
+        if hang_pct is not None and margin_pct is not None:
             indent = (
                 hang
-                if -hang_px <= margin_px
+                if -hang_pct <= margin_pct
                 else ("-" + margin_left[0], margin_left[1])
             )
     margin_right = parse_css_length(css.get("margin-right") or "")

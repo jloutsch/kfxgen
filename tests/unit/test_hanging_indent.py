@@ -18,11 +18,16 @@ from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
         ({"text-indent": "-16px", "margin-left": "1em"}, ("-16", "$319")),
         ({"text-indent": "-1em", "margin-left": "2em"}, ("-1", "$308")),
         ({"text-indent": "-1em"}, None),
-        # Past its margin: clamped to it, as Previewer writes it (QA, #541).
+        # Past its margin: clamped to it. Kindle Previewer 4.0.3 compares in
+        # the % it writes, where 1em = 12pt and 1px = 0.45pt (#541 probes).
         ({"text-indent": "-2em", "margin-left": "1em"}, ("-1", "$308")),
-        # A % margin, as a share of Previewer's 512 px column: 5% covers 10px.
-        ({"text-indent": "-10px", "margin-left": "5%"}, ("-10", "$319")),
-        ({"text-indent": "-40px", "margin-left": "5%"}, ("-5", "$314")),
+        ({"text-indent": "-40px", "margin-left": "2em"}, ("-40", "$319")),
+        ({"text-indent": "-1em", "margin-left": "20px"}, ("-20", "$319")),
+        ({"text-indent": "-1em", "margin-left": "12pt"}, ("-1", "$308")),
+        ({"text-indent": "-15pt", "margin-left": "1em"}, ("-1", "$308")),
+        ({"text-indent": "-40px", "margin-left": "5%"}, ("-40", "$319")),
+        ({"text-indent": "-60px", "margin-left": "5%"}, ("-5", "$314")),
+        ({"text-indent": "-2em", "margin-left": "5%"}, ("-5", "$314")),
         ({"text-indent": "2em"}, ("2", "$308")),
     ],
     ids=[
@@ -31,8 +36,13 @@ from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
         "wider-margin",
         "alone",
         "past-margin",
-        "percent-covers",
-        "percent-clamped",
+        "px-under-em-margin",
+        "em-past-px-margin",
+        "pt-equal",
+        "pt-past-em",
+        "px-under-percent",
+        "px-past-percent",
+        "em-past-percent",
         "positive",
     ],
 )
