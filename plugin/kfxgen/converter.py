@@ -5280,6 +5280,13 @@ def _assemble_chapters_by_coordinate(
         else:
             ch = _flag_nav(_mk(_leading_chapter_title(head), head), 0, first_fi)
             if ch:
+                if ch["title"] != LEADING_TITLE_FALLBACK and _IMG_TOKEN_RE.search(
+                    head[0].get("text") or ""
+                ):
+                    # Titled with the words beside a picture: that paragraph
+                    # prints them, so a heading of them would print them
+                    # twice. Kindle Previewer 4.0.3 prints them once (#525).
+                    ch["_omit_title_heading"] = True
                 if ch["title"] == LEADING_TITLE_FALLBACK:
                     # No title of its own, and not in the source TOC either —
                     # this chapter exists precisely because these blocks
