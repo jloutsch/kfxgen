@@ -9,7 +9,7 @@ no-op so it never breaks anything.
 import os
 import struct
 
-DEFAULT_MAX_DIM = 2048
+DEFAULT_MAX_DIM = 1920
 DEFAULT_JPEG_QUALITY = 85
 
 #: Byte ceiling above which an image is re-encoded even when its pixel
@@ -162,7 +162,9 @@ def optimize_image(
         if log:
             log.warn(f"  image optimize failed ({e}); keeping original")
         return data
-    if not out or len(out) >= len(data):
+    # Over the cap, the scaled one even if it grew: Previewer caps every
+    # picture at 1920 px (#467). Re-encoded for its bytes alone, never larger.
+    if not out or (len(out) >= len(data) and not over_dim):
         return data
     return out
 

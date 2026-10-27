@@ -331,3 +331,20 @@ MINIMAL_PNG: bytes = bytes.fromhex(
     "6789ea7d92fa33a6dea4a85f52d61769ea4774f577fada67acdf41fd3bff0345"
     "b254df943c21df0000000049454e44ae426082"
 )
+
+
+def colour_jpeg_of(mode, size, colour, right=None):
+    """A real JPEG made by Pillow in colour `mode` ("CMYK", "RGB", "L"), of
+    `size`, filled with `colour`, its right half with `right` if given. For
+    the colour-form tests (#466): `jpeg_of` and `decodable_jpeg_of` are RGB
+    only."""
+    import io
+
+    from PIL import Image
+
+    im = Image.new(mode, size, colour)
+    if right is not None:
+        im.paste(right, (size[0] // 2, 0, size[0], size[1]))
+    out = io.BytesIO()
+    im.save(out, "JPEG", quality=95)
+    return out.getvalue()

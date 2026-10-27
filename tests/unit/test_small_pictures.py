@@ -34,6 +34,6 @@ def test_a_small_picture_keeps_its_shape(tmp_path, dims):
         if hasattr(e, "get") and str(e.get("$159")) == "$271"
     ]
     assert str(style["$56"]["$306"]) == "$314"
-    assert float(str(style["$56"]["$307"])) == round(dims[0] / 496 * 100, 3)
+    assert float(str(style["$56"]["$307"])) == round(dims[0] / 512 * 100, 3)
     assert "$57" not in style
     assert "$31" not in style

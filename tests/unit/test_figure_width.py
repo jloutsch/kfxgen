@@ -284,7 +284,7 @@ def test_a_caption_beside_an_unsized_picture_keeps_its_styling(tmp_path):
     [
         ("w300", 300, 100.0),  # Previewer: 300px in 300px is 100
         ("w300", 150, 50.0),
-        ("w40", 120, 60.484),  # 120px is 24.194 % of the page, of 40 %
+        ("w40", 120, 58.594),  # 120px is 23.438 % of the page, of 40 %
         ("w40", 400, 100.0),
     ],
 )

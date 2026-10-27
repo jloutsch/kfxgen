@@ -1,7 +1,7 @@
 """A small picture is sized by its pixel width and keeps its shape, through
 calibre (#462): not a 3em square shifted down 9 pt. Kindle Previewer 4.0.3
-writes a picture alone in its paragraph as px / 512 of the column; kfxgen's
-column is 496 px (#467 tracks the difference).
+writes a picture alone in its paragraph as px / 512 of the column (#467):
+these are its own values for the two sizes.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found. CI has no calibre, so this is
@@ -100,6 +100,6 @@ def test_a_small_picture_is_sized_by_its_width(calibre):  # noqa: F811
                     )
                 )
     assert shown == [
-        ("20.161", "$314", False, False),
-        ("60.484", "$314", False, False),
+        ("19.531", "$314", False, False),
+        ("58.594", "$314", False, False),
     ], f"calibre {version}"
