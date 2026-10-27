@@ -60,6 +60,18 @@ PREVIEWER = [
     ],
 ]
 
+# (level, text) of the heading navigation's entries ($798) in Previewer's
+# file: the book's <h1>-<h3>, none for the paragraphs.
+PREVIEWER_LEVELS = {
+    (1, "Chapter One"),
+    (1, "Part Four"),
+    (2, "The Start"),
+    (2, "The Sea"),
+    (2, "Act One"),
+    (3, "Scene"),
+}
+LEVEL_UNITS = {"$799": 1, "$800": 2, "$801": 3, "$802": 4, "$803": 5, "$804": 6}
+
 
 def _page(body):
     return (
@@ -139,12 +151,18 @@ def _chapters(kfx):
     return out, bottom
 
 
-def test_each_block_keeps_its_own_entry_and_style(calibre):  # noqa: F811
-    tmp, _env, version = calibre
+def _convert(calibre):  # noqa: F811
+    tmp = calibre[0]
     epub, kfx = tmp / "sp552.epub", tmp / "sp552.kfx"
-    _epub(epub)
-    _ebook_convert(calibre, epub, kfx, True)
-    chapters, bottom = _chapters(kfx)
+    if not kfx.exists():
+        _epub(epub)
+        _ebook_convert(calibre, epub, kfx, True)
+    return kfx
+
+
+def test_each_block_keeps_its_own_entry_and_style(calibre):  # noqa: F811
+    version = calibre[2]
+    chapters, bottom = _chapters(_convert(calibre))
     for want in PREVIEWER:
         assert want in chapters, f"calibre {version}: {chapters}"
     # Previewer writes none on these; kfxgen's own heading has 2em (#552
@@ -152,3 +170,31 @@ def test_each_block_keeps_its_own_entry_and_style(calibre):  # noqa: F811
     assert not set(bottom) & {t for rows in PREVIEWER for t, _, _ in rows}, (
         f"calibre {version}: {bottom}"
     )
+
+
+def test_each_heading_keeps_its_level(calibre):  # noqa: F811
+    """The heading navigation lists each <h1>-<h3> at its level, as
+    Previewer's does; the joined heading was one level-1 entry (#552)."""
+    version = calibre[2]
+    frags = load_fragments(_convert(calibre))
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    at = {
+        int(e["$155"]): str(texts[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+        for st in by_type(frags, "$259")
+        for e in iter_entries(val(st)["$146"])
+        if e.get("$145")
+    }
+
+    def plain(x):  # an annotated value, as `$391::{...}` is written
+        return getattr(x, "value", x)
+
+    levels = {
+        (LEVEL_UNITS[str(plain(unit)["$238"])], at.get(int(plain(c)["$246"]["$155"])))
+        for f in by_type(frags, "$389")
+        for nav in val(f)
+        for container in map(plain, nav["$392"])
+        if str(container["$235"]) == "$798"
+        for unit in container["$247"]
+        for c in plain(unit)["$247"]
+    }
+    assert levels == PREVIEWER_LEVELS, f"calibre {version}: {levels}"
