@@ -136,10 +136,10 @@ def test_each_svg_picture_is_written_where_it_was(book):
 
 def test_each_svg_picture_is_drawn_at_twice_its_size_and_shown_at_its_own(book):
     """Pixels: twice 200x100 and 300x150. Page width: the SVG's own width
-    against the 496 px column, as a PNG of the SVG's size would get."""
+    against the 512 px column (#467), as a PNG of the SVG's size would get."""
     order, version = book
     pictures = [x for x in order if isinstance(x, tuple)]
-    assert pictures[:2] == [(400, 200, "40.323%"), (600, 300, "60.484%")], (
+    assert pictures[:2] == [(400, 200, "39.062%"), (600, 300, "58.594%")], (
         f"calibre {version}: {order}"
     )
 

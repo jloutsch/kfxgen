@@ -41,10 +41,10 @@ _log = logging.getLogger(__name__)
 #: A token size hint: axis, number, unit (bare = px).
 _SIZE_HINT_RE = re.compile(r"^([wh])=(\d+(?:\.\d+)?)(%|px|em|pt)?$")
 _CSS_PX_PER_UNIT = {"px": 1.0, "em": 16.0, "pt": 4.0 / 3.0}
-#: Text column width Amazon sizes against, in CSS pixels. Recovered by
-#: dividing each sub-100% width it emits by the image's pixel width: every
-#: one resolves to this, across seven books. (#145)
-_IMAGE_COLUMN_PX = 496.0
+#: Text column width Amazon sizes against, in CSS pixels: 512 in Kindle
+#: Previewer 4.0.3 (#467, probed 1 to 400 px). It was 496, recovered from
+#: Previewer 3.106's output across seven books (#145).
+_IMAGE_COLUMN_PX = 512.0
 
 
 def _size_in_box(hint, box):
@@ -1945,7 +1945,8 @@ class NativeKFXGenerator:
         landmarks_name = "nL"
         self.symtab.create_local_symbol(heading_name)
         self.symtab.create_local_symbol(toc_name)
-        self.symtab.create_local_symbol(landmarks_name)
+        if cover_position is not None:
+            self.symtab.create_local_symbol(landmarks_name)
 
         # Build $798 heading nav container (required by Kindle for navigation)
         # Contains heading-based navigation mirroring the TOC structure
@@ -2029,43 +2030,44 @@ class NativeKFXGenerator:
         # margins shows the landmark alone decides it: neither the cover
         # section's layout nor the image's own style changed anything (#160).
         #
-        # A book with no cover keeps the old target, which is where it opens.
+        # A book with no cover has none, as Kindle Previewer 4.0.3 writes it:
+        # a cover landmark at the first chapter could have it drawn as a
+        # full-screen cover (#460).
+        containers = [heading_container, toc_container]
         if cover_position is not None:
-            landmark_label, landmark_position = "cover-nav-unit", cover_position
-        else:
-            landmark_label = toc_entries[0]["title"] if toc_entries else "Start"
-            landmark_position = first_position
-        landmarks_units = [
-            IonAnnotation(
-                [IS("$393")],
+            landmarks_units = [
+                IonAnnotation(
+                    [IS("$393")],
+                    IonStruct(
+                        IS("$238"),
+                        IS("$233"),
+                        IS("$241"),
+                        IonStruct(IS("$244"), "cover-nav-unit"),
+                        IS("$246"),
+                        IonStruct(IS("$155"), cover_position, IS("$143"), 0),
+                    ),
+                )
+            ]
+            landmarks_container = IonAnnotation(
+                [IS("$391")],
                 IonStruct(
-                    IS("$238"),
-                    IS("$233"),
-                    IS("$241"),
-                    IonStruct(IS("$244"), landmark_label),
-                    IS("$246"),
-                    IonStruct(IS("$155"), landmark_position, IS("$143"), 0),
+                    IS("$235"),
+                    IS("$236"),
+                    IS("$239"),
+                    IS(landmarks_name),
+                    IS("$247"),
+                    landmarks_units,
                 ),
             )
-        ]
-        landmarks_container = IonAnnotation(
-            [IS("$391")],
-            IonStruct(
-                IS("$235"),
-                IS("$236"),
-                IS("$239"),
-                IS(landmarks_name),
-                IS("$247"),
-                landmarks_units,
-            ),
-        )
 
-        # Top-level struct with reading order ref and all 3 nav containers
+            containers.append(landmarks_container)
+
+        # Top-level struct with reading order ref and its nav containers
         top_struct = IonStruct(
             IS("$178"),
             IS("$351"),
             IS("$392"),
-            [heading_container, toc_container, landmarks_container],
+            containers,
         )
 
         return YJFragment(fid=IS("$348"), ftype=IS("$389"), value=[top_struct])
@@ -2528,7 +2530,11 @@ class NativeKFXGenerator:
                     IS("$306"),
                     IS("$310"),
                 )
-        elif not is_heading and text_indent is None:
+        elif not is_heading and (
+            # A first-line indent replaces the space; a hanging one doesn't
+            # (#465).
+            text_indent is None or float(text_indent[0]) < 0
+        ):
             # margin-top: a line of the main text, in this paragraph's own
             # line heights, as Previewer measures it (#463).
             value[IS("$47")] = IonStruct(
@@ -3407,7 +3413,7 @@ class NativeKFXGenerator:
             # let the content decide the order, never the iteration.
             valid = []
             for href, data in sorted(images.items()):
-                if not data or len(data) <= 100:
+                if not data:
                     continue
                 if cover_resource_name and data == cover_image:
                     # The cover's picture used in the text: shown there from
@@ -5168,8 +5174,8 @@ class NativeKFXGenerator:
         def _image_width_pct(w):
             """CSS width for an image `w` pixels wide, as Amazon computes it.
 
-            `min(100, px / 496 * 100)`, which reproduces 1,411 of the 1,422
-            percent widths in decoded Previewer output. An image at least as
+            `min(100, px / 512 * 100)`, as Kindle Previewer 4.0.3 writes it
+            (#467; 496 in Previewer 3.106, #145). An image at least as
             wide as the column fills it; a narrower one keeps its natural
             proportion instead of being stretched.
             """

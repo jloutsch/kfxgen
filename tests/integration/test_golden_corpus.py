@@ -215,10 +215,12 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     branch last produced.
 
     Every fragment matches but the `$550` location map, which every book
-    now writes with a location every 110 positions (#227), and the content
+    now writes with a location every 110 positions (#227); the content
     features (#455): `$585` declares reflow-section-size, yj_hdv and
     yj_jpg_rst_marker_present only when a book has them, so their three
-    symbols are gone and `$270`'s symbol ids after them move down by 3."""
+    symbols are gone and `$270`'s symbol ids after them move down by 3; and
+    the landmarks: the book has no cover, so `$389` has no `$236` container
+    and the symbol table no `nL` (#460)."""
     from types import SimpleNamespace
 
     from tests._kfx_introspect import load_fragments, val
@@ -240,7 +242,7 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
         return {
             (str(f.ftype), str(f.fid)): repr(val(f))
             for f in load_fragments(path)
-            if str(f.ftype) not in ("$550", "$585", "$270", "$ion_symbol_table")
+            if str(f.ftype) not in ("$550", "$585", "$270", "$389", "$ion_symbol_table")
         }
 
     def by_type(path, ftype):
@@ -250,7 +252,7 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     assert fragments(fresh_path) == fragments(old_path)
     old_symbols = list(by_type(old_path, "$ion_symbol_table")["symbols"])
     assert list(by_type(fresh_path, "$ion_symbol_table")["symbols"]) == [
-        x for x in old_symbols if x not in features
+        x for x in old_symbols if x not in (*features, "nL")
     ]
     assert [t for t, _ in by_type(fresh_path, "$270")["$181"]] == [
         t for t, _ in by_type(old_path, "$270")["$181"]
@@ -259,6 +261,11 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
         repr(f)
         for f in by_type(old_path, "$585")["$590"]
         if str(f["$492"]) not in features
+    ]
+    assert [repr(c) for c in by_type(fresh_path, "$389")[0]["$392"]] == [
+        repr(c)
+        for c in by_type(old_path, "$389")[0]["$392"]
+        if str(getattr(c, "value", c)["$235"]) != "$236"
     ]
 
 
@@ -326,9 +333,9 @@ def test_fixture_body_images_shape():
         "body_images must emit at least two $259 image entries — fixture rotted"
     )
     widths = _image_style_percents(frags)
-    assert widths == {"s_img_w0": 60.484, "s_img_w1": 100.0}, (
+    assert widths == {"s_img_w0": 58.594, "s_img_w1": 100.0}, (
         f"body_images must carry one computed width and one saturated one, got "
-        f"{widths}. 300px against a 496px column is 60.484%; 800px caps at 100%. "
+        f"{widths}. 300px against a 512px column is 58.594%; 800px caps at 100%. "
         "If this moved deliberately, regenerate — but see #164 for why a golden "
         "showing only 100.0 tests nothing."
     )
@@ -339,7 +346,7 @@ def test_fixture_body_images_shape():
 def test_some_golden_exercises_a_computed_width():
     """At least one golden must carry a width the arithmetic actually produced.
 
-    `_image_width_pct` is `min(100, px / 496 * 100)`, and 100.0 is also what
+    `_image_width_pct` is `min(100, px / 512 * 100)`, and 100.0 is also what
     the caller falls back to when an image's dimensions are unreadable. So a
     corpus where every width is 100.0 cannot tell a working rule from a broken
     one — which is exactly what this corpus was until #164, because every

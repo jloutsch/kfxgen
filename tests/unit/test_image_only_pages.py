@@ -118,3 +118,13 @@ class TestImageOnlyPagesShip:
         assert _conv._page_shows_something(token)
         assert not _conv._page_shows_something(token, cover_href="x/cover.jpg")
         assert _conv._page_shows_something(token, cover_href="x/other.jpg")
+
+    @pytest.mark.parametrize(
+        "src", ["Images/COVER.jpg", "images/Cover.JPG", "images/c%6Fver.jpg"]
+    )
+    def test_the_cover_named_in_other_capitals_is_the_cover(self, src):
+        """A page whose picture names the cover in other capitals or
+        %-encoding shows only the cover: its cover page showed it twice
+        (#550 QA, point 3), where Kindle Previewer 4.0.3 shows it once."""
+        token = _conv._make_img_token(src, "")
+        assert not _conv._page_shows_something(token, cover_href="images/cover.jpg")

@@ -2512,15 +2512,10 @@ def test_sub_and_super_defaults_are_both_device_verified_values():
 @pytest.mark.tier1
 @pytest.mark.unit
 class TestLandmarkFollowsTheFirstListedChapter:
-    """The start-of-content landmark is derived from the first *listed* nav
-    entry, so omitting a chapter from the TOC also moves where the book opens.
-
-    Found while omitting invented front-matter entries (#143): the landmark
-    went from the front-matter chapter to the one after it. That is arguably
-    the better target — Gutenberg boilerplate is not where reading starts —
-    but it was a side effect rather than a decision, and nothing pinned it.
-    This does, so a future change to `_omit_from_toc` cannot move the opening
-    position without a test saying so.
+    """A book with no cover writes no landmark at all, as Kindle Previewer
+    4.0.3 writes none (#460). It had one naming the first *listed* nav entry
+    (#143), so omitting a chapter from the TOC moved where the book opened;
+    now neither the TOC nor `_omit_from_toc` moves it.
     """
 
     def _landmark_title(self, chapters):
@@ -2534,7 +2529,8 @@ class TestLandmarkFollowsTheFirstListedChapter:
             for f in by_type(frags, "$389"):
                 s = pprint.pformat(val(f), width=10**6)
                 m = re.search(r"\$391:: \{\$235: \$236.*?\}\]\}", s)
-                assert m, "no landmarks container"
+                if not m:
+                    return None
                 t = re.search(r"\$244: '((?:[^'\\]|\\.)*)'", m.group(0))
                 return t.group(1) if t else None
         finally:
@@ -2546,17 +2542,14 @@ class TestLandmarkFollowsTheFirstListedChapter:
             {"title": "Front Matter", "text": "Boilerplate."},
             {"title": "Chapter 1", "text": "Body."},
         ]
-        assert self._landmark_title(chapters) == "Front Matter"
+        assert self._landmark_title(chapters) is None
 
     def test_omitting_the_first_chapter_moves_the_landmark(self):
         chapters = [
             {"title": "Front Matter", "text": "Boilerplate.", "_omit_from_toc": True},
             {"title": "Chapter 1", "text": "Body."},
         ]
-        assert self._landmark_title(chapters) == "Chapter 1", (
-            "omitting a chapter from the nav also moves the start-of-content "
-            "landmark, which is where the book opens"
-        )
+        assert self._landmark_title(chapters) is None
 
 
 @pytest.mark.tier1
@@ -2595,10 +2588,10 @@ class TestCoverLandmarkMarksTheCover:
                 os.unlink(path)
         (nav,) = by_type(frags, "$389")
         containers = val(nav)[0][IS("$392")]
-        (landmarks,) = [c for c in containers if str(c.value[IS("$235")]) == "$236"]
+        landmarks = [c for c in containers if str(c.value[IS("$235")]) == "$236"]
         sections = {str(f.fid): val(f) for f in by_type(frags, "$260")}
         c0 = sections["c0"][IS("$141")][0]
-        return landmarks.value[IS("$247")], c0
+        return (landmarks[0].value[IS("$247")] if landmarks else None), c0
 
     def test_cover_landmark_points_at_the_cover_section(self):
         (unit,), c0 = self._landmarks_and_cover_section(cover=True)
@@ -2609,9 +2602,10 @@ class TestCoverLandmarkMarksTheCover:
             "device lays the cover out as an ordinary page inside the margins"
         )
 
-    def test_a_book_without_a_cover_keeps_the_first_chapter(self):
-        (unit,), _c0 = self._landmarks_and_cover_section(cover=False)
-        assert unit.value[IS("$241")][IS("$244")] == "Chapter One"
+    def test_a_book_without_a_cover_has_no_landmark(self):
+        """As Kindle Previewer 4.0.3 writes it (#460)."""
+        units, _c0 = self._landmarks_and_cover_section(cover=False)
+        assert units is None
 
 
 @pytest.mark.tier1
@@ -2633,7 +2627,7 @@ class TestImageWidthFollowsIntrinsicSize:
     against 729, and 3 small images given 100% anyway.
     """
 
-    REF = 496.0
+    REF = 512.0
 
     def _widths(self, dims):
         """{resource pixel width: emitted CSS width} for a book of images."""
@@ -2678,10 +2672,7 @@ class TestImageWidthFollowsIntrinsicSize:
                 os.unlink(path)
 
     def test_a_half_column_image_gets_half_the_width(self):
-        # Height above 300 so this is unambiguously an illustration: at
-        # 248x300 it is square enough to be an ornament, and ornaments keep
-        # em sizing.
-        (got,) = self._widths([(248, 400)])
+        (got,) = self._widths([(256, 400)])
         assert got == (50.0, "%")
 
     def test_an_image_wider_than_the_column_is_capped(self):
@@ -2712,7 +2703,7 @@ class TestImageWidthFollowsIntrinsicSize:
         assert not any(g[0] == 9.626 for g in got if g), got
 
     def test_distinct_sizes_get_distinct_widths(self):
-        got = self._widths([(248, 400), (124, 400), (496, 400)])
+        got = self._widths([(256, 400), (128, 400), (512, 400)])
         assert [g[0] for g in got] == [50.0, 25.0, 100.0]
 
 
@@ -3794,9 +3785,9 @@ def test_a_picture_with_display_dims_is_sized_by_them_not_its_pixels(tmp_path):
                     (int(r["$422"]), int(r["$423"]), str(w["$307"]), str(w["$306"]))
                 )
     assert shown == [
-        (400, 200, "40.323", "$314"),  # 200 px wide of the 496 px column
-        (128, 128, "12.903", "$314"),  # 64 px wide: by width too (#462)
-        (400, 200, "80.645", "$314"),  # no display size: its pixels decide
+        (400, 200, "39.062", "$314"),  # 200 px wide of the 512 px column
+        (128, 128, "12.5", "$314"),  # 64 px wide: by width too (#462)
+        (400, 200, "78.125", "$314"),  # no display size: its pixels decide
     ]
 
 

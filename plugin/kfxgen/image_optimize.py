@@ -9,7 +9,7 @@ no-op so it never breaks anything.
 import os
 import struct
 
-DEFAULT_MAX_DIM = 2048
+DEFAULT_MAX_DIM = 1920
 DEFAULT_JPEG_QUALITY = 85
 
 #: Byte ceiling above which an image is re-encoded even when its pixel
@@ -62,30 +62,69 @@ def _read_image_size(data):
     if len(data) >= 24 and data[:8] == _PNG_SIG:
         w, h = struct.unpack(">II", data[16:24])
         return (int(w), int(h))
-    if data[:2] == b"\xff\xd8":  # JPEG SOI
-        i, n = 2, len(data)
-        while i + 1 < n:
-            if data[i] != 0xFF:
-                i += 1
-                continue
-            marker = data[i + 1]
-            if marker == 0xFF:
-                i += 1
-                continue
-            if marker in (0xD8, 0xD9) or 0xD0 <= marker <= 0xD7:
-                i += 2
-                continue
-            if i + 4 > n:
-                break
-            seg_len = struct.unpack(">H", data[i + 2 : i + 4])[0]
-            if marker in _SOF_MARKERS:
-                if i + 9 <= n:
-                    h, w = struct.unpack(">HH", data[i + 5 : i + 9])
-                    return (int(w), int(h))
-                break
-            i += 2 + seg_len
-        return None
+    i = _jpeg_frame_at(data)
+    if i is not None:
+        h, w = struct.unpack(">HH", data[i + 5 : i + 9])
+        return (int(w), int(h))
     return None
+
+
+def _jpeg_frame_at(data):
+    """Where a JPEG's frame header (SOF) starts, if it is a JPEG with one
+    whole enough to read its size."""
+    if data[:2] != b"\xff\xd8":  # JPEG SOI
+        return None
+    i, n = 2, len(data)
+    while i + 1 < n:
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        marker = data[i + 1]
+        if marker == 0xFF:
+            i += 1
+            continue
+        if marker in (0xD8, 0xD9) or 0xD0 <= marker <= 0xD7:
+            i += 2
+            continue
+        if i + 4 > n:
+            break
+        seg_len = struct.unpack(">H", data[i + 2 : i + 4])[0]
+        if marker in _SOF_MARKERS:
+            return i if i + 9 <= n else None
+        i += 2 + seg_len
+    return None
+
+
+def _jpeg_components(data):
+    """A JPEG's colour components (1 grey, 3 colour, 4 CMYK), else None."""
+    i = _jpeg_frame_at(data)
+    return data[i + 9] if i is not None and i + 9 < len(data) else None
+
+
+def cmyk_to_rgb(cover_image, images, log):
+    """The cover and body pictures, each CMYK JPEG re-encoded as RGB, as
+    Kindle Previewer 4.0.3 writes it (#466). calibre's Qt reads a CMYK JPEG
+    as CMYK and writes it back so, scaled or not, unless converted first.
+    A picture that can't be converted, or with no calibre, is left as it is.
+    """
+    quality = _read_env_int("KFXGEN_IMAGE_QUALITY", DEFAULT_JPEG_QUALITY, 1, 100, log)
+
+    def convert(data):
+        if not data or _jpeg_components(data) != 4:
+            return data
+        try:
+            from calibre.utils.img import image_from_data, image_to_data
+            from qt.core import QImage
+        except ImportError:
+            return data
+        try:
+            img = image_from_data(data).convertToFormat(QImage.Format.Format_RGB32)
+            return image_to_data(img, fmt="JPEG", compression_quality=quality)
+        except Exception as e:  # noqa: BLE001 - never fail a conversion over an image
+            log.warn(f"  CMYK picture kept as it is: {e}")
+            return data
+
+    return convert(cover_image), {href: convert(d) for href, d in images.items()}
 
 
 def _read_env_int(name, default, lo, hi, log):
@@ -162,7 +201,9 @@ def optimize_image(
         if log:
             log.warn(f"  image optimize failed ({e}); keeping original")
         return data
-    if not out or len(out) >= len(data):
+    # Over the cap, the scaled one even if it grew: Previewer caps every
+    # picture at 1920 px (#467). Re-encoded for its bytes alone, never larger.
+    if not out or (len(out) >= len(data) and not over_dim):
         return data
     return out
 
