@@ -612,6 +612,7 @@ def test_blocks_block_style_from_resolver():
         "margin_left": None,
         "margin_right": None,
         "font_family": [],
+        "line_height": None,
         "bold": False,
         "italic": False,
         "font_size": None,
@@ -622,6 +623,7 @@ def test_blocks_block_style_from_resolver():
         "margin_left": None,
         "margin_right": None,
         "font_family": [],
+        "line_height": None,
         "bold": False,
         "italic": False,
         "font_size": None,
@@ -1496,18 +1498,29 @@ def test_link_composes_with_superscript():
 @pytest.mark.parametrize(
     "href",
     [
-        "http://example.com/x",
-        "https://example.com/x",
-        "mailto:a@b.c",
         "../../../etc/passwd",
         "/absolute/path.xhtml",
+        "javascript:alert(1)",
+        "tel:123",
     ],
 )
-def test_external_and_unsafe_hrefs_produce_no_link(href):
+def test_unsafe_and_other_scheme_hrefs_produce_no_link(href):
     blocks = _conv.extract_blocks_from_html(
         _doc(f'<p>a<a href="{href}">b</a></p>'), base_href="chapter_001.xhtml"
     )
     assert _spans_link_targets(blocks[0]) in ([], [None])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "href", ["http://example.com/x", "https://example.com/x", "mailto:a@b.c"]
+)
+def test_an_external_href_is_a_link_leaving_the_book(href):
+    """Kept as a link, as Kindle Previewer writes it (#474)."""
+    blocks = _conv.extract_blocks_from_html(
+        _doc(f'<p>a<a href="{href}">b</a></p>'), base_href="chapter_001.xhtml"
+    )
+    assert _spans_link_targets(blocks[0]) == [f"url:{href}"]
 
 
 @pytest.mark.unit
