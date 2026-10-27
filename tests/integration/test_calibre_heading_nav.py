@@ -1,7 +1,8 @@
 """The heading navigation ($798) through calibre (#461), as Kindle
 Previewer 4.0.3 builds it for the same book (probed 2026-10-26): a unit per
 heading level, $799 to $804, each holding its headings in reading order;
-a TOC entry pointing at a paragraph isn't one of them.
+a TOC entry pointing at a paragraph isn't one of them. Only <h1>-<h6> are,
+and a book with none has no $798 (#575).
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found. CI has no calibre, so this is
@@ -40,10 +41,12 @@ TOC = [
 ]
 
 
-def test_heading_navigation_as_previewer_builds_it(calibre):  # noqa: F811
-    tmp, _env, version = calibre
-    epub, kfx = tmp / "hn461.epub", tmp / "hn461.kfx"
-    _build(epub, FILES, TOC, "hn461")
+def _units(calibre, name, files, toc):  # noqa: F811
+    """[(unit, [heading texts])] of the converted book's $798, or None when
+    it has none."""
+    tmp = calibre[0]
+    epub, kfx = tmp / f"{name}.epub", tmp / f"{name}.kfx"
+    _build(epub, files, toc, name)
     _ebook_convert(calibre, epub, kfx, True)
     frags = load_fragments(kfx)
     content = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
@@ -54,12 +57,15 @@ def test_heading_navigation_as_previewer_builds_it(calibre):  # noqa: F811
         if hasattr(e, "get") and e.get("$145")
     }
     (nav,) = by_type(frags, "$389")
-    (container,) = [
+    containers = [
         getattr(c, "value", c)
         for c in val(nav)[0]["$392"]
         if str(getattr(c, "value", c)["$235"]) == "$798"
     ]
-    got = [
+    if not containers:
+        return None
+    (container,) = containers
+    return [
         (
             str(getattr(u, "value", u)["$238"]),
             [
@@ -69,6 +75,11 @@ def test_heading_navigation_as_previewer_builds_it(calibre):  # noqa: F811
         )
         for u in container["$247"]
     ]
+
+
+def test_heading_navigation_as_previewer_builds_it(calibre):  # noqa: F811
+    version = calibre[2]
+    got = _units(calibre, "hn461", FILES, TOC)
     assert got == [
         ("$799", ["H1 one", "H1 two"]),
         ("$800", ["H2 sub", "H2 again"]),
@@ -77,3 +88,30 @@ def test_heading_navigation_as_previewer_builds_it(calibre):  # noqa: F811
         ("$803", ["H5 x"]),
         ("$804", ["H6 y"]),
     ], f"calibre {version}"
+
+
+STYLED = (
+    "<p style='font-size:2em;font-weight:bold'>Chapter {n}</p>"
+    "<p style='font-size:1.5em;font-weight:bold'>Part {n}</p><p>Body {n}.</p>"
+)
+TAGGED = "<h1>Chapter {n}</h1><h2>Part {n}</h2><p>Body {n}.</p>"
+CHAPTERS = [(f"Chapter {n}", f"c{n}.xhtml") for n in range(1, 5)]
+
+
+def test_only_h1_to_h6_are_listed(calibre):  # noqa: F811
+    """Chapters 1 and 3 with heading tags, 2 and 4 with styled paragraphs:
+    Previewer lists 1 and 3 only (#575, probed 2026-10-27)."""
+    files = {
+        f"c{n}.xhtml": (TAGGED if n % 2 else STYLED).format(n=n) for n in range(1, 5)
+    }
+    got = _units(calibre, "hn575m", files, CHAPTERS)
+    assert got == [
+        ("$799", ["Chapter 1", "Chapter 3"]),
+        ("$800", ["Part 1", "Part 3"]),
+    ], f"calibre {calibre[2]}"
+
+
+def test_a_book_without_headings_has_no_heading_navigation(calibre):  # noqa: F811
+    """Previewer writes no $798 for it (#575, probed 2026-10-27)."""
+    files = {f"c{n}.xhtml": STYLED.format(n=n) for n in range(1, 5)}
+    assert _units(calibre, "hn575n", files, CHAPTERS) is None, f"calibre {calibre[2]}"

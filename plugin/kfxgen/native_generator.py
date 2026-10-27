@@ -1028,13 +1028,11 @@ _HEADING_LEVEL_UNITS = {
 
 
 def _book_headings(ch_data):
-    """[(position, level)] of the book's headings in reading order: its own,
-    with their levels, and kfxgen's printed labels at level 1 (#461)."""
+    """[(position, level)] of the book's <h1>-<h6> in reading order (#461).
+    Only those: Kindle Previewer 4.0.3 lists no label kfxgen prints (#575)."""
     out = []
     for idx, chunk in enumerate(ch_data["all_chunks"]):
         level = chunk.get("heading_level")
-        if not level and idx in ch_data["heading_chunk_indices"]:
-            level = 1
         position = ch_data["chunk_positions"][idx]
         if level and position is not None:
             out.append((position, level))
@@ -2087,15 +2085,17 @@ class NativeKFXGenerator:
         heading_name = "nH"
         toc_name = "nT"
         landmarks_name = "nL"
-        self.symtab.create_local_symbol(heading_name)
+        if headings:
+            self.symtab.create_local_symbol(heading_name)
         self.symtab.create_local_symbol(toc_name)
         if cover_position is not None:
             self.symtab.create_local_symbol(landmarks_name)
 
-        # Build $798 heading nav container (required by Kindle for navigation).
-        # From the book's headings, a unit per level at its first heading
-        # holding one child per heading, as Kindle Previewer 4.0.3 builds it
-        # (#461); from the TOC only for a book with no headings.
+        # The heading navigation ($798): from the book's <h1>-<h6>, a unit
+        # per level at its first heading holding one child per heading, as
+        # Kindle Previewer 4.0.3 builds it (#461). A book with none has no
+        # $798, as in Previewer's file (#575).
+        heading_container = None
         if headings:
             heading_container = IonAnnotation(
                 [IS("$391")],
@@ -2106,50 +2106,6 @@ class NativeKFXGenerator:
                     IS(heading_name),
                     IS("$247"),
                     _heading_levels(headings),
-                ),
-            )
-        heading_units = []
-        for entry in toc_entries:
-            position = entry["position"]
-            heading_unit = IonAnnotation(
-                [IS("$393")],
-                IonStruct(
-                    IS("$238"),
-                    IS("$800"),
-                    IS("$241"),
-                    IonStruct(IS("$244"), "heading-nav-unit"),
-                    IS("$246"),
-                    IonStruct(IS("$155"), position, IS("$143"), entry.get("offset", 0)),
-                ),
-            )
-            heading_units.append(heading_unit)
-
-        # Wrap all heading units under a single top-level $799 entry
-        first_position = toc_entries[0]["position"] if toc_entries else 1800
-        heading_top = IonAnnotation(
-            [IS("$393")],
-            IonStruct(
-                IS("$238"),
-                IS("$799"),
-                IS("$241"),
-                IonStruct(IS("$244"), "heading-nav-unit"),
-                IS("$246"),
-                IonStruct(IS("$155"), first_position, IS("$143"), 0),
-                IS("$247"),
-                heading_units,
-            ),
-        )
-
-        if not headings:
-            heading_container = IonAnnotation(
-                [IS("$391")],
-                IonStruct(
-                    IS("$235"),
-                    IS("$798"),
-                    IS("$239"),
-                    IS(heading_name),
-                    IS("$247"),
-                    [heading_top],
                 ),
             )
 
@@ -2192,7 +2148,7 @@ class NativeKFXGenerator:
         # A book with no cover has none, as Kindle Previewer 4.0.3 writes it:
         # a cover landmark at the first chapter could have it drawn as a
         # full-screen cover (#460).
-        containers = [heading_container, toc_container]
+        containers = [c for c in (heading_container, toc_container) if c]
         if cover_position is not None:
             landmarks_units = [
                 IonAnnotation(

@@ -2,7 +2,8 @@
 by level, as Kindle Previewer 4.0.3 builds it (#461, probed 2026-10-26):
 one unit per level, $799 for h1 to $804 for h6, each at its level's first
 heading, holding one child per heading. kfxgen built it from the TOC,
-taking in entries that point at paragraphs."""
+taking in entries that point at paragraphs. Only <h1>-<h6> count, and a
+book with none has no $798 (#575, probed 2026-10-27)."""
 
 import pytest
 from lxml import etree
@@ -12,7 +13,8 @@ from kfxgen.native_generator import NativeKFXGenerator
 from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
 
 
-def _nav(tmp_path, chapters_html):
+def _containers(tmp_path, chapters_html):
+    """The `$389` containers by kind, and each entry's text by position."""
     chapters = []
     for title, html in chapters_html:
         xhtml = f'<html xmlns="http://www.w3.org/1999/xhtml"><body>{html}</body></html>'
@@ -32,11 +34,16 @@ def _nav(tmp_path, chapters_html):
                     content[str(e["$145"]["name"])][int(e["$145"]["$403"])]
                 )
     (nav,) = by_type(frags, "$389")
-    (headings,) = [
-        getattr(c, "value", c)
-        for c in val(nav)[0]["$392"]
-        if str(getattr(c, "value", c)["$235"]) == "$798"
-    ]
+    kinds = {}
+    for c in val(nav)[0]["$392"]:
+        c = getattr(c, "value", c)
+        kinds[str(c["$235"])] = c
+    return kinds, text
+
+
+def _nav(tmp_path, chapters_html):
+    kinds, text = _containers(tmp_path, chapters_html)
+    headings = kinds["$798"]
     out = []
     for unit in headings["$247"]:
         u = getattr(unit, "value", unit)
@@ -69,14 +76,32 @@ def test_heading_navigation_groups_the_books_headings_by_level(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_label_kfxgen_prints_counts_as_a_first_level_heading(tmp_path):
-    """A chapter with no heading of its own gets its title printed as one,
-    so the navigation lists it with the book's h1s (#461)."""
+@pytest.mark.parametrize(
+    "first",
+    [
+        "<p>Body only.</p>",
+        # A styled paragraph printed in the label's place (#409).
+        "<p class='ct'>One</p><p>Body.</p>",
+    ],
+    ids=["label", "paragraph"],
+)
+def test_only_h1_to_h6_are_listed(tmp_path, first):
+    """Previewer lists the book's <h1>-<h6> only: not a chapter title kfxgen
+    prints, nor a paragraph printed as one (#575; #461 listed both as h1)."""
     got = _nav(
         tmp_path,
-        [
-            ("One", "<p>Body only.</p>"),
-            ("Two", "<h1>Two</h1><p>Body.</p><h2>Sub</h2><p>Para.</p>"),
-        ],
+        [("One", first), ("Two", "<h1>Two</h1><p>Body.</p><h2>Sub</h2><p>Para.</p>")],
     )
-    assert got == [("$799", "One", ["One", "Two"]), ("$800", "Sub", ["Sub"])]
+    assert got == [("$799", "Two", ["Two"]), ("$800", "Sub", ["Sub"])]
+
+
+@pytest.mark.unit
+def test_a_book_without_headings_has_no_heading_navigation(tmp_path):
+    """Previewer writes no $798 for a book with no <h1>-<h6>; kfxgen built
+    one from the TOC (#575). The TOC itself stays."""
+    kinds, _text = _containers(
+        tmp_path,
+        [("One", "<p class='ct'>One</p><p>Body.</p>"), ("Two", "<p>Body two.</p>")],
+    )
+    assert "$798" not in kinds
+    assert "$212" in kinds
