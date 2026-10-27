@@ -240,7 +240,7 @@ def normalize_runs_with_anchors(
     return text_out, spans, anchors
 
 
-def parse_css_length(value):
+def parse_css_length(value, negative=False):
     """Parse a CSS length string into (magnitude_str, kfx_unit_symbol).
 
     Returns None for empty/auto/inherit, unsupported units, a zero magnitude
@@ -250,7 +250,8 @@ def parse_css_length(value):
     line off the left edge and clips leading characters (observed on Gutenberg
     front-matter metadata lists). Dropping it falls back to the default 0 indent.
     Magnitude is returned as a trimmed string so the caller can hand it to
-    IonDecimal unchanged.
+    IonDecimal unchanged. With `negative`, a negative magnitude is returned
+    too, for a hanging indent its margin covers (#465).
     """
     if not value:
         return None
@@ -259,7 +260,7 @@ def parse_css_length(value):
         return None
     mag, unit = m.group(1), m.group(2).lower()
     try:
-        if float(mag) <= 0.0:
+        if float(mag) == 0.0 or (float(mag) < 0.0 and not negative):
             return None
     except ValueError:
         return None
@@ -762,6 +763,25 @@ def _parse_font_family(value):
 _FONT_FAMILY_PART_RE = re.compile(r'"([^"]*)"|\'([^\']*)\'|([^,"\']+)')
 
 
+#: A unit in the % Kindle Previewer 4.0.3 writes a margin or indent in:
+#: 1em = 12pt, 1px = 0.45pt (#239), and 100% = 384pt (#541 probes).
+_PERCENT_PER_UNIT = {
+    "$308": 3.125,
+    "$505": 3.125,
+    "$318": 3.125 / 12,
+    "$319": 0.45 * 3.125 / 12,
+    "$316": 72 / 25.4 * 3.125 / 12,
+    "$314": 1.0,
+}
+
+
+def _length_percent(length):
+    """A parsed length as the % Previewer writes it, or None for none."""
+    if not length or length[1] not in _PERCENT_PER_UNIT:
+        return None
+    return float(length[0]) * _PERCENT_PER_UNIT[length[1]]
+
+
 def _line_height_factor(value):
     """A resolved line-height factor, or None."""
     try:
@@ -787,6 +807,18 @@ def compute_block_style(css):
         align = raw_align
     indent = parse_css_length(css.get("text-indent") or "")
     margin_left = parse_css_length(css.get("margin-left") or "")
+    if indent is None and margin_left is not None:
+        # A hanging indent within its left margin, as Previewer writes it
+        # (#465): one past it is clamped to it. With no margin it would pull
+        # the first line off the page, so it is dropped.
+        hang = parse_css_length(css.get("text-indent") or "", negative=True)
+        hang_pct, margin_pct = _length_percent(hang), _length_percent(margin_left)
+        if hang_pct is not None and margin_pct is not None:
+            indent = (
+                hang
+                if -hang_pct <= margin_pct
+                else ("-" + margin_left[0], margin_left[1])
+            )
     margin_right = parse_css_length(css.get("margin-right") or "")
     return {
         "align": align,
