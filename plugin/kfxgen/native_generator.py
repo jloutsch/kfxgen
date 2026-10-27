@@ -89,6 +89,59 @@ def _inline_length_em(m, font_size):
     return number * (0.45 if unit == "px" else 1.0) / 12 / (font_size or 1)
 
 
+def _cut_after_picture_lines(block):
+    """`block` cut after each line holding only a picture when more follows,
+    as Kindle Previewer 4.0.3 ends an entry there (#565): the picture stays
+    in the words before it, and the next line starts an entry. [block] when
+    there is no such line, the paragraph has no words, or a picture in it
+    floats, which is cut as before. The pieces after the first continue the
+    paragraph: no heading level, space above or clearing of their own."""
+    text = block["text"]
+    tokens = list(IMG_TOKEN_RE.finditer(text))
+    if not tokens or any(m.group(4) for m in tokens):
+        return [block]
+    if not IMG_TOKEN_RE.sub("", text).strip():
+        return [block]
+    cuts, start = [], 0
+    for line in text.split("\n")[:-1]:
+        end = start + len(line)
+        if IMG_TOKEN_RE.search(line) and not IMG_TOKEN_RE.sub("", line).strip():
+            if text[end + 1 :].strip():
+                cuts.append(end)
+        start = end + 1
+    if not cuts:
+        return [block]
+    pieces, a = [], 0
+    for b in [*cuts, len(text)]:
+        offsets = {
+            k: o - a
+            for k, o in (block.get("anchor_offsets") or {}).items()
+            if a <= (o or 0) < b or (a == 0 and not o)
+        }
+        piece = {
+            **block,
+            "text": text[a:b],
+            "spans": [
+                (max(s, a) - a, min(s + n, b) - max(s, a), f)
+                for s, n, f in block.get("spans") or ()
+                if min(s + n, b) > max(s, a)
+            ],
+            "anchor_keys": [k for k in block.get("anchor_keys") or () if k in offsets],
+            "anchor_offsets": offsets,
+        }
+        if a:
+            for key in ("heading_level", "space_above", "tight", "clear"):
+                piece.pop(key, None)
+        pieces.append(piece)
+        a = b + 1
+    # A key with no offset, or one past the text, stays on the first piece.
+    placed = {k for p in pieces for k in p["anchor_keys"]}
+    pieces[0]["anchor_keys"] = pieces[0]["anchor_keys"] + [
+        k for k in block.get("anchor_keys") or () if k not in placed
+    ]
+    return pieces
+
+
 def _parse_size_hint(hint, column_px):
     """('w' | 'h', percent) for a token size hint, or None to size by pixels.
 
@@ -4303,15 +4356,16 @@ class NativeKFXGenerator:
             character, U+FFFC, and `pictures` lists (offset, (resource,
             alt)): the paragraph stays one entry, its text and pictures
             together, as Kindle Previewer 4.0.3 writes it. A paragraph of
-            pictures alone, one with a floated picture, or one with a picture
-            alone on its line (`<img/><br/>caption`, which Previewer writes
-            as a picture and then the text) is cut at them as before."""
+            pictures alone, or one with a floated picture, is cut at them as
+            before."""
             tokens = list(IMG_TOKEN_RE.finditer(para))
             if not tokens or any(m.group(4) for m in tokens):
                 return None
-            for line in para.split("\n"):
-                if IMG_TOKEN_RE.search(line) and not IMG_TOKEN_RE.sub("", line).strip():
-                    return None
+            # Pictures alone: entries. A line of only a picture after words
+            # stays in them; `_cut_after_picture_lines` has cut the
+            # paragraph after it (#565).
+            if not IMG_TOKEN_RE.sub("", para).strip():
+                return None
             text, cuts, pictures, last = [], [], [], 0
             for m in tokens:
                 text.append(para[last : m.start()])
@@ -4371,6 +4425,10 @@ class NativeKFXGenerator:
             Returns the anchor keys it could not place because it emitted
             nothing (only a picture the book doesn't hold), so the caller
             can put them elsewhere."""
+            if inline_pictures:
+                pieces = _cut_after_picture_lines(block)
+                if len(pieces) > 1:
+                    return [k for p in pieces for k in _emit_paragraph(p)]
             preformatted = bool(block.get("preformatted"))
             para = (
                 block["text"].rstrip(_ASCII_SPACE)

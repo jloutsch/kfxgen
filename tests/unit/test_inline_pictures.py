@@ -277,3 +277,76 @@ def test_vertical_align_is_kept(tmp_path, value, symbol):
     """As Previewer writes it, `$44` (#565, probed with all eight)."""
     style = _picture_style(tmp_path, f"style='vertical-align:{value}'")
     assert style.get("$44") == symbol
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        # #565 item 4, Kindle Previewer 4.0.3 (probed): a line of only a
+        # picture ends the entry after it; the picture stays in the words
+        # before it.
+        (
+            "<p>M3 start <img src='s.jpg' alt='a'/> mid<br/>"
+            "<img src='s.jpg' alt='b'/><br/>end.</p>",
+            [
+                ["M3 start ", "pic", " mid\n", "pic"],
+                "end.",
+            ],
+        ),
+        # The first line alone: a picture entry, then the words, as #529.
+        (
+            "<p><img src='b.jpg' alt='a'/><br/>caption <img src='s.jpg' alt='b'/>"
+            " inline.</p>",
+            ["picture", ["caption ", "pic", " inline."]],
+        ),
+    ],
+    ids=["after-words", "first-line"],
+)
+def test_a_line_of_only_a_picture_ends_the_entry(tmp_path, body, expected):
+    entries = _book(tmp_path, f"<h1>One</h1>{body}<p>After.</p>")[1:-1]
+    got = [
+        [p if isinstance(p, str) else "pic" for p in e[1]]
+        if e[0] == "mixed"
+        else (e[1] if e[0] == "text" else "picture")
+        for e in entries
+    ]
+    assert got == expected
+
+
+def test_a_run_after_the_cut_stays_on_its_words(tmp_path):
+    """The second entry's italic run is moved by the cut, not left at the
+    paragraph's offsets (#565)."""
+    _book(
+        tmp_path,
+        "<h1>One</h1><p>Start <img src='s.jpg' alt='a'/> mid<br/>"
+        "<img src='s.jpg' alt='b'/><br/>an <i>end</i>.</p>",
+    )
+    frags = load_fragments(tmp_path / "i.kfx")
+    content = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    (runs,) = [
+        [
+            str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])])[
+                int(r["$143"]) : int(r["$143"]) + int(r["$144"])
+            ]
+            for r in e.get("$142") or ()
+        ]
+        for st in by_type(frags, "$259")
+        for e in (getattr(x, "value", x) for x in val(st)["$146"])
+        if e.get("$145")
+        and str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])]) == "an end."
+    ]
+    assert runs == ["end"]
+
+
+def test_a_link_to_the_words_after_the_cut_lands_on_them(tmp_path):
+    """An id in the entry after the cut keeps its place in it (#565)."""
+    from tests.unit.test_link_landings import _landings
+
+    _book(
+        tmp_path,
+        "<h1>One</h1><p>Start <img src='s.jpg' alt='a'/> mid<br/>"
+        "<img src='s.jpg' alt='b'/><br/>an <span id='e'>end</span>.</p>"
+        "<p><a href='c.xhtml#e'>To end</a></p>",
+    )
+    # From the word "end" on, not the entry's start.
+    assert _landings(tmp_path / "i.kfx")["To end"] == "end."

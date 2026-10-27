@@ -129,6 +129,9 @@ def _entries(body, tmp_path):
             if e.get("$145"):
                 r = e["$145"]
                 text = str(texts[str(r["name"])][r["$403"]])
+            elif any(isinstance(k, str) for k in e.get("$146") or ()):
+                # A mixed entry's words (#529).
+                text = "".join(k for k in e["$146"] if isinstance(k, str))
             style = styles.get(str(e.get("$157")), {})
             found.append((str(e.get("$159")), style, text))
             walk(e.get("$146") or [])
@@ -159,8 +162,9 @@ def test_a_cleared_paragraph_after_a_float_has_628(tmp_path, cls, symbol):
 
 @pytest.mark.unit
 def test_only_the_first_entry_of_a_cleared_block_has_628(tmp_path):
-    """A picture alone on its line splits the paragraph into three entries;
-    the ones after it continue the paragraph."""
+    """A line of only a picture ends the entry after it (#565): the first
+    entry holds the words and the picture, and the one after continues the
+    paragraph."""
     body = (
         f'<p class="cb">First.<br/><img class="w20" src="i.jpg" alt="a"/><br/>'
         f"After. {WORDS}</p><p>Next. {WORDS}</p>"
