@@ -44,7 +44,8 @@ def _nav(tmp_path, chapters_html):
             text.get(getattr(k, "value", k)["$246"]["$155"])
             for k in u.get("$247") or []
         ]
-        out.append((str(u["$238"]), kids))
+        # The unit itself lands at its level's first heading.
+        out.append((str(u["$238"]), text.get(u["$246"]["$155"]), kids))
     return out
 
 
@@ -61,7 +62,21 @@ def test_heading_navigation_groups_the_books_headings_by_level(tmp_path):
         ],
     )
     assert got == [
-        ("$799", ["One", "Two"]),
-        ("$800", ["Sub", "Again"]),
-        ("$801", ["Deep"]),
+        ("$799", "One", ["One", "Two"]),
+        ("$800", "Sub", ["Sub", "Again"]),
+        ("$801", "Deep", ["Deep"]),
     ]
+
+
+@pytest.mark.unit
+def test_a_label_kfxgen_prints_counts_as_a_first_level_heading(tmp_path):
+    """A chapter with no heading of its own gets its title printed as one,
+    so the navigation lists it with the book's h1s (#461)."""
+    got = _nav(
+        tmp_path,
+        [
+            ("One", "<p>Body only.</p>"),
+            ("Two", "<h1>Two</h1><p>Body.</p><h2>Sub</h2><p>Para.</p>"),
+        ],
+    )
+    assert got == [("$799", "One", ["One", "Two"]), ("$800", "Sub", ["Sub"])]
