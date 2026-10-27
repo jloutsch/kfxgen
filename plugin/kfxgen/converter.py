@@ -24,6 +24,7 @@ from ._img_tokens import (
 from .font_table import BOLD_WEIGHT_THRESHOLD, parse_style, parse_weight
 from .image_optimize import (
     GIF_SIGNATURES,
+    cmyk_to_rgb,
     decodes,
     gif_to_png,
     optimize_images,
@@ -602,10 +603,13 @@ def _page_shows_something(text, cover_href=None):
     """
     if _has_real_text(text):
         return True
-    cover = _img_basename(cover_href) if cover_href else None
-    return any(
-        _img_basename(m.group(1)) != cover for m in _IMG_TOKEN_RE.finditer(text or "")
-    )
+
+    def name(href):
+        # In any capitals or %-encoding: one file to a reader (#550 QA).
+        return unquote(_img_basename(href)).lower()
+
+    cover = name(cover_href) if cover_href else None
+    return any(name(m.group(1)) != cover for m in _IMG_TOKEN_RE.finditer(text or ""))
 
 
 def _local_tag(tag):
@@ -6809,6 +6813,7 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         own_size=_pictures_in_table_cells(oeb_book),
     )
 
+    cover_image, images = cmyk_to_rgb(cover_image, images, log)
     cover_image, images = _check_and_optimize(
         cover_image, cover_href, images, opts, log
     )
