@@ -5102,7 +5102,10 @@ def _assemble_chapters_by_coordinate(
         acc += len(b)
 
     flat = []
-    for b in spine_blocks:
+    for si, b in enumerate(spine_blocks):
+        for block in b:
+            # Its file, so a Contents page can tell its own (#551 review).
+            block["_spine_file"] = si
         flat.extend(b)
 
     # Collect all anchor fragments referenced in the TOC (even non-monotonic ones)
@@ -6007,6 +6010,39 @@ def _split_text_above_listing(ch):
     return lead
 
 
+def _split_files_after_contents(ch):
+    """The pages from files after the contents page's own, as a chapter of
+    their own, or None (#551 review).
+
+    A contents entry's section runs on to the next TOC entry, so files the
+    TOC doesn't list after it are part of it, and the rebuild replaced them:
+    a foreword and an introduction, 64 blocks, in one library book. Kindle
+    Previewer 4.0.3 prints them. They follow the rebuilt page, out of the
+    navigation and with no heading, as #393's front matter does."""
+    blocks = ch.get("blocks") or []
+    own = blocks[0].get("_spine_file") if blocks else None
+    cut = next(
+        (
+            n
+            for n, b in enumerate(blocks)
+            if b.get("_spine_file") is not None and b["_spine_file"] != own
+        ),
+        None,
+    )
+    if own is None or cut is None or not _count_text_blocks(blocks[cut:]):
+        return None
+    kept, ch["blocks"] = blocks[cut:], blocks[:cut]
+    ch["text"] = "\n\n".join(b["text"] for b in ch["blocks"] if b.get("text"))
+    return {
+        "title": LEADING_TITLE_FALLBACK,
+        "text": "\n\n".join(b["text"] for b in kept if b.get("text")),
+        "blocks": kept,
+        "toc_level": ch.get("toc_level", 0),
+        "_omit_from_toc": True,
+        "_omit_title_heading": True,
+    }
+
+
 def _split_front_matter_below_listing(ch):
     """The front matter printed after `ch`'s listing, as a chapter of its
     own, or None.
@@ -6109,6 +6145,10 @@ def _replace_title_page(chapters, metadata, log, listings_kept=False):
     # (#393). Only a chapter that dropped a listing has a place for it.
     for ch in list(chapters):
         if ch is nav_contents_ch or _normalize_title(ch["title"]) in _CONTENTS_TITLES:
+            later = _split_files_after_contents(ch)
+            if later is not None:
+                chapters.insert(chapters.index(ch) + 1, later)
+                log.info("  Kept the pages after the contents page")
             after = _split_front_matter_below_listing(ch)
             if after is not None:
                 chapters.insert(chapters.index(ch) + 1, after)
