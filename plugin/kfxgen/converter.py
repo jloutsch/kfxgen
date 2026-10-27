@@ -5364,7 +5364,8 @@ def _assemble_chapters_by_coordinate(
                 ch["sub_entries"] = subs
             chapters.append(ch)
 
-    last_si = coords[-1][1]
+    # The furthest file reached: an entry out of order can point back (#484).
+    last_si = max(c[1] for c in coords)
     # Tail orphans use filename-stem titles; TOC titles drove the inline splits
     # above so they are not available to reassign here (intentional).
     for si in range(last_si + 1, len(spine_items_ordered)):
