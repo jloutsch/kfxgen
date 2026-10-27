@@ -602,10 +602,13 @@ def _page_shows_something(text, cover_href=None):
     """
     if _has_real_text(text):
         return True
-    cover = _img_basename(cover_href) if cover_href else None
-    return any(
-        _img_basename(m.group(1)) != cover for m in _IMG_TOKEN_RE.finditer(text or "")
-    )
+
+    def name(href):
+        # In any capitals or %-encoding: one file to a reader (#550 QA).
+        return unquote(_img_basename(href)).lower()
+
+    cover = name(cover_href) if cover_href else None
+    return any(name(m.group(1)) != cover for m in _IMG_TOKEN_RE.finditer(text or ""))
 
 
 def _local_tag(tag):

@@ -94,7 +94,7 @@ def test_a_first_page_of_only_a_cover_copy_keeps_it(calibre):  # noqa: F811
     assert all(t.strip() for t in sections[1] if t != "cover_img"), f"calibre {version}"
 
 
-def _spine_fallback_epub(path):
+def _spine_fallback_epub(path, src="cover.jpg"):
     """The book's own cover page first, and a TOC whose hrefs differ from
     the spine's in case, so no entry maps and the spine items become the
     chapters, as in 2 of 200 library books."""
@@ -133,20 +133,22 @@ def _spine_fallback_epub(path):
             '<navPoint id="n1" playOrder="2"><navLabel><text>One</text></navLabel>'
             '<content src="One.xhtml"/></navPoint></navMap></ncx>',
         )
-        z.writestr("cover.xhtml", _page('<div><img src="cover.jpg" alt="c"/></div>'))
+        z.writestr("cover.xhtml", _page(f'<div><img src="{src}" alt="c"/></div>'))
         z.writestr("one.xhtml", _page("<h1>One</h1><p>Text.</p>"))
         z.writestr("cover.jpg", cover)
 
 
-def test_the_books_own_cover_page_shows_once_without_a_toc(calibre):  # noqa: F811
+@pytest.mark.parametrize("src", ["cover.jpg", "COVER.jpg"], ids=["exact", "capitals"])
+def test_the_books_own_cover_page_shows_once_without_a_toc(calibre, src):  # noqa: F811
     """With no TOC entry mapped, the book's own cover page was a chapter:
     its picture was left to kfxgen's cover page (#516), leaving a blank page
     of no text. It is skipped, as on the TOC's path (#32) and as Kindle
     Previewer 4.0.3 shows such a book (#524: 2 library books, 9 and 34
-    pictures in Previewer's file and now in kfxgen's)."""
+    pictures in Previewer's file and now in kfxgen's). The page may name the
+    cover in other capitals (#550 QA)."""
     tmp, _env, version = calibre
-    epub, kfx = tmp / "cov524s.epub", tmp / "cov524s.kfx"
-    _spine_fallback_epub(epub)
+    epub, kfx = tmp / f"cov524s{src[0]}.epub", tmp / f"cov524s{src[0]}.kfx"
+    _spine_fallback_epub(epub, src)
     _ebook_convert(calibre, epub, kfx, True)
     frags = load_fragments(kfx)
     content = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
