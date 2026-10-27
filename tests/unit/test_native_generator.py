@@ -2699,11 +2699,13 @@ class TestImageWidthFollowsIntrinsicSize:
         (got,) = self._widths([(462, 700)])
         assert 90.0 < got[0] <= 100.0
 
-    def test_ornaments_keep_their_em_sizing(self):
-        """A small square dingbat is not an illustration; 3em is right and
-        scaling it to 45% of the column would be wrong."""
-        (got,) = self._widths([(222, 222)])
-        assert got == (3.0, "em")
+    def test_small_pictures_are_sized_by_their_width(self):
+        """Kindle Previewer 4.0.3 sizes a picture alone in its paragraph by
+        its pixel width at any size: no fixed 3em square for one up to 300 px,
+        which also stretched a non-square one (#462)."""
+        dims = [(48, 48), (222, 222), (300, 220), (220, 300)]
+        got = self._widths(dims)
+        assert got == [(round(w / self.REF * 100, 3), "%") for w, _ in dims]
 
     def test_no_image_is_given_the_old_fixed_fraction(self):
         got = self._widths([(512, 206), (462, 700), (1200, 900), (150, 150)])
@@ -2943,9 +2945,10 @@ def test_close_markers_take_no_position_and_opens_take_one():
 
 @pytest.mark.unit
 def test_empty_cell_is_still_a_cell():
+    """With nothing in it, as Kindle Previewer writes it (#480)."""
     ch = _content([_table_block([["a", "", "c"]])])
     cells = [c for c in ch["all_chunks"] if "cell" in c]
-    assert [c["text"] for c in cells] == ["a", " ", "c"]
+    assert [c.get("text", c["type"]) for c in cells] == ["a", "open", "c"]
 
 
 @pytest.mark.unit
@@ -3792,7 +3795,7 @@ def test_a_picture_with_display_dims_is_sized_by_them_not_its_pixels(tmp_path):
                 )
     assert shown == [
         (400, 200, "40.323", "$314"),  # 200 px wide of the 496 px column
-        (128, 128, "3", "$308"),  # small, as a 64x64 picture is
+        (128, 128, "12.903", "$314"),  # 64 px wide: by width too (#462)
         (400, 200, "80.645", "$314"),  # no display size: its pixels decide
     ]
 

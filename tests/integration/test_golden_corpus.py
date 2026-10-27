@@ -215,12 +215,17 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     branch last produced.
 
     Every fragment matches but the `$550` location map, which every book
-    now writes with a location every 110 positions (#227), and the heading
-    navigation, built from the book's headings (#461): `$389`'s other
-    containers are unchanged."""
+    now writes with a location every 110 positions (#227); the content
+    features (#455): `$585` declares reflow-section-size, yj_hdv and
+    yj_jpg_rst_marker_present only when a book has them, so their three
+    symbols are gone and `$270`'s symbol ids after them move down by 3; and
+    the heading navigation, built from the book's headings (#461): `$389`'s
+    other containers are unchanged."""
     from types import SimpleNamespace
 
     from tests._kfx_introspect import load_fragments, val
+
+    features = ("reflow-section-size", "yj_hdv", "yj_jpg_rst_marker_present")
 
     from tests.fixtures.golden.inputs import make_table_cells
 
@@ -237,8 +242,26 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
         return {
             (str(f.ftype), str(f.fid)): repr(val(f))
             for f in load_fragments(path)
-            if str(f.ftype) not in ("$550", "$389")
+            if str(f.ftype) not in ("$550", "$585", "$270", "$389", "$ion_symbol_table")
         }
+
+    def by_type(path, ftype):
+        return next(val(f) for f in load_fragments(path) if str(f.ftype) == ftype)
+
+    old_path = EXPECTED_DIR / "table_cells_rows.kfx"
+    assert fragments(fresh_path) == fragments(old_path)
+    old_symbols = list(by_type(old_path, "$ion_symbol_table")["symbols"])
+    assert list(by_type(fresh_path, "$ion_symbol_table")["symbols"]) == [
+        x for x in old_symbols if x not in features
+    ]
+    assert [t for t, _ in by_type(fresh_path, "$270")["$181"]] == [
+        t for t, _ in by_type(old_path, "$270")["$181"]
+    ]
+    assert [repr(f) for f in by_type(fresh_path, "$585")["$590"]] == [
+        repr(f)
+        for f in by_type(old_path, "$585")["$590"]
+        if str(f["$492"]) not in features
+    ]
 
     def navigation(path):
         (nav,) = [val(f) for f in load_fragments(path) if str(f.ftype) == "$389"]
@@ -248,8 +271,6 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
             if str(getattr(c, "value", c)["$235"]) != "$798"
         ]
 
-    old_path = EXPECTED_DIR / "table_cells_rows.kfx"
-    assert fragments(fresh_path) == fragments(old_path)
     assert navigation(fresh_path) == navigation(old_path)
 
 

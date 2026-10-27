@@ -11,6 +11,7 @@ from urllib.parse import unquote
 from ._img_tokens import IMG_TOKEN_RE
 from .inline_style import (
     ALIGN_MAP,
+    EXTERNAL_LINK_PREFIX,
     NOTEREF_FLAG,
     TYPOGRAPHY_KEYS,
     VALIGN_MAP,
@@ -1340,18 +1341,15 @@ class NativeKFXGenerator:
         - yj_table: table support
         - yj_table_viewer: added by `_declare_table_viewer` once a native
           table has been written (#254)
-        - reflow-section-size: multi-section content support
         - reflow-style: basic reflowable styling
         - CanonicalFormat: standard format marker
-        - yj_hdv: high-definition visual support
-        - yj_jpg_rst_marker_present: JPEG restart marker support
+        reflow-section-size, yj_hdv and yj_jpg_rst_marker_present are added
+        by `_declare_content_features` once the content is built, only when
+        the book has them (#455).
         """
         self.symtab.create_local_symbol("com.amazon.yjconversion")
         self.symtab.create_local_symbol("reflow-style")
-        self.symtab.create_local_symbol("reflow-section-size")
         self.symtab.create_local_symbol("yj_table")
-        self.symtab.create_local_symbol("yj_hdv")
-        self.symtab.create_local_symbol("yj_jpg_rst_marker_present")
         self.symtab.create_local_symbol("version")
         self.symtab.create_local_symbol("SDK.Marker")
         self.symtab.create_local_symbol("CanonicalFormat")
@@ -1374,14 +1372,6 @@ class NativeKFXGenerator:
                 IS("$586"),
                 "com.amazon.yjconversion",
                 IS("$492"),
-                "reflow-section-size",
-                IS("$589"),
-                make_version(9),
-            ),
-            IonStruct(
-                IS("$586"),
-                "com.amazon.yjconversion",
-                IS("$492"),
                 "reflow-style",
                 IS("$589"),
                 make_version(1),
@@ -1394,26 +1384,58 @@ class NativeKFXGenerator:
                 IS("$589"),
                 make_version(1),
             ),
-            IonStruct(
-                IS("$586"),
-                "com.amazon.yjconversion",
-                IS("$492"),
-                "yj_hdv",
-                IS("$589"),
-                make_version(1),
-            ),
-            IonStruct(
-                IS("$586"),
-                "com.amazon.yjconversion",
-                IS("$492"),
-                "yj_jpg_rst_marker_present",
-                IS("$589"),
-                make_version(1),
-            ),
         ]
 
         value = IonStruct(IS("$590"), features_list)
         return YJFragment(fid=IS("$348"), ftype=IS("$585"), value=value)
+
+    def _declare_content_features(self, max_section_pids):
+        """Add the content features the built book has to $585, by kfxlib's
+        rules (#455): reflow-section-size from its largest section's
+        positions, left at 1 (undeclared) up to 65,536; yj_hdv for a picture
+        over 1920 px on a side; yj_jpg_rst_marker_present for a JPEG holding
+        a restart marker. Symbols are created here, last, as
+        `_declare_table_viewer`'s is."""
+        features = next(f for f in self.fragments if f.ftype == IS("$585")).value[
+            IS("$590")
+        ]
+
+        def feature(name, major):
+            self.symtab.create_local_symbol(name)
+            return IonStruct(
+                IS("$586"),
+                "com.amazon.yjconversion",
+                IS("$492"),
+                name,
+                IS("$589"),
+                IonStruct(IS("version"), IonStruct(IS("$587"), major, IS("$588"), 0)),
+            )
+
+        n = max_section_pids
+        size = min((n - 65536) // 16384 + 2, 256) if n > 65536 else 1
+        if size > 1:
+            # After yj_table and its viewer, where it stood before (#455).
+            at = sum(
+                1
+                for f in features
+                if str(f.get(IS("$492"))) in ("yj_table", "yj_table_viewer")
+            )
+            features.insert(at, feature("reflow-section-size", size))
+        resources = [f.value for f in self.fragments if f.ftype == IS("$164")]
+        if any(
+            max(int(r.get(IS("$422"), 0) or 0), int(r.get(IS("$423"), 0) or 0)) > 1920
+            for r in resources
+        ):
+            features.append(feature("yj_hdv", 1))
+        jpeg_locations = {
+            str(r.get(IS("$165"))) for r in resources if r.get(IS("$161")) == IS("$285")
+        }
+        if any(
+            re.search(rb"\xff[\xd0-\xd7]", bytes(f.value))
+            for f in self.fragments
+            if f.ftype == IS("$417") and str(f.fid) in jpeg_locations
+        ):
+            features.append(feature("yj_jpg_rst_marker_present", 1))
 
     def _declare_ruby(self):
         """Add `yj_ruby` 1.0 to the built $585 once a ruby is written, as Kindle
@@ -2340,6 +2362,14 @@ class NativeKFXGenerator:
             "position_entries_265": entries_265_raw,
             "section_positions_264": section_positions_264,
             "locations": locations,
+            # kfxlib's pid count of each section, for reflow-section-size.
+            "max_section_pids": max(
+                (
+                    sum(max(length, 0) for _eid, length, *_ in sec)
+                    for sec in location_sections
+                ),
+                default=0,
+            ),
         }
 
     def build_ion_symbol_table_fragment(self):
@@ -2573,14 +2603,16 @@ class NativeKFXGenerator:
             if space_above:
                 value[IS("$47")] = IonStruct(
                     IS("$307"),
-                    IonDecimal(f"{space_above / _LINE_EM:.6g}"),
+                    IonDecimal(f"{space_above / _LINE_EM / line_height:.6g}"),
                     IS("$306"),
                     IS("$310"),
                 )
         elif not is_heading and text_indent is None:
+            # margin-top: a line of the main text, in this paragraph's own
+            # line heights, as Previewer measures it (#463).
             value[IS("$47")] = IonStruct(
-                IS("$307"), IonDecimal("1"), IS("$306"), IS("$310")
-            )  # margin-top: 1lh
+                IS("$307"), IonDecimal(f"{1 / line_height:.6g}"), IS("$306"), IS("$310")
+            )
 
         # Only set font-size when non-default — lets Kindle use its default for normal text
         # Reference KFX files omit font-size on most styles and only set it for headings/small text
@@ -2751,6 +2783,7 @@ class NativeKFXGenerator:
         text_transform=None,
         letter_spacing=None,
         colour=None,
+        background=None,
     ):
         """$157 for a table cell: Previewer's padding, plus the cell's own
         alignment, header weight and spans (#219), its vertical alignment
@@ -2797,72 +2830,50 @@ class NativeKFXGenerator:
         if border_box:
             # A cell that sets its own width, as Previewer writes it (#264).
             value[IS("$546")] = IS("$377")
+        if background is not None:
+            # Its fill, as Previewer writes it on the cell (#502).
+            value[IS("$70")] = background
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_fragment_157_image(
         self,
         entity_name,
-        kind,
         width_pct=None,
         height_pct=None,
         float_side=None,
         clear=None,
     ):
-        """Builds a $157 style for a picture entry, of one of two kinds:
-        - "sized": its own width against the text column, as Amazon sizes
-          it (#145); `height_pct` sizes it by height ($57) instead, Amazon's
-          shape for `height="98%"` and `height: 100%`.
-        - "small" (Calibre KFX Output's s7N8 shape): a small near-square
-          ornament, 3em by 3em.
+        """Builds a $157 style for a picture entry: its own width against the
+        text column, as Amazon sizes it (#145), at any size (#462);
+        `height_pct` sizes it by height ($57) instead, Amazon's shape for
+        `height="98%"` and `height: 100%`.
         """
         self.symtab.create_local_symbol(entity_name)
-        if kind == "sized":
-            # Width from the image's own pixel width against the text column,
-            # capped at full width — what Amazon does. Everything else matches
-            # the old "inline" style so only the width changes. (#145)
-            # A height-sized image swaps $56 for $57 and keeps the max-width
-            # guard, so a tall page image still cannot overflow the column.
-            axis, pct = (
-                (IS("$57"), height_pct)
-                if height_pct is not None
-                else (IS("$56"), width_pct)
-            )
-            value = IonStruct(
-                axis,
-                IonStruct(IS("$307"), IonDecimal(str(pct)), IS("$306"), IS("$314")),
-                IS("$65"),
-                IonStruct(IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")),
-                IS("$785"),
-                IonStruct(IS("$131"), 2, IS("$132"), 2),
-                IS("$546"),
-                IS("$377"),
-                IS("$42"),
-                IonStruct(IS("$307"), IonDecimal("1"), IS("$306"), IS("$310")),
-                IS("$580"),
-                IS("$320"),
-                IS("$173"),
-                IS(entity_name),
-            )
-        else:  # small
-            # Reference s7N8 verbatim:
-            #   $56: 3em (width), $57: 3em (height) — em unit ($308)
-            #   $65: 100% (max-width, % unit $314) — prevents overflow
-            #   $546: $377 (center alignment)
-            #   $31: -9lh (top margin pull-up, lh unit $318)
-            value = IonStruct(
-                IS("$56"),
-                IonStruct(IS("$307"), IonDecimal("3"), IS("$306"), IS("$308")),
-                IS("$65"),
-                IonStruct(IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")),
-                IS("$57"),
-                IonStruct(IS("$307"), IonDecimal("3"), IS("$306"), IS("$308")),
-                IS("$546"),
-                IS("$377"),
-                IS("$173"),
-                IS(entity_name),
-                IS("$31"),
-                IonStruct(IS("$307"), IonDecimal("-9"), IS("$306"), IS("$318")),
-            )
+        # Width from the image's own pixel width against the text column,
+        # capped at full width — what Amazon does. (#145)
+        # A height-sized image swaps $56 for $57 and keeps the max-width
+        # guard, so a tall page image still cannot overflow the column.
+        axis, pct = (
+            (IS("$57"), height_pct)
+            if height_pct is not None
+            else (IS("$56"), width_pct)
+        )
+        value = IonStruct(
+            axis,
+            IonStruct(IS("$307"), IonDecimal(str(pct)), IS("$306"), IS("$314")),
+            IS("$65"),
+            IonStruct(IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")),
+            IS("$785"),
+            IonStruct(IS("$131"), 2, IS("$132"), 2),
+            IS("$546"),
+            IS("$377"),
+            IS("$42"),
+            IonStruct(IS("$307"), IonDecimal("1"), IS("$306"), IS("$310")),
+            IS("$580"),
+            IS("$320"),
+            IS("$173"),
+            IS(entity_name),
+        )
         if float_side:
             # Floated: the text after it wraps beside it, and it isn't
             # centred, as Kindle Previewer writes it (#243).
@@ -2871,6 +2882,17 @@ class NativeKFXGenerator:
         # A picture set to clear floats (#381).
         _write_clear(value, clear)
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
+
+    def build_fragment_266_uri(self, anchor_name, uri):
+        """A $266 anchor for a link leaving the book: its name ($180) and the
+        address ($186), as Kindle Previewer 4.0.3 writes http, https and
+        mailto links (#474)."""
+        self.symtab.create_local_symbol(anchor_name)
+        return YJFragment(
+            fid=IS(anchor_name),
+            ftype=IS("$266"),
+            value=IonStruct(IS("$180"), IS(anchor_name), IS("$186"), uri),
+        )
 
     def build_fragment_266(self, anchor_name, position_id, offset=0):
         """
@@ -3826,6 +3848,7 @@ class NativeKFXGenerator:
             self._declare_ruby()
         if ch_data.get("math_names"):
             self._declare_feature("yj_mathml")
+        self._declare_content_features(pos_data["max_section_pids"])
 
         # 16. Build $ion_symbol_table fragment (REQUIRED for Kindle)
         # Must be added last so all symbols used by other fragments are registered
@@ -3974,6 +3997,11 @@ class NativeKFXGenerator:
         if found is None:
             return None
         blocks, pending = found
+        if not any((b.get("text") or "").strip() for b in blocks):
+            # Nothing else on the page prints: left out, it was a blank page
+            # but for spaces. It stays, as Kindle Previewer 4.0.3 prints it
+            # (#524).
+            return None
         if pending:
             # Nothing after it: an empty block holds its anchors.
             blocks = [_with_anchors({"text": "", "spans": []}, pending), *blocks]
@@ -4445,6 +4473,7 @@ class NativeKFXGenerator:
                         "border": cell.get("border"),
                         "width_set": cell.get("width_set"),
                         "padding": cell.get("padding"),
+                        "background": cell.get("background"),
                         "table_width": tbl.get("width"),
                     }
                     if cell.get("paragraphs"):
@@ -4505,6 +4534,24 @@ class NativeKFXGenerator:
                             )
                         all_chunks.append({"type": "close"})
                         continue
+                    if not (cell["text"] or "").strip(" \t\r\n\xa0") and not cell.get(
+                        "anchor_keys"
+                    ):
+                        # An empty cell: a cell with nothing in it, as Kindle
+                        # Previewer writes it, not a text entry of a space
+                        # (#480), an NBSP-only one too, as Previewer does. One
+                        # holding an id keeps its entry, for a link to land on.
+                        all_chunks.append(
+                            {
+                                "type": "open",
+                                "node": "cell",
+                                "anchor_keys": [],
+                                "block_style": cell.get("block_style"),
+                                "cell": cell_info,
+                            }
+                        )
+                        all_chunks.append({"type": "close"})
+                        continue
                     all_chunks.append(
                         {
                             "type": "text",
@@ -4521,6 +4568,7 @@ class NativeKFXGenerator:
                                 "border": cell.get("border"),
                                 "width_set": cell.get("width_set"),
                                 "padding": cell.get("padding"),
+                                "background": cell.get("background"),
                                 "table_width": tbl.get("width"),
                             },
                         }
@@ -4711,6 +4759,8 @@ class NativeKFXGenerator:
                                             for k in TYPOGRAPHY_KEYS
                                             if bs.get(k) is not None
                                         }
+                                        # And the rest of its style (#490).
+                                        heading_chunk["book_style"] = bs
                                         # And its level (#461).
                                         if first.get("heading_level"):
                                             heading_chunk["heading_level"] = first[
@@ -4725,9 +4775,21 @@ class NativeKFXGenerator:
                                 # rendered twice. (#64)
                                 # A native table among them counts one block
                                 # per row, as the rows build saw it. (#219)
+                                first_style = (
+                                    (iter_blocks[0].get("block_style") or {})
+                                    if iter_blocks
+                                    else {}
+                                )
+                                before = len(iter_blocks)
                                 iter_blocks, eaten_keys = _eat_split_title(
                                     iter_blocks, title
                                 )
+                                if (
+                                    heading_chunk is not None
+                                    and len(iter_blocks) < before
+                                ):
+                                    # The book's heading prints: its style (#490).
+                                    heading_chunk["book_style"] = first_style
                                 carried_anchor_keys.extend(eaten_keys)
                         para_iter = iter_blocks
                     else:
@@ -5032,6 +5094,18 @@ class NativeKFXGenerator:
             for f in sorted(file_to_chunk):
                 folded_files.setdefault(f.lower(), f)
             for target in sorted(referenced_targets):
+                if target.startswith(EXTERNAL_LINK_PREFIX):
+                    # Leaving the book: an anchor holding the address, one
+                    # per address, as Kindle Previewer writes it (#474).
+                    anchor_name = f"ext_anchor_{len(body_anchor_map)}"
+                    self.fragments.append(
+                        self.build_fragment_266_uri(
+                            anchor_name, target[len(EXTERNAL_LINK_PREFIX) :]
+                        )
+                    )
+                    body_anchor_map[target] = anchor_name
+                    anchor_names.append(anchor_name)
+                    continue
                 key = (
                     target
                     if target in key_to_chunk
@@ -5126,7 +5200,11 @@ class NativeKFXGenerator:
         open_fills = []
 
         def _allocate_style(kind, builder=None, **attrs):
-            if attrs.get("colour") is not None and not any(open_fills):
+            if (
+                attrs.get("colour") is not None
+                and not any(open_fills)
+                and attrs.get("background") is None
+            ):
                 # Text written on the page is measured against it: a colour
                 # already readable there is unchanged (#383).
                 attrs["colour"] = _on_page(attrs["colour"])
@@ -5179,8 +5257,7 @@ class NativeKFXGenerator:
                 if link_name not in extra_style_names:
                     extra_style_names.append(link_name)
 
-        # Picture entries need their own $157 styles (build_fragment_157_image):
-        # "small" for a near-square picture up to 300px, "sized" for the rest.
+        # Picture entries need their own $157 styles (build_fragment_157_image).
         IMAGE_COLUMN_PX = _IMAGE_COLUMN_PX
 
         def _image_width_pct(w):
@@ -5193,34 +5270,16 @@ class NativeKFXGenerator:
             """
             return round(min(100.0, w / IMAGE_COLUMN_PX * 100.0), 3)
 
-        def _classify(w, h):
-            """`small` for ornaments, `sized` for everything else.
-
-            The old third bucket gave every image between 300 and 600 pixels a
-            fixed 9.626% width — a value correct for the 1090x92 rule it was
-            copied from and wrong for the illustrations it was applied to. It
-            is gone: an image's width now comes from its own dimensions, which
-            subsumes the old `page` bucket as the capped case. (#145)
-            """
-            if not (w and h):
-                return "sized"
-            if w <= 300 and h <= 300:
-                ratio = max(w, h) / float(min(w, h))
-                if ratio <= 1.4:
-                    return "small"
-            return "sized"
-
         any_image_chunk = any(
             isinstance(c, dict) and c.get("type") == "image" for c in all_chunks
         )
-        image_style_names = {"small": None}
         width_style_names = {}
         height_style_names = {}
         float_style_names = {}  # ((axis, pct), side) -> name (#243)
         resource_to_dims = {}
 
         def _image_size_key(c):
-            """('small', None), ('w', pct) or ('h', pct) for an image chunk.
+            """('w', pct) or ('h', pct) for an image chunk.
 
             A size the markup asked for wins over the pixel-width rule: it is
             what Amazon honours, and it is how a page-image book says "fill
@@ -5229,9 +5288,7 @@ class NativeKFXGenerator:
             hint = _parse_size_hint(c.get("size"), IMAGE_COLUMN_PX)
             if hint:
                 return hint
-            w, h = resource_to_dims.get(c.get("resource"), (None, None))
-            if _classify(w, h) == "small":
-                return ("small", None)
+            w, _h = resource_to_dims.get(c.get("resource"), (None, None))
             return ("w", _image_width_pct(w) if w else 100.0)
 
         if any_image_chunk:
@@ -5263,23 +5320,8 @@ class NativeKFXGenerator:
                 },
                 key=lambda k: (k[0][0], k[0][1] or 0, k[1] or "", k[2] or ""),
             )
-            kinds_used = {axis for axis, _ in keys_used}
             widths_used = {pct for axis, pct in keys_used if axis == "w"}
             heights_used = {pct for axis, pct in keys_used if axis == "h"}
-
-            # Fixed order, not the set's. Iterating `kinds_used` directly made
-            # the output non-reproducible: CPython randomizes string hashing
-            # per interpreter, so a book using more than one size class
-            # allocated these $157 styles in a different order each run, and
-            # every local symbol numbered after them shifted with it — $270's
-            # symbol ids and $419's name list changed while the content was
-            # byte-identical. (#96)
-            if "small" in kinds_used:
-                self.fragments.append(
-                    self.build_fragment_157_image(entity_name="s_img_sm", kind="small")
-                )
-                extra_style_names.append("s_img_sm")
-                image_style_names["small"] = "s_img_sm"
 
             # Sorted, so the allocation order is a property of the widths
             # rather than of set iteration — the #96 reproducibility rule
@@ -5288,9 +5330,7 @@ class NativeKFXGenerator:
             for idx, pct in enumerate(sorted(widths_used)):
                 name = f"s_img_w{idx}"
                 self.fragments.append(
-                    self.build_fragment_157_image(
-                        entity_name=name, kind="sized", width_pct=pct
-                    )
+                    self.build_fragment_157_image(entity_name=name, width_pct=pct)
                 )
                 extra_style_names.append(name)
                 width_style_names[pct] = name
@@ -5298,9 +5338,7 @@ class NativeKFXGenerator:
             for idx, pct in enumerate(sorted(heights_used)):
                 name = f"s_img_h{idx}"
                 self.fragments.append(
-                    self.build_fragment_157_image(
-                        entity_name=name, kind="sized", height_pct=pct
-                    )
+                    self.build_fragment_157_image(entity_name=name, height_pct=pct)
                 )
                 extra_style_names.append(name)
                 height_style_names[pct] = name
@@ -5310,7 +5348,6 @@ class NativeKFXGenerator:
                 self.fragments.append(
                     self.build_fragment_157_image(
                         entity_name=name,
-                        kind="small" if axis == "small" else "sized",
                         width_pct=pct if axis == "w" else None,
                         height_pct=pct if axis == "h" else None,
                         float_side=side,
@@ -5326,8 +5363,6 @@ class NativeKFXGenerator:
                     (_image_size_key(chunk), chunk.get("float"), chunk.get("clear"))
                 )
             axis, pct = _image_size_key(chunk)
-            if axis == "small":
-                return image_style_names.get("small")
             if axis == "h":
                 return height_style_names.get(pct)
             return width_style_names.get(pct)
@@ -5340,6 +5375,8 @@ class NativeKFXGenerator:
             FLAG_STRIKE,
             FLAG_SUB,
             FLAG_SUPER,
+            FLAG_TEXT_BOTTOM,
+            FLAG_TEXT_TOP,
             FLAG_UNDERLINE,
             TYPOGRAPHY_FLAGS,
             flag_value,
@@ -5381,6 +5418,24 @@ class NativeKFXGenerator:
         for chunk in all_chunks:
             text_px.update(_chars_by_px(chunk))
         main_px = _most(text_px)
+
+        # The book's main line height, as a factor of each paragraph's own
+        # font size: the one most of its text has. A paragraph's $42 is
+        # written against it, so the main text is 1lh, as Kindle Previewer
+        # writes it (#463).
+        line_counts = collections.Counter()
+        for chunk in all_chunks:
+            factor = (chunk.get("block_style") or {}).get("line_height")
+            if chunk.get("type") == "text" and factor:
+                line_counts[factor] += len(chunk.get("text") or "")
+        main_line = _most(line_counts)
+
+        def _line_ratio(chunk):
+            factor = (chunk.get("block_style") or {}).get("line_height")
+            if not factor or not main_line:
+                return 1.0
+            # Previewer writes none below 0.6 (probed to 0.5).
+            return float(f"{max(factor / main_line, 0.6):.6g}")
 
         def _rem(px):
             # A CSS px size as `$16` says it: against the main text size.
@@ -5472,6 +5527,10 @@ class NativeKFXGenerator:
                 attrs["font_size"], attrs["baseline_style"] = superscript_metrics()
             elif FLAG_SUB in flags:
                 attrs["font_size"], attrs["baseline_style"] = subscript_metrics()
+            elif FLAG_TEXT_TOP in flags:
+                attrs["baseline_style"] = "$447"  # no size change (#485)
+            elif FLAG_TEXT_BOTTOM in flags:
+                attrs["baseline_style"] = "$449"
             # Set only when drawn, so every other style keeps its key (#237).
             if FLAG_UNDERLINE in flags:
                 attrs["underline"] = True
@@ -5508,6 +5567,7 @@ class NativeKFXGenerator:
                 "border_box": bool(cell.get("width_set")),
                 "padding": _border_key(cell.get("padding")),
                 "table_width": cell.get("table_width") if cell.get("padding") else None,
+                "background": cell.get("background"),
                 **_typography(bs),
             }
             if cell_fam:
@@ -5534,7 +5594,9 @@ class NativeKFXGenerator:
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
                 if chunk.get("type") == "open":
-                    open_fills.append((chunk.get("box") or {}).get("background"))
+                    open_fills.append(
+                        (chunk.get("box") or chunk.get("cell") or {}).get("background")
+                    )
                 elif chunk.get("type") == "close" and open_fills:
                     open_fills.pop()
                 if chunk.get("type") in ("open", "close"):
@@ -5683,11 +5745,34 @@ class NativeKFXGenerator:
                     # The book's heading's small caps, transform, spacing
                     # and colour go on kfxgen's (#239).
                     typo = chunk.get("typography")
-                    entry_styles.append(
-                        _allocate_style("_h", **heading_attrs[ch_idx], **typo)
-                        if typo
-                        else heading_style_names[ch_idx]
-                    )
+                    book = chunk.get("book_style")
+                    if book:
+                        # The book's own heading prints: its weight, size,
+                        # alignment and side margins, as Kindle Previewer
+                        # prints it, over kfxgen's spacing (#490).
+                        attrs = {
+                            **heading_attrs[ch_idx],
+                            "bold": bool(book.get("bold")),
+                            "font_size": _rem(book.get("font_size")),
+                        }
+                        for key in ("align", "margin_left", "margin_right"):
+                            if book.get(key):
+                                attrs[key] = book[key]
+                        if not book.get("align"):
+                            # None set: none written, as Previewer writes it,
+                            # not kfxgen's justified body default.
+                            attrs["no_align"] = True
+                        if book.get("italic"):
+                            attrs["italic"] = True
+                        entry_styles.append(
+                            _allocate_style("_h", **attrs, **(typo or {}))
+                        )
+                    else:
+                        entry_styles.append(
+                            _allocate_style("_h", **heading_attrs[ch_idx], **typo)
+                            if typo
+                            else heading_style_names[ch_idx]
+                        )
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)
@@ -5714,6 +5799,8 @@ class NativeKFXGenerator:
                 else:
                     bs = chunk.get("block_style") or {}
                     attrs = {"font_size": _block_font_size(ch_idx, chunk)}
+                    if _line_ratio(chunk) != 1.0:
+                        attrs["line_height"] = _line_ratio(chunk)
                     if bs.get("align"):
                         attrs["align"] = bs["align"]
                     if bs.get("indent"):
@@ -5821,6 +5908,8 @@ class NativeKFXGenerator:
                             FLAG_NOT_ITALIC,
                             FLAG_SUPER,
                             FLAG_SUB,
+                            FLAG_TEXT_TOP,
+                            FLAG_TEXT_BOTTOM,
                             FLAG_UNDERLINE,
                             FLAG_STRIKE,
                         )
