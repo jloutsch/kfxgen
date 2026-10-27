@@ -360,3 +360,25 @@ def test_a_second_entry_on_the_same_spot_lands_with_its_twin(toc, subs):
     chapters = _conv._assemble_chapters_by_coordinate(spine, toc, NullLog())
     assert [c["title"] for c in chapters] == ["Chapter One"]
     assert [(s["title"], s["key"]) for s in chapters[0]["sub_entries"]] == subs
+
+
+@pytest.mark.unit
+def test_an_entry_out_of_document_order_is_kept_where_the_book_lists_it():
+    # #484: it was dropped as "out of document order". It is now a place, in
+    # the book's TOC order, landing on its own block; sections still follow
+    # the document.
+    spine = [
+        _spine_item("ch1.xhtml", CH1, True),
+        _spine_item("ch2.xhtml", CH2, True),
+    ]
+    toc = [
+        {"title": "Chapter Two", "href": "ch2.xhtml", "level": 0},
+        {"title": "Chapter One", "href": "ch1.xhtml", "level": 0},
+    ]
+    chapters = _conv._assemble_chapters_by_coordinate(spine, toc, NullLog())
+    head, two = chapters
+    assert head.get("_omit_from_toc") is True
+    assert two["title"] == "Chapter Two"
+    assert [(s["title"], s["key"]) for s in two["sub_entries"]] == [
+        ("Chapter One", "ch1.xhtml")
+    ]

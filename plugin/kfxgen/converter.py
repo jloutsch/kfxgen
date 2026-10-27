@@ -5120,6 +5120,9 @@ def _assemble_chapters_by_coordinate(
     listing_entry = None  # the listing ids the entry before named
     empty_listing = {}  # coord -> its listing's keys, for a page with no blocks (#433)
     same_spot = {}  # coord -> the entry before it, on the same block (#459)
+    # Coords pointing before the entry listed above them: places, in the
+    # book's TOC order, landing on their own block (#484).
+    out_of_order = set()
     for entry in toc_entries:
         norm = _normalize_href(entry["href"])
         try:
@@ -5177,11 +5180,19 @@ def _assemble_chapters_by_coordinate(
             # section, landing where the twin does (#459).
             same_spot[len(coords)] = len(coords) - 1
         elif fi < prev_flat:
-            log.warn(
-                f"  TOC entry {entry['title']!r} out of document order; skipping split"
+            # Kept where the book lists it, as Kindle Previewer keeps it,
+            # landing on its own block; the sections still follow the
+            # document (#484).
+            log.info(
+                f"  TOC entry {entry['title']!r} out of document order; kept as a "
+                "place, no section of its own"
             )
-            continue
+            out_of_order.add(len(coords))
         key = _entry_key(spine_items_ordered[si], frag)
+        if key is None and len(coords) in out_of_order:
+            # A whole-file entry out of order: the file's key, on its first
+            # block, so it lands there and not at the section's start.
+            key = _key_doc(spine_items_ordered[si]["href"], "")
         if (
             key
             and frag not in amap
@@ -5190,7 +5201,8 @@ def _assemble_chapters_by_coordinate(
             flat[fi]["anchor_keys"].append(key)
             flat[fi].setdefault("anchor_offsets", {})[key] = 0
         coords.append((fi, si, entry["title"], key, entry.get("level", 0)))
-        prev_flat = fi
+        if len(coords) - 1 not in out_of_order:
+            prev_flat = fi
         listing_entry = names_listing
         last_block_in_file[si] = bi
 
@@ -5215,8 +5227,9 @@ def _assemble_chapters_by_coordinate(
     # class="toc">`); otherwise it belongs to the chapter holding the block
     # before it. A listing at the start of its file stays with that file. (#276)
     starts = {}
-    for fi, si, _title, _key, _level in coords:
-        starts[fi] = si
+    for k, (fi, si, _title, _key, _level) in enumerate(coords):
+        if k not in out_of_order:
+            starts[fi] = si
     toc_frag_at = {}
     for entry in toc_entries:
         frag = _href_fragment(entry["href"])
@@ -5264,6 +5277,10 @@ def _assemble_chapters_by_coordinate(
     chapters = []
 
     first_fi = coords[0][0]
+    # An out-of-order entry into the blocks before the first section names
+    # that place itself: the head chapter takes no TOC entry of its own, or
+    # the pane listed it twice (#484).
+    head_listed = any(coords[k][0] < first_fi for k in out_of_order)
     # A head block that carries an anchor referenced (even non-monotonically) in
     # the TOC is NOT front matter — fold it into the first chapter instead.
     # NOTE: Known limitation — a malformed EPUB where genuine front matter
@@ -5298,10 +5315,12 @@ def _assemble_chapters_by_coordinate(
                     # chapter "Front Matter" comes through `coords` and keeps
                     # its heading. (#133)
                     ch["_omit_title_heading"] = True
+                if head_listed:
+                    ch["_omit_from_toc"] = True
                 chapters.append(ch)
 
     heads = _section_heads(coords, flat, spine_items_ordered, nav_flat, file_offset)
-    for k in same_spot:
+    for k in (*same_spot, *out_of_order):
         heads[k] = False
     for k, (fi, si, title, _key, _level) in enumerate(coords):
         if not heads[k]:
@@ -5333,8 +5352,13 @@ def _assemble_chapters_by_coordinate(
                 twin = j
                 while twin in same_spot:
                     twin = same_spot[twin]
-                # On the section's own block: it opens the section (None).
-                key = None if twin == k else coords[twin][3]
+                # On the section's own block: it opens the section (None). One
+                # out of order lands on its own block (#484).
+                key = (
+                    coords[j][3]
+                    if twin in out_of_order
+                    else (None if twin == k else coords[twin][3])
+                )
                 subs.append({"title": coords[j][2], "key": key, "level": coords[j][4]})
             if subs:
                 ch["sub_entries"] = subs
