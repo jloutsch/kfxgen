@@ -3891,6 +3891,11 @@ class NativeKFXGenerator:
         if found is None:
             return None
         blocks, pending = found
+        if not any((b.get("text") or "").strip() for b in blocks):
+            # Nothing else on the page prints: left out, it was a blank page
+            # but for spaces. It stays, as Kindle Previewer 4.0.3 prints it
+            # (#524).
+            return None
         if pending:
             # Nothing after it: an empty block holds its anchors.
             blocks = [_with_anchors({"text": "", "spans": []}, pending), *blocks]
