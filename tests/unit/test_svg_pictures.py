@@ -83,16 +83,16 @@ def test_an_svg_picture_is_extracted_as_png_with_its_own_size(monkeypatch):
     ("size", "box"),
     [
         ((200, 100), 400),
-        ((1024, 100), 2048),
-        ((1025, 10), 2048),
-        ((3000, 1000), 2048),
-        ((1000, 3000), 2048),
-        ((20000, 20000), 2048),
+        ((1024, 100), 1920),
+        ((1025, 10), 1920),
+        ((3000, 1000), 1920),
+        ((1000, 3000), 1920),
+        ((20000, 20000), 1920),
     ],
 )
 def test_an_svg_is_drawn_at_twice_its_size_within_the_cap(monkeypatch, size, box):
     """Twice its own size, so small text is clear on a 300 ppi screen (#440,
-    Paperwhite). Never past 2048 px: at its own size a 20000x20000 SVG took
+    Paperwhite). Never past 1920 px, the optimiser's cap (#467): at its own size a 20000x20000 SVG took
     67 s and 1.2 GB, and Qt would not read the PNG back for `optimize_image`
     to shrink (#439 review). calibre's `size.scale` fits the SVG inside the
     box, keeping its shape."""

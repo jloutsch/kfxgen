@@ -9,7 +9,7 @@ no-op so it never breaks anything.
 import os
 import struct
 
-DEFAULT_MAX_DIM = 2048
+DEFAULT_MAX_DIM = 1920
 DEFAULT_JPEG_QUALITY = 85
 
 #: Byte ceiling above which an image is re-encoded even when its pixel

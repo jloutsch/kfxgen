@@ -326,9 +326,9 @@ def test_fixture_body_images_shape():
         "body_images must emit at least two $259 image entries — fixture rotted"
     )
     widths = _image_style_percents(frags)
-    assert widths == {"s_img_w0": 60.484, "s_img_w1": 100.0}, (
+    assert widths == {"s_img_w0": 58.594, "s_img_w1": 100.0}, (
         f"body_images must carry one computed width and one saturated one, got "
-        f"{widths}. 300px against a 496px column is 60.484%; 800px caps at 100%. "
+        f"{widths}. 300px against a 512px column is 58.594%; 800px caps at 100%. "
         "If this moved deliberately, regenerate — but see #164 for why a golden "
         "showing only 100.0 tests nothing."
     )
@@ -339,7 +339,7 @@ def test_fixture_body_images_shape():
 def test_some_golden_exercises_a_computed_width():
     """At least one golden must carry a width the arithmetic actually produced.
 
-    `_image_width_pct` is `min(100, px / 496 * 100)`, and 100.0 is also what
+    `_image_width_pct` is `min(100, px / 512 * 100)`, and 100.0 is also what
     the caller falls back to when an image's dimensions are unreadable. So a
     corpus where every width is 100.0 cannot tell a working rule from a broken
     one — which is exactly what this corpus was until #164, because every

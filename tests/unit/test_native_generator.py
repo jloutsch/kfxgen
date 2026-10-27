@@ -2633,7 +2633,7 @@ class TestImageWidthFollowsIntrinsicSize:
     against 729, and 3 small images given 100% anyway.
     """
 
-    REF = 496.0
+    REF = 512.0
 
     def _widths(self, dims):
         """{resource pixel width: emitted CSS width} for a book of images."""
@@ -2678,10 +2678,7 @@ class TestImageWidthFollowsIntrinsicSize:
                 os.unlink(path)
 
     def test_a_half_column_image_gets_half_the_width(self):
-        # Height above 300 so this is unambiguously an illustration: at
-        # 248x300 it is square enough to be an ornament, and ornaments keep
-        # em sizing.
-        (got,) = self._widths([(248, 400)])
+        (got,) = self._widths([(256, 400)])
         assert got == (50.0, "%")
 
     def test_an_image_wider_than_the_column_is_capped(self):
@@ -2712,7 +2709,7 @@ class TestImageWidthFollowsIntrinsicSize:
         assert not any(g[0] == 9.626 for g in got if g), got
 
     def test_distinct_sizes_get_distinct_widths(self):
-        got = self._widths([(248, 400), (124, 400), (496, 400)])
+        got = self._widths([(256, 400), (128, 400), (512, 400)])
         assert [g[0] for g in got] == [50.0, 25.0, 100.0]
 
 
@@ -3794,9 +3791,9 @@ def test_a_picture_with_display_dims_is_sized_by_them_not_its_pixels(tmp_path):
                     (int(r["$422"]), int(r["$423"]), str(w["$307"]), str(w["$306"]))
                 )
     assert shown == [
-        (400, 200, "40.323", "$314"),  # 200 px wide of the 496 px column
-        (128, 128, "12.903", "$314"),  # 64 px wide: by width too (#462)
-        (400, 200, "80.645", "$314"),  # no display size: its pixels decide
+        (400, 200, "39.062", "$314"),  # 200 px wide of the 512 px column
+        (128, 128, "12.5", "$314"),  # 64 px wide: by width too (#462)
+        (400, 200, "78.125", "$314"),  # no display size: its pixels decide
     ]
 
 

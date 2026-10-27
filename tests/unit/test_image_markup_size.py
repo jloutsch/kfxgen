@@ -127,18 +127,18 @@ class TestSizedImageStyles:
         assert _magnitude(s, "$56") == 50.0
 
     def test_width_length_is_divided_by_the_column(self):
-        # width="200" -> 200 / 496 of the column, the same arithmetic as a
-        # natural width (#145).
+        # width="200" -> 200 / 512 of the column, the same arithmetic as a
+        # natural width (#145, #467).
         s = _style(_build(_token("p.jpg", "w=200"), self.IMAGES), "s_img_w0")
-        assert _magnitude(s, "$56") == round(200 / 496 * 100, 3)
+        assert _magnitude(s, "$56") == round(200 / 512 * 100, 3)
 
     def test_em_width_is_sixteen_pixels_an_em(self):
         s = _style(_build(_token("p.jpg", "w=10em"), self.IMAGES), "s_img_w0")
-        assert _magnitude(s, "$56") == round(160 / 496 * 100, 3)
+        assert _magnitude(s, "$56") == round(160 / 512 * 100, 3)
 
     def test_unsized_image_is_still_sized_by_its_pixels(self):
         s = _style(_build(_token("p.jpg"), self.IMAGES), "s_img_w0")
-        assert _magnitude(s, "$56") == round(390 / 496 * 100, 3)
+        assert _magnitude(s, "$56") == round(390 / 512 * 100, 3)
 
     def test_one_style_per_distinct_size(self):
         sizes = ["h=98%", "h=98%", "w=50%"]
