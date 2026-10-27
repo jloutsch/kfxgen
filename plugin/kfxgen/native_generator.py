@@ -1714,9 +1714,13 @@ class NativeKFXGenerator:
         language="en",
         issue_date=None,
         publisher="kfxgen",
+        authors=None,
+        description=None,
     ):
         """
-        Builds Fragment $490 (Book Metadata)
+        Builds Fragment $490 (Book Metadata). One author entry per author,
+        the book's own description, and an issue date only when the book
+        gives one, as Kindle Previewer 4.0.3 writes them (#454).
         """
         # Ensure symbols exist
         for sym in [
@@ -1772,26 +1776,26 @@ class NativeKFXGenerator:
         title_meta_list = [
             IonStruct(IS("$492"), "ASIN", IS("$307"), asin),
             IonStruct(IS("$492"), "asset_id", IS("$307"), container_id),
-            IonStruct(IS("$492"), "author", IS("$307"), author),
+            *(
+                IonStruct(IS("$492"), "author", IS("$307"), name)
+                for name in (authors or [author])
+            ),
             # Use ASIN as book_id/content_id for simplicity
             IonStruct(IS("$492"), "book_id", IS("$307"), asin),
             IonStruct(IS("$492"), "cde_content_type", IS("$307"), "PDOC"),
             IonStruct(IS("$492"), "content_id", IS("$307"), asin),
-            IonStruct(IS("$492"), "description", IS("$307"), f"Book: {title}"),
+            *(
+                [IonStruct(IS("$492"), "description", IS("$307"), description)]
+                if description
+                else []
+            ),
             IonStruct(IS("$492"), "is_sample", IS("$307"), False),
-            IonStruct(
-                IS("$492"),
-                "issue_date",
-                IS("$307"),
-                # Fallback is a stable epoch sentinel rather than today's
-                # date (#89): a time-of-conversion default would leak
-                # date drift into otherwise-identical re-conversions of
-                # the same book, breaking byte-determinism across days.
-                # Callers with a real date should pass `issue_date`
-                # explicitly; this branch only fires for inputs whose
-                # OPF metadata has no date, where Kindle's sort order
-                # is dominated by sideload-time anyway.
-                issue_date or "1970-01-01",
+            # None when the book gives none: no date of the conversion's
+            # (#89), nor the 1970-01-01 placeholder (#454).
+            *(
+                [IonStruct(IS("$492"), "issue_date", IS("$307"), issue_date)]
+                if issue_date
+                else []
             ),
             IonStruct(IS("$492"), "language", IS("$307"), language),
             # override_kindle_font: when the book embeds fonts (#15), the
@@ -3191,6 +3195,8 @@ class NativeKFXGenerator:
         language="en",
         publisher="kfxgen",
         issue_date=None,
+        authors=None,
+        description=None,
         images=None,
         font_table=None,
         resolved_image_refs=False,
@@ -3485,6 +3491,8 @@ class NativeKFXGenerator:
                 language=language,
                 issue_date=issue_date,
                 publisher=publisher,
+                authors=authors,
+                description=description,
             )
         )
 
