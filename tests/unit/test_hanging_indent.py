@@ -18,8 +18,11 @@ from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
         ({"text-indent": "-16px", "margin-left": "1em"}, ("-16", "$319")),
         ({"text-indent": "-1em", "margin-left": "2em"}, ("-1", "$308")),
         ({"text-indent": "-1em"}, None),
-        ({"text-indent": "-2em", "margin-left": "1em"}, None),
-        ({"text-indent": "-1em", "margin-left": "5%"}, None),
+        # Past its margin: clamped to it, as Previewer writes it (QA, #541).
+        ({"text-indent": "-2em", "margin-left": "1em"}, ("-1", "$308")),
+        # A % margin, as a share of Previewer's 512 px column: 5% covers 10px.
+        ({"text-indent": "-10px", "margin-left": "5%"}, ("-10", "$319")),
+        ({"text-indent": "-40px", "margin-left": "5%"}, ("-5", "$314")),
         ({"text-indent": "2em"}, ("2", "$308")),
     ],
     ids=[
@@ -28,11 +31,12 @@ from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
         "wider-margin",
         "alone",
         "past-margin",
-        "percent",
+        "percent-covers",
+        "percent-clamped",
         "positive",
     ],
 )
-def test_a_negative_indent_is_kept_only_when_the_margin_covers_it(css, indent):
+def test_a_negative_indent_is_kept_within_its_margin(css, indent):
     assert compute_block_style(css)["indent"] == indent
 
 

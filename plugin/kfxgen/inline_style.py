@@ -758,8 +758,13 @@ _PX_PER_UNIT = {
 
 
 def _length_px(length):
-    """A parsed length in CSS px, or None for a share of the page or none."""
-    if not length or length[1] not in _PX_PER_UNIT:
+    """A parsed length in CSS px, a % as a share of Previewer's 512 px column
+    (QA on #541), or None for none."""
+    if not length:
+        return None
+    if length[1] == "$314":
+        return float(length[0]) * 5.12
+    if length[1] not in _PX_PER_UNIT:
         return None
     return float(length[0]) * _PX_PER_UNIT[length[1]]
 
@@ -781,12 +786,17 @@ def compute_block_style(css):
     indent = parse_css_length(css.get("text-indent") or "")
     margin_left = parse_css_length(css.get("margin-left") or "")
     if indent is None and margin_left is not None:
-        # A hanging indent its left margin covers, as Previewer writes it
-        # (#465); alone it would pull the first line off the page.
+        # A hanging indent within its left margin, as Previewer writes it
+        # (#465): one past it is clamped to it. With no margin it would pull
+        # the first line off the page, so it is dropped.
         hang = parse_css_length(css.get("text-indent") or "", negative=True)
         hang_px, margin_px = _length_px(hang), _length_px(margin_left)
-        if hang_px is not None and margin_px is not None and -hang_px <= margin_px:
-            indent = hang
+        if hang_px is not None and margin_px is not None:
+            indent = (
+                hang
+                if -hang_px <= margin_px
+                else ("-" + margin_left[0], margin_left[1])
+            )
     margin_right = parse_css_length(css.get("margin-right") or "")
     return {
         "align": align,
