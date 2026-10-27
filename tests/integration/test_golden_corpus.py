@@ -222,7 +222,8 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     the landmarks: the book has no cover, so `$389` has no `$236` container
     and the symbol table no `nL` (#460); the metadata: no invented
     description or date (#454); and the heading navigation, built from the
-    book's headings (#461): `$389`'s other containers are unchanged."""
+    book's headings (#461): `$389`'s other containers are unchanged. The book
+    has no <h1>-<h6>, so no `$798` and no `nH` (#575)."""
     from types import SimpleNamespace
 
     from tests._kfx_introspect import load_fragments, val
@@ -264,7 +265,7 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     assert fragments(fresh_path) == fragments(old_path)
     old_symbols = list(by_type(old_path, "$ion_symbol_table")["symbols"])
     assert list(by_type(fresh_path, "$ion_symbol_table")["symbols"]) == [
-        x for x in old_symbols if x not in (*features, "nL")
+        x for x in old_symbols if x not in (*features, "nL", "nH")
     ]
     assert [t for t, _ in by_type(fresh_path, "$270")["$181"]] == [
         t for t, _ in by_type(old_path, "$270")["$181"]
