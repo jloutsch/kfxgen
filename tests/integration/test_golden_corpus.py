@@ -215,7 +215,9 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     branch last produced.
 
     Every fragment matches but the `$550` location map, which every book
-    now writes with a location every 110 positions (#227)."""
+    now writes with a location every 110 positions (#227), and the heading
+    navigation, built from the book's headings (#461): `$389`'s other
+    containers are unchanged."""
     from types import SimpleNamespace
 
     from tests._kfx_introspect import load_fragments, val
@@ -235,10 +237,20 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
         return {
             (str(f.ftype), str(f.fid)): repr(val(f))
             for f in load_fragments(path)
-            if str(f.ftype) != "$550"
+            if str(f.ftype) not in ("$550", "$389")
         }
 
-    assert fragments(fresh_path) == fragments(EXPECTED_DIR / "table_cells_rows.kfx")
+    def navigation(path):
+        (nav,) = [val(f) for f in load_fragments(path) if str(f.ftype) == "$389"]
+        return [
+            repr(c)
+            for c in nav[0]["$392"]
+            if str(getattr(c, "value", c)["$235"]) != "$798"
+        ]
+
+    old_path = EXPECTED_DIR / "table_cells_rows.kfx"
+    assert fragments(fresh_path) == fragments(old_path)
+    assert navigation(fresh_path) == navigation(old_path)
 
 
 # ---------------------------------------------------------------------------
