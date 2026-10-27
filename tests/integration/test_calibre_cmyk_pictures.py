@@ -31,7 +31,7 @@ from tests.integration.test_calibre_table_rows import (  # noqa: E402
 pytestmark = [pytest.mark.slow, pytest.mark.integration]
 
 
-def _epub(path):
+def _epub(path, cover=False):
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
         z.writestr(
@@ -47,7 +47,9 @@ def _epub(path):
             'version="2.0" unique-identifier="u"><metadata '
             'xmlns:dc="http://purl.org/dc/elements/1.1/">'
             '<dc:identifier id="u">cmyk466</dc:identifier><dc:title>C</dc:title>'
-            "<dc:language>en</dc:language></metadata><manifest>"
+            "<dc:language>en</dc:language>"
+            + ('<meta name="cover" content="p"/>' if cover else "")
+            + "</metadata><manifest>"
             '<item id="c" href="c.xhtml" media-type="application/xhtml+xml"/>'
             '<item id="p" href="p.jpg" media-type="image/jpeg"/>'
             '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
@@ -73,11 +75,17 @@ def _epub(path):
         )
 
 
-@pytest.mark.parametrize("embed", [False, True], ids=["optimised", "embed-originals"])
-def test_a_cmyk_picture_is_written_as_rgb(calibre, embed):  # noqa: F811
+@pytest.mark.parametrize(
+    ("embed", "cover"),
+    [(False, False), (True, False), (False, True)],
+    ids=["optimised", "embed-originals", "cover"],
+)
+def test_a_cmyk_picture_is_written_as_rgb(calibre, embed, cover):  # noqa: F811
+    """The cover too, whose resource the text's picture shares (#475). No
+    test covered it (QA's review of #555)."""
     tmp, env, version = calibre
-    epub, kfx = tmp / f"cmyk{embed}.epub", tmp / f"cmyk{embed}.kfx"
-    _epub(epub)
+    epub, kfx = tmp / f"cmyk{embed}{cover}.epub", tmp / f"cmyk{embed}{cover}.kfx"
+    _epub(epub, cover)
     cmd = [EBOOK_CONVERT, str(epub), str(kfx)]
     if embed:
         cmd.append("--kfxgen-embed-original-images")
