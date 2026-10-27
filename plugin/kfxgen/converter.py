@@ -2858,8 +2858,13 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
         own = compute_block_style(style_resolver(inner) or {})["align"]
         if own:
             return {**(block_style or compute_block_style({})), "align": own}
+    # The table's direction, or what holds it: a cell's or a row's own
+    # `dir` doesn't count, as Kindle Previewer 4.0.3 has it (#570).
+    table = next(
+        (a for a in cell.iterancestors() if _local_tag(a.tag) == "table"), cell
+    )
     rtl = next(
-        (a.get("dir") for a in (cell, *cell.iterancestors()) if a.get("dir")), ""
+        (a.get("dir") for a in (table, *table.iterancestors()) if a.get("dir")), ""
     )
     return {
         **(block_style or compute_block_style({})),

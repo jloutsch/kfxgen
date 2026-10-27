@@ -33,9 +33,13 @@ def _align(cell):
         ("<table><tr><td>a</td><td>b</td></tr></table>", ["left", "left"]),
         ('<table dir="rtl"><tr><td>a</td><td>b</td></tr></table>', ["right", "right"]),
         ('<div dir="rtl"><table><tr><td>a</td></tr></table></div>', ["right"]),
-        ('<table dir="rtl"><tr><td dir="ltr">a</td></tr></table>', ["left"]),
+        # A cell's or a row's own dir doesn't count: Kindle Previewer 4.0.3
+        # takes it from the table and what holds it (#570, probed).
+        ('<table dir="rtl"><tr><td dir="ltr">a</td></tr></table>', ["right"]),
+        ('<table><tr><td dir="rtl">a</td></tr></table>', ["left"]),
+        ('<table><tr dir="rtl"><td>a</td></tr></table>', ["left"]),
     ],
-    ids=["plain", "rtl-table", "rtl-ancestor", "ltr-cell"],
+    ids=["plain", "rtl-table", "rtl-ancestor", "ltr-cell", "rtl-cell", "rtl-row"],
 )
 def test_a_cell_with_no_alignment_of_its_own(html, aligns):
     assert [_align(c) for c in _cells(html)] == aligns

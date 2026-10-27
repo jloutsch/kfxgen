@@ -38,6 +38,10 @@ FILES = {
     "<table><tr><td><p>T5 one</p><p>T5 two</p></td><td>T5b</td></tr></table>"
     '<table><tr><td><p style="text-align: right">T6 p right</p></td>'
     "<td>T6b</td></tr></table>"
+    # A cell's or a row's own dir doesn't count (#570).
+    '<table dir="rtl"><tr><td dir="ltr">T7 ltr cell</td><td>T7b</td></tr></table>'
+    '<table><tr><td dir="rtl">T8 rtl cell</td><td>T8b</td></tr></table>'
+    '<table><tr dir="rtl"><td>T9 rtl row</td><td>T9b</td></tr></table>'
     "<p>After.</p>"
 }
 ALIGN = {"$59": "left", "$61": "right", "$320": "center", "$321": "justify"}
@@ -73,5 +77,11 @@ def test_cells_are_aligned_as_previewer_writes_them(calibre):  # noqa: F811
         "T5 two": "left",
         "T5b": "left",
         "T6 p right": "right",
+        "T7 ltr cell": "right",
+        "T7b": "right",
+        "T8 rtl cell": "left",
+        "T8b": "left",
+        "T9 rtl row": "left",
+        "T9b": "left",
         "T6b": "left",
     }, f"calibre {version}"
