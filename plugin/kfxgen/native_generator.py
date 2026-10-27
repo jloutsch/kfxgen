@@ -1945,7 +1945,8 @@ class NativeKFXGenerator:
         landmarks_name = "nL"
         self.symtab.create_local_symbol(heading_name)
         self.symtab.create_local_symbol(toc_name)
-        self.symtab.create_local_symbol(landmarks_name)
+        if cover_position is not None:
+            self.symtab.create_local_symbol(landmarks_name)
 
         # Build $798 heading nav container (required by Kindle for navigation)
         # Contains heading-based navigation mirroring the TOC structure
@@ -2029,43 +2030,44 @@ class NativeKFXGenerator:
         # margins shows the landmark alone decides it: neither the cover
         # section's layout nor the image's own style changed anything (#160).
         #
-        # A book with no cover keeps the old target, which is where it opens.
+        # A book with no cover has none, as Kindle Previewer 4.0.3 writes it:
+        # a cover landmark at the first chapter could have it drawn as a
+        # full-screen cover (#460).
+        containers = [heading_container, toc_container]
         if cover_position is not None:
-            landmark_label, landmark_position = "cover-nav-unit", cover_position
-        else:
-            landmark_label = toc_entries[0]["title"] if toc_entries else "Start"
-            landmark_position = first_position
-        landmarks_units = [
-            IonAnnotation(
-                [IS("$393")],
+            landmarks_units = [
+                IonAnnotation(
+                    [IS("$393")],
+                    IonStruct(
+                        IS("$238"),
+                        IS("$233"),
+                        IS("$241"),
+                        IonStruct(IS("$244"), "cover-nav-unit"),
+                        IS("$246"),
+                        IonStruct(IS("$155"), cover_position, IS("$143"), 0),
+                    ),
+                )
+            ]
+            landmarks_container = IonAnnotation(
+                [IS("$391")],
                 IonStruct(
-                    IS("$238"),
-                    IS("$233"),
-                    IS("$241"),
-                    IonStruct(IS("$244"), landmark_label),
-                    IS("$246"),
-                    IonStruct(IS("$155"), landmark_position, IS("$143"), 0),
+                    IS("$235"),
+                    IS("$236"),
+                    IS("$239"),
+                    IS(landmarks_name),
+                    IS("$247"),
+                    landmarks_units,
                 ),
             )
-        ]
-        landmarks_container = IonAnnotation(
-            [IS("$391")],
-            IonStruct(
-                IS("$235"),
-                IS("$236"),
-                IS("$239"),
-                IS(landmarks_name),
-                IS("$247"),
-                landmarks_units,
-            ),
-        )
 
-        # Top-level struct with reading order ref and all 3 nav containers
+            containers.append(landmarks_container)
+
+        # Top-level struct with reading order ref and its nav containers
         top_struct = IonStruct(
             IS("$178"),
             IS("$351"),
             IS("$392"),
-            [heading_container, toc_container, landmarks_container],
+            containers,
         )
 
         return YJFragment(fid=IS("$348"), ftype=IS("$389"), value=[top_struct])
@@ -2528,7 +2530,11 @@ class NativeKFXGenerator:
                     IS("$306"),
                     IS("$310"),
                 )
-        elif not is_heading and text_indent is None:
+        elif not is_heading and (
+            # A first-line indent replaces the space; a hanging one doesn't
+            # (#465).
+            text_indent is None or float(text_indent[0]) < 0
+        ):
             # margin-top: a line of the main text, in this paragraph's own
             # line heights, as Previewer measures it (#463).
             value[IS("$47")] = IonStruct(
