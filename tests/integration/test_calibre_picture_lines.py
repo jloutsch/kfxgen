@@ -32,15 +32,29 @@ PARAS = [
     " inline.</p>",
     "<p>M3 start <img src='s.jpg' alt='m3a'/> mid<br/>"
     "<img src='s.jpg' alt='m3b'/><br/>end.</p>",
+    # After an empty line, the picture line is an entry of its own (QA on
+    # #590; probed 2026-10-27).
+    "<p>W1 words<br/><br/><img src='s.jpg' alt='w1'/></p>",
+    "<h2>W2 heading<br/><br/><img src='s.jpg' alt='w2'/></h2>",
+    "<p>W4 words<br/><br/><img src='s.jpg' alt='w4'/><br/>W4 more.</p>",
+    "<p>W5 words<br/><img src='s.jpg' alt='w5'/><br/><br/>W5 more.</p>",
 ]
 
 #: Previewer's entries after the heading, in reading order: a mixed entry as
 #: [words, and each picture as (alt, width, height) in em], a text entry as
-#: its words. A 48 px picture is 3em.
+#: its words; a picture entry of its own isn't listed. A 48 px picture is 3em.
 PREVIEWER = [
     ["M1 ", ("m1a", 3.0, 3.0), "\ncaption ", ("m1b", 3.0, 3.0), " inline."],
     ["M3 start ", ("m3a", 3.0, 3.0), " mid\n", ("m3b", 3.0, 3.0)],
     "end.",
+    # Previewer's text keeps a line break at the end ("W1 words\n"); kfxgen
+    # strips it, as main does. The pictures are entries of their own.
+    "W1 words",
+    "W2 heading",
+    "W4 words",
+    "W4 more.",
+    ["W5 words\n", ("w5", 3.0, 3.0)],
+    "W5 more.",
     "After.",
 ]
 

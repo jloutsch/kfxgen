@@ -379,3 +379,36 @@ def test_preformatted_text_with_a_picture_line_is_not_cut(tmp_path):
         "pic",
         "\nP1 more code",
     ]
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (
+            "<p>W1 words<br/><br/><img src='b.jpg' alt='a'/></p>",
+            ["W1 words", "picture"],
+        ),
+        (
+            "<h1>W2 heading<br/><br/><img src='b.jpg' alt='a'/></h1>",
+            ["W2 heading", "picture"],
+        ),
+        # One <br/>: the picture stays in the words, as before.
+        (
+            "<p>W3 words<br/><img src='s.jpg' alt='a'/></p>",
+            [["W3 words\n", "pic"]],
+        ),
+    ],
+    ids=["paragraph", "heading", "one-break"],
+)
+def test_a_picture_line_after_an_empty_line_is_its_own_entry(tmp_path, body, expected):
+    """Previewer cuts before a line of only a picture when an empty line comes
+    before it: the words, then the picture as an entry (QA on #590, 2 library
+    books)."""
+    entries = _book(tmp_path, f"<h1>One</h1>{body}<p>After.</p>")[1:-1]
+    got = [
+        [p if isinstance(p, str) else "pic" for p in e[1]]
+        if e[0] == "mixed"
+        else (e[1] if e[0] == "text" else "picture")
+        for e in entries
+    ]
+    assert got == expected

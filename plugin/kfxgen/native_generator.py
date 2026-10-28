@@ -92,11 +92,13 @@ def _inline_length_em(m, font_size):
 def _cut_after_picture_lines(block):
     """`block` cut after each line holding only a picture when more follows,
     as Kindle Previewer 4.0.3 ends an entry there (#565): the picture stays
-    in the words before it, and the next line starts an entry. [block] when
+    in the words before it, and the next line starts an entry. After an
+    empty line it is cut before the picture line too, which is then an entry
+    of its own (QA on #590). [block] when
     there is no such line, the paragraph has no words, it is preformatted,
     or a picture in it floats, which is cut as before. The pieces after the
-    first continue the
-    paragraph: no heading level, space above or clearing of their own."""
+    first continue the paragraph: no heading level, space above or clearing
+    of their own."""
     text = block["text"]
     tokens = list(IMG_TOKEN_RE.finditer(text))
     # Preformatted text stays one entry, picture lines and all, as Previewer
@@ -105,17 +107,24 @@ def _cut_after_picture_lines(block):
         return [block]
     if not IMG_TOKEN_RE.sub("", text).strip():
         return [block]
+    # (end of a piece, start of the next): a cut after a picture line drops
+    # its line break; one before it, after an empty line, drops nothing.
     cuts, start = [], 0
-    for line in text.split("\n")[:-1]:
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
         end = start + len(line)
         if IMG_TOKEN_RE.search(line) and not IMG_TOKEN_RE.sub("", line).strip():
-            if text[end + 1 :].strip():
-                cuts.append(end)
+            # After an empty line, the picture is an entry of its own, as
+            # Previewer writes it (QA on #590).
+            if i and not lines[i - 1].strip() and text[:start].strip():
+                cuts.append((start, start))
+            if i < len(lines) - 1 and text[end + 1 :].strip():
+                cuts.append((end, end + 1))
         start = end + 1
     if not cuts:
         return [block]
     pieces, a = [], 0
-    for b in [*cuts, len(text)]:
+    for b, after in [*cuts, (len(text), None)]:
         # A piece holds its end too: an id after the last word (#487), or at
         # a cut, stays on the piece it ends (QA on #590).
         offsets = {
@@ -138,7 +147,7 @@ def _cut_after_picture_lines(block):
             for key in ("heading_level", "space_above", "tight", "clear"):
                 piece.pop(key, None)
         pieces.append(piece)
-        a = b + 1
+        a = after
     # A key with no offset, or one past the text, stays on the first piece.
     placed = {k for p in pieces for k in p["anchor_keys"]}
     pieces[0]["anchor_keys"] = pieces[0]["anchor_keys"] + [
