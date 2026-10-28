@@ -1,5 +1,62 @@
 # Changelog
 
+## 5.20.0 — Pictures in text and tables, header cells, Contents pages
+
+Ten fixes since 5.19.0. Each one was reviewed, converted through real
+calibre and compared with Kindle Previewer 4.0.3's output for the same book.
+Most were also checked against the Gutenberg 90 and a sample of library
+books before and after. The plain table cell change was checked on a Kindle
+Paperwhite (5.19.2); the others write the same kind of KFX structure that
+5.19.0's device checks covered, and were not checked on a Kindle again.
+
+### What readers will notice
+
+**Pictures**
+- A large picture saved as PNG is written as a JPEG when that is smaller,
+  as Previewer does. In a 12-book library sample, 94 pictures went from
+  36.4 MB to 11.5 MB in total, with only small colour differences. Pictures
+  with transparency stay PNG (#557).
+- A picture inside a table cell's words stays in the line, as it does in
+  ordinary paragraphs (#565).
+- A picture on a line of its own inside a paragraph sits where Previewer
+  puts it. After a single line break it joins the text above. After a
+  blank line it starts a new block, and so does a picture followed by words
+  on its line (#565, #593).
+- A link to an id placed just before such a picture lands on the picture
+  (#592).
+
+**Tables**
+- Header cells (`<th>`) are centred, as Previewer centres them, unless the
+  book sets the cell's own alignment (#589).
+- A header cell the book sets to a normal weight is no longer bold (#597).
+- A plain table cell is no longer forced to the left; it follows the
+  reader's default, as in Previewer's books. On the Paperwhite that looks
+  justified, the same as Amazon's file (#599).
+
+**Navigation**
+- When kfxgen rebuilds a Contents page, the page's own section headings
+  (such as "Part One") are kept, in place and at heading size (#585).
+- The list of heading stops follows the order in which each heading level
+  first appears, as Previewer orders it (#584).
+
+### Tech debt paid down
+- **Previewer evidence re-checked in standards mode.** Several earlier
+  table fixes were measured against Previewer files made from test pages
+  with no DOCTYPE. Previewer reads such pages in an older compatibility
+  ("quirks") mode, which aligns table cells differently from a normal book.
+  The cell-alignment rule from #479 rested on that output, and is now
+  corrected (#599). The test pages now carry a DOCTYPE, and the right-to-left
+  cell rule from #570 is filed for the same correction (#605).
+
+### Known differences from Previewer, still open
+- Right-to-left tables: Previewer records each table's, row's and cell's
+  text direction; kfxgen doesn't yet (#605).
+- Previewer writes plain bold header cells as extra-bold (#597).
+- A heading cell set to the same alignment as its row is centred (#601).
+- Plain text with a blank line in the middle stays one block, where
+  Previewer splits it (#602).
+- The 5.19.0 list (#536, #570, #578, #579, #246, #247) still applies.
+
 ## 5.19.0 — Matching Kindle Previewer, checked on a Kindle
 
 This release comes out of an audit of the code that had never had a QA
