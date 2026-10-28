@@ -2872,9 +2872,35 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
     """A cell's, or a cell paragraph's, block style with its alignment: the
     book's, else left, or right under a right-to-left `dir`, as Kindle
     Previewer 4.0.3 writes every cell (#479). A header cell is left unset,
-    so it stays centred."""
+    so it stays centred, unless it sets its own alignment (#589)."""
     if block_style is None:
         block_style = compute_block_style(css) if css is not None else None
+    if _local_tag(cell.tag) == "th" and style_resolver is not None:
+        block_style = block_style or compute_block_style({})
+
+        # A header cell's alignment counts only when it sets its own, as
+        # Kindle Previewer 4.0.3 has it (#589): one equal to its row's is
+        # inherited (calibre's values are), and the cell is centred. A
+        # data cell inherits as usual, in a page with a DOCTYPE.
+        def raw(elem):
+            css_of = style_resolver(elem) if elem is not None else None
+            return str((css_of or {}).get("text-align") or "").strip().lower()
+
+        mine = raw(cell)
+        own_paragraph = (
+            block_style["align"] != compute_block_style({"text-align": mine})["align"]
+        )
+        if mine == raw(cell.getparent()) and not own_paragraph:
+            # Centred, written out: a header cell's paragraphs otherwise
+            # take the book's alignment.
+            block_style = {**block_style, "align": "center"}
+        # `<th><p style="text-align: right">`: the paragraph's own, as for a
+        # data cell (#532), Previewer's too.
+        inner = _only_block_child(cell)
+        if inner is not None and raw(inner) != mine:
+            own = compute_block_style({"text-align": raw(inner)})["align"]
+            if own:
+                block_style = {**block_style, "align": own}
     if _local_tag(cell.tag) == "th" or (block_style or {}).get("align"):
         return block_style
     inner = _only_block_child(cell)
@@ -2898,6 +2924,18 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
     }
 
 
+def _header_not_bold(cell, css):
+    """A header cell whose weight comes to normal, as `<th style="font-weight:
+    normal">`: not bold, as Kindle Previewer 4.0.3 writes it (#597)."""
+    weight = str((css or {}).get("font-weight") or "").strip().lower()
+    # `bolder` reads as 400 here; the cell's block style makes it bold.
+    return (
+        _local_tag(cell.tag) == "th"
+        and bool(weight)
+        and parse_weight(weight) < BOLD_WEIGHT_THRESHOLD
+    )
+
+
 def _table_cell(cell, style_resolver, base_href):
     text, spans, marks = normalize_runs_with_anchors(
         _walk_inline(cell, style_resolver=style_resolver, base_href=base_href)
@@ -2911,6 +2949,7 @@ def _table_cell(cell, style_resolver, base_href):
         "anchor_offsets": {aid: marks.get(aid, 0) for aid in ids},
         "block_style": _cell_block_style(cell, css, style_resolver=style_resolver),
         "header": _local_tag(cell.tag) == "th",
+        "not_bold": _header_not_bold(cell, css),
         # A heading written in a cell: the section's opening, as a heading
         # outside a table is (#492).
         "heading": any(
@@ -2932,7 +2971,12 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
     items, loose text and anchors become the same blocks they would outside
     a table. Returns None when that leaves no text."""
     paragraphs = [
-        {**p, "block_style": _cell_block_style(cell, None, p.get("block_style"))}
+        {
+            **p,
+            "block_style": _cell_block_style(
+                cell, None, p.get("block_style"), style_resolver
+            ),
+        }
         for p in walk_cell(cell)
         if p.get("text")
     ]
@@ -2944,8 +2988,9 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
         "spans": [],
         "anchor_ids": [],
         "anchor_offsets": {},
-        "block_style": _cell_block_style(cell, css),
+        "block_style": _cell_block_style(cell, css, style_resolver=style_resolver),
         "header": _local_tag(cell.tag) == "th",
+        "not_bold": _header_not_bold(cell, css),
         "colspan": _span_attr(cell, "colspan"),
         "rowspan": _span_attr(cell, "rowspan"),
         "valign": _cell_valign(cell, style_resolver),

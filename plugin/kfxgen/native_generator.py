@@ -128,11 +128,12 @@ def _cut_after_picture_lines(block):
     pieces, a = [], 0
     for b, after in [*cuts, (len(text), None)]:
         # A piece holds its end too: an id after the last word (#487), or at
-        # a cut, stays on the piece it ends (QA on #590).
+        # a cut, stays on the piece it ends (QA on #590). Not before a
+        # picture line, where it names the picture (#592).
         offsets = {
             k: (o or 0) - a
             for k, o in (block.get("anchor_offsets") or {}).items()
-            if a <= (o or 0) <= b
+            if a <= (o or 0) < b or ((o or 0) == b and after != b)
         }
         piece = {
             **block,
@@ -4706,6 +4707,7 @@ class NativeKFXGenerator:
                 for cell in row["cells"]:
                     cell_info = {
                         "header": bool(cell.get("header")),
+                        "not_bold": bool(cell.get("not_bold")),
                         "colspan": cell.get("colspan", 1),
                         "rowspan": cell.get("rowspan", 1),
                         "valign": cell.get("valign"),
@@ -4745,7 +4747,10 @@ class NativeKFXGenerator:
                                     ):
                                         ch["in_cell"] = True
                                     elif ch["type"] == "text":
-                                        ch["in_header_cell"] = cell_info["header"]
+                                        ch["in_header_cell"] = (
+                                            cell_info["header"]
+                                            and not cell_info["not_bold"]
+                                        )
                                 continue
                             all_chunks.append(
                                 {
@@ -4755,7 +4760,8 @@ class NativeKFXGenerator:
                                     "block_style": para.get("block_style"),
                                     "anchor_keys": para.get("anchor_keys") or [],
                                     "anchor_offsets": para.get("anchor_offsets") or {},
-                                    "in_header_cell": cell_info["header"],
+                                    "in_header_cell": cell_info["header"]
+                                    and not cell_info["not_bold"],
                                 }
                             )
                         if len(all_chunks) == inside:
@@ -4803,6 +4809,7 @@ class NativeKFXGenerator:
                             "anchor_offsets": cell.get("anchor_offsets") or {},
                             "cell": {
                                 "header": bool(cell.get("header")),
+                                "not_bold": bool(cell.get("not_bold")),
                                 "colspan": cell.get("colspan", 1),
                                 "rowspan": cell.get("rowspan", 1),
                                 "valign": cell.get("valign"),
@@ -5837,7 +5844,7 @@ class NativeKFXGenerator:
             on its own."""
             blk_bold = bool(bs.get("bold"))
             blk_italic = bool(bs.get("italic"))
-            cell_bold = bool(cell["header"]) or blk_bold
+            cell_bold = (cell["header"] and not cell.get("not_bold")) or blk_bold
             cell_fam = _family(bs.get("font_family", []), cell_bold, blk_italic)
             cattrs = {
                 "align": bs.get("align") or ("center" if cell["header"] else None),
@@ -6139,7 +6146,10 @@ class NativeKFXGenerator:
                 # run's whole face, so it must say bold too. (#219)
                 _blk_b = (
                     bool(_cbs.get("bold"))
-                    or bool((chunk.get("cell") or {}).get("header"))
+                    or bool(
+                        (chunk.get("cell") or {}).get("header")
+                        and not chunk["cell"].get("not_bold")
+                    )
                     or bool(chunk.get("in_header_cell"))
                     # kfxgen's chapter heading is bold (#366).
                     or chunk_idx in heading_chunk_indices

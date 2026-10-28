@@ -452,3 +452,18 @@ def test_an_empty_line_before_a_line_with_a_picture_ends_the_entry(
         for e in entries
     ]
     assert got == expected
+
+
+def test_an_id_just_before_a_picture_after_an_empty_line_lands_on_it(tmp_path):
+    """Previewer lands a link to an id just before the picture on the
+    picture's own entry; kfxgen put it at the text piece's end, past its
+    stripped line breaks, and it fell back to the text's start (#592)."""
+    from tests.unit.test_link_landings import _landings
+
+    _book(
+        tmp_path,
+        "<h1>One</h1><p>W words<br/><br/><a id='x'></a>"
+        "<img src='b.jpg' alt='a'/></p><p><a href='c.xhtml#x'>To x</a></p>",
+    )
+    # The picture's entry, which holds no text.
+    assert _landings(tmp_path / "i.kfx")["To x"] == ""

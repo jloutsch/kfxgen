@@ -3536,6 +3536,40 @@ def test_an_italic_run_in_a_body_cell_is_not_bold(tmp_path):
     assert str(style["$13"]) == "$350"
 
 
+@pytest.mark.unit
+def test_a_header_cell_set_to_normal_weight_is_not_bold(tmp_path):
+    # `<th style="font-weight: normal">`, as Kindle Previewer 4.0.3 has it (#597).
+    block = _table_block([["Head"], ["a"]])
+    block["table"]["rows"][0]["cells"][0].update(header=True, not_bold=True)
+    top, styles = _storyline(tmp_path, [block])
+    cell = _first_cells(top)[0]
+    assert str(styles[str(cell["$157"])].get("$13")) != "$361"
+
+
+@pytest.mark.unit
+def test_an_italic_run_in_a_normal_weight_header_cell_is_not_bold(tmp_path):
+    from kfxgen.inline_style import FLAG_ITALIC
+
+    block = _table_block([["Name"], ["a"]])
+    cell = block["table"]["rows"][0]["cells"][0]
+    cell.update(header=True, not_bold=True, spans=[(0, 4, frozenset({FLAG_ITALIC}))])
+    top, styles = _storyline(tmp_path, [block])
+    entry = _first_cells(top)[0]
+    (span,) = entry["$142"]
+    assert str(styles[str(span["$157"])]["$13"]) == "$350"
+
+
+@pytest.mark.unit
+def test_a_normal_weight_header_paragraph_cell_is_not_bold(tmp_path):
+    block = _table_block([["H"], ["a"]])
+    cell = _paragraph_cell(["Head", "two"], header=True)
+    block["table"]["rows"][0]["cells"][0] = {**cell, "not_bold": True}
+    top, styles = _storyline(tmp_path, [block])
+    cell = _first_cells(top)[0]
+    for entry in (cell, *cell["$146"]):
+        assert str(styles[str(entry["$157"])].get("$13")) != "$361"
+
+
 def _cell_styles_at_font_size(tmp_path, font_size):
     gen = NativeKFXGenerator()
     out = tmp_path / "t.kfx"
