@@ -2870,8 +2870,9 @@ def _only_block_child(cell):
 
 def _cell_block_style(cell, css, block_style=None, style_resolver=None):
     """A cell's, or a cell paragraph's, block style with its alignment: the
-    book's, else left, or right under a right-to-left `dir`, as Kindle
-    Previewer 4.0.3 writes every cell (#479). A header cell is left unset,
+    book's, else none, as Kindle Previewer 4.0.3 writes a cell in a page with
+    a DOCTYPE; a Paperwhite then shows it justified, as Previewer's (#599).
+    Right under a right-to-left `dir` (#479). A header cell is left unset,
     so it stays centred."""
     if block_style is None:
         block_style = compute_block_style(css) if css is not None else None
@@ -2892,10 +2893,9 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
     rtl = next(
         (a.get("dir") for a in (table, *table.iterancestors()) if a.get("dir")), ""
     )
-    return {
-        **(block_style or compute_block_style({})),
-        "align": "right" if rtl.lower() == "rtl" else "left",
-    }
+    if rtl.lower() != "rtl":
+        return block_style
+    return {**(block_style or compute_block_style({})), "align": "right"}
 
 
 def _table_cell(cell, style_resolver, base_href):
