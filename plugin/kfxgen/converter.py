@@ -437,6 +437,9 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # .get(): margins don't inherit, and getitem drops the CSS
                     # unit on indent (returns computed px).
                     "text-align": _computed_value(st, "text-align"),
+                    # The element's own, declared on it: a header cell keeps
+                    # its own alignment, even its row's (#601).
+                    "own-text-align": st.get("text-align"),
                     "text-indent": st.get("text-indent"),
                     "margin-left": st.get("margin-left"),
                     "margin-right": st.get("margin-right"),
@@ -2880,21 +2883,23 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
         block_style = block_style or compute_block_style({})
 
         # A header cell's alignment counts only when it sets its own, as
-        # Kindle Previewer 4.0.3 has it (#589): one equal to its row's is
-        # inherited (calibre's values are), and the cell is centred. A
-        # data cell inherits as usual, in a page with a DOCTYPE.
-        def raw(elem):
+        # Kindle Previewer 4.0.3 has it (#589), even one equal to its row's
+        # (#601); otherwise it is centred. A data cell inherits as usual, in
+        # a page with a DOCTYPE.
+        def raw(elem, key="text-align"):
             css_of = style_resolver(elem) if elem is not None else None
-            return str((css_of or {}).get("text-align") or "").strip().lower()
+            return str((css_of or {}).get(key) or "").strip().lower()
 
         mine = raw(cell)
+        own = raw(cell, "own-text-align")
         own_paragraph = (
             block_style["align"] != compute_block_style({"text-align": mine})["align"]
         )
-        if mine == raw(cell.getparent()) and not own_paragraph:
+        if not own_paragraph:
             # Centred, written out: a header cell's paragraphs otherwise
             # take the book's alignment.
-            block_style = {**block_style, "align": "center"}
+            align = compute_block_style({"text-align": own})["align"]
+            block_style = {**block_style, "align": align or "center"}
         # `<th><p style="text-align: right">`: the paragraph's own, as for a
         # data cell (#532), Previewer's too.
         inner = _only_block_child(cell)
@@ -6559,6 +6564,14 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     for b in blocks:
         if b is first:
             continue
+        words = _normalize_title(b.get("text") or "")
+        if b.get("heading_level") and words in listed:
+            # A heading the TOC lists, as a part's: its line prints as the
+            # heading, its size, weight and level, as Kindle Previewer 4.0.3
+            # prints the page (#595), and keeps its link.
+            link = toc_links[listed.index(words)]
+            link["heading_level"] = b["heading_level"]
+            link["block_style"] = b.get("block_style")
         if any(_is_link_flag(f) for _s, _n, fl in b.get("spans") or () for f in fl):
             events.append(("link", _normalize_title(b.get("text") or "")))
         elif b.get("heading_level") and (b.get("text") or "").strip():
