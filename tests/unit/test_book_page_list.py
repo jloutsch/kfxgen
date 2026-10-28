@@ -129,3 +129,28 @@ def test_no_page_list_no_container(tmp_path):
     assert "$237" not in [
         str(getattr(c, "value", c)["$235"]) for c in val(nav)[0]["$392"]
     ]
+
+
+@pytest.mark.parametrize(
+    ("labels", "kept"),
+    [
+        (["1", "ii", "IV", "Xii"], True),
+        (["1", "A8"], False),
+        (["1", "{2}"], False),
+        (["1", "8-9"], False),
+        (["1", "p 2"], False),
+        (["1", "Cover Page"], False),
+    ],
+    ids=["digits-and-roman", "letter-digit", "braces", "range", "two-words", "words"],
+)
+def test_one_label_previewer_rejects_drops_the_whole_list(tmp_path, labels, kept):
+    """Kindle Previewer 4.0.3 writes no page list when any label is not all
+    digits or all roman-numeral letters (QA on #612)."""
+    pages = [(label, f"c1.xhtml#p{n}") for n, label in enumerate(labels)]
+    got = _conv._book_page_list(_book(tmp_path, nav=_nav(pages)))
+    assert got == (pages if kept else [])
+
+
+def test_spaces_round_a_label_are_trimmed(tmp_path):
+    book = _book(tmp_path, ncx=_ncx([("\n   8\n  ", "c1.xhtml#p8")]))
+    assert _conv._book_page_list(book) == [("8", "c1.xhtml#p8")]

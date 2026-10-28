@@ -54,7 +54,8 @@ def _page(n, f):
     )
 
 
-def _epub(out, key, nav_pages, ncx_pages):
+def _epub(out, key, nav_pages, ncx_pages, relabel=None):
+    relabel = relabel or {}
     epub3 = nav_pages
     files = {f: _page(n, f) for n, f in enumerate(CHAPS, 1)}
     items = "".join(
@@ -65,7 +66,8 @@ def _epub(out, key, nav_pages, ncx_pages):
         plist = (
             '<nav epub:type="page-list"><ol>'
             + "".join(
-                f'<li><a href="{f}#{pid}">{label}</a></li>' for f, pid, label in PAGES
+                f'<li><a href="{f}#{pid}">{relabel.get(label, label)}</a></li>'
+                for f, pid, label in PAGES
             )
             + "</ol></nav>"
         )
@@ -84,7 +86,8 @@ def _epub(out, key, nav_pages, ncx_pages):
         "<pageList><navLabel><text>Pages</text></navLabel>"
         + "".join(
             f'<pageTarget id="pt{n}" type="normal" value="{n}" playOrder="{n + 2}">'
-            f'<navLabel><text>{label}</text></navLabel><content src="{f}#{pid}"/></pageTarget>'
+            f"<navLabel><text>{relabel.get(label, label)}</text></navLabel>"
+            f'<content src="{f}#{pid}"/></pageTarget>'
             for n, (f, pid, label) in enumerate(PAGES, 1)
         )
         + "</pageList>"
@@ -185,3 +188,29 @@ def test_the_page_list_as_previewer_writes_it(calibre, case):  # noqa: F811
     assert len(_page_list(kfx)) == len(want) and got == want, (
         f"calibre {version}: {_page_list(kfx)}"
     )
+
+
+@pytest.mark.parametrize(
+    ("relabel", "want"),
+    [
+        ({"2": "A8"}, []),
+        ({"2": "{2}"}, []),
+        ({"2": "8-9"}, []),
+        ({"2": "p 2"}, []),
+        # Spaces round a label are trimmed: kfxgen's choice; Previewer
+        # writes none for a pretty-printed NCX's labels (QA on #612).
+        ({"2": "\n  2\n"}, ["1", "2", "3", "iv"]),
+        ({"iv": "IV", "3": "Xii"}, ["1", "2", "Xii", "IV"]),
+    ],
+    ids=["letter-digit", "braces", "range", "two-words", "spaces", "roman"],
+)
+def test_one_label_previewer_rejects_drops_the_page_list(calibre, relabel, want):  # noqa: F811
+    """Kindle Previewer 4.0.3 writes no page list when any label is not all
+    digits or all roman-numeral letters (QA's probes on #612)."""
+    tmp, _env, version = calibre
+    key = "-".join(f"{ord(c)}" for c in "".join(relabel.values()))[:40]
+    epub, kfx = tmp / f"p578-r{key}.epub", tmp / f"p578-r{key}.kfx"
+    _epub(epub, f"r{key}", False, True, relabel)
+    _ebook_convert(calibre, epub, kfx, True)
+    got = [label for label, _at in _page_list(kfx)]
+    assert got == want, f"calibre {version}: {got}"

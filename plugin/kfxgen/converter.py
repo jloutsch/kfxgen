@@ -6601,6 +6601,7 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
 
 #: Landmark types kfxgen writes, as Kindle Previewer 4.0.3 maps them (#579).
 _OPS_NS = "http://www.idpf.org/2007/ops"
+_PAGE_LABEL_RE = re.compile(r"\d+|[ivxlcdm]+", re.IGNORECASE)
 _NAV_LANDMARKS = {"toc": "toc", "bodymatter": "start"}
 _GUIDE_LANDMARKS = {"toc": "toc", "text": "start"}
 
@@ -6713,7 +6714,12 @@ def _book_page_list(oeb_book):
                 "//*[local-name()='pageList']/*[local-name()='pageTarget']"
             )
         ]
-    return [(label, key) for label, key in found if label and key]
+    found = [(label, key) for label, key in found if label and key]
+    # Kindle Previewer 4.0.3 writes no page list when one label isn't all
+    # digits or a roman numeral's letters (QA on #612), so neither does kfxgen.
+    if any(not _PAGE_LABEL_RE.fullmatch(label) for label, _key in found):
+        return []
+    return found
 
 
 def _with_ncx_empty_labels(oeb_book, entries):
