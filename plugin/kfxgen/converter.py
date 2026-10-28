@@ -6659,7 +6659,10 @@ def _respelled(found, oeb_book):
     """`found`'s (…, link key) items, each key naming a spine file only up to
     letter case put in the spine's spelling when one file fits (#610), as
     #549 does for TOC hrefs."""
-    names = {unquote(i.href) for i in getattr(oeb_book, "spine", None) or ()}
+    # The spine without calibre's copies of a file under another spelling,
+    # which are left out of the book (#476), so each file has one name.
+    spine = _spine_in_order(oeb_book, []) if getattr(oeb_book, "spine", None) else []
+    names = {unquote(i.href) for i in spine}
     loose = {}
     for name in names:
         loose.setdefault(name.lower(), set()).add(name)

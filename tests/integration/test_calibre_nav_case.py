@@ -42,6 +42,9 @@ def _epub(path):
         "c1.xhtml": _page(
             '<h1>One</h1><p>Before. <span epub:type="pagebreak" id="p1"/>After page one.</p>'
             + "<p>More words.</p>" * 10
+            # A link in other capitals: calibre adds the file again under that
+            # spelling, as in the library books (#549, #610).
+            + '<p><a href="CONTENTS.xhtml">Back</a> <a href="C1.xhtml#p1">Here</a></p>'
         ),
         "nav.xhtml": _page(
             '<nav epub:type="toc"><ol><li><a href="C1.xhtml">One</a></li></ol></nav>'
