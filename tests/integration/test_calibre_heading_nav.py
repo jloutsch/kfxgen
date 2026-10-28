@@ -338,3 +338,26 @@ def test_a_kept_heading_keeps_its_size_in_a_book_with_a_cover(calibre):  # noqa:
         and str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])]) == "Part One"
     ]
     assert sizes == [1.5], f"calibre {calibre[2]}: {sizes}"
+
+
+def test_kept_headings_dont_set_the_books_main_size(calibre):  # noqa: F811
+    """QA's K5 on #594: two kept part headings outweigh the chapters' short
+    body text and became the book's main size, so they printed at 1em. They
+    are left out of the count, as on main, where they weren't printed."""
+    files = {
+        "toc.xhtml": "<h1>Contents</h1><h2>Part One</h2>"
+        "<p><a href='c1.xhtml'>Chapter One</a></p><h2>Part Two</h2>"
+        "<p><a href='c2.xhtml'>Chapter Two</a></p>",
+        "c1.xhtml": "<h1>Chapter One</h1><p>Body 1.</p>",
+        "c2.xhtml": "<h1>Chapter Two</h1><p>Body 2.</p>",
+    }
+    toc = [
+        ("Contents", "toc.xhtml"),
+        ("Chapter One", "c1.xhtml"),
+        ("Chapter Two", "c2.xhtml"),
+    ]
+    _units(calibre, "hn594k5", files, toc)
+    sizes = dict(_first_page(calibre[0] / "hn594k5.kfx"))
+    assert (sizes["Part One"], sizes["Part Two"]) == (1.5, 1.5), (
+        f"calibre {calibre[2]}: {sizes}"
+    )

@@ -5695,7 +5695,10 @@ class NativeKFXGenerator:
         # as Kindle Previewer writes them (#241).
         text_px = collections.Counter()
         for chunk in all_chunks:
-            text_px.update(_chars_by_px(chunk))
+            # A heading kept on a rebuilt contents page (#585) isn't the
+            # book's text: in a short book it outweighed it (QA on #594).
+            if not chunk.get("own_size"):
+                text_px.update(_chars_by_px(chunk))
         main_px = _most(text_px)
 
         # The book's main line height, as a factor of each paragraph's own
@@ -5705,7 +5708,7 @@ class NativeKFXGenerator:
         line_counts = collections.Counter()
         for chunk in all_chunks:
             factor = (chunk.get("block_style") or {}).get("line_height")
-            if chunk.get("type") == "text" and factor:
+            if chunk.get("type") == "text" and factor and not chunk.get("own_size"):
                 line_counts[factor] += len(chunk.get("text") or "")
         main_line = _most(line_counts)
 
