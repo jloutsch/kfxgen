@@ -3758,6 +3758,8 @@ class NativeKFXGenerator:
                     **ch,
                     "toc_links": [
                         {**link, "target_chapter_idx": link["target_chapter_idx"] + 1}
+                        if "target_chapter_idx" in link
+                        else link
                         for link in (ch.get("toc_links") or [])
                     ],
                 }
@@ -4916,6 +4918,18 @@ class NativeKFXGenerator:
             if toc_links:
                 for link in toc_links:
                     chunk_idx = len(all_chunks)
+                    if "target_chapter_idx" not in link:
+                        # One of the page's own headings, printed as it is
+                        # (#585): no link, its level and style.
+                        all_chunks.append(
+                            {
+                                "type": "text",
+                                "text": link["text"],
+                                "block_style": link.get("block_style"),
+                                "heading_level": link.get("heading_level"),
+                            }
+                        )
+                        continue
                     all_chunks.append({"type": "text", "text": link["text"]})
                     toc_link_chunks[chunk_idx] = (
                         link["target_chapter_idx"],
@@ -5711,7 +5725,11 @@ class NativeKFXGenerator:
             # block takes its CSS size, or the size of a span holding all its
             # text, as in Previewer's output (#375 review).
             fs = chapters[ch_idx].get("font_size", 1.0)
-            if fs != 1.0:
+            # A heading kept on a rebuilt contents page keeps its own size
+            # (#585), not the page's.
+            if fs != 1.0 and not (
+                chunk.get("heading_level") and chapters[ch_idx].get("toc_links")
+            ):
                 return fs
             counts = +_chars_by_px(chunk)
             if len(counts) == 1:

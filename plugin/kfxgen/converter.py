@@ -6498,17 +6498,34 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
         lines.append(link["text"])
     contents_ch["text"] = "\n\n".join(lines)
     # The title prints as kfxgen's own label in place of the page's heading,
-    # which keeps its level for the heading navigation (#580).
-    level = next(
-        (
-            b["heading_level"]
-            for b in contents_ch.get("blocks") or ()
-            if b.get("heading_level")
-        ),
-        None,
-    )
-    if level:
-        contents_ch["heading_level"] = level
+    # which keeps its level for the heading navigation (#580), when the page
+    # opens with it (#585).
+    blocks = contents_ch.get("blocks") or ()
+    first = next((b for b in blocks if (b.get("text") or "").strip()), None)
+    if first is not None and first.get("heading_level"):
+        contents_ch["heading_level"] = first["heading_level"]
+    # The page's other headings print too, as Kindle Previewer 4.0.3 prints
+    # the page (#585): each as a line before the entry whose link came after
+    # it, counting the page's link blocks.
+    links_above, inserts = 0, []
+    for b in blocks:
+        if b is first:
+            continue
+        if b.get("heading_level") and (b.get("text") or "").strip():
+            inserts.append(
+                (
+                    links_above,
+                    {
+                        "text": b["text"].strip(),
+                        "heading_level": b["heading_level"],
+                        "block_style": b.get("block_style"),
+                    },
+                )
+            )
+        elif any(_is_link_flag(f) for _s, _n, fl in b.get("spans") or () for f in fl):
+            links_above += 1
+    for at, line in reversed(inserts):
+        toc_links.insert(min(at, len(toc_links)), line)
     contents_ch.pop("blocks", None)
 
     # Structured link data for the native generator

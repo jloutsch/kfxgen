@@ -143,3 +143,50 @@ def test_a_rebuilt_contents_page_keeps_its_headings_level(calibre, heading, list
     ]
     got = _units(calibre, f"hn580{heading[1]}", files, toc)
     assert got == [("$799", listed)], f"calibre {calibre[2]}: {got}"
+
+
+def test_a_contents_pages_other_headings_are_kept(calibre):  # noqa: F811
+    """A contents page with a styled title and an <h2> under it: Kindle
+    Previewer 4.0.3 prints the <h2> and lists it at level 2 (#585, probed
+    2026-10-27). kfxgen's rebuilt page dropped it, and its "Contents" took
+    the <h2>'s level."""
+    tmp, version = calibre[0], calibre[2]
+    files = {
+        "toc.xhtml": "<p style='font-size:2em;font-weight:bold'>Contents</p>"
+        "<h2>Part One</h2>"
+        "<p><a href='c1.xhtml'>Chapter One</a></p>"
+        "<p><a href='c2.xhtml'>Chapter Two</a></p>",
+        "c1.xhtml": "<h1>Chapter One</h1><p>One text.</p>",
+        "c2.xhtml": "<h1>Chapter Two</h1><p>Two text.</p>",
+    }
+    toc = [
+        ("Contents", "toc.xhtml"),
+        ("Chapter One", "c1.xhtml"),
+        ("Chapter Two", "c2.xhtml"),
+    ]
+    got = _units(calibre, "hn585", files, toc)
+    # The units' order is #584's.
+    assert dict(got) == {
+        "$800": ["Part One"],
+        "$799": ["Chapter One", "Chapter Two"],
+    }, f"calibre {version}: {got}"
+    frags = load_fragments(tmp / "hn585.kfx")
+    content = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    first_page = [
+        str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+        for e in iter_entries(val(by_type(frags, "$259")[0])["$146"])
+        if hasattr(e, "get") and e.get("$145")
+    ]
+    assert first_page == ["Contents", "Part One", "Chapter One", "Chapter Two"], (
+        f"calibre {version}: {first_page}"
+    )
+    # At its own size, as Previewer prints it, not the rebuilt page's.
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    (size,) = [
+        float(styles[str(e["$157"])]["$16"]["$307"])
+        for e in iter_entries(val(by_type(frags, "$259")[0])["$146"])
+        if hasattr(e, "get")
+        and e.get("$145")
+        and str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])]) == "Part One"
+    ]
+    assert size == 1.5, f"calibre {version}: {size}"
