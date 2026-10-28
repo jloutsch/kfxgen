@@ -38,6 +38,12 @@ PARAS = [
     "<h2>W2 heading<br/><br/><img src='s.jpg' alt='w2'/></h2>",
     "<p>W4 words<br/><br/><img src='s.jpg' alt='w4'/><br/>W4 more.</p>",
     "<p>W5 words<br/><img src='s.jpg' alt='w5'/><br/><br/>W5 more.</p>",
+    # After an empty line, a line holding a picture starts an entry, with
+    # words after it or before it (#593, probed with a DOCTYPE).
+    "<p>U1 words<br/><br/><img src='s.jpg' alt='u1'/> tail words.</p>",
+    "<p><a href='#t'>U2 words<br/><br/><img src='s.jpg' alt='u2'/></a> tail.</p>",
+    "<p>U3 words<br/><br/>lead <img src='s.jpg' alt='u3'/> tail words.</p>",
+    "<p>U5 words<br/><img src='s.jpg' alt='u5'/> tail words.</p>",
 ]
 
 #: Previewer's entries after the heading, in reading order: a mixed entry as
@@ -55,12 +61,20 @@ PREVIEWER = [
     "W4 more.",
     ["W5 words\n", ("w5", 3.0, 3.0)],
     "W5 more.",
+    # Previewer's text keeps one line break ("U1 words\n"); kfxgen strips it.
+    "U1 words",
+    [("u1", 3.0, 3.0), " tail words."],
+    "U2 words",
+    [("u2", 3.0, 3.0), " tail."],
+    "U3 words",
+    ["lead ", ("u3", 3.0, 3.0), " tail words."],
+    ["U5 words\n", ("u5", 3.0, 3.0), " tail words."],
     "After.",
 ]
 
 
 def _epub(path):
-    body = f"<h1>Lines</h1>{''.join(PARAS)}<p>After.</p>"
+    body = f"<h1>Lines</h1>{''.join(PARAS)}<p id='t'>After.</p>"
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
         z.writestr(
@@ -122,3 +136,28 @@ def test_a_line_of_only_a_picture_ends_the_entry(calibre):  # noqa: F811
             elif e.get("$146"):
                 got.append([part(k) for k in e["$146"]])
     assert got[1:] == PREVIEWER, f"calibre {version}: {got}"
+
+
+def test_a_link_across_the_cut_covers_both_pieces(calibre):  # noqa: F811
+    """U2: a link round the words and the picture runs across the cut, as in
+    Previewer's file (QA on #590)."""
+    tmp, _env, version = calibre
+    kfx = tmp / "l565.kfx"
+    if not kfx.exists():
+        _epub(tmp / "l565.epub")
+        _ebook_convert(calibre, tmp / "l565.epub", kfx, True)
+    frags = load_fragments(kfx)
+    content = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    linked = []
+    for st in by_type(frags, "$259"):
+        for e in (getattr(x, "value", x) for x in val(st)["$146"]):
+            words = (
+                str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+                if e.get("$145")
+                else "".join(k for k in e.get("$146") or () if isinstance(k, str))
+            )
+            if words.startswith(("U2", " tail.")) and any(
+                "$179" in r for r in e.get("$142") or ()
+            ):
+                linked.append(words)
+    assert linked == ["U2 words", " tail."], f"calibre {version}: {linked}"

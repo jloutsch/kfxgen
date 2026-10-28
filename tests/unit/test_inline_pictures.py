@@ -412,3 +412,43 @@ def test_a_picture_line_after_an_empty_line_is_its_own_entry(tmp_path, body, exp
         for e in entries
     ]
     assert got == expected
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (
+            "<p>U1 words<br/><br/><img src='s.jpg' alt='a'/> tail words.</p>",
+            ["U1 words", ["pic", " tail words."]],
+        ),
+        (
+            "<p>U3 words<br/><br/>lead <img src='s.jpg' alt='a'/> tail words.</p>",
+            ["U3 words", ["lead ", "pic", " tail words."]],
+        ),
+        (
+            "<p>U4 words<br/><br/><img src='s.jpg' alt='a'/>"
+            "<img src='s.jpg' alt='b'/> tail words.</p>",
+            ["U4 words", ["pic", "pic", " tail words."]],
+        ),
+        # One line break: no cut, as before.
+        (
+            "<p>U5 words<br/><img src='s.jpg' alt='a'/> tail words.</p>",
+            [["U5 words\n", "pic", " tail words."]],
+        ),
+    ],
+    ids=["first-on-line", "after-words", "two-pictures", "one-break"],
+)
+def test_an_empty_line_before_a_line_with_a_picture_ends_the_entry(
+    tmp_path, body, expected
+):
+    """Previewer ends the entry at an empty line when the next line holds a
+    picture, with words after it on that line or not (#593, probed with a
+    DOCTYPE). #590 cut there only for a line of the picture alone."""
+    entries = _book(tmp_path, f"<h1>One</h1>{body}<p>After.</p>")[1:-1]
+    got = [
+        [p if isinstance(p, str) else "pic" for p in e[1]]
+        if e[0] == "mixed"
+        else (e[1] if e[0] == "text" else "picture")
+        for e in entries
+    ]
+    assert got == expected
