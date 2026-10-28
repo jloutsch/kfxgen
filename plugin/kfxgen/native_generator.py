@@ -126,11 +126,12 @@ def _cut_after_picture_lines(block):
     pieces, a = [], 0
     for b, after in [*cuts, (len(text), None)]:
         # A piece holds its end too: an id after the last word (#487), or at
-        # a cut, stays on the piece it ends (QA on #590).
+        # a cut, stays on the piece it ends (QA on #590). Not before a
+        # picture line, where it names the picture (#592).
         offsets = {
             k: (o or 0) - a
             for k, o in (block.get("anchor_offsets") or {}).items()
-            if a <= (o or 0) <= b
+            if a <= (o or 0) < b or ((o or 0) == b and after != b)
         }
         piece = {
             **block,
