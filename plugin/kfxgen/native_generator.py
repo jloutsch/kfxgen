@@ -2164,7 +2164,7 @@ class NativeKFXGenerator:
         return YJFragment(fid=IS("$348"), ftype=IS("$538"), value=value)
 
     def build_fragment_389_toc(
-        self, toc_entries, cover_position=None, headings=None, landmarks=()
+        self, toc_entries, cover_position=None, headings=None, landmarks=(), pages=()
     ):
         """
         Builds Fragment $389 (Navigation) with TOC and landmarks.
@@ -2254,6 +2254,34 @@ class NativeKFXGenerator:
         # a cover landmark at the first chapter could have it drawn as a
         # full-screen cover (#460).
         containers = [c for c in (heading_container, toc_container) if c]
+        # The page list ($237): an entry per print page break, as Kindle
+        # Previewer 4.0.3 writes it (#578).
+        if pages:
+            self.symtab.create_local_symbol("nP")
+            containers.append(
+                IonAnnotation(
+                    [IS("$391")],
+                    IonStruct(
+                        IS("$235"),
+                        IS("$237"),
+                        IS("$239"),
+                        IS("nP"),
+                        IS("$247"),
+                        [
+                            IonAnnotation(
+                                [IS("$393")],
+                                IonStruct(
+                                    IS("$241"),
+                                    IonStruct(IS("$244"), label),
+                                    IS("$246"),
+                                    IonStruct(IS("$155"), pos, IS("$143"), offset),
+                                ),
+                            )
+                            for label, pos, offset in pages
+                        ],
+                    ),
+                )
+            )
         # After it, the book's contents ($212) and start ($396) landmarks,
         # as Kindle Previewer 4.0.3 writes them (#579).
         units = []
@@ -3460,6 +3488,7 @@ class NativeKFXGenerator:
         display_dims=None,
         footnote_keys=None,
         landmarks=None,
+        page_list=None,
     ):
         """
         Generates a complete KFX book with metadata and content.
@@ -3890,22 +3919,34 @@ class NativeKFXGenerator:
                 )
         # The synthetic cover chapter is always first when present (#32).
         cover_position = section_positions[0] if chapters[0].get("_is_cover") else None
+
         # The book's contents and start landmarks, where their links land
         # (#579). One that lands nowhere is left out.
-        marks = []
-        for kind, label, key in landmarks or ():
+        def lands(key):
             idx = ch_data["key_to_chunk"].get(key)
             offset = ch_data["key_to_offset"].get(key, 0)
             if idx is None and "#" not in key:
                 idx, offset = ch_data["file_to_chunk"].get(key), 0
-            if idx is not None:
-                marks.append((kind, label, ch_data["chunk_positions"][idx], offset))
+            return None if idx is None else (ch_data["chunk_positions"][idx], offset)
+
+        marks = [
+            (kind, label, *at)
+            for kind, label, key in landmarks or ()
+            if (at := lands(key)) is not None
+        ]
+        # The book's print page breaks, the same way (#578).
+        pages = [
+            (label, *at)
+            for label, key in page_list or ()
+            if (at := lands(key)) is not None
+        ]
         self.fragments.append(
             self.build_fragment_389_toc(
                 nav_entries,
                 cover_position=cover_position,
                 headings=_book_headings(ch_data),
                 landmarks=marks,
+                pages=pages,
             )
         )
 
@@ -4965,7 +5006,16 @@ class NativeKFXGenerator:
                             }
                         )
                         continue
-                    all_chunks.append({"type": "text", "text": link["text"]})
+                    line = {"type": "text", "text": link["text"]}
+                    if link.get("heading_level"):
+                        # A heading the TOC lists prints as the heading
+                        # (#595), linked.
+                        line.update(
+                            block_style=link.get("block_style"),
+                            heading_level=link["heading_level"],
+                            own_size=True,
+                        )
+                    all_chunks.append(line)
                     toc_link_chunks[chunk_idx] = (
                         link["target_chapter_idx"],
                         link.get("target_key"),
@@ -6093,7 +6143,7 @@ class NativeKFXGenerator:
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)
-                elif chunk_idx in chunk_anchor_map:
+                elif chunk_idx in chunk_anchor_map and not chunk.get("heading_level"):
                     # Link entry: entry uses body style; link styling lives
                     # inside the $142 span via entry_link_styles. Reference
                     # has entry $157 = body style, span $157 = link style.
@@ -6159,9 +6209,16 @@ class NativeKFXGenerator:
                         if drop:
                             attrs["drop_cap"] = drop
                         entry_styles.append(_allocate_style("", **attrs))
-                    entry_link_targets.append(None)
-                    entry_link_styles.append(None)
-                    entry_link_text_lengths.append(None)
+                    if chunk_idx in chunk_anchor_map:
+                        # A contents line printed as a heading (#595): its
+                        # link in the heading's own style, not underlined.
+                        entry_link_targets.append(chunk_anchor_map[chunk_idx])
+                        entry_link_styles.append(entry_styles[-1])
+                        entry_link_text_lengths.append(len(chunk["text"]))
+                    else:
+                        entry_link_targets.append(None)
+                        entry_link_styles.append(None)
+                        entry_link_text_lengths.append(None)
                 chunk_spans = chunk.get("spans", [])
                 _cbs = chunk.get("block_style") or {}
                 chunk_fam = _cbs.get("font_family", [])
