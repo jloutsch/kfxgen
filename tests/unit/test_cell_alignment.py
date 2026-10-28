@@ -80,7 +80,7 @@ def test_a_cells_one_paragraph_keeps_its_own_alignment():
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("own", "aligns"),
-    [("right", "right"), (None, "center"), ("center", "center"), ("inherit", "center")],
+    [("right", "right"), (None, "center"), ("center", "center"), ("inherit", "right")],
     ids=["own-right", "none", "own-centre", "inherit"],
 )
 def test_a_header_cell_in_a_right_row_keeps_only_its_own_alignment(own, aligns):

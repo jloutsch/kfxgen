@@ -2898,6 +2898,15 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
         if not own_paragraph:
             # Centred, written out: a header cell's paragraphs otherwise
             # take the book's alignment.
+            # Keywords as Previewer reads them on a header cell (#616):
+            # inherit is the parent's, else left; initial left; start centre.
+            if own == "inherit":
+                own = (
+                    mine
+                    if compute_block_style({"text-align": mine})["align"]
+                    else "left"
+                )
+            own = {"initial": "left", "start": "center"}.get(own, own)
             align = compute_block_style({"text-align": own})["align"]
             block_style = {**block_style, "align": align or "center"}
         # `<th><p style="text-align: right">`: the paragraph's own, as for a

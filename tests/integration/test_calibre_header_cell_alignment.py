@@ -73,6 +73,18 @@ PAGES = {
         "<table><tr style='text-align:justify'><th style='text-align:justify'>"
         "K6 th own justify in justify row</th><td>K6 td</td></tr></table>",
     ),
+    # Keywords on a header cell (#616, QA's Previewer probes on #615).
+    "e.xhtml": (
+        "",
+        "<table><tr style='text-align:right'><th style='text-align:inherit'>"
+        "M1 th inherit in right row</th><td>M1 td</td></tr>"
+        "<tr><th style='text-align:inherit'>M2 th inherit in plain row</th>"
+        "<td>M2 td</td></tr>"
+        "<tr><th style='text-align:initial'>M3 th initial</th><td>M3 td</td></tr>"
+        "<tr><th style='text-align:start'>M4 th start</th>"
+        "<td style='text-align:start'>M4 td start</td></tr>"
+        "<tr><th style='text-align:unset'>M5 th unset</th><td>M5 td</td></tr></table>",
+    ),
     # The same, set by class (#601).
     "d.xhtml": (
         "tr.r{text-align:right} th.r{text-align:right} th.c{text-align:center}",
@@ -136,6 +148,14 @@ PREVIEWER = {
     "K3 td div right": RIGHT,
     "K4 td own justify": JUSTIFY,
     "K4 th own justify": JUSTIFY,
+    # Keywords (#616): inherit is the parent's, initial left, start and
+    # unset centre (QA's probes on #615).
+    "M1 th inherit in right row": RIGHT,
+    "M2 th inherit in plain row": LEFT,
+    "M3 th initial": LEFT,
+    "M4 th start": CENTRE,
+    "M4 td start": LEFT,
+    "M5 th unset": CENTRE,
     # Its own alignment, equal to its row's, is kept (#601, probed 2026-10-28).
     "K5 th own right in right row": RIGHT,
     "K5 td": RIGHT,
