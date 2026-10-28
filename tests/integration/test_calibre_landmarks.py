@@ -153,6 +153,35 @@ CASES = {
         "",
         [("$396", "Begin", "Chapter Two")],
     ),
+    # Repeated (#609, probed 2026-10-28): the last contents landmark wins,
+    # the first start; each where its own entry is.
+    "two-guide-toc": (
+        _ref("toc", "contents.xhtml") + _ref("toc", "other.xhtml"),
+        "",
+        [("$212", "Contents", "Other page")],
+    ),
+    "two-guide-text": (
+        _ref("text", "c1.xhtml", "Begin") + _ref("text", "c3.xhtml", "Later"),
+        "",
+        [("$396", "Begin", "Chapter One")],
+    ),
+    "two-nav-toc": (
+        "",
+        _lm("toc", "contents.xhtml", "Contents") + _lm("toc", "other.xhtml", "Other"),
+        [("$212", "Other", "Other page")],
+    ),
+    "two-nav-body": (
+        "",
+        _lm("bodymatter", "c1.xhtml", "Start") + _lm("bodymatter", "c3.xhtml", "Later"),
+        [("$396", "Start", "Chapter One")],
+    ),
+    "toc-text-toc": (
+        _ref("toc", "contents.xhtml")
+        + _ref("text", "c2.xhtml", "Begin")
+        + _ref("toc", "other.xhtml", "Again"),
+        "",
+        [("$396", "Begin", "Chapter Two"), ("$212", "Again", "Other page")],
+    ),
     "nav-toc-only": (
         "",
         _lm("toc", "c3.xhtml", "Contents"),

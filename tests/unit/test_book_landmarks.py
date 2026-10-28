@@ -200,3 +200,19 @@ def test_a_landmark_named_in_other_capitals_takes_the_spines_spelling(tmp_path):
     book = _book(tmp_path, '<reference type="toc" title="Contents" href="TOC.xhtml"/>')
     book.spine = [SimpleNamespace(href="toc.xhtml")]
     assert _conv._book_landmarks(book) == [("toc", "Contents", "toc.xhtml")]
+
+
+def test_the_last_contents_and_the_first_start_landmark_are_kept(tmp_path):
+    """Kindle Previewer 4.0.3 keeps the last `toc` and the first `text`, each
+    where its own entry is (#609)."""
+    book = _book(
+        tmp_path,
+        '<reference type="toc" title="A" href="a.xhtml"/>'
+        '<reference type="text" title="B" href="b.xhtml"/>'
+        '<reference type="text" title="C" href="c.xhtml"/>'
+        '<reference type="toc" title="D" href="d.xhtml"/>',
+    )
+    assert _conv._book_landmarks(book) == [
+        ("start", "B", "b.xhtml"),
+        ("toc", "D", "d.xhtml"),
+    ]
