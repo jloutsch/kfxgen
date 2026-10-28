@@ -6511,7 +6511,11 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     for b in blocks:
         if b is first:
             continue
-        if b.get("heading_level") and (b.get("text") or "").strip():
+        if any(_is_link_flag(f) for _s, _n, fl in b.get("spans") or () for f in fl):
+            # A linked heading is one of the page's entries, printed as its
+            # linked line, not again as a heading.
+            links_above += 1
+        elif b.get("heading_level") and (b.get("text") or "").strip():
             inserts.append(
                 (
                     links_above,
@@ -6522,8 +6526,6 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
                     },
                 )
             )
-        elif any(_is_link_flag(f) for _s, _n, fl in b.get("spans") or () for f in fl):
-            links_above += 1
     for at, line in reversed(inserts):
         toc_links.insert(min(at, len(toc_links)), line)
     contents_ch.pop("blocks", None)

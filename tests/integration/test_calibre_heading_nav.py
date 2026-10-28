@@ -205,3 +205,32 @@ def test_units_follow_each_levels_first_heading(calibre):  # noqa: F811
         ("$800", ["Preface", "Two sub"]),
         ("$799", ["One", "Two"]),
     ], f"calibre {calibre[2]}: {got}"
+
+
+def test_a_linked_heading_on_a_contents_page_prints_once(calibre):  # noqa: F811
+    """A part title that is itself a link is one of the page's entries: it
+    prints once, as its linked line, not again as a kept heading (#585)."""
+    tmp, version = calibre[0], calibre[2]
+    files = {
+        "toc.xhtml": "<h1>Contents</h1>"
+        "<h2><a href='p2.xhtml'>Part Two</a></h2>"
+        "<p><a href='c1.xhtml'>Chapter One</a></p>",
+        "p2.xhtml": "<h1>Part Two</h1><p>Part text.</p>",
+        "c1.xhtml": "<h1>Chapter One</h1><p>One text.</p>",
+    }
+    toc = [
+        ("Contents", "toc.xhtml"),
+        ("Part Two", "p2.xhtml"),
+        ("Chapter One", "c1.xhtml"),
+    ]
+    _units(calibre, "hn585l", files, toc)
+    frags = load_fragments(tmp / "hn585l.kfx")
+    content = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    first_page = [
+        str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+        for e in iter_entries(val(by_type(frags, "$259")[0])["$146"])
+        if hasattr(e, "get") and e.get("$145")
+    ]
+    assert first_page == ["Contents", "Part Two", "Chapter One"], (
+        f"calibre {version}: {first_page}"
+    )
