@@ -4941,7 +4941,16 @@ class NativeKFXGenerator:
                             }
                         )
                         continue
-                    all_chunks.append({"type": "text", "text": link["text"]})
+                    line = {"type": "text", "text": link["text"]}
+                    if link.get("heading_level"):
+                        # A heading the TOC lists prints as the heading
+                        # (#595), linked.
+                        line.update(
+                            block_style=link.get("block_style"),
+                            heading_level=link["heading_level"],
+                            own_size=True,
+                        )
+                    all_chunks.append(line)
                     toc_link_chunks[chunk_idx] = (
                         link["target_chapter_idx"],
                         link.get("target_key"),
@@ -6069,7 +6078,7 @@ class NativeKFXGenerator:
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)
-                elif chunk_idx in chunk_anchor_map:
+                elif chunk_idx in chunk_anchor_map and not chunk.get("heading_level"):
                     # Link entry: entry uses body style; link styling lives
                     # inside the $142 span via entry_link_styles. Reference
                     # has entry $157 = body style, span $157 = link style.
@@ -6135,9 +6144,16 @@ class NativeKFXGenerator:
                         if drop:
                             attrs["drop_cap"] = drop
                         entry_styles.append(_allocate_style("", **attrs))
-                    entry_link_targets.append(None)
-                    entry_link_styles.append(None)
-                    entry_link_text_lengths.append(None)
+                    if chunk_idx in chunk_anchor_map:
+                        # A contents line printed as a heading (#595): its
+                        # link in the heading's own style, not underlined.
+                        entry_link_targets.append(chunk_anchor_map[chunk_idx])
+                        entry_link_styles.append(entry_styles[-1])
+                        entry_link_text_lengths.append(len(chunk["text"]))
+                    else:
+                        entry_link_targets.append(None)
+                        entry_link_styles.append(None)
+                        entry_link_text_lengths.append(None)
                 chunk_spans = chunk.get("spans", [])
                 _cbs = chunk.get("block_style") or {}
                 chunk_fam = _cbs.get("font_family", [])

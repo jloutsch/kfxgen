@@ -6559,6 +6559,14 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     for b in blocks:
         if b is first:
             continue
+        words = _normalize_title(b.get("text") or "")
+        if b.get("heading_level") and words in listed:
+            # A heading the TOC lists, as a part's: its line prints as the
+            # heading, its size, weight and level, as Kindle Previewer 4.0.3
+            # prints the page (#595), and keeps its link.
+            link = toc_links[listed.index(words)]
+            link["heading_level"] = b["heading_level"]
+            link["block_style"] = b.get("block_style")
         if any(_is_link_flag(f) for _s, _n, fl in b.get("spans") or () for f in fl):
             events.append(("link", _normalize_title(b.get("text") or "")))
         elif b.get("heading_level") and (b.get("text") or "").strip():
