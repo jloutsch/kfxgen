@@ -194,19 +194,22 @@ def test_the_page_list_as_previewer_writes_it(calibre, case):  # noqa: F811
     ("relabel", "want"),
     [
         ({"2": "A8"}, []),
-        ({"2": "{2}"}, []),
         ({"2": "8-9"}, []),
-        ({"2": "p 2"}, []),
-        # Spaces round a label are trimmed: kfxgen's choice; Previewer
-        # writes none for a pretty-printed NCX's labels (QA on #612).
+        ({"2": "Cover Page"}, []),
+        # A label in brackets, or after "Pg", is cleaned to its number, which
+        # Previewer's rule accepts: kfxgen's choice (#612 review). Previewer
+        # writes no page list for these books, nor for spaces round a label.
+        ({"1": "[Pg 1]", "2": "{2}", "3": "[3]", "iv": "(iv)"}, ["1", "2", "3", "iv"]),
+        ({"2": "p. 2", "3": "Page 3"}, ["1", "2", "3", "iv"]),
         ({"2": "\n  2\n"}, ["1", "2", "3", "iv"]),
         ({"iv": "IV", "3": "Xii"}, ["1", "2", "Xii", "IV"]),
     ],
-    ids=["letter-digit", "braces", "range", "two-words", "spaces", "roman"],
+    ids=["letter-digit", "range", "words", "brackets", "prefix", "spaces", "roman"],
 )
-def test_one_label_previewer_rejects_drops_the_page_list(calibre, relabel, want):  # noqa: F811
+def test_page_labels_previewer_rejects(calibre, relabel, want):  # noqa: F811
     """Kindle Previewer 4.0.3 writes no page list when any label is not all
-    digits or all roman-numeral letters (QA's probes on #612)."""
+    digits or all roman-numeral letters (QA's probes on #612). kfxgen cleans
+    brackets and a "Pg" off first, then follows that rule."""
     tmp, _env, version = calibre
     key = "-".join(f"{ord(c)}" for c in "".join(relabel.values()))[:40]
     epub, kfx = tmp / f"p578-r{key}.epub", tmp / f"p578-r{key}.kfx"

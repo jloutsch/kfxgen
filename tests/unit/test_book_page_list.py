@@ -134,21 +134,36 @@ def test_no_page_list_no_container(tmp_path):
 @pytest.mark.parametrize(
     ("labels", "kept"),
     [
-        (["1", "ii", "IV", "Xii"], True),
-        (["1", "A8"], False),
-        (["1", "{2}"], False),
-        (["1", "8-9"], False),
-        (["1", "p 2"], False),
-        (["1", "Cover Page"], False),
+        (["1", "ii", "IV", "Xii"], ["1", "ii", "IV", "Xii"]),
+        (
+            ["[Pg 1]", "{ii}", "[3]", "(iv)", "Page 5", "p. 6", "pg7"],
+            ["1", "ii", "3", "iv", "5", "6", "7"],
+        ),
+        (["1", "A8"], []),
+        (["1", "8-9"], []),
+        (["1", "[Inhoud]"], []),
+        (["Cover Page", "1"], []),
+        (["1", "[]"], []),
     ],
-    ids=["digits-and-roman", "letter-digit", "braces", "range", "two-words", "words"],
+    ids=[
+        "digits-and-roman",
+        "cleaned",
+        "letter-digit",
+        "range",
+        "word-in-brackets",
+        "words",
+        "empty-brackets",
+    ],
 )
-def test_one_label_previewer_rejects_drops_the_whole_list(tmp_path, labels, kept):
+def test_labels_are_cleaned_then_previewers_rule_applies(tmp_path, labels, kept):
     """Kindle Previewer 4.0.3 writes no page list when any label is not all
-    digits or all roman-numeral letters (QA on #612)."""
+    digits or all roman-numeral letters (QA on #612). kfxgen first takes off
+    brackets and a "Page"/"Pg"/"p." before the number (#612 review)."""
     pages = [(label, f"c1.xhtml#p{n}") for n, label in enumerate(labels)]
     got = _conv._book_page_list(_book(tmp_path, nav=_nav(pages)))
-    assert got == (pages if kept else [])
+    assert [label for label, _key in got] == kept
+    if kept:
+        assert [key for _label, key in got] == [key for _l, key in pages]
 
 
 def test_spaces_round_a_label_are_trimmed(tmp_path):

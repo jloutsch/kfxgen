@@ -6602,6 +6602,23 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
 #: Landmark types kfxgen writes, as Kindle Previewer 4.0.3 maps them (#579).
 _OPS_NS = "http://www.idpf.org/2007/ops"
 _PAGE_LABEL_RE = re.compile(r"\d+|[ivxlcdm]+", re.IGNORECASE)
+#: A label's number inside one pair of brackets and after "Page", "Pg" or
+#: "p.", as Gutenberg writes them: "[Pg 12]", "{vii}" (#612 review).
+_PAGE_LABEL_WRAP_RE = re.compile(
+    r"^(?:\[\s*(.*?)\s*\]|\{\s*(.*?)\s*\}|\(\s*(.*?)\s*\)|(.*))$", re.DOTALL
+)
+_PAGE_LABEL_PREFIX_RE = re.compile(r"^(?:page|pg|p)\.?\s*", re.IGNORECASE)
+
+
+def _page_label(text):
+    """`text` as a page number: trimmed, out of its brackets, without a
+    "Page"/"Pg"/"p." before it."""
+    inner = next(
+        g for g in _PAGE_LABEL_WRAP_RE.match(text.strip()).groups() if g is not None
+    )
+    return _PAGE_LABEL_PREFIX_RE.sub("", inner.strip()).strip()
+
+
 _NAV_LANDMARKS = {"toc": "toc", "bodymatter": "start"}
 _GUIDE_LANDMARKS = {"toc": "toc", "text": "start"}
 
@@ -6714,9 +6731,10 @@ def _book_page_list(oeb_book):
                 "//*[local-name()='pageList']/*[local-name()='pageTarget']"
             )
         ]
-    found = [(label, key) for label, key in found if label and key]
+    found = [(_page_label(label), key) for label, key in found if label and key]
     # Kindle Previewer 4.0.3 writes no page list when one label isn't all
-    # digits or a roman numeral's letters (QA on #612), so neither does kfxgen.
+    # digits or a roman numeral's letters (QA on #612). kfxgen cleans the
+    # labels first, then does the same.
     if any(not _PAGE_LABEL_RE.fullmatch(label) for label, _key in found):
         return []
     return found
