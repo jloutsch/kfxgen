@@ -2872,9 +2872,32 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
     """A cell's, or a cell paragraph's, block style with its alignment: the
     book's, else left, or right under a right-to-left `dir`, as Kindle
     Previewer 4.0.3 writes every cell (#479). A header cell is left unset,
-    so it stays centred."""
+    so it stays centred, unless it sets its own alignment (#589)."""
     if block_style is None:
         block_style = compute_block_style(css) if css is not None else None
+    if (block_style or {}).get("align") and style_resolver is not None:
+        # Alignment the cell only inherits doesn't count, as Kindle Previewer
+        # 4.0.3 has it (#589): a header cell's from its row or above, a data
+        # cell's from outside its table. calibre's values are inherited, so
+        # one equal to the row's, or to the table's surroundings', is.
+        def raw(elem):
+            css_of = style_resolver(elem) if elem is not None else None
+            return str((css_of or {}).get("text-align") or "").strip().lower()
+
+        mine = raw(cell)
+        if _local_tag(cell.tag) == "th":
+            inherited = mine == raw(cell.getparent())
+        else:
+            table = next(
+                (a for a in cell.iterancestors() if _local_tag(a.tag) == "table"),
+                None,
+            )
+            inherited = table is not None and mine == raw(table.getparent())
+        own_paragraph = (
+            block_style["align"] != compute_block_style({"text-align": mine})["align"]
+        )
+        if inherited and not own_paragraph:
+            block_style = {**block_style, "align": None}
     if _local_tag(cell.tag) == "th" or (block_style or {}).get("align"):
         return block_style
     inner = _only_block_child(cell)
@@ -2932,7 +2955,12 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
     items, loose text and anchors become the same blocks they would outside
     a table. Returns None when that leaves no text."""
     paragraphs = [
-        {**p, "block_style": _cell_block_style(cell, None, p.get("block_style"))}
+        {
+            **p,
+            "block_style": _cell_block_style(
+                cell, None, p.get("block_style"), style_resolver
+            ),
+        }
         for p in walk_cell(cell)
         if p.get("text")
     ]
@@ -2944,7 +2972,7 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
         "spans": [],
         "anchor_ids": [],
         "anchor_offsets": {},
-        "block_style": _cell_block_style(cell, css),
+        "block_style": _cell_block_style(cell, css, style_resolver=style_resolver),
         "header": _local_tag(cell.tag) == "th",
         "colspan": _span_attr(cell, "colspan"),
         "rowspan": _span_attr(cell, "rowspan"),
