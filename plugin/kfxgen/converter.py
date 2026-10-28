@@ -437,6 +437,9 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # .get(): margins don't inherit, and getitem drops the CSS
                     # unit on indent (returns computed px).
                     "text-align": _computed_value(st, "text-align"),
+                    # The element's own, declared on it: a header cell keeps
+                    # its own alignment, even its row's (#601).
+                    "own-text-align": st.get("text-align"),
                     "text-indent": st.get("text-indent"),
                     "margin-left": st.get("margin-left"),
                     "margin-right": st.get("margin-right"),
@@ -2880,21 +2883,23 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
         block_style = block_style or compute_block_style({})
 
         # A header cell's alignment counts only when it sets its own, as
-        # Kindle Previewer 4.0.3 has it (#589): one equal to its row's is
-        # inherited (calibre's values are), and the cell is centred. A
-        # data cell inherits as usual, in a page with a DOCTYPE.
-        def raw(elem):
+        # Kindle Previewer 4.0.3 has it (#589), even one equal to its row's
+        # (#601); otherwise it is centred. A data cell inherits as usual, in
+        # a page with a DOCTYPE.
+        def raw(elem, key="text-align"):
             css_of = style_resolver(elem) if elem is not None else None
-            return str((css_of or {}).get("text-align") or "").strip().lower()
+            return str((css_of or {}).get(key) or "").strip().lower()
 
         mine = raw(cell)
+        own = raw(cell, "own-text-align")
         own_paragraph = (
             block_style["align"] != compute_block_style({"text-align": mine})["align"]
         )
-        if mine == raw(cell.getparent()) and not own_paragraph:
+        if not own_paragraph:
             # Centred, written out: a header cell's paragraphs otherwise
             # take the book's alignment.
-            block_style = {**block_style, "align": "center"}
+            align = compute_block_style({"text-align": own})["align"]
+            block_style = {**block_style, "align": align or "center"}
         # `<th><p style="text-align: right">`: the paragraph's own, as for a
         # data cell (#532), Previewer's too.
         inner = _only_block_child(cell)
@@ -6687,6 +6692,27 @@ def _book_files(oeb_book):
     return opf, nav, rel(nav_path), ncx, rel(ncx_path)
 
 
+def _respelled(found, oeb_book):
+    """`found`'s (…, link key) items, each key naming a spine file only up to
+    letter case put in the spine's spelling when one file fits (#610), as
+    #549 does for TOC hrefs."""
+    # The spine without calibre's copies of a file under another spelling,
+    # which are left out of the book (#476), so each file has one name.
+    spine = _spine_in_order(oeb_book, []) if getattr(oeb_book, "spine", None) else []
+    names = {unquote(i.href) for i in spine}
+    loose = {}
+    for name in names:
+        loose.setdefault(name.lower(), set()).add(name)
+    out = []
+    for *rest, key in found:
+        path, sep, frag = key.partition("#")
+        fits = loose.get(path.lower(), set())
+        if path not in names and len(fits) == 1:
+            key = next(iter(fits)) + sep + frag
+        out.append((*rest, key))
+    return out
+
+
 def _nav_links(nav, kind):
     """The links of `nav`'s `<nav epub:type=kind>`."""
     if nav is None:
@@ -6736,7 +6762,8 @@ def _book_landmarks(oeb_book):
                 "//*[local-name()='guide']/*[local-name()='reference']"
             )
         ]
-    return [(kind, label, key) for kind, label, key in found if kind and key]
+    found = [(kind, label, key) for kind, label, key in found if kind and key]
+    return _respelled(found, oeb_book)
 
 
 def _book_page_list(oeb_book):
@@ -6769,7 +6796,7 @@ def _book_page_list(oeb_book):
     # labels first, then does the same.
     if any(not _PAGE_LABEL_RE.fullmatch(label) for label, _key in found):
         return []
-    return found
+    return _respelled(found, oeb_book)
 
 
 def _with_ncx_empty_labels(oeb_book, entries):

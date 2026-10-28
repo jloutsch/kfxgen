@@ -194,3 +194,9 @@ def test_a_landmark_inside_a_paragraph_keeps_its_offset(tmp_path):
         for u in getattr(c, "value", c)["$247"]
     ]
     assert int(unit["$246"]["$143"]) == 7
+
+
+def test_a_landmark_named_in_other_capitals_takes_the_spines_spelling(tmp_path):
+    book = _book(tmp_path, '<reference type="toc" title="Contents" href="TOC.xhtml"/>')
+    book.spine = [SimpleNamespace(href="toc.xhtml")]
+    assert _conv._book_landmarks(book) == [("toc", "Contents", "toc.xhtml")]
