@@ -467,3 +467,18 @@ def test_an_id_just_before_a_picture_after_an_empty_line_lands_on_it(tmp_path):
     )
     # The picture's entry, which holds no text.
     assert _landings(tmp_path / "i.kfx")["To x"] == ""
+
+
+def test_an_id_before_a_picture_with_words_after_it_lands_on_the_picture(tmp_path):
+    """QA's U8 on #603: the cut before the picture's line puts the id at
+    the cut point; it lands on the piece the picture starts, as in
+    Previewer's file, not at the start of the words before."""
+    from tests.unit.test_link_landings import _landings
+
+    _book(
+        tmp_path,
+        "<h1>One</h1><p>W words<br/><br/><span id='x'></span>"
+        "<img src='b.jpg' alt='a'/> tail words.</p>"
+        "<p><a href='c.xhtml#x'>To x</a></p>",
+    )
+    assert _landings(tmp_path / "i.kfx")["To x"] == "\ufffc tail words."
