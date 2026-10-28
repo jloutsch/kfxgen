@@ -169,3 +169,18 @@ def test_labels_are_cleaned_then_previewers_rule_applies(tmp_path, labels, kept)
 def test_spaces_round_a_label_are_trimmed(tmp_path):
     book = _book(tmp_path, ncx=_ncx([("\n   8\n  ", "c1.xhtml#p8")]))
     assert _conv._book_page_list(book) == [("8", "c1.xhtml#p8")]
+
+
+def test_a_target_named_in_other_capitals_takes_the_spines_spelling(tmp_path):
+    """The OPF and nav name `text/Chapter1.xhtml`, calibre's spine has
+    `Text/chapter1.xhtml`: the key takes the spine's spelling, so the page
+    lands (#610), as #551 does for TOC hrefs."""
+    book = _book(tmp_path, nav=_nav([("1", "text/Chapter1.xhtml#p1")]))
+    book.spine = [SimpleNamespace(href="Text/chapter1.xhtml")]
+    assert _conv._book_page_list(book) == [("1", "Text/chapter1.xhtml#p1")]
+
+
+def test_two_spine_files_that_fit_leave_the_key_as_written(tmp_path):
+    book = _book(tmp_path, nav=_nav([("1", "a.xhtml#p1")]))
+    book.spine = [SimpleNamespace(href="A.xhtml"), SimpleNamespace(href="a.XHTML")]
+    assert _conv._book_page_list(book) == [("1", "a.xhtml#p1")]

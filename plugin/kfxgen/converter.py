@@ -6655,6 +6655,24 @@ def _book_files(oeb_book):
     return opf, nav, rel(nav_path), ncx, rel(ncx_path)
 
 
+def _respelled(found, oeb_book):
+    """`found`'s (…, link key) items, each key naming a spine file only up to
+    letter case put in the spine's spelling when one file fits (#610), as
+    #549 does for TOC hrefs."""
+    names = {unquote(i.href) for i in getattr(oeb_book, "spine", None) or ()}
+    loose = {}
+    for name in names:
+        loose.setdefault(name.lower(), set()).add(name)
+    out = []
+    for *rest, key in found:
+        path, sep, frag = key.partition("#")
+        fits = loose.get(path.lower(), set())
+        if path not in names and len(fits) == 1:
+            key = next(iter(fits)) + sep + frag
+        out.append((*rest, key))
+    return out
+
+
 def _nav_links(nav, kind):
     """The links of `nav`'s `<nav epub:type=kind>`."""
     if nav is None:
@@ -6704,7 +6722,8 @@ def _book_landmarks(oeb_book):
                 "//*[local-name()='guide']/*[local-name()='reference']"
             )
         ]
-    return [(kind, label, key) for kind, label, key in found if kind and key]
+    found = [(kind, label, key) for kind, label, key in found if kind and key]
+    return _respelled(found, oeb_book)
 
 
 def _book_page_list(oeb_book):
@@ -6737,7 +6756,7 @@ def _book_page_list(oeb_book):
     # labels first, then does the same.
     if any(not _PAGE_LABEL_RE.fullmatch(label) for label, _key in found):
         return []
-    return found
+    return _respelled(found, oeb_book)
 
 
 def _with_ncx_empty_labels(oeb_book, entries):
