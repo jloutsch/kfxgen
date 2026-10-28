@@ -75,3 +75,39 @@ def test_a_cells_one_paragraph_keeps_its_own_alignment():
     ]
     cells = table["table"]["rows"][0]["cells"]
     assert [_align(c) for c in cells] == ["right", None]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("own", "aligns"),
+    [("right", "right"), (None, "center"), ("center", "center"), ("inherit", "center")],
+    ids=["own-right", "none", "own-centre", "inherit"],
+)
+def test_a_header_cell_in_a_right_row_keeps_only_its_own_alignment(own, aligns):
+    """`<tr style="text-align: right"><th style="text-align: right">`: right,
+    as Kindle Previewer 4.0.3 writes it; the same cell with no alignment of
+    its own is centred (#601). calibre's computed value is the row's either
+    way, so the cell's own declared value decides."""
+    xhtml = (
+        '<html xmlns="http://www.w3.org/1999/xhtml"><body><table><tr>'
+        "<th>H</th><td>d</td></tr></table></body></html>"
+    )
+    root = etree.fromstring(xhtml.encode())
+    th = root.find(".//{http://www.w3.org/1999/xhtml}th")
+
+    def resolver(elem):
+        css = {"text-align": "right"}  # inherited from the row
+        if elem is th and own:
+            css["own-text-align"] = own
+        return css
+
+    (table,) = [
+        b
+        for b in _conv.extract_blocks_from_html(
+            root, style_resolver=resolver, base_href="c.xhtml", native_tables=True
+        )
+        if b.get("table")
+    ]
+    header, data = table["table"]["rows"][0]["cells"]
+    assert _align(header) == aligns
+    assert _align(data) == "right"

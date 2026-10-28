@@ -66,7 +66,21 @@ PAGES = {
         "<div style='text-align:right'><table><tr><th>K3 th div right</th>"
         "<td>K3 td div right</td></tr></table></div>"
         "<table><tr><td style='text-align:justify'>K4 td own justify</td>"
-        "<th style='text-align:justify'>K4 th own justify</th></tr></table>",
+        "<th style='text-align:justify'>K4 th own justify</th></tr></table>"
+        # A header cell set to its row's alignment keeps it (#601).
+        "<table><tr style='text-align:right'><th style='text-align:right'>"
+        "K5 th own right in right row</th><td>K5 td</td></tr></table>"
+        "<table><tr style='text-align:justify'><th style='text-align:justify'>"
+        "K6 th own justify in justify row</th><td>K6 td</td></tr></table>",
+    ),
+    # The same, set by class (#601).
+    "d.xhtml": (
+        "tr.r{text-align:right} th.r{text-align:right} th.c{text-align:center}",
+        "<table><tr class='r'><th class='r'>L1 th class right in right row</th>"
+        "<td>L1 td</td></tr>"
+        "<tr class='r'><th class='c'>L2 th class centre in right row</th>"
+        "<td>L2 td</td></tr>"
+        "<tr class='r'><th>L3 th plain in right row</th><td>L3 td</td></tr></table>",
     ),
 }
 
@@ -122,6 +136,17 @@ PREVIEWER = {
     "K3 td div right": RIGHT,
     "K4 td own justify": JUSTIFY,
     "K4 th own justify": JUSTIFY,
+    # Its own alignment, equal to its row's, is kept (#601, probed 2026-10-28).
+    "K5 th own right in right row": RIGHT,
+    "K5 td": RIGHT,
+    "K6 th own justify in justify row": JUSTIFY,
+    "K6 td": JUSTIFY,
+    "L1 th class right in right row": RIGHT,
+    "L1 td": RIGHT,
+    "L2 th class centre in right row": CENTRE,
+    "L2 td": RIGHT,
+    "L3 th plain in right row": CENTRE,
+    "L3 td": RIGHT,
 }
 
 
