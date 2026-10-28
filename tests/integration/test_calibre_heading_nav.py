@@ -10,6 +10,7 @@ local-only.
 """
 
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -234,3 +235,106 @@ def test_a_linked_heading_on_a_contents_page_prints_once(calibre):  # noqa: F811
     assert first_page == ["Contents", "Part Two", "Chapter One"], (
         f"calibre {version}: {first_page}"
     )
+
+
+def _first_page(kfx):
+    """[(text, font size)] of the book's first storyline's text entries."""
+    frags = load_fragments(kfx)
+    content = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    return [
+        (
+            str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])]),
+            float((styles[str(e["$157"])].get("$16") or {"$307": 1})["$307"]),
+        )
+        for e in iter_entries(val(by_type(frags, "$259")[0])["$146"])
+        if hasattr(e, "get") and e.get("$145")
+    ]
+
+
+def test_parts_listed_in_the_toc_print_once_in_order(calibre):  # noqa: F811
+    """Parts that are TOC entries, shown on the contents page as unlinked
+    <h2>s: each prints once, where Previewer prints it (QA on #594: twice, and
+    "Part Two" a line early)."""
+    files = {
+        "toc.xhtml": "<h1>Contents</h1><h2>Part One</h2>"
+        "<p><a href='c1.xhtml'>Chapter One</a></p>"
+        "<p><a href='c2.xhtml'>Chapter Two</a></p><h2>Part Two</h2>"
+        "<p><a href='c3.xhtml'>Chapter Three</a></p>",
+        "p1.xhtml": "<h1>Part One</h1><p>Part text.</p>",
+        "c1.xhtml": "<h1>Chapter One</h1><p>One text.</p>",
+        "c2.xhtml": "<h1>Chapter Two</h1><p>Two text.</p>",
+        "p2.xhtml": "<h1>Part Two</h1><p>Part text.</p>",
+        "c3.xhtml": "<h1>Chapter Three</h1><p>Three text.</p>",
+    }
+    toc = [
+        ("Contents", "toc.xhtml"),
+        ("Part One", "p1.xhtml"),
+        ("Chapter One", "c1.xhtml"),
+        ("Chapter Two", "c2.xhtml"),
+        ("Part Two", "p2.xhtml"),
+        ("Chapter Three", "c3.xhtml"),
+    ]
+    _units(calibre, "hn594", files, toc)
+    lines = [t for t, _ in _first_page(calibre[0] / "hn594.kfx")]
+    assert lines == [
+        "Contents",
+        "Part One",
+        "Chapter One",
+        "Chapter Two",
+        "Part Two",
+        "Chapter Three",
+    ], f"calibre {calibre[2]}: {lines}"
+
+
+def test_a_kept_heading_keeps_its_size_in_a_book_with_a_cover(calibre):  # noqa: F811
+    """The cover chapter moves the chapters along; the kept heading still
+    takes its own size (QA on #594: 1em with a cover)."""
+    from tests._helpers import colour_jpeg_of
+
+    tmp = calibre[0]
+    files = {
+        "toc.xhtml": "<p style='font-size:2em;font-weight:bold'>Contents</p>"
+        "<h2>Part One</h2>"
+        "<p><a href='c1.xhtml'>Chapter One</a></p>",
+        "c1.xhtml": "<h1>Chapter One</h1><p>One text.</p>",
+    }
+    toc = [("Contents", "toc.xhtml"), ("Chapter One", "c1.xhtml")]
+    plain = tmp / "hn594c-plain.epub"
+    _build(plain, files, toc, "hn594c")
+    epub, kfx = tmp / "hn594c.epub", tmp / "hn594c.kfx"
+    with zipfile.ZipFile(plain) as src, zipfile.ZipFile(epub, "w") as z:
+        for info in src.infolist():
+            data = src.read(info.filename)
+            if info.filename.endswith(".opf"):
+                data = (
+                    data.decode()
+                    .replace(
+                        "</metadata>", '<meta name="cover" content="cov"/></metadata>'
+                    )
+                    .replace(
+                        "<manifest>",
+                        '<manifest><item id="cov" href="cover.jpg" '
+                        'media-type="image/jpeg"/>',
+                    )
+                    .encode()
+                )
+            z.writestr(info.filename, data, compress_type=info.compress_type)
+        z.writestr("cover.jpg", colour_jpeg_of("RGB", (600, 800), (30, 60, 120)))
+    _ebook_convert(calibre, epub, kfx, True)
+    frags = load_fragments(kfx)
+    # The book has kfxgen's cover section: a cover landmark.
+    (nav,) = by_type(frags, "$389")
+    kinds = [str(getattr(c, "value", c)["$235"]) for c in val(nav)[0]["$392"]]
+    assert "$236" in kinds, f"calibre {calibre[2]}: no cover, {kinds}"
+    content = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    sizes = [
+        float((styles[str(e["$157"])].get("$16") or {"$307": 1})["$307"])
+        for st in by_type(frags, "$259")
+        for e in iter_entries(val(st)["$146"])
+        if hasattr(e, "get")
+        and e.get("$145")
+        and str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])]) == "Part One"
+    ]
+    assert sizes == [1.5], f"calibre {calibre[2]}: {sizes}"

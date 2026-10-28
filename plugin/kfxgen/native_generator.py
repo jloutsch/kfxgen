@@ -4928,6 +4928,7 @@ class NativeKFXGenerator:
                                 "text": link["text"],
                                 "block_style": link.get("block_style"),
                                 "heading_level": link.get("heading_level"),
+                                "own_size": True,
                             }
                         )
                         continue
@@ -5728,9 +5729,7 @@ class NativeKFXGenerator:
             fs = chapters[ch_idx].get("font_size", 1.0)
             # A heading kept on a rebuilt contents page keeps its own size
             # (#585), not the page's.
-            if fs != 1.0 and not (
-                chunk.get("heading_level") and chapters[ch_idx].get("toc_links")
-            ):
+            if fs != 1.0 and not chunk.get("own_size"):
                 return fs
             counts = +_chars_by_px(chunk)
             if len(counts) == 1:

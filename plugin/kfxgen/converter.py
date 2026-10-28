@@ -6505,29 +6505,38 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     if first is not None and first.get("heading_level"):
         contents_ch["heading_level"] = first["heading_level"]
     # The page's other headings print too, as Kindle Previewer 4.0.3 prints
-    # the page (#585): each as a line before the entry whose link came after
-    # it, counting the page's link blocks.
-    links_above, inserts = 0, []
+    # the page (#585), each before the entry of the next link on the page. A
+    # heading holding a link, or naming an entry the page lists anyway (a
+    # part in the TOC), is that entry's line and isn't printed twice (QA on
+    # #594).
+    listed = [_normalize_title(link["text"]) for link in toc_links]
+    events = []  # ("link", words) or ("heading", line), in page order
     for b in blocks:
         if b is first:
             continue
         if any(_is_link_flag(f) for _s, _n, fl in b.get("spans") or () for f in fl):
-            # A linked heading is one of the page's entries, printed as its
-            # linked line, not again as a heading.
-            links_above += 1
+            events.append(("link", _normalize_title(b.get("text") or "")))
         elif b.get("heading_level") and (b.get("text") or "").strip():
-            inserts.append(
-                (
-                    links_above,
-                    {
-                        "text": b["text"].strip(),
-                        "heading_level": b["heading_level"],
-                        "block_style": b.get("block_style"),
-                    },
+            if _normalize_title(b["text"]) not in listed:
+                events.append(
+                    (
+                        "heading",
+                        {
+                            "text": b["text"].strip(),
+                            "heading_level": b["heading_level"],
+                            "block_style": b.get("block_style"),
+                        },
+                    )
                 )
-            )
-    for at, line in reversed(inserts):
-        toc_links.insert(min(at, len(toc_links)), line)
+    inserts = []
+    for n, (kind, line) in enumerate(events):
+        if kind != "heading":
+            continue
+        after = next((w for k, w in events[n + 1 :] if k == "link"), None)
+        at = listed.index(after) if after in listed else len(listed)
+        inserts.append((at, line))
+    for at, line in sorted(inserts, key=lambda x: x[0], reverse=True):
+        toc_links.insert(at, line)
     contents_ch.pop("blocks", None)
 
     # Structured link data for the native generator
