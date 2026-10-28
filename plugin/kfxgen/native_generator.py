@@ -93,8 +93,8 @@ def _cut_after_picture_lines(block):
     """`block` cut after each line holding only a picture when more follows,
     as Kindle Previewer 4.0.3 ends an entry there (#565): the picture stays
     in the words before it, and the next line starts an entry. After an
-    empty line it is cut before the picture line too, which is then an entry
-    of its own (QA on #590). [block] when
+    empty line it is cut before any line holding a picture too, which then
+    starts an entry (QA on #590, #593). [block] when
     there is no such line, the paragraph has no words, it is preformatted,
     or a picture in it floats, which is cut as before. The pieces after the
     first continue the paragraph: no heading level, space above or clearing
@@ -113,11 +113,13 @@ def _cut_after_picture_lines(block):
     lines = text.split("\n")
     for i, line in enumerate(lines):
         end = start + len(line)
-        if IMG_TOKEN_RE.search(line) and not IMG_TOKEN_RE.sub("", line).strip():
-            # After an empty line, the picture is an entry of its own, as
-            # Previewer writes it (QA on #590).
-            if i and not lines[i - 1].strip() and text[:start].strip():
-                cuts.append((start, start))
+        has_picture = bool(IMG_TOKEN_RE.search(line))
+        # After an empty line, a line holding a picture starts an entry, as
+        # Previewer writes it: a picture alone is then an entry of its own
+        # (QA on #590), one among words a mixed entry (#593).
+        if has_picture and i and not lines[i - 1].strip() and text[:start].strip():
+            cuts.append((start, start))
+        if has_picture and not IMG_TOKEN_RE.sub("", line).strip():
             if i < len(lines) - 1 and text[end + 1 :].strip():
                 cuts.append((end, end + 1))
         start = end + 1
