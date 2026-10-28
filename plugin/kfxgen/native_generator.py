@@ -93,12 +93,15 @@ def _cut_after_picture_lines(block):
     """`block` cut after each line holding only a picture when more follows,
     as Kindle Previewer 4.0.3 ends an entry there (#565): the picture stays
     in the words before it, and the next line starts an entry. [block] when
-    there is no such line, the paragraph has no words, or a picture in it
-    floats, which is cut as before. The pieces after the first continue the
+    there is no such line, the paragraph has no words, it is preformatted,
+    or a picture in it floats, which is cut as before. The pieces after the
+    first continue the
     paragraph: no heading level, space above or clearing of their own."""
     text = block["text"]
     tokens = list(IMG_TOKEN_RE.finditer(text))
-    if not tokens or any(m.group(4) for m in tokens):
+    # Preformatted text stays one entry, picture lines and all, as Previewer
+    # keeps it (QA on #590).
+    if not tokens or any(m.group(4) for m in tokens) or block.get("preformatted"):
         return [block]
     if not IMG_TOKEN_RE.sub("", text).strip():
         return [block]
@@ -113,10 +116,12 @@ def _cut_after_picture_lines(block):
         return [block]
     pieces, a = [], 0
     for b in [*cuts, len(text)]:
+        # A piece holds its end too: an id after the last word (#487), or at
+        # a cut, stays on the piece it ends (QA on #590).
         offsets = {
-            k: o - a
+            k: (o or 0) - a
             for k, o in (block.get("anchor_offsets") or {}).items()
-            if a <= (o or 0) < b or (a == 0 and not o)
+            if a <= (o or 0) <= b
         }
         piece = {
             **block,

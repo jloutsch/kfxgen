@@ -350,3 +350,32 @@ def test_a_link_to_the_words_after_the_cut_lands_on_them(tmp_path):
     )
     # From the word "end" on, not the entry's start.
     assert _landings(tmp_path / "i.kfx")["To end"] == "end."
+
+
+def test_an_id_at_the_paragraphs_end_lands_there_after_the_cut(tmp_path):
+    """An id after the last word (#487) is at the paragraph's end, which no
+    piece held, and fell back to the first piece's start (QA on #590). It
+    lands on the last character, as on main and in Previewer's file."""
+    from tests.unit.test_link_landings import _landings
+
+    _book(
+        tmp_path,
+        "<h1>One</h1><p>E1 words<br/><img src='s.jpg' alt='a'/><br/>"
+        "caption ends here<a id='e1end'></a></p>"
+        "<p><a href='c.xhtml#e1end'>To end</a></p>",
+    )
+    assert _landings(tmp_path / "i.kfx")["To end"] == "e"
+
+
+def test_preformatted_text_with_a_picture_line_is_not_cut(tmp_path):
+    """Previewer keeps `<pre>` whole, a picture line and all (QA on #590)."""
+    entries = _book(
+        tmp_path,
+        "<h1>One</h1><pre>P1 code line\n<img src='s.jpg' alt='a'/>\nP1 more code</pre>",
+    )
+    (mixed,) = _mixed(entries)
+    assert [p if isinstance(p, str) else "pic" for p in mixed[1]] == [
+        "P1 code line\n",
+        "pic",
+        "\nP1 more code",
+    ]
