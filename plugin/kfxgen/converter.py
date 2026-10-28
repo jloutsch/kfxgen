@@ -2875,29 +2875,34 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
     so it stays centred, unless it sets its own alignment (#589)."""
     if block_style is None:
         block_style = compute_block_style(css) if css is not None else None
-    if (block_style or {}).get("align") and style_resolver is not None:
-        # Alignment the cell only inherits doesn't count, as Kindle Previewer
-        # 4.0.3 has it (#589): a header cell's from its row or above, a data
-        # cell's from outside its table. calibre's values are inherited, so
-        # one equal to the row's, or to the table's surroundings', is.
+    if (
+        _local_tag(cell.tag) == "th"
+        and (block_style or {}).get("align")
+        and style_resolver is not None
+    ):
+        # A header cell's alignment counts only when it sets its own, as
+        # Kindle Previewer 4.0.3 has it (#589): one equal to its row's is
+        # inherited (calibre's values are), and the cell is centred. A
+        # data cell inherits as usual, in a page with a DOCTYPE.
         def raw(elem):
             css_of = style_resolver(elem) if elem is not None else None
             return str((css_of or {}).get("text-align") or "").strip().lower()
 
         mine = raw(cell)
-        if _local_tag(cell.tag) == "th":
-            inherited = mine == raw(cell.getparent())
-        else:
-            table = next(
-                (a for a in cell.iterancestors() if _local_tag(a.tag) == "table"),
-                None,
-            )
-            inherited = table is not None and mine == raw(table.getparent())
         own_paragraph = (
             block_style["align"] != compute_block_style({"text-align": mine})["align"]
         )
-        if inherited and not own_paragraph:
-            block_style = {**block_style, "align": None}
+        if mine == raw(cell.getparent()) and not own_paragraph:
+            # Centred, written out: a header cell's paragraphs otherwise
+            # take the book's alignment.
+            block_style = {**block_style, "align": "center"}
+        # `<th><p style="text-align: right">`: the paragraph's own, as for a
+        # data cell (#532), Previewer's too.
+        inner = _only_block_child(cell)
+        if inner is not None and raw(inner) != mine:
+            own = compute_block_style({"text-align": raw(inner)})["align"]
+            if own:
+                block_style = {**block_style, "align": own}
     if _local_tag(cell.tag) == "th" or (block_style or {}).get("align"):
         return block_style
     inner = _only_block_child(cell)

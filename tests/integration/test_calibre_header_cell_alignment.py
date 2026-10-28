@@ -1,8 +1,8 @@
-"""Table cell alignment as Kindle Previewer 4.0.3 writes it (#589, probed
-2026-10-27): a header cell is centred unless it sets its own alignment; a
-data cell takes alignment set on itself, its row or its table, but not from
-outside the table, such as a `body { text-align: justify }`. kfxgen took any
-inherited alignment, so a whole book's header cells came out justified.
+"""Header cell alignment as Kindle Previewer 4.0.3 writes it (#589, probed
+2026-10-27, pages with a DOCTYPE): a header cell is centred unless it sets
+its own alignment, whatever its row, table or page sets. kfxgen took any
+inherited alignment, so a justified book's header cells came out justified.
+Data cells inherit as usual, as kfxgen already had them.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found. CI has no calibre, so this is
@@ -42,7 +42,11 @@ PAGES = {
         f"<table>{ROWS.format(p='B ')}"
         "<tr><th><p>B H6 para in th</p></th><td>B D6 cell</td></tr>"
         "<tr><td><p style='text-align:right'>B P7 own right</p><p>B P7 second</p></td>"
-        "<td>B D7 cell</td></tr></table>",
+        "<td>B D7 cell</td></tr>"
+        "<tr><th><p style='text-align:right'>B H8 own para right</p></th>"
+        "<td>B D8 cell</td></tr>"
+        "<tr><th><p style='text-align:right'>B H9 own right</p><p>B H9 second</p></th>"
+        "<td>B D9 cell</td></tr></table>",
     ),
     "c.xhtml": (
         "",
@@ -57,37 +61,48 @@ PAGES = {
     ),
 }
 
-#: Previewer's `$34` for each cell, by the cell's first words.
+#: Previewer's `$34` for each cell, by the cell's first words, from its file
+#: for these pages with a DOCTYPE (#589, probed 2026-10-27). A header cell is
+#: centred unless it sets its own alignment; a data cell inherits as usual.
+#: The data cells Previewer writes with no `$34` (nothing sets theirs) are
+#: left out: kfxgen writes left there (#479), which is a separate question.
 CENTRE, LEFT, RIGHT, JUSTIFY = "$320", "$59", "$61", "$321"
 PREVIEWER = {
-    **{
-        f"{p} {k}": v
-        for p in ("A", "B")
-        for k, v in {
-            "H1 plain": CENTRE,
-            "D1 cell": LEFT,
-            "H2 css left": LEFT,
-            "D2 cell": LEFT,
-            "H3 align right": RIGHT,
-            "D3 cell": LEFT,
-            "H4 row right": CENTRE,
-            "D4 cell": RIGHT,
-            "D5 td first": LEFT,
-            "H5 second": CENTRE,
-        }.items()
-    },
+    "A H1 plain": CENTRE,
+    "A H2 css left": LEFT,
+    "A H3 align right": RIGHT,
+    "A H4 row right": CENTRE,
+    "A D4 cell": RIGHT,
+    "A H5 second": CENTRE,
+    "B H1 plain": CENTRE,
+    "B D1 cell": JUSTIFY,
+    "B H2 css left": LEFT,
+    "B D2 cell": JUSTIFY,
+    "B H3 align right": RIGHT,
+    "B D3 cell": JUSTIFY,
+    "B H4 row right": CENTRE,
+    "B D4 cell": RIGHT,
+    "B D5 td first": JUSTIFY,
+    "B H5 second": CENTRE,
     "B H6 para in th": CENTRE,
-    "B D6 cell": LEFT,
-    # A paragraph's own alignment in a cell of two (#532), probed.
+    "B D6 cell": JUSTIFY,
+    # A paragraph's own alignment in a cell of two (#532).
     "B P7 own right": RIGHT,
-    "B P7 second": LEFT,
-    "B D7 cell": LEFT,
+    "B P7 second": JUSTIFY,
+    "B D7 cell": JUSTIFY,
+    # A header cell's paragraph with its own alignment keeps it.
+    "B H8 own para right": RIGHT,
+    "B D8 cell": JUSTIFY,
+    # And in a header cell of two paragraphs, the other centred.
+    "B H9 own right": RIGHT,
+    "B H9 second": CENTRE,
+    "B D9 cell": JUSTIFY,
     "K1 th row justify": CENTRE,
     "K1 td row justify": JUSTIFY,
     "K2 th table right": CENTRE,
     "K2 td table right": RIGHT,
     "K3 th div right": CENTRE,
-    "K3 td div right": LEFT,
+    "K3 td div right": RIGHT,
     "K4 td own justify": JUSTIFY,
     "K4 th own justify": JUSTIFY,
 }
@@ -132,7 +147,9 @@ def _epub(path):
         for name, (css, body) in PAGES.items():
             z.writestr(
                 name,
-                '<?xml version="1.0" encoding="utf-8"?><html '
+                '<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html PUBLIC '
+                '"-//W3C//DTD XHTML 1.1//EN" '
+                '"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html '
                 'xmlns="http://www.w3.org/1999/xhtml"><head><title>p</title>'
                 f"<style>{css}</style></head><body><h1>Page</h1>{body}"
                 "<p>After.</p></body></html>",
