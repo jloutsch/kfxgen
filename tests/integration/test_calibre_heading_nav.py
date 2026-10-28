@@ -165,11 +165,10 @@ def test_a_contents_pages_other_headings_are_kept(calibre):  # noqa: F811
         ("Chapter Two", "c2.xhtml"),
     ]
     got = _units(calibre, "hn585", files, toc)
-    # The units' order is #584's.
-    assert dict(got) == {
-        "$800": ["Part One"],
-        "$799": ["Chapter One", "Chapter Two"],
-    }, f"calibre {version}: {got}"
+    assert got == [
+        ("$800", ["Part One"]),
+        ("$799", ["Chapter One", "Chapter Two"]),
+    ], f"calibre {version}: {got}"
     frags = load_fragments(tmp / "hn585.kfx")
     content = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
     first_page = [
@@ -190,3 +189,19 @@ def test_a_contents_pages_other_headings_are_kept(calibre):  # noqa: F811
         and str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])]) == "Part One"
     ]
     assert size == 1.5, f"calibre {version}: {size}"
+
+
+def test_units_follow_each_levels_first_heading(calibre):  # noqa: F811
+    """QA's probe on #584: an <h2> before the first <h1>; Previewer writes the
+    `$800` unit first."""
+    files = {
+        "c1.xhtml": "<h2>Preface</h2><p>Preface text.</p>",
+        "c2.xhtml": "<h1>One</h1><p>One text.</p>",
+        "c3.xhtml": "<h1>Two</h1><p>Two text.</p><h2>Two sub</h2><p>Sub text.</p>",
+    }
+    toc = [("Preface", "c1.xhtml"), ("One", "c2.xhtml"), ("Two", "c3.xhtml")]
+    got = _units(calibre, "hn584", files, toc)
+    assert got == [
+        ("$800", ["Preface", "Two sub"]),
+        ("$799", ["One", "Two"]),
+    ], f"calibre {calibre[2]}: {got}"
