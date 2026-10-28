@@ -182,6 +182,12 @@ CASES = {
         "",
         [("$396", "Begin", "Chapter Two"), ("$212", "Again", "Other page")],
     ),
+    # QA's L14 on #620: the first start that lands is kept.
+    "first-start-missing": (
+        _ref("text", "gone.xhtml", "A") + _ref("text", "c2.xhtml", "B"),
+        "",
+        [("$396", "B", "Chapter Two")],
+    ),
     "nav-toc-only": (
         "",
         _lm("toc", "c3.xhtml", "Contents"),

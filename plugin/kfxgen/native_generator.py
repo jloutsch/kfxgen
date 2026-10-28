@@ -3934,6 +3934,9 @@ class NativeKFXGenerator:
             for kind, label, key in landmarks or ()
             if (at := lands(key)) is not None
         ]
+        # The first start landmark that lands, as Previewer keeps it (#609).
+        starts = [n for n, m in enumerate(marks) if m[0] == "start"]
+        marks = [m for n, m in enumerate(marks) if m[0] != "start" or n == starts[0]]
         # The book's print page breaks, the same way (#578).
         pages = [
             (label, *at)

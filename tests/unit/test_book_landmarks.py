@@ -203,8 +203,10 @@ def test_a_landmark_named_in_other_capitals_takes_the_spines_spelling(tmp_path):
 
 
 def test_the_last_contents_and_the_first_start_landmark_are_kept(tmp_path):
-    """Kindle Previewer 4.0.3 keeps the last `toc` and the first `text`, each
-    where its own entry is (#609)."""
+    """Kindle Previewer 4.0.3 keeps the last `toc` and the first `text` that
+    lands, each where its own entry is (#609). The reader keeps the last
+    `toc` and every start, in order; the generator keeps the first start
+    that lands."""
     book = _book(
         tmp_path,
         '<reference type="toc" title="A" href="a.xhtml"/>'
@@ -214,5 +216,24 @@ def test_the_last_contents_and_the_first_start_landmark_are_kept(tmp_path):
     )
     assert _conv._book_landmarks(book) == [
         ("start", "B", "b.xhtml"),
+        ("start", "C", "c.xhtml"),
         ("toc", "D", "d.xhtml"),
+    ]
+
+
+def test_the_first_start_that_lands_is_kept(tmp_path):
+    """QA's L14 on #620: two start landmarks, the first to a missing file.
+    Kindle Previewer 4.0.3 keeps the second; a contents landmark is the last
+    even when it lands nowhere."""
+    got = _written(
+        tmp_path,
+        [
+            ("start", "A", "gone.xhtml"),
+            ("start", "B", "c2.xhtml#b"),
+            ("toc", "C", "c1.xhtml"),
+        ],
+    )
+    assert [g for g in got if g[0] != "$233"] == [
+        ("$396", "B", "Words 2."),
+        ("$212", "C", "Words 1."),
     ]

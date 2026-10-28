@@ -6739,13 +6739,10 @@ def _book_landmarks(oeb_book):
             )
         ]
     found = [(kind, label, key) for kind, label, key in found if kind and key]
-    # One of each, as Previewer keeps them: the last contents landmark, the
-    # first start, each where its own entry is (#609).
-    keep = {}
-    for n, (kind, _label, _key) in enumerate(found):
-        if kind == "toc" or kind not in keep:
-            keep[kind] = n
-    found = [found[n] for n in sorted(keep.values())]
+    # The last contents landmark, as Previewer keeps it, where its own entry
+    # is (#609). Every start stays: the generator keeps the first that lands.
+    last_toc = max((n for n, m in enumerate(found) if m[0] == "toc"), default=None)
+    found = [m for n, m in enumerate(found) if m[0] != "toc" or n == last_toc]
     return _respelled(found, oeb_book)
 
 
