@@ -6607,6 +6607,73 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     log.info(f"  Rebuilt contents page with {len(toc_links)} linked entries")
 
 
+#: Landmark types kfxgen writes, as Kindle Previewer 4.0.3 maps them (#579).
+_NAV_LANDMARKS = {"toc": "toc", "bodymatter": "start"}
+_GUIDE_LANDMARKS = {"toc": "toc", "text": "start"}
+
+
+def _book_landmarks(oeb_book):
+    """The book's contents and start landmarks, as (kind, label, link key),
+    kind "toc" or "start", in the book's order. Kindle Previewer 4.0.3 takes
+    them from an EPUB 3 landmarks nav (`toc`, `bodymatter`), else from the
+    OPF guide (`toc`, `text`) (#579). calibre passes on neither the nav's
+    nor a guide's the nav overrides, so both are read from the book's files."""
+    parse = _container_parser(oeb_book)
+    opfname = getattr(getattr(oeb_book, "container", None), "opfname", None)
+    opf = parse(opfname) if parse and opfname else None
+    if opf is None:
+        return []
+    opf_dir = posixpath.dirname(opfname)
+    nav_hrefs = opf.xpath(
+        "//*[local-name()='manifest']/*[local-name()='item']"
+        "[contains(concat(' ', normalize-space(@properties), ' '), ' nav ')]/@href"
+    )
+    nav = None
+    if nav_hrefs:
+        nav_path = posixpath.normpath(posixpath.join(opf_dir, unquote(nav_hrefs[0])))
+        nav = parse(nav_path)
+    links = (
+        nav.xpath(
+            "//*[local-name()='nav'][contains(concat(' ', normalize-space("
+            "@*[local-name()='type']), ' '), ' landmarks ')]//*[local-name()='a']"
+        )
+        if nav is not None
+        else []
+    )
+    if links:
+        # Its hrefs are written from its own folder; keys from the OPF's.
+        base = posixpath.relpath(nav_path, opf_dir or ".")
+        found = [
+            (
+                next(
+                    (
+                        _NAV_LANDMARKS[t]
+                        for t in (
+                            a.get("{http://www.idpf.org/2007/ops}type") or ""
+                        ).split()
+                        if t in _NAV_LANDMARKS
+                    ),
+                    None,
+                ),
+                "".join(a.itertext()).strip(),
+                _key_doc(base, a.get("href") or ""),
+            )
+            for a in links
+        ]
+    else:
+        found = [
+            (
+                _GUIDE_LANDMARKS.get((ref.get("type") or "").strip().lower()),
+                (ref.get("title") or "").strip(),
+                _key_doc("_", ref.get("href") or ""),
+            )
+            for ref in opf.xpath(
+                "//*[local-name()='guide']/*[local-name()='reference']"
+            )
+        ]
+    return [(kind, label, key) for kind, label, key in found if kind and key]
+
+
 def _with_ncx_empty_labels(oeb_book, entries):
     """`entries` with the NCX's entries whose label is empty or only spaces
     put back where the NCX has them, their label as written (#459). calibre's
@@ -7092,6 +7159,7 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         authors=metadata.get("authors"),
         description=metadata.get("description"),
         font_table=font_table,
+        landmarks=_book_landmarks(oeb_book),
         # Every <img src> went through _resolve_img_src, so a miss means the
         # file is absent, not that the href is spelled differently. (#195)
         resolved_image_refs=True,
