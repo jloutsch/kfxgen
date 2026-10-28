@@ -100,3 +100,74 @@ def test_the_generator_prints_it_as_a_linked_heading(tmp_path):
     assert str(run_style(part).get("$23")) != "$328"
     # A plain contents line is still underlined.
     assert str(run_style(chapter).get("$23")) == "$328"
+
+
+def _rebuild(blocks, titles):
+    contents = {"title": "Contents", "text": "", "blocks": blocks}
+    chapters = [contents] + [{"title": t, "text": f"{t} words."} for t in titles]
+    _conv._rebuild_contents_page(contents, chapters, NullLog())
+    return [
+        (link["text"], link.get("heading_level"), "target_chapter_idx" in link)
+        for link in contents["toc_links"]
+    ]
+
+
+def _link(text, href):
+    return {"text": text, "spans": [(0, len(text), frozenset({make_link_flag(href)}))]}
+
+
+def test_a_heading_the_page_also_links_prints_where_it_is():
+    """N5 (QA on #613): `<h3>Notes</h3>` at the top and a Notes link last.
+    Kindle Previewer 4.0.3 prints the heading at the top and keeps a plain
+    link last (#614)."""
+    lines = _rebuild(
+        [
+            {"text": "Contents", "heading_level": 1},
+            {"text": "Notes", "heading_level": 3},
+            _link("Chapter One", "c1.xhtml"),
+            _link("Notes", "n.xhtml"),
+        ],
+        ["Chapter One", "Notes"],
+    )
+    assert lines == [
+        ("Notes", 3, False),
+        ("Chapter One", None, True),
+        ("Notes", None, True),
+    ]
+
+
+def test_a_heading_takes_the_entry_after_the_previous_link():
+    """N6 (QA on #613): two "Introduction" entries, the page's heading under
+    Part Two's links: it is Part Two's, not the first (#614)."""
+    lines = _rebuild(
+        [
+            {"text": "Contents", "heading_level": 1},
+            _link("Part One", "p1.xhtml"),
+            _link("Chapter One", "c1.xhtml"),
+            _link("Part Two", "p2.xhtml"),
+            {"text": "Introduction", "heading_level": 3},
+            _link("Chapter Two", "c2.xhtml"),
+        ],
+        [
+            "Part One",
+            "Introduction",
+            "Chapter One",
+            "Part Two",
+            "Introduction",
+            "Chapter Two",
+        ],
+    )
+    levels = [lvl for _t, lvl, _l in lines]
+    assert levels == [None, None, None, None, 3, None], lines
+
+
+def test_a_heading_that_is_its_own_link_still_takes_its_entry():
+    lines = _rebuild(
+        [
+            {"text": "Contents", "heading_level": 1},
+            {**_link("Part One", "p1.xhtml"), "heading_level": 2},
+            _link("Chapter One", "c1.xhtml"),
+        ],
+        ["Part One", "Chapter One"],
+    )
+    assert lines == [("Part One", 2, True), ("Chapter One", None, True)]

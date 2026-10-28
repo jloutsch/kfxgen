@@ -193,3 +193,83 @@ def test_a_part_heading_prints_as_a_heading(calibre, linked):  # noqa: F811
     assert parts["Chapter One"][3], f"calibre {version}: {lines}"
     # Previewer's level 2: the page's part headings, then the chapters'.
     assert level2[:2] == ["Part One", "Part Two"], f"calibre {version}: {level2}"
+
+
+def _notes_epub(out):
+    """QA's N5 on #613: a Notes heading at the top of the page, and a Notes
+    link last, the TOC listing Notes."""
+    page = (
+        '<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html><html '
+        'xmlns="http://www.w3.org/1999/xhtml"><head><title>{t}</title></head>'
+        "<body>{b}</body></html>"
+    )
+    files = {
+        "contents.xhtml": page.format(
+            t="Contents",
+            b='<h1>Contents</h1><h3>Notes</h3><p><a href="c1.xhtml">Chapter One</a></p>'
+            '<p><a href="notes.xhtml">Notes</a></p>',
+        ),
+        "c1.xhtml": page.format(
+            t="One", b="<h2>Chapter One</h2>" + "<p>Words.</p>" * 10
+        ),
+        "notes.xhtml": page.format(t="Notes", b="<h2>Notes</h2><p>1. A note.</p>"),
+    }
+    nav = [
+        ("c0", "contents.xhtml", "Contents"),
+        ("n1", "c1.xhtml", "Chapter One"),
+        ("n2", "notes.xhtml", "Notes"),
+    ]
+    ncx = (
+        '<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">'
+        "<head/><docTitle><text>N</text></docTitle><navMap>"
+        + "".join(
+            f'<navPoint id="{i}" playOrder="{n}"><navLabel><text>{t}</text></navLabel>'
+            f'<content src="{f}"/></navPoint>'
+            for n, (i, f, t) in enumerate(nav)
+        )
+        + "</navMap></ncx>"
+    )
+    opf = (
+        '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0" '
+        'unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        '<dc:title>N614</dc:title><dc:identifier id="id">n614</dc:identifier>'
+        "<dc:language>en</dc:language></metadata><manifest>"
+        + "".join(
+            f'<item id="i{n}" href="{f}" media-type="application/xhtml+xml"/>'
+            for n, f in enumerate(files)
+        )
+        + '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/></manifest>'
+        '<spine toc="ncx">'
+        + "".join(f'<itemref idref="i{n}"/>' for n in range(len(files)))
+        + "</spine></package>"
+    )
+    with zipfile.ZipFile(out, "w") as z:
+        z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        z.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0" '
+            'xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles>'
+            '<rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>'
+            "</rootfiles></container>",
+        )
+        z.writestr("content.opf", opf)
+        z.writestr("toc.ncx", ncx)
+        for name, doc in files.items():
+            z.writestr(name, doc)
+
+
+def test_a_heading_the_page_also_links_prints_where_it_is(calibre):  # noqa: F811
+    """Previewer prints the Notes heading at the top and keeps a plain Notes
+    link last (QA on #613, #614)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "n614.epub", tmp / "n614.kfx"
+    _notes_epub(epub)
+    _ebook_convert(calibre, epub, kfx, True)
+    lines, _level2 = _contents(kfx)
+    got = [(t, link, under) for t, _size, _weight, link, under in lines]
+    assert got == [
+        ("Contents", False, False),
+        ("Notes", False, False),
+        ("Chapter One", True, True),
+        ("Notes", True, True),
+    ], f"calibre {version}: {lines}"
