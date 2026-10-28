@@ -6632,8 +6632,69 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
 
 
 #: Landmark types kfxgen writes, as Kindle Previewer 4.0.3 maps them (#579).
+_OPS_NS = "http://www.idpf.org/2007/ops"
+_PAGE_LABEL_RE = re.compile(r"\d+|[ivxlcdm]+", re.IGNORECASE)
+#: A label's number inside one pair of brackets and after "Page", "Pg" or
+#: "p.", as Gutenberg writes them: "[Pg 12]", "{vii}" (#612 review).
+_PAGE_LABEL_WRAP_RE = re.compile(
+    r"^(?:\[\s*(.*?)\s*\]|\{\s*(.*?)\s*\}|\(\s*(.*?)\s*\)|(.*))$", re.DOTALL
+)
+_PAGE_LABEL_PREFIX_RE = re.compile(r"^(?:page|pg|p)\.?\s*", re.IGNORECASE)
+
+
+def _page_label(text):
+    """`text` as a page number: trimmed, out of its brackets, without a
+    "Page"/"Pg"/"p." before it."""
+    inner = next(
+        g for g in _PAGE_LABEL_WRAP_RE.match(text.strip()).groups() if g is not None
+    )
+    return _PAGE_LABEL_PREFIX_RE.sub("", inner.strip()).strip()
+
+
 _NAV_LANDMARKS = {"toc": "toc", "bodymatter": "start"}
 _GUIDE_LANDMARKS = {"toc": "toc", "text": "start"}
+
+
+def _book_files(oeb_book):
+    """The book's own OPF, nav document and NCX, as calibre unpacked them:
+    (opf, nav, the nav's path from the OPF's folder, ncx, the NCX's path),
+    a missing one None, or None when there is no unpacked book."""
+    parse = _container_parser(oeb_book)
+    opfname = getattr(getattr(oeb_book, "container", None), "opfname", None)
+    opf = parse(opfname) if parse and opfname else None
+    if opf is None:
+        return None
+    opf_dir = posixpath.dirname(opfname)
+
+    def item(test):
+        hrefs = opf.xpath(
+            f"//*[local-name()='manifest']/*[local-name()='item'][{test}]/@href"
+        )
+        return (
+            posixpath.normpath(posixpath.join(opf_dir, unquote(hrefs[0])))
+            if hrefs
+            else None
+        )
+
+    nav_path = item("contains(concat(' ', normalize-space(@properties), ' '), ' nav ')")
+    nav = parse(nav_path) if nav_path else None
+    ncx_path = item("@media-type='application/x-dtbncx+xml'")
+    ncx = parse(ncx_path) if ncx_path else None
+
+    def rel(path):
+        return posixpath.relpath(path, opf_dir or ".") if path else ""
+
+    return opf, nav, rel(nav_path), ncx, rel(ncx_path)
+
+
+def _nav_links(nav, kind):
+    """The links of `nav`'s `<nav epub:type=kind>`."""
+    if nav is None:
+        return []
+    return nav.xpath(
+        "//*[local-name()='nav'][contains(concat(' ', normalize-space("
+        f"@*[local-name()='type']), ' '), ' {kind} ')]//*[local-name()='a']"
+    )
 
 
 def _book_landmarks(oeb_book):
@@ -6642,45 +6703,25 @@ def _book_landmarks(oeb_book):
     them from an EPUB 3 landmarks nav (`toc`, `bodymatter`), else from the
     OPF guide (`toc`, `text`) (#579). calibre passes on neither the nav's
     nor a guide's the nav overrides, so both are read from the book's files."""
-    parse = _container_parser(oeb_book)
-    opfname = getattr(getattr(oeb_book, "container", None), "opfname", None)
-    opf = parse(opfname) if parse and opfname else None
-    if opf is None:
+    files = _book_files(oeb_book)
+    if files is None:
         return []
-    opf_dir = posixpath.dirname(opfname)
-    nav_hrefs = opf.xpath(
-        "//*[local-name()='manifest']/*[local-name()='item']"
-        "[contains(concat(' ', normalize-space(@properties), ' '), ' nav ')]/@href"
-    )
-    nav = None
-    if nav_hrefs:
-        nav_path = posixpath.normpath(posixpath.join(opf_dir, unquote(nav_hrefs[0])))
-        nav = parse(nav_path)
-    links = (
-        nav.xpath(
-            "//*[local-name()='nav'][contains(concat(' ', normalize-space("
-            "@*[local-name()='type']), ' '), ' landmarks ')]//*[local-name()='a']"
-        )
-        if nav is not None
-        else []
-    )
+    opf, nav, nav_base, _ncx, _ncx_base = files
+    links = _nav_links(nav, "landmarks")
     if links:
         # Its hrefs are written from its own folder; keys from the OPF's.
-        base = posixpath.relpath(nav_path, opf_dir or ".")
         found = [
             (
                 next(
                     (
                         _NAV_LANDMARKS[t]
-                        for t in (
-                            a.get("{http://www.idpf.org/2007/ops}type") or ""
-                        ).split()
+                        for t in (a.get(f"{{{_OPS_NS}}}type") or "").split()
                         if t in _NAV_LANDMARKS
                     ),
                     None,
                 ),
                 "".join(a.itertext()).strip(),
-                _key_doc(base, a.get("href") or ""),
+                _key_doc(nav_base, a.get("href") or ""),
             )
             for a in links
         ]
@@ -6696,6 +6737,39 @@ def _book_landmarks(oeb_book):
             )
         ]
     return [(kind, label, key) for kind, label, key in found if kind and key]
+
+
+def _book_page_list(oeb_book):
+    """The book's print page breaks, as (label, link key) in the book's
+    order, as Kindle Previewer 4.0.3 takes them: an EPUB 3 nav `page-list`,
+    else the NCX's `pageList` (#578). Read from the book's own files."""
+    files = _book_files(oeb_book)
+    if files is None:
+        return []
+    _opf, nav, nav_base, ncx, ncx_base = files
+    found = [
+        ("".join(a.itertext()).strip(), _key_doc(nav_base, a.get("href") or ""))
+        for a in _nav_links(nav, "page-list")
+    ]
+    if not found and ncx is not None:
+        found = [
+            (
+                "".join(t.xpath("./*[local-name()='navLabel']//text()")).strip(),
+                _key_doc(
+                    ncx_base, (t.xpath("./*[local-name()='content']/@src") or [""])[0]
+                ),
+            )
+            for t in ncx.xpath(
+                "//*[local-name()='pageList']/*[local-name()='pageTarget']"
+            )
+        ]
+    found = [(_page_label(label), key) for label, key in found if label and key]
+    # Kindle Previewer 4.0.3 writes no page list when one label isn't all
+    # digits or a roman numeral's letters (QA on #612). kfxgen cleans the
+    # labels first, then does the same.
+    if any(not _PAGE_LABEL_RE.fullmatch(label) for label, _key in found):
+        return []
+    return found
 
 
 def _with_ncx_empty_labels(oeb_book, entries):
@@ -7184,6 +7258,7 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         description=metadata.get("description"),
         font_table=font_table,
         landmarks=_book_landmarks(oeb_book),
+        page_list=_book_page_list(oeb_book),
         # Every <img src> went through _resolve_img_src, so a miss means the
         # file is absent, not that the href is spelled differently. (#195)
         resolved_image_refs=True,
