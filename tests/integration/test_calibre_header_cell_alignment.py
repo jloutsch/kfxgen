@@ -73,11 +73,16 @@ PAGES = {
 #: Previewer's `$34` for each cell, by the cell's first words, from its file
 #: for these pages with a DOCTYPE (#589, probed 2026-10-27). A header cell is
 #: centred unless it sets its own alignment; a data cell inherits as usual.
-#: The data cells Previewer writes with no `$34` (nothing sets theirs) are
-#: left out: kfxgen writes left there (#479), which is a separate question.
-CENTRE, LEFT, RIGHT, JUSTIFY = "$320", "$59", "$61", "$321"
+#: A data cell nothing aligns has no `$34`, in kfxgen's file too since #599.
+CENTRE, LEFT, RIGHT, JUSTIFY, NONE = "$320", "$59", "$61", "$321", "None"
 PREVIEWER = {
     "A H1 plain": CENTRE,
+    "A D1 cell": NONE,
+    "A D2 cell": NONE,
+    "A D3 cell": NONE,
+    "A D5 td first": NONE,
+    "A D7 cell": NONE,
+    "A D8 cell": NONE,
     "A H2 css left": LEFT,
     "A H3 align right": RIGHT,
     "A H4 row right": CENTRE,

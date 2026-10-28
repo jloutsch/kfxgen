@@ -1,8 +1,8 @@
-"""Table cells are left-aligned unless the book says otherwise, and
-right-aligned in a right-to-left table, as Kindle Previewer 4.0.3 writes
-them (#479, probed 2026-10-26): it writes an explicit left on every cell
-and on each paragraph in a cell, where kfxgen left cells unset and set a
-cell's paragraphs justified, the body's default."""
+"""Table cells have no alignment unless the book gives one, as Kindle
+Previewer 4.0.3 writes them in a page with a DOCTYPE (#599, probed
+2026-10-28); on a Paperwhite an unset cell shows justified, as Previewer's
+does. Cells in a right-to-left table are right-aligned: Previewer marks
+the table's direction instead, which kfxgen doesn't write."""
 
 import pytest
 from lxml import etree
@@ -30,14 +30,14 @@ def _align(cell):
 @pytest.mark.parametrize(
     ("html", "aligns"),
     [
-        ("<table><tr><td>a</td><td>b</td></tr></table>", ["left", "left"]),
+        ("<table><tr><td>a</td><td>b</td></tr></table>", [None, None]),
         ('<table dir="rtl"><tr><td>a</td><td>b</td></tr></table>', ["right", "right"]),
         ('<div dir="rtl"><table><tr><td>a</td></tr></table></div>', ["right"]),
         # A cell's or a row's own dir doesn't count: Kindle Previewer 4.0.3
         # takes it from the table and what holds it (#570, probed).
         ('<table dir="rtl"><tr><td dir="ltr">a</td></tr></table>', ["right"]),
-        ('<table><tr><td dir="rtl">a</td></tr></table>', ["left"]),
-        ('<table><tr dir="rtl"><td>a</td></tr></table>', ["left"]),
+        ('<table><tr><td dir="rtl">a</td></tr></table>', [None]),
+        ('<table><tr dir="rtl"><td>a</td></tr></table>', [None]),
     ],
     ids=["plain", "rtl-table", "rtl-ancestor", "ltr-cell", "rtl-cell", "rtl-row"],
 )
@@ -74,4 +74,4 @@ def test_a_cells_one_paragraph_keeps_its_own_alignment():
         if b.get("table")
     ]
     cells = table["table"]["rows"][0]["cells"]
-    assert [_align(c) for c in cells] == ["right", "left"]
+    assert [_align(c) for c in cells] == ["right", None]

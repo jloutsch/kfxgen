@@ -1,7 +1,9 @@
 """Table cells aligned as Kindle Previewer 4.0.3 writes them, through
-calibre (#479): left unless the book says otherwise, right in a
-right-to-left table, and a cell's paragraphs left too, not justified. Each
-expected value is Previewer's own for the same markup (probed 2026-10-26).
+calibre: no alignment unless the book gives one (#599). Each value is
+Previewer's own for the same markup in a page with a DOCTYPE (probed
+2026-10-28), except in right-to-left tables: Previewer writes no alignment
+there either, but marks the table's direction (`$682`), which kfxgen
+doesn't write, so kfxgen keeps those cells right-aligned (#479, #570).
 
 Not covered: `<td style="text-align: left" align="right">`, which Previewer
 writes left. calibre's CSS flattening has already made it right, with the
@@ -68,20 +70,22 @@ def test_cells_are_aligned_as_previewer_writes_them(calibre):  # noqa: F811
                     got[text] = ALIGN.get(str(a)) if a is not None else None
     assert got == {
         "T2 attr": "right",
-        "T2b": "left",
-        "T3 plain": "left",
-        "T3b": "left",
-        "T4 rtl": "right",
+        "T2b": None,
+        "T3 plain": None,
+        "T3b": None,
+        "T4 rtl": "right",  # kfxgen's; Previewer: none, `$682` on the table
         "T4b": "right",
-        "T5 one": "left",
-        "T5 two": "left",
-        "T5b": "left",
+        # Previewer: none. kfxgen writes justify on any paragraph that sets
+        # nothing, inside a table or not; a Paperwhite shows both justified.
+        "T5 one": "justify",
+        "T5 two": "justify",
+        "T5b": None,
         "T6 p right": "right",
-        "T7 ltr cell": "right",
+        "T7 ltr cell": "right",  # kfxgen's, as T4
         "T7b": "right",
-        "T8 rtl cell": "left",
-        "T8b": "left",
-        "T9 rtl row": "left",
-        "T9b": "left",
-        "T6b": "left",
+        "T8 rtl cell": None,
+        "T8b": None,
+        "T9 rtl row": None,
+        "T9b": None,
+        "T6b": None,
     }, f"calibre {version}"
