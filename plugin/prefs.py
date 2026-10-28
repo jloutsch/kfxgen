@@ -18,3 +18,8 @@ prefs.defaults["disable_font_embedding"] = False
 # Kindle tables (the default). The per-conversion CLI option
 # `--kfxgen-disable-native-tables` can also disable them; the two are OR'd.
 prefs.defaults["disable_native_tables"] = False
+
+# Global default for "Open new books at the cover". False -> a book opens where
+# it marks its text's start, as store books do (#579). The per-conversion CLI
+# option `--kfxgen-open-at-cover` can also turn it on; the two are OR'd.
+prefs.defaults["open_at_cover"] = False

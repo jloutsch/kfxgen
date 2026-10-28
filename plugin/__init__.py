@@ -83,6 +83,15 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
                 "this if a book's tables display badly on your Kindle."
             ),
         ),
+        OptionRecommendation(
+            name="kfxgen_open_at_cover",
+            recommended_value=False,
+            help=(
+                "Open a new book at its cover. By default it opens where the "
+                "book marks the start of its text, usually the first chapter, "
+                "as store books do."
+            ),
+        ),
     }
 
     # --- Customization (Preferences -> Plugins -> Customize) ---
@@ -115,6 +124,9 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
             if prefs["disable_native_tables"]:
                 opts.kfxgen_disable_native_tables = True
                 log.info("  Native tables disabled by plugin setting")
+            if prefs["open_at_cover"]:
+                opts.kfxgen_open_at_cover = True
+                log.info("  New books open at the cover, by plugin setting")
         except Exception as e:
             log.warn("Could not read kfxgen plugin settings ({})".format(e))
 

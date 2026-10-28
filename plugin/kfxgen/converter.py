@@ -6742,6 +6742,15 @@ def _book_landmarks(oeb_book):
     return _respelled(found, oeb_book)
 
 
+def _book_landmarks_for(oeb_book, opts):
+    """`_book_landmarks`, without the start landmark when the user asked for
+    new books to open at the cover (`kfxgen_open_at_cover`)."""
+    marks = _book_landmarks(oeb_book)
+    if getattr(opts, "kfxgen_open_at_cover", False) is True:
+        marks = [m for m in marks if m[0] != "start"]
+    return marks
+
+
 def _book_page_list(oeb_book):
     """The book's print page breaks, as (label, link key) in the book's
     order, as Kindle Previewer 4.0.3 takes them: an EPUB 3 nav `page-list`,
@@ -7260,7 +7269,7 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         authors=metadata.get("authors"),
         description=metadata.get("description"),
         font_table=font_table,
-        landmarks=_book_landmarks(oeb_book),
+        landmarks=_book_landmarks_for(oeb_book, opts),
         page_list=_book_page_list(oeb_book),
         # Every <img src> went through _resolve_img_src, so a miss means the
         # file is absent, not that the href is spelled differently. (#195)

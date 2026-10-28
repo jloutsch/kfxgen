@@ -33,8 +33,19 @@ class ConfigWidget(QWidget):
         )
         self.disable_tables.setChecked(bool(prefs["disable_native_tables"]))
         layout.addWidget(self.disable_tables)
+
+        self.open_at_cover = QCheckBox("Open new books at the cover", self)
+        self.open_at_cover.setToolTip(
+            "By default a new book opens where it marks the start of its text, "
+            "usually the first chapter, as store books do. Check this to open "
+            "it at the cover instead. The per-conversion --kfxgen-open-at-cover "
+            "option can also turn it on."
+        )
+        self.open_at_cover.setChecked(bool(prefs["open_at_cover"]))
+        layout.addWidget(self.open_at_cover)
         layout.addStretch(1)
 
     def save_settings(self):
         prefs["disable_font_embedding"] = self.disable_fonts.isChecked()
         prefs["disable_native_tables"] = self.disable_tables.isChecked()
+        prefs["open_at_cover"] = self.open_at_cover.isChecked()
