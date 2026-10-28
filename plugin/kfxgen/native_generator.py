@@ -3760,6 +3760,8 @@ class NativeKFXGenerator:
                     **ch,
                     "toc_links": [
                         {**link, "target_chapter_idx": link["target_chapter_idx"] + 1}
+                        if "target_chapter_idx" in link
+                        else link
                         for link in (ch.get("toc_links") or [])
                     ],
                 }
@@ -4918,6 +4920,19 @@ class NativeKFXGenerator:
             if toc_links:
                 for link in toc_links:
                     chunk_idx = len(all_chunks)
+                    if "target_chapter_idx" not in link:
+                        # One of the page's own headings, printed as it is
+                        # (#585): no link, its level and style.
+                        all_chunks.append(
+                            {
+                                "type": "text",
+                                "text": link["text"],
+                                "block_style": link.get("block_style"),
+                                "heading_level": link.get("heading_level"),
+                                "own_size": True,
+                            }
+                        )
+                        continue
                     all_chunks.append({"type": "text", "text": link["text"]})
                     toc_link_chunks[chunk_idx] = (
                         link["target_chapter_idx"],
@@ -5681,7 +5696,10 @@ class NativeKFXGenerator:
         # as Kindle Previewer writes them (#241).
         text_px = collections.Counter()
         for chunk in all_chunks:
-            text_px.update(_chars_by_px(chunk))
+            # A heading kept on a rebuilt contents page (#585) isn't the
+            # book's text: in a short book it outweighed it (QA on #594).
+            if not chunk.get("own_size"):
+                text_px.update(_chars_by_px(chunk))
         main_px = _most(text_px)
 
         # The book's main line height, as a factor of each paragraph's own
@@ -5691,7 +5709,7 @@ class NativeKFXGenerator:
         line_counts = collections.Counter()
         for chunk in all_chunks:
             factor = (chunk.get("block_style") or {}).get("line_height")
-            if chunk.get("type") == "text" and factor:
+            if chunk.get("type") == "text" and factor and not chunk.get("own_size"):
                 line_counts[factor] += len(chunk.get("text") or "")
         main_line = _most(line_counts)
 
@@ -5713,7 +5731,9 @@ class NativeKFXGenerator:
             # block takes its CSS size, or the size of a span holding all its
             # text, as in Previewer's output (#375 review).
             fs = chapters[ch_idx].get("font_size", 1.0)
-            if fs != 1.0:
+            # A heading kept on a rebuilt contents page keeps its own size
+            # (#585), not the page's.
+            if fs != 1.0 and not chunk.get("own_size"):
                 return fs
             counts = +_chars_by_px(chunk)
             if len(counts) == 1:
