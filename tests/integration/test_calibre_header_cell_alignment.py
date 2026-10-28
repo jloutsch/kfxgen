@@ -40,7 +40,9 @@ PAGES = {
     "b.xhtml": (
         "body{text-align:justify}",
         f"<table>{ROWS.format(p='B ')}"
-        "<tr><th><p>B H6 para in th</p></th><td>B D6 cell</td></tr></table>",
+        "<tr><th><p>B H6 para in th</p></th><td>B D6 cell</td></tr>"
+        "<tr><td><p style='text-align:right'>B P7 own right</p><p>B P7 second</p></td>"
+        "<td>B D7 cell</td></tr></table>",
     ),
     "c.xhtml": (
         "",
@@ -76,6 +78,10 @@ PREVIEWER = {
     },
     "B H6 para in th": CENTRE,
     "B D6 cell": LEFT,
+    # A paragraph's own alignment in a cell of two (#532), probed.
+    "B P7 own right": RIGHT,
+    "B P7 second": LEFT,
+    "B D7 cell": LEFT,
     "K1 th row justify": CENTRE,
     "K1 td row justify": JUSTIFY,
     "K2 th table right": CENTRE,
