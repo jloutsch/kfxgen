@@ -2898,6 +2898,18 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
     }
 
 
+def _header_not_bold(cell, css):
+    """A header cell whose weight comes to normal, as `<th style="font-weight:
+    normal">`: not bold, as Kindle Previewer 4.0.3 writes it (#597)."""
+    weight = str((css or {}).get("font-weight") or "").strip().lower()
+    # `bolder` reads as 400 here; the cell's block style makes it bold.
+    return (
+        _local_tag(cell.tag) == "th"
+        and bool(weight)
+        and parse_weight(weight) < BOLD_WEIGHT_THRESHOLD
+    )
+
+
 def _table_cell(cell, style_resolver, base_href):
     text, spans, marks = normalize_runs_with_anchors(
         _walk_inline(cell, style_resolver=style_resolver, base_href=base_href)
@@ -2911,6 +2923,7 @@ def _table_cell(cell, style_resolver, base_href):
         "anchor_offsets": {aid: marks.get(aid, 0) for aid in ids},
         "block_style": _cell_block_style(cell, css, style_resolver=style_resolver),
         "header": _local_tag(cell.tag) == "th",
+        "not_bold": _header_not_bold(cell, css),
         # A heading written in a cell: the section's opening, as a heading
         # outside a table is (#492).
         "heading": any(
@@ -2946,6 +2959,7 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
         "anchor_offsets": {},
         "block_style": _cell_block_style(cell, css),
         "header": _local_tag(cell.tag) == "th",
+        "not_bold": _header_not_bold(cell, css),
         "colspan": _span_attr(cell, "colspan"),
         "rowspan": _span_attr(cell, "rowspan"),
         "valign": _cell_valign(cell, style_resolver),
