@@ -105,3 +105,17 @@ def test_a_book_without_headings_has_no_heading_navigation(tmp_path):
     )
     assert "$798" not in kinds
     assert "$212" in kinds
+
+
+@pytest.mark.unit
+def test_units_follow_each_levels_first_heading(tmp_path):
+    """Previewer writes a level's unit where that level first appears, not in
+    level order: an <h2> before the first <h1> puts `$800` first (#584)."""
+    got = _nav(
+        tmp_path,
+        [
+            ("Preface", "<h2>Preface</h2><p>Body.</p>"),
+            ("One", "<h1>One</h1><p>Body.</p><h2>Sub</h2><p>Para.</p>"),
+        ],
+    )
+    assert got == [("$800", "Preface", ["Preface", "Sub"]), ("$799", "One", ["One"])]

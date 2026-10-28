@@ -143,3 +143,19 @@ def test_a_rebuilt_contents_page_keeps_its_headings_level(calibre, heading, list
     ]
     got = _units(calibre, f"hn580{heading[1]}", files, toc)
     assert got == [("$799", listed)], f"calibre {calibre[2]}: {got}"
+
+
+def test_units_follow_each_levels_first_heading(calibre):  # noqa: F811
+    """QA's probe on #584: an <h2> before the first <h1>; Previewer writes the
+    `$800` unit first."""
+    files = {
+        "c1.xhtml": "<h2>Preface</h2><p>Preface text.</p>",
+        "c2.xhtml": "<h1>One</h1><p>One text.</p>",
+        "c3.xhtml": "<h1>Two</h1><p>Two text.</p><h2>Two sub</h2><p>Sub text.</p>",
+    }
+    toc = [("Preface", "c1.xhtml"), ("One", "c2.xhtml"), ("Two", "c3.xhtml")]
+    got = _units(calibre, "hn584", files, toc)
+    assert got == [
+        ("$800", ["Preface", "Two sub"]),
+        ("$799", ["One", "Two"]),
+    ], f"calibre {calibre[2]}: {got}"

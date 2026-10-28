@@ -1064,9 +1064,10 @@ def _book_headings(ch_data):
 
 def _heading_levels(headings):
     """$798's units: one per level present, at its first heading, holding a
-    child per heading, as Kindle Previewer 4.0.3 writes them (#461)."""
+    child per heading, as Kindle Previewer 4.0.3 writes them (#461), in the
+    order the levels first appear, not level order (#584)."""
     units = []
-    for level in sorted({lv for _p, lv in headings}):
+    for level in dict.fromkeys(lv for _p, lv in headings):
         positions = [p for p, lv in headings if lv == level]
 
         def target(position):
