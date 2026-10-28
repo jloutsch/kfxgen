@@ -171,3 +171,43 @@ def test_a_heading_that_is_its_own_link_still_takes_its_entry():
         ["Part One", "Chapter One"],
     )
     assert lines == [("Part One", 2, True), ("Chapter One", None, True)]
+
+
+def test_two_headings_before_the_same_link_keep_their_order():
+    """N10 (QA on #618): `<h2>Book One</h2><h3>The Beginning</h3>` before
+    Chapter One print in that order, as on the page."""
+    lines = _rebuild(
+        [
+            {"text": "Contents", "heading_level": 1},
+            {"text": "Book One", "heading_level": 2},
+            {"text": "The Beginning", "heading_level": 3},
+            _link("Chapter One", "c1.xhtml"),
+        ],
+        ["Chapter One"],
+    )
+    assert [t for t, _l, _k in lines] == ["Book One", "The Beginning", "Chapter One"]
+
+
+def test_a_heading_before_a_repeated_link_goes_before_that_link():
+    """N8 (QA on #618): part headings before two "Introduction" links each
+    go before their own, not both before the first."""
+    lines = _rebuild(
+        [
+            {"text": "Contents", "heading_level": 1},
+            {"text": "Part One", "heading_level": 2},
+            _link("Introduction", "i1.xhtml"),
+            _link("Chapter A", "a.xhtml"),
+            {"text": "Part Two", "heading_level": 2},
+            _link("Introduction", "i2.xhtml"),
+            _link("Chapter B", "b.xhtml"),
+        ],
+        ["Introduction", "Chapter A", "Introduction", "Chapter B"],
+    )
+    assert [t for t, _l, _k in lines] == [
+        "Part One",
+        "Introduction",
+        "Chapter A",
+        "Part Two",
+        "Introduction",
+        "Chapter B",
+    ]

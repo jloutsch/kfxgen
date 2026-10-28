@@ -6594,9 +6594,10 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
             link["block_style"] = b.get("block_style")
             merged = True
         if is_link(b):
-            events.append(("link", words))
             if words in listed:
                 last = entry(words, last)
+            # The entry this link is, so a heading before it goes there (#618).
+            events.append(("link", last if words in listed else None))
         elif b.get("heading_level") and words and not merged:
             # A heading the TOC doesn't list, or one the page links from
             # another line too: printed where it is (#585, #614).
@@ -6615,9 +6616,11 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
         if kind != "heading":
             continue
         after = next((w for k, w in events[n + 1 :] if k == "link"), None)
-        at = listed.index(after) if after in listed else len(listed)
-        inserts.append((at, line))
-    for at, line in sorted(inserts, key=lambda x: x[0], reverse=True):
+        at = after if after is not None else len(listed)
+        inserts.append((at, n, line))
+    # Last first, so earlier places don't move; two at one place keep the
+    # page's order (#618).
+    for at, _n, line in sorted(inserts, key=lambda x: x[:2], reverse=True):
         toc_links.insert(at, line)
     contents_ch.pop("blocks", None)
 
