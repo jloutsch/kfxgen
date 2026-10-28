@@ -2161,7 +2161,9 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS("$348"), ftype=IS("$538"), value=value)
 
-    def build_fragment_389_toc(self, toc_entries, cover_position=None, headings=None):
+    def build_fragment_389_toc(
+        self, toc_entries, cover_position=None, headings=None, landmarks=()
+    ):
         """
         Builds Fragment $389 (Navigation) with TOC and landmarks.
 
@@ -2189,7 +2191,7 @@ class NativeKFXGenerator:
         if headings:
             self.symtab.create_local_symbol(heading_name)
         self.symtab.create_local_symbol(toc_name)
-        if cover_position is not None:
+        if cover_position is not None or landmarks:
             self.symtab.create_local_symbol(landmarks_name)
 
         # The heading navigation ($798): from the book's <h1>-<h6>, a unit
@@ -2250,19 +2252,29 @@ class NativeKFXGenerator:
         # a cover landmark at the first chapter could have it drawn as a
         # full-screen cover (#460).
         containers = [c for c in (heading_container, toc_container) if c]
+        # After it, the book's contents ($212) and start ($396) landmarks,
+        # as Kindle Previewer 4.0.3 writes them (#579).
+        units = []
         if cover_position is not None:
+            units.append(("$233", "cover-nav-unit", cover_position, 0))
+        units += [
+            ({"toc": "$212", "start": "$396"}[kind], label, pos, offset)
+            for kind, label, pos, offset in landmarks or ()
+        ]
+        if units:
             landmarks_units = [
                 IonAnnotation(
                     [IS("$393")],
                     IonStruct(
                         IS("$238"),
-                        IS("$233"),
+                        IS(symbol),
                         IS("$241"),
-                        IonStruct(IS("$244"), "cover-nav-unit"),
+                        IonStruct(IS("$244"), label),
                         IS("$246"),
-                        IonStruct(IS("$155"), cover_position, IS("$143"), 0),
+                        IonStruct(IS("$155"), pos, IS("$143"), offset),
                     ),
                 )
+                for symbol, label, pos, offset in units
             ]
             landmarks_container = IonAnnotation(
                 [IS("$391")],
@@ -3445,6 +3457,7 @@ class NativeKFXGenerator:
         resolved_image_refs=False,
         display_dims=None,
         footnote_keys=None,
+        landmarks=None,
     ):
         """
         Generates a complete KFX book with metadata and content.
@@ -3875,11 +3888,22 @@ class NativeKFXGenerator:
                 )
         # The synthetic cover chapter is always first when present (#32).
         cover_position = section_positions[0] if chapters[0].get("_is_cover") else None
+        # The book's contents and start landmarks, where their links land
+        # (#579). One that lands nowhere is left out.
+        marks = []
+        for kind, label, key in landmarks or ():
+            idx = ch_data["key_to_chunk"].get(key)
+            offset = ch_data["key_to_offset"].get(key, 0)
+            if idx is None and "#" not in key:
+                idx, offset = ch_data["file_to_chunk"].get(key), 0
+            if idx is not None:
+                marks.append((kind, label, ch_data["chunk_positions"][idx], offset))
         self.fragments.append(
             self.build_fragment_389_toc(
                 nav_entries,
                 cover_position=cover_position,
                 headings=_book_headings(ch_data),
+                landmarks=marks,
             )
         )
 
@@ -6374,6 +6398,9 @@ class NativeKFXGenerator:
             "section_positions": section_positions,
             "chapter_start_positions": chapter_start_positions,
             "key_positions": key_positions,
+            "key_to_chunk": key_to_chunk,
+            "key_to_offset": key_to_offset,
+            "file_to_chunk": file_to_chunk,
             "chunk_positions": chunk_positions,
             "outer_positions": outer_positions,
             "chapter_chunk_ranges": chapter_chunk_ranges,
