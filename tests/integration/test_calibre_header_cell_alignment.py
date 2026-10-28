@@ -35,7 +35,16 @@ ROWS = (
     "<tr><td>{p}D5 td first</td><th>{p}H5 second</th></tr>"
 )
 PAGES = {
-    "a.xhtml": ("", f"<table>{ROWS.format(p='A ')}</table>"),
+    "a.xhtml": (
+        "",
+        f"<table>{ROWS.format(p='A ')}"
+        # QA on #600: a header cell's own paragraph in a page that sets no
+        # alignment.
+        "<tr><th><p style='text-align:right'>A H7 own para</p></th>"
+        "<td>A D7 cell</td></tr>"
+        "<tr><th><p style='text-align:right'>A H8 own right</p><p>A H8 second</p>"
+        "</th><td>A D8 cell</td></tr></table>",
+    ),
     # The same, in a page whose body is justified.
     "b.xhtml": (
         "body{text-align:justify}",
@@ -74,6 +83,9 @@ PREVIEWER = {
     "A H4 row right": CENTRE,
     "A D4 cell": RIGHT,
     "A H5 second": CENTRE,
+    "A H7 own para": RIGHT,
+    "A H8 own right": RIGHT,
+    "A H8 second": CENTRE,
     "B H1 plain": CENTRE,
     "B D1 cell": JUSTIFY,
     "B H2 css left": LEFT,

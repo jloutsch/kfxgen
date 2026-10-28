@@ -2875,11 +2875,9 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
     so it stays centred, unless it sets its own alignment (#589)."""
     if block_style is None:
         block_style = compute_block_style(css) if css is not None else None
-    if (
-        _local_tag(cell.tag) == "th"
-        and (block_style or {}).get("align")
-        and style_resolver is not None
-    ):
+    if _local_tag(cell.tag) == "th" and style_resolver is not None:
+        block_style = block_style or compute_block_style({})
+
         # A header cell's alignment counts only when it sets its own, as
         # Kindle Previewer 4.0.3 has it (#589): one equal to its row's is
         # inherited (calibre's values are), and the cell is centred. A
