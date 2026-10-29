@@ -46,6 +46,7 @@ from .inline_style import (
     HARD_BREAK,
     LINE_START,
     NOTEREF_FLAG,
+    SHIFT_FLAGS,
     _parse_font_family,
     BLACK,
     COLOUR_FLAG,
@@ -66,6 +67,7 @@ from .inline_style import (
     make_ruby_flag,
     make_size_flag,
     mono_families,
+    nested_shift,
     normalize_runs_with_anchors,
     parse_css_length,
     parse_vertical_align,
@@ -80,6 +82,20 @@ _BOLD_TAGS = {"strong", "b"}
 _NOT_FLAG = {FLAG_BOLD: FLAG_NOT_BOLD, FLAG_ITALIC: FLAG_NOT_ITALIC}
 _SUPER_TAGS = {"sup"}
 _SUB_TAGS = {"sub"}
+
+
+def _nest_shift(cur, inherited, own):
+    """`cur` with the shift this element sets (`own`) inside one it inherits
+    recorded as a nested one, "sub@2", as Kindle Previewer 4.0.3 layers it on
+    the outer run (#536). The outer shifts stay as they were."""
+    depth = sum(1 for f in inherited if f in SHIFT_FLAGS or nested_shift(f))
+    if not depth or not own:
+        return cur
+    # Superscript wins over another shift, as it does on one run.
+    shift = next(f for f in SHIFT_FLAGS if f in own)
+    return (set(cur) - (set(own) - set(inherited))) | {f"{shift}@{depth + 1}"}
+
+
 _UNDERLINE_TAGS = {"u", "ins"}
 _STRIKE_TAGS = {"s", "strike", "del"}
 #: Monospace without a stylizer; with one, calibre's UA sheet says so (#242).
@@ -1476,10 +1492,13 @@ def _walk_inline(
         cur.add(FLAG_ITALIC)
     if local in _BOLD_TAGS:
         cur.add(FLAG_BOLD)
+    own_shifts = []  # the shifts this element sets itself (#536)
     if local in _SUPER_TAGS:
         cur.add(FLAG_SUPER)
+        own_shifts.append(FLAG_SUPER)
     if local in _SUB_TAGS:
         cur.add(FLAG_SUB)
+        own_shifts.append(FLAG_SUB)
     starts_link = False
     if local == "a":
         target = _resolve_link_target(
@@ -1528,6 +1547,8 @@ def _walk_inline(
                 cur.add(FLAG_TEXT_TOP)
             elif shift == "text-bottom":
                 cur.add(FLAG_TEXT_BOTTOM)
+            if shift in SHIFT_FLAGS:
+                own_shifts.append(shift)
         if parent_emphasis is None and elem.getparent() is not None:
             parent_emphasis = _css_emphasis(style_resolver(elem.getparent()))
         if emphasis is not None and parent_emphasis is not None:
@@ -1587,7 +1608,7 @@ def _walk_inline(
                 cur.add((kind, now if now is not None else unset))
     if local in _MONO_TAGS and "font-family" not in (own_css or {}):
         cur.add(make_mono_flag(("monospace",)))
-    cur = frozenset(cur)
+    cur = frozenset(_nest_shift(cur, flags, own_shifts))
     parts = []
     # A <span> drawn as a block, one per line of verse, an address, a
     # letter's closing: its lines used to run together ("AB"). It is a line

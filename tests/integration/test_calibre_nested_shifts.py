@@ -1,0 +1,90 @@
+"""Nested superscripts and subscripts through calibre, as Kindle Previewer
+4.0.3 writes them (#536, my probe 2026-10-29): the outer shift on its text,
+then a run layered over the inner text with the inner shift. Previewer's
+layered text-top run has no size of its own, so it keeps the superscript's;
+calibre's computed size for the span must not shrink it.
+
+Needs calibre, so it is `slow` and skips without `ebook-convert`."""
+
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "plugin"))
+sys.path.insert(0, str(REPO))
+
+from kfxgen.native_generator import SUPERSCRIPT_FONT_SIZE as S  # noqa: E402
+from tests._kfx_introspect import by_type, iter_entries, load_fragments, val  # noqa: E402
+from tests.integration.test_calibre_contents_part_headings import (  # noqa: E402
+    _book_epub,
+)
+from tests.integration.test_calibre_table_rows import (  # noqa: E402
+    _ebook_convert,
+    calibre,  # noqa: F401  (fixture)
+)
+
+pytestmark = [pytest.mark.slow, pytest.mark.integration]
+
+BODY = (
+    "<h1>Nested</h1>"
+    "<p>N1 x<sup>2<sub>i</sub></sup> end.</p>"
+    "<p>N2 y<sub>j<sup>3</sup></sub> end.</p>"
+    "<p>N3 a<sup>b<span style='vertical-align:text-top'>c</span>d</sup> end.</p>"
+    "<p>N6 plain<sup>9</sup> and H<sub>2</sub>O.</p>"
+)
+
+
+def _plain(x):
+    return getattr(x, "value", x)
+
+
+def _runs(kfx):
+    frags = load_fragments(kfx)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    got = {}
+    for st in by_type(frags, "$259"):
+        for e in iter_entries(val(st)["$146"]):
+            if not (hasattr(e, "get") and e.get("$145")):
+                continue
+            t = str(texts[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+            runs = []
+            for r in e.get("$142") or ():
+                r = _plain(r)
+                a, n = int(r["$143"]), int(r["$144"])
+                y = styles.get(str(r.get("$157")), {})
+                size = y.get("$16")
+                runs.append(
+                    (
+                        t[a : a + n],
+                        str(y.get("$44")),
+                        round(float(_plain(size)["$307"]), 4) if size else None,
+                    )
+                )
+            got[t[:2]] = runs
+    return got
+
+
+def test_nested_shifts_are_layered_as_previewer_writes_them(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "n536.epub", tmp / "n536.kfx"
+    _book_epub(
+        epub,
+        "N536",
+        BODY,
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Nested", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    runs = _runs(kfx)
+    shifts = {k: [(t, v) for t, v, _s in r] for k, r in runs.items()}
+    assert shifts["N1"] == [("2", "$370"), ("i", "$370"), ("i", "$371")], version
+    assert shifts["N2"] == [("j", "$371"), ("3", "$371"), ("3", "$370")], version
+    assert ("c", "$447") in shifts["N3"], version
+    assert shifts["N6"] == [("9", "$370"), ("2", "$371")], version
+    # The layered runs' sizes: the inner shift's on the outer's, and text-top
+    # the superscript's own.
+    assert runs["N1"][2][2] == round(S * S, 4), version
+    assert [s for t, v, s in runs["N3"] if v == "$447"] == [round(S, 4)], version
