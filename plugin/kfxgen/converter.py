@@ -6567,21 +6567,27 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     # the page (#585), each before the entry of the next link on the page. A
     # heading holding a link, or naming an entry the page lists anyway (a
     # part in the TOC), is that entry's line and isn't printed twice (QA on
-    # #594).
+    # #594), unless another line of the page links that entry too (#622).
     listed = [_normalize_title(link["text"]) for link in toc_links]
     events = []  # ("link", words) or ("heading", line), in page order
 
     def is_link(b):
         return any(_is_link_flag(f) for _s, _n, fl in b.get("spans") or () for f in fl)
 
-    # Words the page links. A heading that is itself a link takes its entry
-    # whatever this holds.
-    linked = {_normalize_title(b.get("text") or "") for b in blocks if is_link(b)}
-
     def entry(words, after):
         """The first entry with `words` past entry `after`, else the first."""
         hits = [i for i, w in enumerate(listed) if w == words]
         return next((i for i in hits if i > after), hits[0])
+
+    # How many of the page's links each entry is, decided per entry, not by
+    # words: two "Introduction" entries can have one linked (#622).
+    links_to = collections.Counter()
+    last = -1
+    for b in blocks:
+        words = _normalize_title(b.get("text") or "")
+        if b is not first and is_link(b) and words in listed:
+            last = entry(words, last)
+            links_to[last] += 1
 
     last = -1  # the entry of the page's latest link
     for b in blocks:
@@ -6589,19 +6595,32 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
             continue
         words = _normalize_title(b.get("text") or "")
         merged = False
-        if (
-            b.get("heading_level")
-            and words in listed
-            and (is_link(b) or words not in linked)
-        ):
-            # A heading the TOC lists, as a part's: its line prints as the
-            # heading, its size, weight and level, as Kindle Previewer 4.0.3
-            # prints the page (#595), and keeps its link. The entry is the
-            # one after the page's previous link (#614).
-            link = toc_links[entry(words, last)]
+        at = entry(words, last) if b.get("heading_level") and words in listed else None
+        if at is not None and links_to[at] <= is_link(b):
+            # A heading the TOC lists, as a part's, that no other line of the
+            # page links: its line prints as the heading, its size, weight and
+            # level, as Kindle Previewer 4.0.3 prints the page (#595), and
+            # keeps its link. The entry is the one after the page's previous
+            # link (#614).
+            link = toc_links[at]
             link["heading_level"] = b["heading_level"]
             link["block_style"] = b.get("block_style")
             merged = True
+        elif at is not None and is_link(b):
+            # A heading that is a link the page repeats: printed where it is,
+            # linked, and the entry keeps its own line, as Previewer prints
+            # both (#622).
+            events.append(
+                (
+                    "heading",
+                    {
+                        **toc_links[at],
+                        "heading_level": b["heading_level"],
+                        "block_style": b.get("block_style"),
+                    },
+                )
+            )
+            continue
         if is_link(b):
             if words in listed:
                 last = entry(words, last)
