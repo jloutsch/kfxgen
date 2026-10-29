@@ -273,3 +273,154 @@ def test_a_heading_the_page_also_links_prints_where_it_is(calibre):  # noqa: F81
         ("Chapter One", True, True),
         ("Notes", True, True),
     ], f"calibre {version}: {lines}"
+
+
+def _book_epub(out, key, contents, chapters, nav):
+    """A book with a contents page `contents`, chapters (file, title) and an
+    NCX of (id, file, title, children)."""
+    page = (
+        '<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html><html '
+        'xmlns="http://www.w3.org/1999/xhtml"><head><title>{t}</title></head>'
+        "<body>{b}</body></html>"
+    )
+    files = {"contents.xhtml": page.format(t="Contents", b=contents)}
+    files.update(
+        {
+            f: page.format(t=t, b=f"<h2>{t}</h2>" + "<p>Words.</p>" * 10)
+            for f, t in chapters
+        }
+    )
+
+    def points(items):
+        return "".join(
+            f'<navPoint id="{i}"><navLabel><text>{t}</text></navLabel>'
+            f'<content src="{f}"/>{points(kids)}</navPoint>'
+            for i, f, t, kids in items
+        )
+
+    ncx = (
+        '<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">'
+        f"<head/><docTitle><text>{key}</text></docTitle><navMap>{points(nav)}</navMap></ncx>"
+    )
+    opf = (
+        '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0" '
+        'unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        f'<dc:title>{key}</dc:title><dc:identifier id="id">{key.lower()}</dc:identifier>'
+        "<dc:language>en</dc:language></metadata><manifest>"
+        + "".join(
+            f'<item id="i{n}" href="{f}" media-type="application/xhtml+xml"/>'
+            for n, f in enumerate(files)
+        )
+        + '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/></manifest>'
+        '<spine toc="ncx">'
+        + "".join(f'<itemref idref="i{n}"/>' for n in range(len(files)))
+        + "</spine></package>"
+    )
+    with zipfile.ZipFile(out, "w") as z:
+        z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        z.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0" '
+            'xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles>'
+            '<rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>'
+            "</rootfiles></container>",
+        )
+        z.writestr("content.opf", opf)
+        z.writestr("toc.ncx", ncx)
+        for name, doc in files.items():
+            z.writestr(name, doc)
+
+
+def _a(f, t):
+    return f'<p><a href="{f}">{t}</a></p>'
+
+
+def test_a_heading_merges_into_an_entry_the_page_does_not_link(calibre):  # noqa: F811
+    """N6: Kindle Previewer 4.0.3 (my probe, 2026-10-29) prints Part Two's
+    `<h3>Introduction</h3>` and no other line for that entry, though Part
+    One's Introduction is linked on the page (#622). kfxgen keeps the
+    heading's link, as for every merged heading (#595); Previewer's has none."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "n622a.epub", tmp / "n622a.kfx"
+    _book_epub(
+        epub,
+        "N622a",
+        "<h1>Contents</h1>"
+        + _a("p1.xhtml", "Part One")
+        + _a("i1.xhtml", "Introduction")
+        + _a("c1.xhtml", "Chapter One")
+        + _a("p2.xhtml", "Part Two")
+        + "<h3>Introduction</h3>"
+        + _a("c2.xhtml", "Chapter Two"),
+        [
+            ("p1.xhtml", "Part One"),
+            ("i1.xhtml", "Introduction"),
+            ("c1.xhtml", "Chapter One"),
+            ("p2.xhtml", "Part Two"),
+            ("i2.xhtml", "Introduction"),
+            ("c2.xhtml", "Chapter Two"),
+        ],
+        [
+            ("c0", "contents.xhtml", "Contents", []),
+            (
+                "p1",
+                "p1.xhtml",
+                "Part One",
+                [
+                    ("i1", "i1.xhtml", "Introduction", []),
+                    ("c1", "c1.xhtml", "Chapter One", []),
+                ],
+            ),
+            (
+                "p2",
+                "p2.xhtml",
+                "Part Two",
+                [
+                    ("i2", "i2.xhtml", "Introduction", []),
+                    ("c2", "c2.xhtml", "Chapter Two", []),
+                ],
+            ),
+        ],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    lines, _level2 = _contents(kfx)
+    got = [(t, link, under) for t, _size, _weight, link, under in lines]
+    assert got == [
+        ("Contents", False, False),
+        ("Part One", True, True),
+        ("Introduction", True, True),
+        ("Chapter One", True, True),
+        ("Part Two", True, True),
+        ("Introduction", True, False),
+        ("Chapter Two", True, True),
+    ], f"calibre {version}: {lines}"
+
+
+def test_a_heading_that_is_a_link_the_page_repeats_prints_where_it_is(calibre):  # noqa: F811
+    """N9: `<h3><a>Notes</a></h3>` at the top and a Notes link last. Kindle
+    Previewer 4.0.3 (my probe, 2026-10-29) prints the linked heading at the
+    top and the plain link last (#622)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "n622b.epub", tmp / "n622b.kfx"
+    _book_epub(
+        epub,
+        "N622b",
+        '<h1>Contents</h1><h3><a href="notes.xhtml">Notes</a></h3>'
+        + _a("c1.xhtml", "Chapter One")
+        + _a("notes.xhtml", "Notes"),
+        [("c1.xhtml", "Chapter One"), ("notes.xhtml", "Notes")],
+        [
+            ("c0", "contents.xhtml", "Contents", []),
+            ("n1", "c1.xhtml", "Chapter One", []),
+            ("n2", "notes.xhtml", "Notes", []),
+        ],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    lines, _level2 = _contents(kfx)
+    got = [(t, link, under) for t, _size, _weight, link, under in lines]
+    assert got == [
+        ("Contents", False, False),
+        ("Notes", True, False),
+        ("Chapter One", True, True),
+        ("Notes", True, True),
+    ], f"calibre {version}: {lines}"
