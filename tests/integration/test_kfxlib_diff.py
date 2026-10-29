@@ -331,6 +331,9 @@ _BASELINE_WARNINGS = (
     "yj_jpg_rst_marker_present=1",
     "reflow-section-size is",
     "Symbol table contains",
+    # KFX Input drops approximate page numbers when it writes an EPUB, as it
+    # does KFX Output's; kfxgen adds them to a book with none (#586).
+    "Removing approximate page numbers previously produced by KFX Output",
 )
 
 

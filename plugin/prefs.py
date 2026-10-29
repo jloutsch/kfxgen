@@ -23,3 +23,9 @@ prefs.defaults["disable_native_tables"] = False
 # it marks its text's start, as store books do (#579). The per-conversion CLI
 # option `--kfxgen-open-at-cover` can also turn it on; the two are OR'd.
 prefs.defaults["open_at_cover"] = False
+
+# Global default for "Don't add estimated page numbers". False -> a book with
+# no page numbers of its own gets approximate ones, placed as kfxlib places
+# them (#586). The per-conversion CLI option
+# `--kfxgen-disable-approximate-pages` can also turn them off; the two are OR'd.
+prefs.defaults["disable_approximate_pages"] = False

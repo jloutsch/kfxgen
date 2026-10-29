@@ -43,9 +43,21 @@ class ConfigWidget(QWidget):
         )
         self.open_at_cover.setChecked(bool(prefs["open_at_cover"]))
         layout.addWidget(self.open_at_cover)
+
+        self.disable_pages = QCheckBox("Don't add estimated page numbers", self)
+        self.disable_pages.setToolTip(
+            "A book without page numbers of its own gets estimated ones, about "
+            "one per 1,850 characters, so the Kindle can show pages and Go To "
+            "Page. Check this to leave them out; the book then shows locations "
+            "only. The per-conversion --kfxgen-disable-approximate-pages option "
+            "can also turn them off."
+        )
+        self.disable_pages.setChecked(bool(prefs["disable_approximate_pages"]))
+        layout.addWidget(self.disable_pages)
         layout.addStretch(1)
 
     def save_settings(self):
         prefs["disable_font_embedding"] = self.disable_fonts.isChecked()
         prefs["disable_native_tables"] = self.disable_tables.isChecked()
         prefs["open_at_cover"] = self.open_at_cover.isChecked()
+        prefs["disable_approximate_pages"] = self.disable_pages.isChecked()

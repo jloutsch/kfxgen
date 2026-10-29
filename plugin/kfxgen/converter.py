@@ -7346,6 +7346,10 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         font_table=font_table,
         landmarks=_book_landmarks_for(oeb_book, opts),
         page_list=_book_page_list(oeb_book),
+        # Approximate pages for a book with no page list, unless the user
+        # turned them off (#586).
+        approximate_pages=getattr(opts, "kfxgen_disable_approximate_pages", False)
+        is not True,
         # Every <img src> went through _resolve_img_src, so a miss means the
         # file is absent, not that the href is spelled differently. (#195)
         resolved_image_refs=True,

@@ -983,6 +983,47 @@ def place_locations(sections):
     return locations
 
 
+#: Positions between approximate pages and the most a page break moves back
+#: to its word's start, as kfxlib has them (`TYPICAL_POSITIONS_PER_PAGE`,
+#: `MAX_WHITE_SPACE_ADJUST`). A Paperwhite showed kfxlib's pages on a kfxgen
+#: book (#586).
+POSITIONS_PER_PAGE = 1850
+MAX_PAGE_BREAK_ADJUST = 50
+
+
+def place_pages(sections, texts):
+    """[(eid, offset)] for an approximate page list: a page at each section's
+    start, then one every POSITIONS_PER_PAGE positions, moved back to the
+    start of its word. `sections` is as for `place_locations`, `texts` each
+    text entry's words by eid. This is kfxlib's `determine_approximate_pages`
+    with its defaults (#586)."""
+    pages = []
+    for entries in sections:
+        pid = 0
+        next_page = None
+        # Not the section's own element, which kfxlib counts for locations
+        # but not for pages.
+        for eid, length, *start in entries[1:]:
+            start = start[0] if start else 0
+            if next_page is None:
+                next_page = pid
+            text = texts.get(eid, "")[start : start + length]
+            lowest = 0
+            while (offset := max(next_page - pid, 0)) < length:
+                if text and not text[offset].isspace():
+                    first = offset
+                    while offset and not text[offset - 1].isspace():
+                        if offset <= lowest:
+                            offset = first
+                            break
+                        offset -= 1
+                pages.append((eid, start + offset))
+                next_page += POSITIONS_PER_PAGE
+                lowest = offset + max(POSITIONS_PER_PAGE - MAX_PAGE_BREAK_ADJUST, 1)
+            pid += max(length, 0)
+    return pages
+
+
 def pack_content_fragments(text_strings, start_index, limit=MAX_CONTENT_FRAGMENT_SIZE):
     """Group a chapter's chunk strings into `$145` fragments under the cap (#37).
 
@@ -2202,7 +2243,13 @@ class NativeKFXGenerator:
         return YJFragment(fid=IS("$348"), ftype=IS("$538"), value=value)
 
     def build_fragment_389_toc(
-        self, toc_entries, cover_position=None, headings=None, landmarks=(), pages=()
+        self,
+        toc_entries,
+        cover_position=None,
+        headings=None,
+        landmarks=(),
+        pages=(),
+        page_list_name="nP",
     ):
         """
         Builds Fragment $389 (Navigation) with TOC and landmarks.
@@ -2295,7 +2342,7 @@ class NativeKFXGenerator:
         # The page list ($237): an entry per print page break, as Kindle
         # Previewer 4.0.3 writes it (#578).
         if pages:
-            self.symtab.create_local_symbol("nP")
+            self.symtab.create_local_symbol(page_list_name)
             containers.append(
                 IonAnnotation(
                     [IS("$391")],
@@ -2303,7 +2350,7 @@ class NativeKFXGenerator:
                         IS("$235"),
                         IS("$237"),
                         IS("$239"),
-                        IS("nP"),
+                        IS(page_list_name),
                         IS("$247"),
                         [
                             IonAnnotation(
@@ -2478,6 +2525,7 @@ class NativeKFXGenerator:
         entries_265_raw = []
         char_offset = 0
         location_sections = []
+        page_texts = {}  # each text entry's words, for page breaks (#586)
         link_positions = set()  # link containers: zero length (#355)
 
         for ch_idx in range(len(chapters)):
@@ -2506,6 +2554,7 @@ class NativeKFXGenerator:
                     chunk_text_len = 1
                 else:
                     chunk_text_len = len(chunk["text"])
+                    page_texts[chunk_positions[chunk_idx]] = chunk["text"]
                 entries_265_raw.append((char_offset, chunk_positions[chunk_idx]))
                 maths = math_by_position.get(chunk_positions[chunk_idx])
                 if maths:
@@ -2583,6 +2632,7 @@ class NativeKFXGenerator:
             "position_entries_265": entries_265_raw,
             "section_positions_264": section_positions_264,
             "locations": locations,
+            "pages": place_pages(location_sections, page_texts),
             # kfxlib's pid count of each section, for reflow-section-size.
             "max_section_pids": max(
                 (
@@ -3527,6 +3577,7 @@ class NativeKFXGenerator:
         footnote_keys=None,
         landmarks=None,
         page_list=None,
+        approximate_pages=False,
     ):
         """
         Generates a complete KFX book with metadata and content.
@@ -3981,6 +4032,11 @@ class NativeKFXGenerator:
             for label, key in page_list or ()
             if (at := lands(key)) is not None
         ]
+        page_list_name = "nP"
+        if not pages and approximate_pages:
+            # None of its own: approximate pages, as kfxlib adds them (#586).
+            pages = [(str(n), *at) for n, at in enumerate(pos_data["pages"], 1)]
+            page_list_name = "APPROXIMATE_PAGE_LIST"
         self.fragments.append(
             self.build_fragment_389_toc(
                 nav_entries,
@@ -3988,6 +4044,7 @@ class NativeKFXGenerator:
                 headings=_book_headings(ch_data),
                 landmarks=marks,
                 pages=pages,
+                page_list_name=page_list_name,
             )
         )
 

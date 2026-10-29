@@ -236,7 +236,10 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
         "table_cells",
         make_table_cells,
         tmp_path,
-        opts=SimpleNamespace(kfxgen_disable_native_tables=True),
+        # v5.8.8 wrote no page list; estimated pages (#586) are off here.
+        opts=SimpleNamespace(
+            kfxgen_disable_native_tables=True, kfxgen_disable_approximate_pages=True
+        ),
     )
     fresh_path = tmp_path / "fresh.kfx"
     fresh_path.write_bytes(fresh)

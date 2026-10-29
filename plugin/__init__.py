@@ -92,6 +92,15 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
                 "as store books do."
             ),
         ),
+        OptionRecommendation(
+            name="kfxgen_disable_approximate_pages",
+            recommended_value=False,
+            help=(
+                "Don't add estimated page numbers to a book that has none of its "
+                "own. By default kfxgen adds them, about one per 1,850 "
+                "characters, so the Kindle can show pages and Go To Page."
+            ),
+        ),
     }
 
     # --- Customization (Preferences -> Plugins -> Customize) ---
@@ -127,6 +136,9 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
             if prefs["open_at_cover"]:
                 opts.kfxgen_open_at_cover = True
                 log.info("  New books open at the cover, by plugin setting")
+            if prefs["disable_approximate_pages"]:
+                opts.kfxgen_disable_approximate_pages = True
+                log.info("  Estimated page numbers off, by plugin setting")
         except Exception as e:
             log.warn("Could not read kfxgen plugin settings ({})".format(e))
 
