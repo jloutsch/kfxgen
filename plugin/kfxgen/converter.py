@@ -3950,27 +3950,30 @@ def _em_px(block):
     return (block.get("block_style") or {}).get("font_size") or 16.0
 
 
-def _place_margin(prev, b, above, top, lines, on_purpose):
+def _place_margin(prev, b, above, top, lines, on_purpose, pad_up=0.0, pad_own=0.0):
     """The gap above `b`, as Kindle Previewer 4.0.3 writes it (#553, #538):
     the larger of the margin waiting above (`above`, the block before's
     margin-bottom or an invisible <hr>'s) and `b`'s own margin-top, as margins
     collapse in a browser, plus the spacer paragraphs' lines (in ems). `b` takes it
     when its own margin-top is above 0; otherwise the block before keeps it
     as its space below and `b` takes none. Margins are in each block's own
-    ems, so they are compared in px."""
+    ems, so they are compared in px. A wrapper's padding above `b`
+    (`pad_own`) and below the block before (`pad_up`) is added: padding
+    doesn't collapse (#640)."""
     if prev is None:
         if _takes_margin(b):
-            b["margin_above"] = top + lines
+            b["margin_above"] = top + lines + pad_own
         return
     up, own = above * _em_px(prev), top * _em_px(b)
+    padding = pad_up * _em_px(prev) + pad_own * _em_px(b)
     if top > 0 or on_purpose or not _takes_margin(prev):
         if _takes_margin(b):
-            b["margin_above"] = max(up, own) / _em_px(b) + lines
+            b["margin_above"] = (max(up, own) + padding) / _em_px(b) + lines
     else:
         if not _spaces_itself(b):
-            prev["margin_below"] = above
+            prev["margin_below"] = above + pad_up
         if _takes_margin(b):
-            b["margin_above"] = 0.0
+            b["margin_above"] = pad_own
     if (
         not _takes_margin(b)
         and not _spaces_itself(b)
@@ -3981,7 +3984,7 @@ def _place_margin(prev, b, above, top, lines, on_purpose):
         prev["margin_below"] = above
 
 
-def _space_between(blocks, margins, measured=True):
+def _space_between(blocks, margins, measured=True, paddings=None):
     """`blocks` with the space a scene break puts above a paragraph, in ems,
     as "space_above" (#230, #326). The space blocks standing for spacers and
     invisible <hr>s are taken out.
@@ -4019,10 +4022,20 @@ def _space_between(blocks, margins, measured=True):
             continue
         top, bottom = margins.get(id(b), (0.0, 0.0))
         if measured:
-            _place_margin(out[-1] if out else None, b, above, top, lines, on_purpose)
+            pads = paddings or {}
+            _place_margin(
+                out[-1] if out else None,
+                b,
+                above,
+                top,
+                lines,
+                on_purpose,
+                pad_up=(pads.get(id(out[-1])) or (0, 0))[1] if out else 0.0,
+                pad_own=(pads.get(id(b)) or (0, 0))[0],
+            )
             if kind == "box":
                 # Its paragraphs are spaced the same way, inside it (#640).
-                b["blocks"] = _space_between(b["blocks"], margins, measured)
+                b["blocks"] = _space_between(b["blocks"], margins, measured, paddings)
         if kind is None:
             if out:
                 beside = b.get("heading") or out[-1].get("heading")
@@ -4031,7 +4044,11 @@ def _space_between(blocks, margins, measured=True):
                     # After a table, a box or a rule: a margin there is
                     # theirs to space.
                     how = how if how == "spacer" else None
-                gaps.append((b, round(max(above, top) + lines, 4), how))
+                pads = paddings or {}
+                padding = (pads.get(id(out[-1])) or (0, 0))[1] + (
+                    pads.get(id(b)) or (0, 0)
+                )[0]
+                gaps.append((b, round(max(above, top) + lines + padding, 4), how))
             above = bottom
         else:
             above = 0.0
@@ -4040,8 +4057,9 @@ def _space_between(blocks, margins, measured=True):
         out.append(b)
     if measured and out and _takes_margin(out[-1]):
         # A file's last paragraph keeps its margin-bottom (#553).
-        out[-1]["margin_below"] = max(
-            out[-1].get("margin_below") or 0.0, margins.get(id(out[-1]), (0, 0))[1]
+        out[-1]["margin_below"] = (
+            max(out[-1].get("margin_below") or 0.0, margins.get(id(out[-1]), (0, 0))[1])
+            + ((paddings or {}).get(id(out[-1])) or (0, 0))[1]
         )
     if gaps:
         counts = collections.Counter(g for _, g, _ in gaps)
@@ -4217,6 +4235,7 @@ def extract_blocks_from_html(
     # paragraph or an <hr> that draws nothing is a {"type": "space"} block
     # until the end, where the space goes above the next paragraph.
     margins = {}  # id(block) -> [top, bottom]
+    paddings = {}  # id(block) -> [its wrappers' padding-top, -bottom] (#640)
     # The index from which the next block shown follows a page break, set by
     # an element's `page-break-before` or the one before it's `-after` (#363).
     break_at = []
@@ -4722,6 +4741,7 @@ def extract_blocks_from_html(
         if not _make_box(elem, start):
             _carry_container_margins(elem, start)
             _note_margins(elem, start)
+            _note_padding(elem, start)
 
     def _emit_space(margin=0.0, line=0.0):
         """Space for the next paragraph to take: a spacer's blank line, or an
@@ -4753,6 +4773,30 @@ def extract_blocks_from_html(
                 "rule": {"space_above": space("top"), "space_below": space("bottom")},
             }
         )
+
+    def _note_padding(elem, start):
+        """Record an unboxed container's padding-top on the first paragraph
+        it produced and its padding-bottom on the last, added to what is
+        there: Kindle Previewer 4.0.3 draws it as a padded container, and
+        padding doesn't collapse (#640)."""
+        if style_resolver is None:
+            return
+        sides = (style_resolver(elem) or {}).get("padding-sides") or ()
+        if len(sides) != 4:
+            return
+
+        def em(value):
+            v = _padding_em(value)
+            return v[1] * 0.32 if isinstance(v, tuple) else (v or 0.0)
+
+        top, bottom = em(sides[0]), em(sides[2])
+        if not (top or bottom):
+            return
+        mine = [b for b in blocks[start:] if b.get("type") not in ("space", "rule")]
+        if not mine:
+            return
+        paddings.setdefault(id(mine[0]), [0.0, 0.0])[0] += top
+        paddings.setdefault(id(mine[-1]), [0.0, 0.0])[1] += bottom
 
     def _note_margins(elem, start):
         """Record `elem`'s margin-top on the first paragraph it produced and
@@ -5019,7 +5063,9 @@ def extract_blocks_from_html(
         nav_listing_at[:] = [
             (at - bisect.bisect_left(spaces, at), ids) for at, ids in nav_listing_at
         ]
-    blocks[:] = _space_between(blocks, margins, measured=style_resolver is not None)
+    blocks[:] = _space_between(
+        blocks, margins, measured=style_resolver is not None, paddings=paddings
+    )
 
     # Trailing anchors (e.g. <a id="eof"/> after the last leaf block) never
     # reach a subsequent block to flush to; snap them onto the last emitted

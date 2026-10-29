@@ -251,3 +251,28 @@ def test_paragraphs_in_a_box_are_spaced_by_their_margins(calibre):  # noqa: F811
     assert got["S1"][0] == 0.833, f"calibre {version}: {got}"
     assert got["S2"][0] == 0.833, f"calibre {version}: {got}"
     assert got["S3"][0] is None, f"calibre {version}: {got}"
+
+
+def test_a_wrappers_padding_spaces_its_first_and_last_paragraphs(calibre):  # noqa: F811
+    """An unbordered <div> with padding: Kindle Previewer 4.0.3 writes it as
+    a container with the padding ($52/$54, 0.833 lh for 1em), so the space
+    shows; kfxgen draws no container there and lost it (my probe 2026-10-29,
+    #640). kfxgen puts the same space on the first and last paragraph:
+    padding doesn't collapse, so it adds to the margins."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "pad640.epub", tmp / "pad640.kfx"
+    _book_epub(
+        epub,
+        "D640",
+        "<h1>Padding</h1><p style='margin:0'>W0 plain.</p>"
+        "<div style='padding-top:1em;padding-bottom:1em'>"
+        "<p style='margin:0'>W4 first.</p><p style='margin:0'>W5 last.</p></div>"
+        "<p style='margin:0'>W6 after.</p>",
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Padding", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    assert got["W4"] == (0.833, None), f"calibre {version}: {got}"
+    assert got["W5"] == (None, 0.833), f"calibre {version}: {got}"
+    assert got["W6"] == (None, None), f"calibre {version}: {got}"
