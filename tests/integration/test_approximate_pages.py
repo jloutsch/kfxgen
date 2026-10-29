@@ -65,14 +65,17 @@ def _pages(navigation):
 
 def _chapters():
     """Three chapters of long paragraphs, words of varied length so page
-    breaks fall mid-word, a short one, a picture-free heading each."""
+    breaks fall mid-word, a short one and a long run with no space."""
     words = " ".join(("w" * (1 + n % 9)) + str(n) for n in range(900))
     return [
         {
             "title": f"Chapter {i}",
             "text": words,
             "blocks": [{"text": f"P{i}.{k} " + words, "spans": []} for k in range(3)]
-            + [{"text": f"Short {i}.", "spans": []}],
+            + [{"text": f"Short {i}.", "spans": []}]
+            # A run with no space longer than a page: the break can't move
+            # back past the one before it.
+            + [{"text": "Run " + "x" * 4000 + " end.", "spans": []}],
         }
         for i in range(3)
     ]
