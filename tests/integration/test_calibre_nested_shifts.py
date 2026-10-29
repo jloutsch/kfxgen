@@ -39,6 +39,10 @@ BODY = (
     "<p>PB note<sup><span style='vertical-align:baseline'>12</span></sup> end.</p>"
     "<p>PC x<sup><span style='vertical-align:baseline'>1</span></sup><sup>2</sup> end.</p>"
     "<p>PD x<sup>1</sup><sup><span style='vertical-align:baseline'>2</span></sup> end.</p>"
+    "<p>PE m<sup><span style='vertical-align:baseline'>1</span> "
+    "<span style='vertical-align:baseline'>2</span></sup> end.</p>"
+    "<p>PF m<sup> <span style='vertical-align:baseline'>1</span></sup> end.</p>"
+    "<p>PG m<sup><span style='vertical-align:baseline'>1</span> </sup> end.</p>"
 )
 
 
@@ -119,6 +123,12 @@ def test_baseline_and_a_kept_size_are_layered_as_previewer_writes_them(calibre):
     assert [v for t, v, _s in runs["PB"]] == ["$370"], (
         f"calibre {version}: {runs['PB']}"
     )
+    # A space in the <sup> counts as its text: the baseline spans are part of
+    # it and layered, as Previewer writes them (QA's P34, P41, P42 on #641).
+    for key in ("PE", "PF", "PG"):
+        assert "$350" in {v for t, v, _s in runs[key]}, (
+            f"calibre {version}: {runs[key]}"
+        )
     # Each <sup> judged on its own, a superscript beside it apart (QA on #641).
     for key in ("PC", "PD"):
         assert {v for t, v, _s in runs[key]} == {"$370"}, (

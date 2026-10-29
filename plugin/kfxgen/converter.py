@@ -120,7 +120,8 @@ def _whole_baseline_dropped(parts, depth):
             None,
         )
 
-    texts = [flags for text, flags in parts if text and text.strip()]
+    # A space counts as its text, as Previewer counts it (QA on #641).
+    texts = [flags for text, flags in parts if text]
     if not texts or not all(baseline(flags) for flags in texts):
         return parts
     return [
