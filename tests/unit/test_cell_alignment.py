@@ -94,9 +94,12 @@ def test_a_header_cell_in_a_right_row_keeps_only_its_own_alignment(own, aligns):
     )
     root = etree.fromstring(xhtml.encode())
     th = root.find(".//{http://www.w3.org/1999/xhtml}th")
+    tr = th.getparent()
 
     def resolver(elem):
         css = {"text-align": "right"}  # inherited from the row
+        if elem is tr:
+            css["own-text-align"] = "right"  # the row's own, in CSS
         if elem is th and own:
             css["own-text-align"] = own
         return css
@@ -111,3 +114,83 @@ def test_a_header_cell_in_a_right_row_keeps_only_its_own_alignment(own, aligns):
     header, data = table["table"]["rows"][0]["cells"]
     assert _align(header) == aligns
     assert _align(data) == "right"
+
+
+def _header_cells(xhtml, own_of):
+    """The header cells' alignments, with `own_of(elem)` the element's own
+    declared text-align, as calibre's resolver gives it."""
+    root = etree.fromstring(xhtml.encode())
+    _conv.mark_source_classes(root)
+
+    def resolver(elem):
+        own = own_of(elem)
+        # Computed, as calibre gives it: the nearest declared value, an
+        # `align=` included (calibre makes it CSS).
+        computed = next(
+            (
+                v
+                for e in (elem, *elem.iterancestors())
+                if (v := own_of(e)) and v != "inherit"
+            ),
+            None,
+        )
+        css = {"own-text-align": own} if own else {}
+        return {**css, "text-align": computed} if computed else css
+
+    (table,) = [
+        b
+        for b in _conv.extract_blocks_from_html(
+            root, style_resolver=resolver, base_href="c.xhtml", native_tables=True
+        )
+        if b.get("table")
+    ]
+    return [
+        _align(c) for row in table["table"]["rows"] for c in row["cells"] if c["header"]
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("holder", "aligns"),
+    [
+        ('<tr align="right">', ["left"]),
+        ('<tr style="text-align:right">', ["right"]),
+    ],
+    ids=["align-attribute", "css"],
+)
+def test_inherit_on_a_header_cell_skips_an_align_attribute(holder, aligns):
+    """`<tr align="right"><th style="text-align: inherit">`: left in Kindle
+    Previewer 4.0.3 (my probe, 2026-10-29), which doesn't inherit `align=`;
+    the same row set in CSS gives right (#621). calibre has turned `align=`
+    into a class's text-align by then, so kfxgen marks it before (#329)."""
+    xhtml = (
+        '<html xmlns="http://www.w3.org/1999/xhtml"><body><table>'
+        f'{holder}<th style="text-align:inherit">H</th><td>d</td></tr>'
+        "</table></body></html>"
+    )
+
+    def own_of(elem):
+        if elem.get("style") == "text-align:inherit":
+            return "inherit"
+        if elem.get("align") or elem.get("style") == "text-align:right":
+            return "right"
+        return None
+
+    assert _header_cells(xhtml, own_of) == aligns
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("dir_", "aligns"),
+    [("rtl", ["right", "left", "center"]), ("ltr", ["left", "right", "center"])],
+)
+def test_header_cell_keywords_follow_the_tables_direction(dir_, aligns):
+    """In a right-to-left table Kindle Previewer 4.0.3 reads `initial` as
+    right and `end` as left; `start` stays centre (my probe, 2026-10-29,
+    #621)."""
+    xhtml = (
+        '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+        f'<table dir="{dir_}"><tr><th class="initial">a</th><th class="end">b</th>'
+        '<th class="start">c</th></tr></table></body></html>'
+    )
+    assert _header_cells(xhtml, lambda e: e.get("class")) == aligns
