@@ -15,11 +15,21 @@ from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
 pytestmark = pytest.mark.unit
 
 
-def _runs(tmp_path, body):
+def _inline_css(e):
+    return dict(
+        (k.strip(), v.strip())
+        for k, _, v in (d.partition(":") for d in (e.get("style") or "").split(";"))
+        if v
+    )
+
+
+def _runs(tmp_path, body, style_resolver=None):
     """{paragraph text: [(run text, $44, $16)]} in written order."""
     xhtml = f'<html xmlns="http://www.w3.org/1999/xhtml"><body>{body}</body></html>'
     blocks = _conv.extract_blocks_from_html(
-        etree.fromstring(xhtml.encode()), base_href="c.xhtml"
+        etree.fromstring(xhtml.encode()),
+        base_href="c.xhtml",
+        style_resolver=style_resolver,
     )
     out = tmp_path / "n.kfx"
     NativeKFXGenerator().generate_full_book(
@@ -96,3 +106,16 @@ def test_a_single_shift_is_unchanged(tmp_path):
         "N6 plain9 and H2O."
     ]
     assert [(t, v) for t, v, _s in runs] == [("9", "$370"), ("2", "$371")]
+
+
+def test_text_top_inside_a_superscript_keeps_the_superscripts_size(tmp_path):
+    """Previewer layers text-top on the inner run with no size of its own,
+    so it stays the superscript's size, a sized span's too (#536)."""
+    runs = _runs(
+        tmp_path,
+        "<p>N3 a<sup>b<span style='vertical-align:text-top;font-size:10px'>c"
+        "</span>d</sup> end.</p>",
+        style_resolver=_inline_css,
+    )["N3 abcd end."]
+    layered = [(t, v, size) for t, v, size in runs if v == "$447"]
+    assert layered == [("c", "$447", pytest.approx(S))]

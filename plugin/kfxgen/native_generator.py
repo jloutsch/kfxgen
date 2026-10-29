@@ -6480,8 +6480,13 @@ class NativeKFXGenerator:
                     levels = [f for f in SHIFT_FLAGS if f in flags][:1] + [
                         shift for _depth, shift in nested
                     ]
+                    # Its size is the outer shift's, made smaller by its own.
                     rest = frozenset(
-                        f for f in flags if f not in SHIFT_FLAGS and not nested_shift(f)
+                        f
+                        for f in flags
+                        if f not in SHIFT_FLAGS
+                        and not nested_shift(f)
+                        and run_font_size((f,)) is None
                     )
                     scale = 1.0
                     for outer, inner in zip(levels, levels[1:]):
