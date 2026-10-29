@@ -85,6 +85,34 @@ PAGES = {
         "<td style='text-align:start'>M4 td start</td></tr>"
         "<tr><th style='text-align:unset'>M5 th unset</th><td>M5 td</td></tr></table>",
     ),
+    # `align=` above an inheriting header cell, and keywords in a
+    # right-to-left table (#621, my Previewer probe, 2026-10-29).
+    "f.xhtml": (
+        "",
+        "<table><tr align='right'><th style='text-align:inherit'>"
+        "N1 th inherit under tr align</th><td>N1 td under tr align</td></tr>"
+        "<tr align='right'><th>N3 th plain under tr align</th><td>N3 td</td></tr>"
+        "</table><table><thead align='right'><tr><th style='text-align:inherit'>"
+        "N2 th inherit under thead align</th><td>N2 td under thead align</td>"
+        "</tr></thead></table><table align='right'><tr>"
+        "<th style='text-align:inherit'>N4 th inherit under table align</th>"
+        "<td>N4 td</td></tr></table><div style='text-align:right'><table>"
+        "<tr align='center'><th style='text-align:inherit'>"
+        "N5 th inherit tr align centre in div right</th><td>N5 td</td></tr>"
+        "</table></div><table><tr style='text-align:right'>"
+        "<th style='text-align:inherit'>N6 th inherit tr css right</th>"
+        "<td>N6 td</td></tr></table>",
+    ),
+    "g.xhtml": (
+        "",
+        "<table dir='rtl'><tr><th style='text-align:initial'>R1 th initial rtl</th>"
+        "<th style='text-align:end'>R2 th end rtl</th>"
+        "<th style='text-align:start'>R3 th start rtl</th>"
+        "<th style='text-align:inherit'>R5 th inherit rtl</th>"
+        "<th>R6 th plain rtl</th><td>R4 td rtl</td></tr></table>"
+        "<table><tr><th style='text-align:end'>R7 th end ltr</th>"
+        "<td>R8 td</td></tr></table>",
+    ),
     # The same, set by class (#601).
     "d.xhtml": (
         "tr.r{text-align:right} th.r{text-align:right} th.c{text-align:center}",
@@ -167,6 +195,24 @@ PREVIEWER = {
     "L2 td": RIGHT,
     "L3 th plain in right row": CENTRE,
     "L3 td": RIGHT,
+    # inherit skips an `align=` attribute: the nearest CSS alignment above,
+    # else left (#621).
+    "N1 th inherit under tr align": LEFT,
+    "N1 td under tr align": RIGHT,
+    "N2 th inherit under thead align": LEFT,
+    "N2 td under thead align": RIGHT,
+    "N3 th plain under tr align": CENTRE,
+    "N4 th inherit under table align": LEFT,
+    "N5 th inherit tr align centre in div right": RIGHT,
+    "N5 td": CENTRE,
+    "N6 th inherit tr css right": RIGHT,
+    # Right to left: initial is right, end left; start and unset centre.
+    "R1 th initial rtl": RIGHT,
+    "R2 th end rtl": LEFT,
+    "R3 th start rtl": CENTRE,
+    "R5 th inherit rtl": LEFT,
+    "R6 th plain rtl": CENTRE,
+    "R7 th end ltr": RIGHT,
 }
 
 

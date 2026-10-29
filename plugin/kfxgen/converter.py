@@ -2871,6 +2871,17 @@ def _only_block_child(cell):
     return kids[0]
 
 
+def _table_dir(cell):
+    """The `dir` of a cell's table, or of what holds it: a cell's or a row's
+    own `dir` doesn't count, as Kindle Previewer 4.0.3 has it (#570)."""
+    table = next(
+        (a for a in cell.iterancestors() if _local_tag(a.tag) == "table"), cell
+    )
+    return next(
+        (a.get("dir") for a in (table, *table.iterancestors()) if a.get("dir")), ""
+    )
+
+
 def _cell_block_style(cell, css, block_style=None, style_resolver=None):
     """A cell's, or a cell paragraph's, block style with its alignment: the
     book's, else none, as Kindle Previewer 4.0.3 writes a cell in a page with
@@ -2899,14 +2910,29 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
             # Centred, written out: a header cell's paragraphs otherwise
             # take the book's alignment.
             # Keywords as Previewer reads them on a header cell (#616):
-            # inherit is the parent's, else left; initial left; start centre.
+            # inherit is the nearest alignment set in CSS above it, not by an
+            # `align=` attribute, else left (#621); initial left; start
+            # centre. In a right-to-left table initial is right and end left.
             if own == "inherit":
-                own = (
-                    mine
-                    if compute_block_style({"text-align": mine})["align"]
-                    else "left"
+                own = next(
+                    (
+                        a_own
+                        for a in cell.iterancestors()
+                        if (a_own := raw(a, "own-text-align"))
+                        and a_own != "inherit"
+                        and a_own
+                        != str(a.get(_SOURCE_ALIGN) or a.get("align") or "")
+                        .strip()
+                        .lower()
+                    ),
+                    "left",
                 )
-            own = {"initial": "left", "start": "center"}.get(own, own)
+            rtl = _table_dir(cell).lower() == "rtl"
+            own = {
+                "initial": "right" if rtl else "left",
+                "start": "center",
+                **({"end": "left"} if rtl else {}),
+            }.get(own, own)
             align = compute_block_style({"text-align": own})["align"]
             block_style = {**block_style, "align": align or "center"}
         # `<th><p style="text-align: right">`: the paragraph's own, as for a
@@ -2925,15 +2951,7 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
         own = compute_block_style(style_resolver(inner) or {})["align"]
         if own:
             return {**(block_style or compute_block_style({})), "align": own}
-    # The table's direction, or what holds it: a cell's or a row's own
-    # `dir` doesn't count, as Kindle Previewer 4.0.3 has it (#570).
-    table = next(
-        (a for a in cell.iterancestors() if _local_tag(a.tag) == "table"), cell
-    )
-    rtl = next(
-        (a.get("dir") for a in (table, *table.iterancestors()) if a.get("dir")), ""
-    )
-    if rtl.lower() != "rtl":
+    if _table_dir(cell).lower() != "rtl":
         return block_style
     return {**(block_style or compute_block_style({})), "align": "right"}
 
@@ -3461,6 +3479,9 @@ _FRONT_MATTER_ROLES = frozenset({"doc-dedication", "doc-epigraph", "doc-colophon
 #: front matter (#392). By `epub:type` only: a class named "lot" is anything.
 _LIST_EPUB_TYPES = frozenset({"lot", "loi", "lov"})
 _SOURCE_FRONT = "data-kfxgen-front"
+#: An element's `align=` attribute, which calibre turns into a class's
+#: text-align when it flattens the CSS (#621).
+_SOURCE_ALIGN = "data-kfxgen-align"
 
 
 def mark_source_classes(root):
@@ -3481,6 +3502,8 @@ def mark_source_classes(root):
                 elem.set(_SOURCE_TOC, "1")
             if _FRONT_MATTER.intersection(tokens):
                 elem.set(_SOURCE_FRONT, "1")
+            if elem.get("align"):
+                elem.set(_SOURCE_ALIGN, elem.get("align").strip().lower())
 
 
 def _is_front_matter(elem):
