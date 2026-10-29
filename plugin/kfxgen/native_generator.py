@@ -180,12 +180,14 @@ def _cut_after_picture_lines(block):
             # The paragraph goes on: no space above, clearing or first-line
             # indent of its own. A heading's parts after an empty line stay
             # headings, as Previewer lists them (#602).
-            for key in ("space_above", "tight", "clear"):
+            for key in ("space_above", "margin_above", "tight", "clear"):
                 piece.pop(key, None)
             if not empty_line_cut:
                 piece.pop("heading_level", None)
             if (piece.get("block_style") or {}).get("indent"):
                 piece["block_style"] = {**piece["block_style"], "indent": None}
+        if hi is not None:
+            piece.pop("margin_below", None)  # the paragraph goes on (#553)
         pieces.append(piece)
         empty_line_cut = tail is not None
         lo, a = hi, after
@@ -2761,6 +2763,7 @@ class NativeKFXGenerator:
         baseline_style=None,
         no_align=False,
         space_above=None,
+        space_below=None,
         explicit_size=False,
         drop_cap=None,
         small_caps=None,
@@ -2804,6 +2807,8 @@ class NativeKFXGenerator:
             space_above: Space above the paragraph in ems, from the book's
                         margins (#230). Written as $47 in place of the 1lh
                         default, indented or not; 0 writes none (#331).
+            space_below: Space below it in ems, $49, when the paragraph after
+                        has no margin-top of its own (#553).
             baseline_style: Symbol emitted as $44 — `$370` raises
                         (superscript), `$371` lowers (subscript). Reference
                         noteref styles pair it with a reduced $16 font-size.
@@ -2869,6 +2874,13 @@ class NativeKFXGenerator:
         # inter-paragraph spacing; headings get their spacing from $46 (margin_top
         # param). A non-zero first-line indent replaces inter-paragraph spacing
         # (print convention), so suppress this top margin when indented.
+        if space_below:
+            value[IS("$49")] = IonStruct(
+                IS("$307"),
+                IonDecimal(f"{space_below / _LINE_EM / line_height:.6g}"),
+                IS("$306"),
+                IS("$310"),
+            )
         if space_above is not None:
             # 0: a line of verse set tight under the one before (#331).
             if space_above:
@@ -4634,6 +4646,9 @@ class NativeKFXGenerator:
             if inline:
                 para, para_spans, block_offsets, pictures = inline
             space = 0.0 if block.get("tight") else _space_to_write(block)
+            if "margin_above" in block and not block.get("tight"):
+                # The book's margins, as Previewer writes them (#553).
+                space = block["margin_above"]
             for chunk in _emit_text_chunks(
                 para, preformatted, block.get("trailing") or ""
             ):
@@ -4703,6 +4718,17 @@ class NativeKFXGenerator:
                 first = all_chunks[block_first_chunk]
                 if first["type"] == "text":
                     first["space_above"] = space
+            if block.get("margin_below") and len(all_chunks) > block_first_chunk:
+                last = next(
+                    (
+                        c
+                        for c in reversed(all_chunks[block_first_chunk:])
+                        if c["type"] == "text"
+                    ),
+                    None,
+                )
+                if last is not None:
+                    last["space_below"] = block["margin_below"]
             if block.get("clear"):
                 # Its first entry starts below the floats (#381): the pieces
                 # after a picture continue the paragraph. A linked picture's
@@ -6303,6 +6329,8 @@ class NativeKFXGenerator:
                         attrs["margin_right"] = bs["margin_right"]
                     if chunk.get("space_above") is not None:
                         attrs["space_above"] = chunk["space_above"]
+                    if chunk.get("space_below"):
+                        attrs["space_below"] = chunk["space_below"]
                     if chunk.get("clear"):
                         attrs["clear"] = chunk["clear"]  # (#381)
                     # Body run: match the block's font-family, honouring any
