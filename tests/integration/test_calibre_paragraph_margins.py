@@ -208,3 +208,23 @@ def test_before_a_box_the_paragraph_keeps_no_space_below(calibre):  # noqa: F811
     got = _spacing(kfx)
     assert got["Q1"][1] is None, f"calibre {version}: {got}"
     assert got["Q3"][1] is None, f"calibre {version}: {got}"
+
+
+def test_a_percentage_margin_is_read_on_previewers_scale(calibre):  # noqa: F811
+    """`margin-top: 5%`: Kindle Previewer 4.0.3 writes 1.333 lh, on its scale
+    where 100% is 384pt (32em), so 5% is 1.6em (QA's probe on #639, #640).
+    kfxgen read a percentage margin as none."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "pct640.epub", tmp / "pct640.kfx"
+    _book_epub(
+        epub,
+        "P640",
+        "<h1>Percent</h1><p style='margin:0'>R0 plain.</p>"
+        "<p style='margin:5% 0 0 0'>R1 five percent above.</p>"
+        "<p style='margin:0'>R2 end.</p>",
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Percent", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    assert got["R1"][0] == 1.333, f"calibre {version}: {got}"

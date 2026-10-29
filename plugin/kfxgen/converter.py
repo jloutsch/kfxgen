@@ -2806,9 +2806,12 @@ _LINE_SPACE_EM = 1.2
 
 def _margin_em(css, side):
     """An element's declared margin-top or -bottom in ems (1px = 0.45pt,
-    12pt = 1em, as for padding); 0 when unset, negative or a percentage."""
+    12pt = 1em, as for padding); a percentage on Kindle Previewer 4.0.3's
+    scale, 100% = 384pt = 32em (#640); 0 when unset or negative."""
     em = _padding_em((css or {}).get(f"margin-{side}"))
-    return 0.0 if isinstance(em, tuple) or em is None else em
+    if isinstance(em, tuple):
+        return em[1] * 0.32
+    return 0.0 if em is None else em
 
 
 def _is_spacer(elem):
