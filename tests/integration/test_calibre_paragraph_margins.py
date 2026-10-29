@@ -146,3 +146,41 @@ def test_paragraphs_are_spaced_as_previewer_spaces_them(calibre):  # noqa: F811
         if not (k in got and near(got[k][0], want[0]) and near(got[k][1], want[1]))
     }
     assert not wrong, f"calibre {version}: (kfxgen, Previewer) {wrong}"
+
+
+def test_a_cut_paragraphs_margins_go_on_its_first_and_last_parts(calibre):  # noqa: F811
+    """A paragraph cut at an empty line (#602): its margin-top on the first
+    part, its margin-bottom on the last, as Previewer writes them (my probe,
+    2026-10-29). The parts after the cut keep kfxgen's line above (#602);
+    Previewer writes 0.594 there."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "cut553.epub", tmp / "cut553.kfx"
+    _book_epub(
+        epub,
+        "C553",
+        "<h1>Cut</h1><p>P0 plain words before.</p>"
+        "<p style='margin:0 0 2em 0'>M1 first part<br/><br/>M1 second part</p>"
+        "<p style='margin:0'>M2 after with no margin.</p>"
+        "<p style='margin:1em 0 0 0'>M3 top only<br/><br/>M3 later part</p>"
+        "<p style='margin:0'>M4 end.</p>",
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Cut", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    frags = load_fragments(kfx)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    got = {}
+    for st in by_type(frags, "$259"):
+        for e in iter_entries(val(st)["$146"]):
+            if hasattr(e, "get") and e.get("$145"):
+                t = str(texts[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+                y = styles.get(str(e.get("$157")), {})
+                got[t.strip()] = tuple(
+                    round(float(_plain(y[k])["$307"]), 3) if k in y else None
+                    for k in ("$47", "$49")
+                )
+    assert got["M1 first part"] == (None, None), f"calibre {version}: {got}"
+    assert got["M1 second part"][1] == 1.667, f"calibre {version}: {got}"
+    assert got["M3 top only"] == (0.833, None), f"calibre {version}: {got}"
+    assert got["M3 later part"][1] is None, f"calibre {version}: {got}"
