@@ -228,3 +228,26 @@ def test_a_percentage_margin_is_read_on_previewers_scale(calibre):  # noqa: F811
     _ebook_convert(calibre, epub, kfx, True)
     got = _spacing(kfx)
     assert got["R1"][0] == 1.333, f"calibre {version}: {got}"
+
+
+def test_paragraphs_in_a_box_are_spaced_by_their_margins(calibre):  # noqa: F811
+    """Inside a bordered box (#238) paragraphs follow their margins too, the
+    first its own margin-top, as Kindle Previewer 4.0.3 writes them (QA's
+    probe on #639: 0.667 for 0.8em; #640). kfxgen kept its 1-line default."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "inbox640.epub", tmp / "inbox640.kfx"
+    _book_epub(
+        epub,
+        "I640",
+        "<h1>In a box</h1><p>S0 plain words before.</p>"
+        "<div style='border:1px solid black;padding:0.5em'>"
+        "<p>S1 first in the box.</p><p>S2 second in the box.</p>"
+        "<p style='margin:0'>S3 third, no margin.</p></div><p>S4 after.</p>",
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "In a box", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    assert got["S1"][0] == 0.833, f"calibre {version}: {got}"
+    assert got["S2"][0] == 0.833, f"calibre {version}: {got}"
+    assert got["S3"][0] is None, f"calibre {version}: {got}"

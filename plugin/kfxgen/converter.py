@@ -4020,6 +4020,9 @@ def _space_between(blocks, margins, measured=True):
         top, bottom = margins.get(id(b), (0.0, 0.0))
         if measured:
             _place_margin(out[-1] if out else None, b, above, top, lines, on_purpose)
+            if kind == "box":
+                # Its paragraphs are spaced the same way, inside it (#640).
+                b["blocks"] = _space_between(b["blocks"], margins, measured)
         if kind is None:
             if out:
                 beside = b.get("heading") or out[-1].get("heading")
