@@ -101,7 +101,10 @@ PAGES = {
         "N5 th inherit tr align centre in div right</th><td>N5 td</td></tr>"
         "</table></div><table><tr style='text-align:right'>"
         "<th style='text-align:inherit'>N6 th inherit tr css right</th>"
-        "<td>N6 td</td></tr></table>",
+        "<td>N6 td</td></tr></table><div style='text-align:right'><table>"
+        "<tr style='text-align:inherit'><th style='text-align:inherit'>"
+        "N7 th inherit under tr inherit in div right</th><td>N7 td</td></tr>"
+        "</table></div>",
     ),
     "g.xhtml": (
         "",
@@ -206,6 +209,8 @@ PREVIEWER = {
     "N5 th inherit tr align centre in div right": RIGHT,
     "N5 td": CENTRE,
     "N6 th inherit tr css right": RIGHT,
+    "N7 th inherit under tr inherit in div right": RIGHT,
+    "N7 td": RIGHT,
     # Right to left: initial is right, end left; start and unset centre.
     "R1 th initial rtl": RIGHT,
     "R2 th end rtl": LEFT,
