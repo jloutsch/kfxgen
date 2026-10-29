@@ -46,20 +46,38 @@ CASES = [
         "STANZAS",
         '<div class="st"><p class="l">Line a1</p><p class="l">Line a2</p></div>'
         '<div class="st"><p class="l">Line b1</p><p class="l">Line b2</p></div>',
-        [("Line a1", "1"), ("Line a2", None), ("Line b1", "1"), ("Line b2", None)],
+        # Kindle Previewer 4.0.3's, in this book (#553): the heading's
+        # margin-bottom above a1, the stanza's 1em above b1.
+        [
+            ("Line a1", "1.0375"),
+            ("Line a2", None),
+            ("Line b1", "0.833333"),
+            ("Line b2", None),
+        ],
     ),
     (
         "c1",
         "INDEX",
         "".join(f'<p class="ix">Entry {n}, {n * 7}</p>' for n in range(1, 5)),
-        [("Entry 1, 7", "1")] + [(f"Entry {n}, {n * 7}", None) for n in range(2, 5)],
+        # The heading's margin-bottom above the first entry: Previewer writes
+        # it below the heading (0.6917 of its lines), kfxgen, which spaces its
+        # headings its own way, above the entry; the same space (#553).
+        [("Entry 1, 7", "1.0375")]
+        + [(f"Entry {n}, {n * 7}", None) for n in range(2, 5)],
     ),
     (
         "c1",
         "PROSE",
         f'<p class="np">“Yes.”</p><p class="np">{_LONG}</p><p class="np">“No.”</p>'
         f'<p class="np">{_LONG}</p>',
-        [("“Yes.”", "1"), (_LONG.strip(), "1"), ("“No.”", "1"), (_LONG.strip(), "1")],
+        # No margin and no indent: no space between them, as Previewer and a
+        # browser draw them (#553); #331 kept a line between prose paragraphs.
+        [
+            ("“Yes.”", "1.0375"),
+            (_LONG.strip(), None),
+            ("“No.”", None),
+            (_LONG.strip(), None),
+        ],
     ),
 ]
 

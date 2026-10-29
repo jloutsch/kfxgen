@@ -68,7 +68,9 @@ CASES = [
         "c1",
         "MARGINBOTTOM",
         '<p class="gapbelow">{c} lead</p><p>after</p>',
-        [("after", "1.66667")],
+        # The lead keeps it as its space below, as Kindle Previewer 4.0.3
+        # writes it: "after" has no margin-top of its own (#553).
+        [("lead below", "1.66667"), ("after", None)],
     ),
     (
         "c1",
@@ -116,6 +118,9 @@ def converted(calibre):  # noqa: F811
             if text.endswith(" lead") and text[:-5] in {c[1] for c in CASES}:
                 current = text[:-5]
                 by_case[current] = []
+                below = styles[str(entry["$157"])].get("$49")
+                if below is not None:
+                    by_case[current].append(("lead below", str(below["$307"])))
             elif text == f"END {current}":
                 current = None
             elif current:

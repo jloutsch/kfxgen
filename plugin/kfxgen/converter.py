@@ -3928,6 +3928,56 @@ def _page_breaks(css):
     return breaks("before"), breaks("after")
 
 
+def _takes_margin(block):
+    """Whether kfxgen writes the book's margins on `block`: a paragraph, not
+    a heading (kfxgen spaces its headings its own way), a table, a box or a
+    rule (#553)."""
+    return block.get("type") is None and not block.get("heading")
+
+
+def _spaces_itself(block):
+    """Whether kfxgen writes `block`'s space above its own way: a heading,
+    a box (#238) or a rule (#230). The paragraph before it then keeps no
+    space below, or the gap was both (QA on #639)."""
+    return bool(block.get("heading")) or block.get("type") in ("box", "rule")
+
+
+def _em_px(block):
+    """`block`'s font size in CSS px, for comparing margins across sizes."""
+    return (block.get("block_style") or {}).get("font_size") or 16.0
+
+
+def _place_margin(prev, b, above, top, lines, on_purpose):
+    """The gap above `b`, as Kindle Previewer 4.0.3 writes it (#553, #538):
+    the larger of the margin waiting above (`above`, the block before's
+    margin-bottom or an invisible <hr>'s) and `b`'s own margin-top, as margins
+    collapse in a browser, plus the spacer paragraphs' lines (in ems). `b` takes it
+    when its own margin-top is above 0; otherwise the block before keeps it
+    as its space below and `b` takes none. Margins are in each block's own
+    ems, so they are compared in px."""
+    if prev is None:
+        if _takes_margin(b):
+            b["margin_above"] = top + lines
+        return
+    up, own = above * _em_px(prev), top * _em_px(b)
+    if top > 0 or on_purpose or not _takes_margin(prev):
+        if _takes_margin(b):
+            b["margin_above"] = max(up, own) / _em_px(b) + lines
+    else:
+        if not _spaces_itself(b):
+            prev["margin_below"] = above
+        if _takes_margin(b):
+            b["margin_above"] = 0.0
+    if (
+        not _takes_margin(b)
+        and not _spaces_itself(b)
+        and _takes_margin(prev)
+        and up > own
+    ):
+        # Before a table: the paragraph above keeps it, as Previewer writes it.
+        prev["margin_below"] = above
+
+
 def _space_between(blocks, margins, measured=True):
     """`blocks` with the space a scene break puts above a paragraph, in ems,
     as "space_above" (#230, #326). The space blocks standing for spacers and
@@ -3965,6 +4015,8 @@ def _space_between(blocks, margins, measured=True):
             on_purpose = True
             continue
         top, bottom = margins.get(id(b), (0.0, 0.0))
+        if measured:
+            _place_margin(out[-1] if out else None, b, above, top, lines, on_purpose)
         if kind is None:
             if out:
                 beside = b.get("heading") or out[-1].get("heading")
@@ -3980,6 +4032,11 @@ def _space_between(blocks, margins, measured=True):
         lines = 0.0
         on_purpose = False
         out.append(b)
+    if measured and out and _takes_margin(out[-1]):
+        # A file's last paragraph keeps its margin-bottom (#553).
+        out[-1]["margin_below"] = max(
+            out[-1].get("margin_below") or 0.0, margins.get(id(out[-1]), (0, 0))[1]
+        )
     if gaps:
         counts = collections.Counter(g for _, g, _ in gaps)
         # The most common; of two as common, the smaller.

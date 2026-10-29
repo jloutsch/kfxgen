@@ -532,8 +532,16 @@ def test_a_tables_margins_do_not_reach_rows(converted, cid):
 
 def test_rows_of_an_unstyled_table_are_styled_like_a_paragraph(converted):
     case, v = _case(converted, "PLAIN")
+
+    def unspaced(style):
+        # Space above and below follow the book's margins, so a row under a
+        # heading is spaced as a paragraph there would be (#553).
+        return {k: v for k, v in style.items() if str(k) not in ("$47", "$49", "$173")}
+
     for text, style in case["rows"]:
-        assert style == case["end"], f"calibre {v}: {text!r} carries extra style"
+        assert unspaced(style) == unspaced(case["end"]), (
+            f"calibre {v}: {text!r} carries extra style"
+        )
 
 
 def test_a_bold_tables_rows_use_the_embedded_bold_face(converted_fonts):

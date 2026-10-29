@@ -51,8 +51,13 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
     # calibre's default rescaling snaps 0.9em to 0.75, which put a poem's
     # verse a quarter below its notes (#241). MED, so a user's own Look &
     # Feel setting still wins.
+    # Line heights as the book writes them, as Previewer writes them: calibre
+    # raises one below 120% of its font size to 120% by default, which
+    # spaced a 2em paragraph under a 24px line height at 1 line where
+    # Previewer writes 0.625, and its margins with it (#538).
     recommendations = {
         ("disable_font_rescaling", True, OptionRecommendation.MED),
+        ("minimum_line_height", 0, OptionRecommendation.MED),
     }
 
     options = {
