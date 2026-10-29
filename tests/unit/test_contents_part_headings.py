@@ -283,3 +283,25 @@ def test_a_heading_that_is_a_link_the_page_repeats_prints_where_it_is():
         ("Chapter One", None, True),
         ("Notes", None, True),
     ]
+
+
+def test_a_heading_merges_into_the_first_entry_when_the_second_is_linked():
+    """N6's mirror (my Previewer 4.0.3 probe, 2026-10-29): a heading for the
+    first Introduction, a link to the second. Previewer prints the heading,
+    Chapter A, the Introduction link, Chapter B (#622)."""
+    lines = _rebuild(
+        [
+            {"text": "Contents", "heading_level": 1},
+            {"text": "Introduction", "heading_level": 3},
+            _link("Chapter A", "a.xhtml"),
+            _link("Introduction", "i2.xhtml"),
+            _link("Chapter B", "b.xhtml"),
+        ],
+        ["Introduction", "Chapter A", "Introduction", "Chapter B"],
+    )
+    assert [(t, lvl) for t, lvl, _k in lines] == [
+        ("Introduction", 3),
+        ("Chapter A", None),
+        ("Introduction", None),
+        ("Chapter B", None),
+    ]
