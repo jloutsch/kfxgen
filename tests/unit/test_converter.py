@@ -3539,8 +3539,9 @@ class TestSyntheticFrontMatterLabel:
             "the invented label would render as visible text on the page"
         )
 
-    def test_real_leading_title_still_renders_as_heading(self):
-        """Control: a genuine heading taken from the book keeps its heading."""
+    def test_a_leading_title_prints_as_written(self):
+        """The head's first line prints as the book's own paragraph, not as
+        kfxgen's chapter heading, as Previewer prints it (#558)."""
         spine = [
             _spine_item(
                 "book.xhtml",
@@ -3550,7 +3551,7 @@ class TestSyntheticFrontMatterLabel:
         toc = [{"title": "I", "href": "book.xhtml#c1"}]
         chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
         assert chapters[0]["title"] == "Copyright 2026"
-        assert not chapters[0].get("_omit_title_heading")
+        assert chapters[0].get("_omit_title_heading") is True
 
     def test_not_listed_as_a_contents_entry(self):
         chapters = self._front_matter_book()
@@ -4134,13 +4135,13 @@ class TestUntocedChaptersAreNotListed:
         assert chapters[0]["title"] == _conv.LEADING_TITLE_FALLBACK
         assert chapters[0].get("_omit_from_toc") is True
 
-    def test_a_head_with_its_own_heading_keeps_its_entry(self):
-        """Narrow on purpose. This label is the book's own words, so it stays
-        a usable destination even though the source TOC never named it —
-        #143 is about invented labels, not about untoced content."""
+    def test_a_head_with_its_own_heading_is_not_listed_either(self):
+        """#143 kept an entry when the head's first line read as a heading.
+        Kindle Previewer 4.0.3 lists none, in the same file as the first
+        entry or in a file of its own (my probes, 2026-10-29, #558)."""
         chapters = self._head_book("Copyright 2026")
         assert chapters[0]["title"] == "Copyright 2026"
-        assert not chapters[0].get("_omit_from_toc")
+        assert chapters[0].get("_omit_from_toc") is True
 
     def test_the_front_matter_content_still_ships(self):
         """Omitted from the nav, still in the book."""
