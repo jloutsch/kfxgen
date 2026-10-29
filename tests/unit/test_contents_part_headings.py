@@ -211,3 +211,20 @@ def test_a_heading_before_a_repeated_link_goes_before_that_link():
         "Introduction",
         "Chapter B",
     ]
+
+
+def test_a_heading_before_an_unlisted_link_goes_before_the_next_chapter():
+    """N12 (QA on #618): a heading the TOC doesn't list, before a link it
+    doesn't list either ("Map"), then a chapter. Kindle Previewer 4.0.3 puts
+    the heading before the chapter; kfxgen put it at the page's end (#622)."""
+    lines = _rebuild(
+        [
+            {"text": "Contents", "heading_level": 1},
+            _link("Chapter One", "c1.xhtml"),
+            {"text": "Book Two", "heading_level": 2},
+            _link("Map", "map.xhtml"),
+            _link("Chapter Two", "c2.xhtml"),
+        ],
+        ["Chapter One", "Chapter Two"],
+    )
+    assert [t for t, _l, _k in lines] == ["Chapter One", "Book Two", "Chapter Two"]

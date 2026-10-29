@@ -6624,7 +6624,11 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     for n, (kind, line) in enumerate(events):
         if kind != "heading":
             continue
-        after = next((w for k, w in events[n + 1 :] if k == "link"), None)
+        # The next link with an entry: one the TOC doesn't list ("Map") has no
+        # line on this page (#622).
+        after = next(
+            (w for k, w in events[n + 1 :] if k == "link" and w is not None), None
+        )
         at = after if after is not None else len(listed)
         inserts.append((at, n, line))
     # Last first, so earlier places don't move; two at one place keep the
