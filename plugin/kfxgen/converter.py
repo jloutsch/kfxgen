@@ -3923,19 +3923,18 @@ def _place_margin(prev, b, above, top, lines, on_purpose):
     """The gap above `b`, as Kindle Previewer 4.0.3 writes it (#553, #538):
     the larger of the margin waiting above (`above`, the block before's
     margin-bottom or an invisible <hr>'s) and `b`'s own margin-top, as margins
-    collapse in a browser, plus a line per spacer paragraph. `b` takes it
+    collapse in a browser, plus the spacer paragraphs' lines (in ems). `b` takes it
     when its own margin-top is above 0; otherwise the block before keeps it
     as its space below and `b` takes none. Margins are in each block's own
     ems, so they are compared in px."""
-    lines_em = lines * 1.2 if lines else 0.0
     if prev is None:
         if _takes_margin(b):
-            b["margin_above"] = top + lines_em
+            b["margin_above"] = top + lines
         return
     up, own = above * _em_px(prev), top * _em_px(b)
     if top > 0 or on_purpose or not _takes_margin(prev):
         if _takes_margin(b):
-            b["margin_above"] = max(up, own) / _em_px(b) + lines_em
+            b["margin_above"] = max(up, own) / _em_px(b) + lines
     else:
         prev["margin_below"] = above
         if _takes_margin(b):
