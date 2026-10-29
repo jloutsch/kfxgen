@@ -44,6 +44,7 @@ from .inline_style import (
     FLAG_TEXT_TOP,
     FLAG_UNDERLINE,
     HARD_BREAK,
+    BASELINE_SHIFT,
     LINE_START,
     NOTEREF_FLAG,
     SHIFT_FLAGS,
@@ -92,8 +93,12 @@ def _nest_shift(cur, inherited, own):
     if not depth or not own:
         return cur
     # Superscript wins over another shift, as it does on one run.
-    shift = next(f for f in SHIFT_FLAGS if f in own)
-    return (set(cur) - (set(own) - set(inherited))) | {f"{shift}@{depth + 1}"}
+    shift = next(f for f in (*SHIFT_FLAGS, BASELINE_SHIFT) if f in own)
+    # Its parent's size, `font-size: 100%`: the layer keeps it (#638).
+    size = run_font_size(inherited)
+    keeps = "=" if size is not None and run_font_size(cur) == size else ""
+    nested = f"{shift}@{depth + 1}{keeps}"
+    return (set(cur) - (set(own) - set(inherited))) | {nested}
 
 
 _UNDERLINE_TAGS = {"u", "ins"}
@@ -1549,6 +1554,8 @@ def _walk_inline(
                 cur.add(FLAG_TEXT_BOTTOM)
             if shift in SHIFT_FLAGS:
                 own_shifts.append(shift)
+            elif str(css.get("vertical-align") or "").strip().lower() == "baseline":
+                own_shifts.append(BASELINE_SHIFT)  # inside a shift only (#638)
         if parent_emphasis is None and elem.getparent() is not None:
             parent_emphasis = _css_emphasis(style_resolver(elem.getparent()))
         if emphasis is not None and parent_emphasis is not None:

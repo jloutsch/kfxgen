@@ -33,6 +33,8 @@ BODY = (
     "<p>N2 y<sub>j<sup>3</sup></sub> end.</p>"
     "<p>N3 a<sup>b<span style='vertical-align:text-top'>c</span>d</sup> end.</p>"
     "<p>N6 plain<sup>9</sup> and H<sub>2</sub>O.</p>"
+    "<p>P7 a<sup>b<span style='vertical-align:baseline'>c</span>d</sup> end.</p>"
+    "<p>P8 e<sup>f<sub style='font-size:100%'>g</sub>h</sup> end.</p>"
 )
 
 
@@ -88,3 +90,23 @@ def test_nested_shifts_are_layered_as_previewer_writes_them(calibre):  # noqa: F
     # the superscript's own.
     assert runs["N1"][2][2] == round(S * S, 4), version
     assert [s for t, v, s in runs["N3"] if v == "$447"] == [round(S, 4)], version
+
+
+def test_baseline_and_a_kept_size_are_layered_as_previewer_writes_them(calibre):  # noqa: F811
+    """`vertical-align: baseline` inside a superscript is a layer at the
+    baseline ($44 $350), and a subscript that keeps its superscript's size
+    (font-size: 100%) is layered at that size, as Kindle Previewer 4.0.3
+    writes them (#638, my probe 2026-10-29)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "n638.epub", tmp / "n638.kfx"
+    _book_epub(
+        epub,
+        "N638",
+        BODY,
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Nested", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    runs = _runs(kfx)
+    assert ("c", "$350", round(S, 4)) in runs["P7"], f"calibre {version}: {runs['P7']}"
+    assert ("g", "$371", round(S, 4)) in runs["P8"], f"calibre {version}: {runs['P8']}"

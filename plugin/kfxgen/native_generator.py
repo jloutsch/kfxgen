@@ -5875,6 +5875,7 @@ class NativeKFXGenerator:
             FLAG_TEXT_BOTTOM,
             FLAG_TEXT_TOP,
             FLAG_UNDERLINE,
+            BASELINE_SHIFT,
             SHIFT_FLAGS,
             TYPOGRAPHY_FLAGS,
             flag_value,
@@ -5998,6 +5999,7 @@ class NativeKFXGenerator:
             sized=True,
             blk_fs=1.0,
             scale=1.0,
+            keeps_size=False,
         ):
             # Effective emphasis = inline run flags OR the block's CSS emphasis.
             # The applied $157 always carries the run's own weight/style ($13/$12)
@@ -6036,6 +6038,11 @@ class NativeKFXGenerator:
                 attrs["baseline_style"] = "$447"  # no size change (#485)
             elif FLAG_TEXT_BOTTOM in flags:
                 attrs["baseline_style"] = "$449"
+            elif BASELINE_SHIFT in flags:
+                attrs["baseline_style"] = "$350"  # back on the line (#638)
+            if keeps_size:
+                # The outer shift's size, its own `font-size: 100%` (#638).
+                attrs.pop("font_size", None)
             if scale != 1.0:
                 # A shift inside another: smaller by each outer one (#536).
                 attrs["font_size"] = round(attrs.get("font_size", 1.0) * scale, 6)
@@ -6475,10 +6482,12 @@ class NativeKFXGenerator:
                     # A shift inside another: a run layered on this one, as
                     # Kindle Previewer 4.0.3 writes it (#536).
                     nested = sorted(
-                        nested_shift(f)[::-1] for f in flags if nested_shift(f)
+                        (n[1], n[0], n[2])
+                        for n in (nested_shift(f) for f in flags)
+                        if n
                     )
-                    levels = [f for f in SHIFT_FLAGS if f in flags][:1] + [
-                        shift for _depth, shift in nested
+                    levels = [(f, False) for f in SHIFT_FLAGS if f in flags][:1] + [
+                        (shift, keeps) for _depth, shift, keeps in nested
                     ]
                     # Its size is the outer shift's, made smaller by its own.
                     rest = frozenset(
@@ -6489,8 +6498,8 @@ class NativeKFXGenerator:
                         and run_font_size((f,)) is None
                     )
                     scale = 1.0
-                    for outer, inner in zip(levels, levels[1:]):
-                        scale *= shift_size(outer)
+                    for (outer, kept), (inner, keeps) in zip(levels, levels[1:]):
+                        scale *= 1.0 if kept else shift_size(outer)
                         spans_out.append(
                             (
                                 s,
@@ -6505,6 +6514,7 @@ class NativeKFXGenerator:
                                     sized=sized,
                                     blk_fs=blk_fs,
                                     scale=scale,
+                                    keeps_size=keeps,
                                 ),
                                 None,
                             )
