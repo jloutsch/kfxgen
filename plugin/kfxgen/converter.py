@@ -5520,10 +5520,6 @@ def _assemble_chapters_by_coordinate(
     chapters = []
 
     first_fi = coords[0][0]
-    # An out-of-order entry into the blocks before the first section names
-    # that place itself: the head chapter takes no TOC entry of its own, or
-    # the pane listed it twice (#484).
-    head_listed = any(coords[k][0] < first_fi for k in out_of_order)
     # A head block that carries an anchor referenced (even non-monotonically) in
     # the TOC is NOT front matter — fold it into the first chapter instead.
     # NOTE: Known limitation — a malformed EPUB where genuine front matter
@@ -5540,33 +5536,12 @@ def _assemble_chapters_by_coordinate(
         else:
             ch = _flag_nav(_mk(_leading_chapter_title(head), head), 0, first_fi)
             if ch:
-                if ch["title"] != LEADING_TITLE_FALLBACK and _IMG_TOKEN_RE.search(
-                    head[0].get("text") or ""
-                ):
-                    # Titled with the words beside a picture: that paragraph
-                    # prints them, so a heading of them would print them
-                    # twice. Kindle Previewer 4.0.3 prints them once (#525).
-                    ch["_omit_title_heading"] = True
-                if ch["title"] == LEADING_TITLE_FALLBACK:
-                    # No title of its own, and not in the source TOC either —
-                    # this chapter exists precisely because these blocks
-                    # precede the first TOC anchor. Listing an invented label
-                    # adds navigation the publisher chose not to provide. Only
-                    # the nav entry goes; the content still ships (#143).
-                    #
-                    # Narrow on purpose: a head whose first block *does* read
-                    # as a heading keeps its entry. That label is the book's
-                    # own words rather than ours, and dropping it would remove
-                    # a usable destination to fix a naming problem.
-                    ch["_omit_from_toc"] = True
-                    # Invented label, not the book's own words — suppress it
-                    # as a heading so it cannot print onto the page. Set only
-                    # on this synthetic path: a book whose own TOC names a
-                    # chapter "Front Matter" comes through `coords` and keeps
-                    # its heading. (#133)
-                    ch["_omit_title_heading"] = True
-                if head_listed:
-                    ch["_omit_from_toc"] = True
+                # Text before the book's first TOC entry: Kindle Previewer
+                # 4.0.3 gives it no entry and prints it as written, whatever
+                # its first line (#558). The title is kfxgen's own label for
+                # it (#133, #143), so it is neither listed nor printed.
+                ch["_omit_from_toc"] = True
+                ch["_omit_title_heading"] = True
                 chapters.append(ch)
 
     heads = _section_heads(coords, flat, spine_items_ordered, nav_flat, file_offset)
