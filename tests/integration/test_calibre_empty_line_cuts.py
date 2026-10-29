@@ -4,9 +4,10 @@ a DOCTYPE): each run of empty lines ends an entry; the entry before keeps
 one line break; the next starts at its words. Headings, list items and
 blockquote paragraphs are cut too; preformatted text is not.
 
-Three differences from Previewer's file, listed in DIFFERENT: a table
-cell's text isn't cut (a follow-up), a paragraph ending with an empty line
-keeps no break, and kfxgen writes a list item's marker as text.
+Differences from Previewer's file are listed in DIFFERENT: a paragraph
+ending with an empty line keeps no break, kfxgen writes a list item's marker
+as text, and calibre collapses spaces round a no-break space. A table
+cell's text is cut too since #624.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found. CI has no calibre, so this is
@@ -194,8 +195,6 @@ PREVIEWER = [
 DIFFERENT = {
     "V9 ends with an empty line.\n": ["V9 ends with an empty line."],
     "W2 item first\n": ["\u2022 W2 item first\n"],
-    "W3 cell first\n": ["W3 cell first\n\nW3 cell after"],
-    "W3 cell after": [],
     # calibre collapses the spaces round the no-break space before kfxgen
     # sees them, so only the no-break space's own space is left (#628).
     "X03 first\n  ": ["X03 first\n "],

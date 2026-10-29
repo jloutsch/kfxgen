@@ -4826,6 +4826,27 @@ class NativeKFXGenerator:
                         "background": cell.get("background"),
                         "table_width": tbl.get("width"),
                     }
+                    if not cell.get("paragraphs") and cell.get("text"):
+                        # A cell's text cut at an empty line: a container of
+                        # its parts, as Kindle Previewer 4.0.3 writes it
+                        # (#624), and as a cell of several blocks is (#261).
+                        parts = _cut_after_picture_lines(
+                            {
+                                "text": cell["text"],
+                                "spans": cell.get("spans") or [],
+                                "anchor_keys": cell.get("anchor_keys") or [],
+                                "anchor_offsets": cell.get("anchor_offsets") or {},
+                                "block_style": cell.get("block_style"),
+                            }
+                        )
+                        if len(parts) > 1:
+                            cell = {
+                                **cell,
+                                "paragraphs": [
+                                    {**p, "text": p["text"] + p.pop("trailing", "")}
+                                    for p in parts
+                                ],
+                            }
                     if cell.get("paragraphs"):
                         # A cell holding several blocks (#261): a container,
                         # styled as a cell, around one text entry per block.
