@@ -4134,13 +4134,13 @@ class TestUntocedChaptersAreNotListed:
         assert chapters[0]["title"] == _conv.LEADING_TITLE_FALLBACK
         assert chapters[0].get("_omit_from_toc") is True
 
-    def test_a_head_with_its_own_heading_keeps_its_entry(self):
-        """Narrow on purpose. This label is the book's own words, so it stays
-        a usable destination even though the source TOC never named it —
-        #143 is about invented labels, not about untoced content."""
+    def test_a_head_with_its_own_heading_is_not_listed_either(self):
+        """#143 kept an entry when the head's first line read as a heading.
+        Kindle Previewer 4.0.3 lists none, in the same file as the first
+        entry or in a file of its own (my probes, 2026-10-29, #558)."""
         chapters = self._head_book("Copyright 2026")
         assert chapters[0]["title"] == "Copyright 2026"
-        assert not chapters[0].get("_omit_from_toc")
+        assert chapters[0].get("_omit_from_toc") is True
 
     def test_the_front_matter_content_still_ships(self):
         """Omitted from the nav, still in the book."""
