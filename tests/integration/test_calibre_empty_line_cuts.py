@@ -24,6 +24,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "plugin"))
 sys.path.insert(0, str(REPO))
 
+from tests._helpers import colour_jpeg_of  # noqa: E402
 from tests._kfx_introspect import by_type, iter_entries, load_fragments, val  # noqa: E402
 from tests.integration.test_calibre_table_rows import (  # noqa: E402
     _ebook_convert,
@@ -51,6 +52,19 @@ CASES = [
     "<table><tr><td>W3 cell first<br/><br/>W3 cell after</td><td>W3b</td></tr></table>",
     "<blockquote><p>W4 quote first<br/><br/>W4 quote after</p></blockquote>",
     "<p>W5 first<br/> <br/>W5 after a line of one space.</p>",
+    # A spacer line of no-break spaces (#626).
+    "<p>X1 first<br/>&#160;<br/>X1 after</p>",
+    "<p>X2 first<br/>&#160;&#160;<br/>X2 after</p>",
+    "<p>X4 first<br/>&#160;<br/>&#160;<br/>X4 after</p>",
+    "<p>X5 first<br/><br/>&#160;<br/>X5 after</p>",
+    # An id inside the blank lines (#626).
+    '<p>Y1 first<br/><span id="y1id"/><br/>Y1 after</p>',
+    # QA on #628: an id between a picture line and an empty line; an em
+    # space line; an id after a spacer's no-break space; spaces round one.
+    "<p>X09 one<br/><img src='s.jpg' alt='x9'/><br/><span id='y9'/><br/>X09b two</p>",
+    "<p>X06 first<br/>&#8195;<br/>X06 after</p>",
+    "<p>L10 first<br/>&#160;<span id='l10'/><br/>L10 after</p>",
+    "<p>X03 first<br/> &#160; <br/>X03 after</p>",
 ]
 CSS = (
     ".ind { text-indent: 2em; } .mar { margin-top: 1em; margin-bottom: 2em; margin-left: 3em; } "
@@ -73,7 +87,10 @@ def _epub(out, key):
             "Lines",
             "<h1>Lines</h1>"
             + "".join(CASES)
-            + '<p><a href="c1.xhtml#v7id">To v7</a></p>',
+            + '<p><a href="c1.xhtml#v7id">To v7</a></p>'
+            + '<p><a href="c1.xhtml#y1id">To y1</a></p>'
+            + '<p><a href="c1.xhtml#y9">To y9</a></p>'
+            + '<p><a href="c1.xhtml#l10">To l10</a></p>',
         ),
         "c2.xhtml": _page("Two", "<h1>Two</h1><p>Second chapter.</p>"),
     }
@@ -83,6 +100,7 @@ def _epub(out, key):
             for n, f in enumerate(files)
         )
         + '<item id="css" href="s.css" media-type="text/css"/>'
+        + '<item id="jpg" href="s.jpg" media-type="image/jpeg"/>'
     )
     ncx = (
         '<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">'
@@ -113,6 +131,7 @@ def _epub(out, key):
         z.writestr("content.opf", opf)
         z.writestr("toc.ncx", ncx)
         z.writestr("s.css", CSS)
+        z.writestr("s.jpg", colour_jpeg_of("RGB", (48, 48), (200, 40, 40)))
         for n, d in files.items():
             z.writestr(n, d)
 
@@ -153,6 +172,23 @@ PREVIEWER = [
     "W4 quote after",
     "W5 first\n",
     "W5 after a line of one space.",
+    "X1 first\n ",
+    "X1 after",
+    "X2 first\n  ",
+    "X2 after",
+    "X4 first\n ",
+    "X4 after",
+    "X5 first\n",
+    "X5 after",
+    "Y1 first\n",
+    "Y1 after",
+    "X09b two",
+    "X06 first\n\u2003",
+    "X06 after",
+    "L10 first\n ",
+    "L10 after",
+    "X03 first\n  ",
+    "X03 after",
 ]
 #: kfxgen's own value where it differs, by Previewer's.
 DIFFERENT = {
@@ -160,6 +196,9 @@ DIFFERENT = {
     "W2 item first\n": ["\u2022 W2 item first\n"],
     "W3 cell first\n": ["W3 cell first\n\nW3 cell after"],
     "W3 cell after": [],
+    # calibre collapses the spaces round the no-break space before kfxgen
+    # sees them, so only the no-break space's own space is left (#628).
+    "X03 first\n  ": ["X03 first\n "],
 }
 
 
@@ -175,7 +214,9 @@ def test_a_paragraph_is_cut_at_an_empty_line(calibre):  # noqa: F811
         for e in iter_entries(val(st)["$146"]):
             if hasattr(e, "get") and e.get("$145"):
                 t = str(text[str(e["$145"]["name"])][int(e["$145"]["$403"])])
-                if t.lstrip("\u2022 ").startswith(("V", "W", "italic", "link")):
+                if t.lstrip("\u2022 ").startswith(
+                    ("V", "W", "X", "Y", "L1", "italic", "link")
+                ):
                     got.append(t)
     want = [w for p in PREVIEWER for w in DIFFERENT.get(p, [p])]
     assert got == want, f"calibre {version}: {got}"
@@ -190,3 +231,33 @@ def test_an_id_after_the_cut_lands_on_the_next_part(calibre):  # noqa: F811
     _epub(epub, "t2")
     _ebook_convert(calibre, epub, kfx, True)
     assert _landings(kfx)["To v7"] == "V7 id after.", f"calibre {version}"
+
+
+def test_an_id_in_the_blank_lines_lands_on_the_kept_break(calibre):  # noqa: F811
+    """Previewer lands a link to an id inside the blank lines on the part
+    before, at its kept line break (#626)."""
+    from tests.unit.test_link_landings import _landings
+
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "v602c.epub", tmp / "v602c.kfx"
+    _epub(epub, "t3")
+    _ebook_convert(calibre, epub, kfx, True)
+    assert _landings(kfx)["To y1"] == "\n", f"calibre {version}"
+
+
+@pytest.mark.parametrize(
+    ("link", "lands"),
+    [("To y9", "X09b two"), ("To l10", " ")],
+    ids=["after-a-picture-line", "after-a-spacer-nbsp"],
+)
+def test_ids_round_a_cut_land_as_in_previewer(calibre, link, lands):  # noqa: F811
+    """QA on #628: a link to an id between a picture line and an empty line
+    lands on the next part (it was dropped since #625); one after a spacer's
+    no-break space lands on its space."""
+    from tests.unit.test_link_landings import _landings
+
+    tmp, _env, version = calibre
+    epub, kfx = tmp / f"v602-{link[-2:]}.epub", tmp / f"v602-{link[-2:]}.kfx"
+    _epub(epub, "t" + link[-2:])
+    _ebook_convert(calibre, epub, kfx, True)
+    assert _landings(kfx).get(link) == lands, f"calibre {version}"

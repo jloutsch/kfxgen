@@ -118,22 +118,48 @@ def _cut_after_picture_lines(block):
         # a picture alone is then an entry of its own (QA on #590), one among
         # words a mixed entry (#593), words a text entry (#602).
         if line.strip() and i and not lines[i - 1].strip() and text[:start].strip():
-            cuts.append((start, start))
+            # The piece ends at its last words: it keeps one line break and
+            # the first blank line's no-break spaces, as plain spaces, as
+            # Previewer writes a Gutenberg spacer (#626).
+            j = i - 1
+            while j and not lines[j - 1].strip():
+                j -= 1
+            words_end = sum(len(x) + 1 for x in lines[:j]) - 1
+            # A spacer line's own characters stay, its no-break spaces as
+            # plain ones, as Previewer writes them (QA on #628).
+            spacer = lines[j].lstrip(_ASCII_SPACE).replace("\xa0", " ")
+            if cuts and cuts[-1][0] == words_end:
+                # After a line of only a picture, cut there already (#590):
+                # one cut, the blank lines going to the next piece, as
+                # Previewer lands an id in them (QA on #628).
+                cuts[-1] = (words_end, start, None)
+            else:
+                cuts.append((words_end, start, "\n" + spacer))
         if has_picture and not IMG_TOKEN_RE.sub("", line).strip():
             if i < len(lines) - 1 and text[end + 1 :].strip():
-                cuts.append((end, end + 1))
+                cuts.append((end, end + 1, None))
         start = end + 1
     if not cuts:
         return [block]
-    pieces, a, empty_line_cut = [], 0, False
-    for b, after in [*cuts, (len(text), None)]:
-        # A piece holds its end too: an id after the last word (#487), or at
-        # a cut, stays on the piece it ends (QA on #590). Not before a
-        # picture line, where it names the picture (#592).
+    pieces, a, empty_line_cut, lo = [], 0, False, 0
+
+    def place(o, a, b, tail):
+        """Offset `o` on the piece [a, b): in the blank lines after it, at
+        the same place in its kept tail (#626, QA on #628)."""
+        if o <= b:
+            return max(o - a, 0)
+        return (b - a) + min(o - b - 1, len(tail) - 1)
+
+    for b, after, tail in [*cuts, (len(text), None, None)]:
+        # A piece holds its end (#487), its cut (QA on #590), and the blank
+        # lines after it when it keeps a tail, as Previewer lands an id there
+        # (#626). One at the next piece's start (#592), or in the blank lines
+        # after a picture line, is the next piece's.
+        hi = None if after is None else (after if tail is not None else b + 1)
         offsets = {
-            k: (o or 0) - a
+            k: place(o or 0, a, b, tail or "")
             for k, o in (block.get("anchor_offsets") or {}).items()
-            if a <= (o or 0) < b or ((o or 0) == b and after != b)
+            if lo <= (o or 0) and (hi is None or (o or 0) < hi)
         }
         piece = {
             **block,
@@ -146,10 +172,10 @@ def _cut_after_picture_lines(block):
             "anchor_keys": [k for k in block.get("anchor_keys") or () if k in offsets],
             "anchor_offsets": offsets,
         }
-        if after == b:
+        if tail is not None:
             # Before an empty line's cut: one line break kept, as Previewer
-            # keeps it (#602).
-            piece["trailing_break"] = True
+            # keeps it (#602), with a spacer line's spaces (#626).
+            piece["trailing"] = tail
         if a:
             # The paragraph goes on: no space above, clearing or first-line
             # indent of its own. A heading's parts after an empty line stay
@@ -161,8 +187,8 @@ def _cut_after_picture_lines(block):
             if (piece.get("block_style") or {}).get("indent"):
                 piece["block_style"] = {**piece["block_style"], "indent": None}
         pieces.append(piece)
-        empty_line_cut = after == b
-        a = after
+        empty_line_cut = tail is not None
+        lo, a = hi, after
     # A key with no offset, or one past the text, stays on the first piece.
     placed = {k for p in pieces for k in p["anchor_keys"]}
     pieces[0]["anchor_keys"] = pieces[0]["anchor_keys"] + [
@@ -4342,7 +4368,7 @@ class NativeKFXGenerator:
         toc_link_chunks = {}
         toc_link_levels = {}  # chunk index -> depth in the contents (#313)
 
-        def _emit_text_chunks(para_text, preformatted=False, trailing_break=False):
+        def _emit_text_chunks(para_text, preformatted=False, trailing=""):
             """Yield typed chunks from a paragraph that may contain image tokens.
 
             A preformatted paragraph keeps its leading spaces: they are its
@@ -4392,7 +4418,7 @@ class NativeKFXGenerator:
                 seg = _trim(para_text[last:])
                 if seg.strip():
                     # Before an empty line's cut, one line break stays (#602).
-                    chunks.append({"type": "text", "text": seg + "\n" * trailing_break})
+                    chunks.append({"type": "text", "text": seg + trailing})
             return chunks
 
         def _append_text_with_spans(
@@ -4552,7 +4578,7 @@ class NativeKFXGenerator:
                 para, para_spans, block_offsets, pictures = inline
             space = 0.0 if block.get("tight") else _space_to_write(block)
             for chunk in _emit_text_chunks(
-                para, preformatted, bool(block.get("trailing_break"))
+                para, preformatted, block.get("trailing") or ""
             ):
                 if chunk["type"] == "image":
                     # Figure ids live on image blocks; without this

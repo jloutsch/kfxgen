@@ -151,3 +151,24 @@ def test_a_headings_parts_stay_headings(tmp_path):
         if str(getattr(u, "value", u)["$238"]) == "$800"
     ]
     assert len(level2) == 1 and len(level2[0]["$247"]) == 2
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("<p>X1 first<br/>&#160;<br/>X1 after</p>", ["X1 first\n ", "X1 after"]),
+        ("<p>X2 first<br/>&#160;&#160;<br/>X2 after</p>", ["X2 first\n  ", "X2 after"]),
+        (
+            "<p>X4 first<br/>&#160;<br/>&#160;<br/>X4 after</p>",
+            ["X4 first\n ", "X4 after"],
+        ),
+        ("<p>X5 first<br/><br/>&#160;<br/>X5 after</p>", ["X5 first\n", "X5 after"]),
+    ],
+    ids=["one-nbsp", "two-nbsp", "two-spacer-lines", "empty-then-spacer"],
+)
+def test_a_spacer_line_keeps_only_its_first_line_as_spaces(tmp_path, body, expected):
+    """A line of no-break spaces, a common Gutenberg spacer: Kindle Previewer
+    4.0.3 keeps the line break and the first spacer line's no-break spaces
+    as plain spaces, and nothing after (QA's E12 on #625, probed 2026-10-28;
+    #626)."""
+    assert _texts(tmp_path, body) == expected
