@@ -228,3 +228,80 @@ def test_a_heading_before_an_unlisted_link_goes_before_the_next_chapter():
         ["Chapter One", "Chapter Two"],
     )
     assert [t for t, _l, _k in lines] == ["Chapter One", "Book Two", "Chapter Two"]
+
+
+def test_a_heading_merges_into_an_entry_the_page_does_not_link():
+    """N6 (QA on #618, my Previewer 4.0.3 probe 2026-10-29): Part One's
+    Introduction is linked on the page, Part Two's isn't, and Part Two has an
+    `<h3>Introduction</h3>`. Previewer prints only the heading there; kfxgen
+    printed Part Two's line and the heading, deciding by words (#622)."""
+    lines = _rebuild(
+        [
+            {"text": "Contents", "heading_level": 1},
+            _link("Part One", "p1.xhtml"),
+            _link("Introduction", "i1.xhtml"),
+            _link("Chapter One", "c1.xhtml"),
+            _link("Part Two", "p2.xhtml"),
+            {"text": "Introduction", "heading_level": 3},
+            _link("Chapter Two", "c2.xhtml"),
+        ],
+        [
+            "Part One",
+            "Introduction",
+            "Chapter One",
+            "Part Two",
+            "Introduction",
+            "Chapter Two",
+        ],
+    )
+    assert [(t, lvl) for t, lvl, _k in lines] == [
+        ("Part One", None),
+        ("Introduction", None),
+        ("Chapter One", None),
+        ("Part Two", None),
+        ("Introduction", 3),
+        ("Chapter Two", None),
+    ]
+
+
+def test_a_heading_that_is_a_link_the_page_repeats_prints_where_it_is():
+    """N9 (QA on #618, my Previewer 4.0.3 probe 2026-10-29):
+    `<h3><a>Notes</a></h3>` at the top and a Notes link last. Previewer
+    prints the linked heading at the top and the plain link last; kfxgen
+    moved the heading to the end and dropped a line (#622)."""
+    lines = _rebuild(
+        [
+            {"text": "Contents", "heading_level": 1},
+            {**_link("Notes", "n.xhtml"), "heading_level": 3},
+            _link("Chapter One", "c1.xhtml"),
+            _link("Notes", "n.xhtml"),
+        ],
+        ["Chapter One", "Notes"],
+    )
+    assert lines == [
+        ("Notes", 3, True),
+        ("Chapter One", None, True),
+        ("Notes", None, True),
+    ]
+
+
+def test_a_heading_merges_into_the_first_entry_when_the_second_is_linked():
+    """N6's mirror (my Previewer 4.0.3 probe, 2026-10-29): a heading for the
+    first Introduction, a link to the second. Previewer prints the heading,
+    Chapter A, the Introduction link, Chapter B (#622)."""
+    lines = _rebuild(
+        [
+            {"text": "Contents", "heading_level": 1},
+            {"text": "Introduction", "heading_level": 3},
+            _link("Chapter A", "a.xhtml"),
+            _link("Introduction", "i2.xhtml"),
+            _link("Chapter B", "b.xhtml"),
+        ],
+        ["Introduction", "Chapter A", "Introduction", "Chapter B"],
+    )
+    assert [(t, lvl) for t, lvl, _k in lines] == [
+        ("Introduction", 3),
+        ("Chapter A", None),
+        ("Introduction", None),
+        ("Chapter B", None),
+    ]
