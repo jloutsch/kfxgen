@@ -21,6 +21,20 @@ FLAG_SUB = "sub"
 #: bottom, neither raised nor shrunk; Previewer writes $447 and $449 (#485).
 FLAG_TEXT_TOP = "text-top"
 FLAG_TEXT_BOTTOM = "text-bottom"
+#: The vertical shifts, superscript first: it wins on one run.
+SHIFT_FLAGS = (FLAG_SUPER, FLAG_SUB, FLAG_TEXT_TOP, FLAG_TEXT_BOTTOM)
+
+
+def nested_shift(flag):
+    """(shift, depth) of a shift inside another, "sub@2", which is written
+    as a run layered on the outer one (#536); else None."""
+    if isinstance(flag, str) and "@" in flag:
+        shift, _, depth = flag.partition("@")
+        if shift in SHIFT_FLAGS and depth.isdigit():
+            return shift, int(depth)
+    return None
+
+
 #: Text decoration lines (#237). Kindle Previewer writes them as $23 and $27.
 FLAG_UNDERLINE = "underline"
 FLAG_STRIKE = "line-through"

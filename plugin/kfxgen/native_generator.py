@@ -340,6 +340,16 @@ def superscript_metrics():
     return size, BASELINE_STYLE_SUPER
 
 
+def shift_size(shift):
+    """The size a shift sets, as a share of its text's: superscript's or
+    subscript's, else 1."""
+    if shift == "super":
+        return superscript_metrics()[0]
+    if shift == "sub":
+        return subscript_metrics()[0]
+    return 1.0
+
+
 def subscript_metrics():
     """(font_size, baseline_style) for a subscript run.
 
@@ -5865,10 +5875,12 @@ class NativeKFXGenerator:
             FLAG_TEXT_BOTTOM,
             FLAG_TEXT_TOP,
             FLAG_UNDERLINE,
+            SHIFT_FLAGS,
             TYPOGRAPHY_FLAGS,
             flag_value,
             is_monospace,
             mono_families,
+            nested_shift,
             run_font_size,
         )
 
@@ -5985,6 +5997,7 @@ class NativeKFXGenerator:
             in_cell=False,
             sized=True,
             blk_fs=1.0,
+            scale=1.0,
         ):
             # Effective emphasis = inline run flags OR the block's CSS emphasis.
             # The applied $157 always carries the run's own weight/style ($13/$12)
@@ -6023,6 +6036,9 @@ class NativeKFXGenerator:
                 attrs["baseline_style"] = "$447"  # no size change (#485)
             elif FLAG_TEXT_BOTTOM in flags:
                 attrs["baseline_style"] = "$449"
+            if scale != 1.0:
+                # A shift inside another: smaller by each outer one (#536).
+                attrs["font_size"] = round(attrs.get("font_size", 1.0) * scale, 6)
             # Set only when drawn, so every other style keeps its key (#237).
             if FLAG_UNDERLINE in flags:
                 attrs["underline"] = True
@@ -6456,6 +6472,43 @@ class NativeKFXGenerator:
                         else None
                     )
                     spans_out.append((s, length, style, anchor))
+                    # A shift inside another: a run layered on this one, as
+                    # Kindle Previewer 4.0.3 writes it (#536).
+                    nested = sorted(
+                        nested_shift(f)[::-1] for f in flags if nested_shift(f)
+                    )
+                    levels = [f for f in SHIFT_FLAGS if f in flags][:1] + [
+                        shift for _depth, shift in nested
+                    ]
+                    # Its size is the outer shift's, made smaller by its own.
+                    rest = frozenset(
+                        f
+                        for f in flags
+                        if f not in SHIFT_FLAGS
+                        and not nested_shift(f)
+                        and run_font_size((f,)) is None
+                    )
+                    scale = 1.0
+                    for outer, inner in zip(levels, levels[1:]):
+                        scale *= shift_size(outer)
+                        spans_out.append(
+                            (
+                                s,
+                                length,
+                                _emphasis_style(
+                                    rest | {inner},
+                                    chunk_fam,
+                                    _blk_b,
+                                    _blk_i,
+                                    in_cell="cell" in chunk
+                                    or "in_header_cell" in chunk,
+                                    sized=sized,
+                                    blk_fs=blk_fs,
+                                    scale=scale,
+                                ),
+                                None,
+                            )
+                        )
                 for serial, (r_start, r_end, reading) in rubies.items():
                     readings = ruby_readings.setdefault(ch_idx, [])
                     readings.append((ruby_eids[chunk_idx, serial], reading))
