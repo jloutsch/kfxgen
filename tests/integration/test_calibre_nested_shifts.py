@@ -37,6 +37,8 @@ BODY = (
     "<p>P8 e<sup>f<sub style='font-size:100%'>g</sub>h</sup> end.</p>"
     "<p>P9 e<sup>f<sub style='font-size:100%'>g<sup>z</sup></sub></sup> end.</p>"
     "<p>PB note<sup><span style='vertical-align:baseline'>12</span></sup> end.</p>"
+    "<p>PC x<sup><span style='vertical-align:baseline'>1</span></sup><sup>2</sup> end.</p>"
+    "<p>PD x<sup>1</sup><sup><span style='vertical-align:baseline'>2</span></sup> end.</p>"
 )
 
 
@@ -117,6 +119,11 @@ def test_baseline_and_a_kept_size_are_layered_as_previewer_writes_them(calibre):
     assert [v for t, v, _s in runs["PB"]] == ["$370"], (
         f"calibre {version}: {runs['PB']}"
     )
+    # Each <sup> judged on its own, a superscript beside it apart (QA on #641).
+    for key in ("PC", "PD"):
+        assert {v for t, v, _s in runs[key]} == {"$370"}, (
+            f"calibre {version}: {runs[key]}"
+        )
     # Under a layer at its parent's size, the next one shrinks from that size.
     assert ("z", "$370", round(S * S, 4)) in runs["P9"], (
         f"calibre {version}: {runs['P9']}"

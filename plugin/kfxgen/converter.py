@@ -101,6 +101,34 @@ def _nest_shift(cur, inherited, own):
     return (set(cur) - (set(own) - set(inherited))) | {nested}
 
 
+def _whole_baseline_dropped(parts, depth):
+    """`parts` of a shifted element at `depth`, without its children's
+    baseline shift when that is all of its text: Kindle Previewer 4.0.3
+    layers a baseline over part of a shifted element only, so a note marker
+    set back to the baseline inside its <sup> stays a superscript. Each
+    element is judged on its own, an exponent beside it apart (QA on #641)."""
+
+    def baseline(flags):
+        return next(
+            (
+                f
+                for f in flags
+                if (n := nested_shift(f))
+                and n[0] == BASELINE_SHIFT
+                and n[1] == depth + 1
+            ),
+            None,
+        )
+
+    texts = [flags for text, flags in parts if text and text.strip()]
+    if not texts or not all(baseline(flags) for flags in texts):
+        return parts
+    return [
+        (text, frozenset(f for f in flags if f != baseline(flags)))
+        for text, flags in parts
+    ]
+
+
 _UNDERLINE_TAGS = {"u", "ins"}
 _STRIKE_TAGS = {"s", "strike", "del"}
 #: Monospace without a stylizer; with one, calibre's UA sheet says so (#242).
@@ -1757,6 +1785,10 @@ def _walk_inline(
     # gone through a cell-aware step, and fused anyway. Both shapes are
     # malformed and an html5 parser would repair them, but the OEB shim parses
     # with plain `etree.fromstring`, which does not. (#128)
+    if own_shifts:
+        parts = _whole_baseline_dropped(
+            parts, sum(1 for f in cur if f in SHIFT_FLAGS or nested_shift(f))
+        )
     if local in _CELL_TAGS and not is_root:
         parts.append((" ", frozenset()))
     if line:
