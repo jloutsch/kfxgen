@@ -7,8 +7,12 @@ NCX `pageList`; with both, the two agree here. kfxgen wrote none.
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found. CI has no calibre, so this is
 local-only.
+
+These tests are about the book's own list, so they turn off the approximate
+pages kfxgen adds to a book without one (#586).
 """
 
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -22,11 +26,19 @@ sys.path.insert(0, str(REPO))
 
 from tests._kfx_introspect import by_type, iter_entries, load_fragments, val  # noqa: E402
 from tests.integration.test_calibre_table_rows import (  # noqa: E402
-    _ebook_convert,
+    EBOOK_CONVERT,
     calibre,  # noqa: F401  (fixture)
 )
 
 pytestmark = [pytest.mark.slow, pytest.mark.integration]
+
+
+def _convert_own_pages(calibre, epub, kfx):  # noqa: F811
+    _, env, _ = calibre
+    cmd = [EBOOK_CONVERT, str(epub), str(kfx), "--kfxgen-disable-approximate-pages"]
+    run = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    assert run.returncode == 0 and kfx.exists(), run.stdout[-2000:] + run.stderr[-2000:]
+
 
 CHAPS = ["c1.xhtml", "c2.xhtml"]
 # (file, id, label): page breaks, one mid-paragraph.
@@ -182,7 +194,7 @@ def test_the_page_list_as_previewer_writes_it(calibre, case):  # noqa: F811
     tmp, _env, version = calibre
     epub, kfx = tmp / f"p578-{case}.epub", tmp / f"p578-{case}.kfx"
     _epub(epub, case, *CASES[case])
-    _ebook_convert(calibre, epub, kfx, True)
+    _convert_own_pages(calibre, epub, kfx)
     want = PREVIEWER if any(CASES[case]) else []
     got = [(label, at[: len(w)]) for (label, at), (_l, w) in zip(_page_list(kfx), want)]
     assert len(_page_list(kfx)) == len(want) and got == want, (
@@ -214,6 +226,6 @@ def test_page_labels_previewer_rejects(calibre, relabel, want):  # noqa: F811
     key = "-".join(f"{ord(c)}" for c in "".join(relabel.values()))[:40]
     epub, kfx = tmp / f"p578-r{key}.epub", tmp / f"p578-r{key}.kfx"
     _epub(epub, f"r{key}", False, True, relabel)
-    _ebook_convert(calibre, epub, kfx, True)
+    _convert_own_pages(calibre, epub, kfx)
     got = [label for label, _at in _page_list(kfx)]
     assert got == want, f"calibre {version}: {got}"

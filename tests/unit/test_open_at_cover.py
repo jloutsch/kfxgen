@@ -56,6 +56,7 @@ def _prefs(monkeypatch, **values):
         "disable_font_embedding": False,
         "disable_native_tables": False,
         "open_at_cover": False,
+        "disable_approximate_pages": False,
         **values,
     }
     for name in ("calibre_plugins", "calibre_plugins.kfxgen"):
