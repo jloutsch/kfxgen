@@ -44,6 +44,7 @@ from .inline_style import (
     FLAG_TEXT_TOP,
     FLAG_UNDERLINE,
     HARD_BREAK,
+    BASELINE_SHIFT,
     LINE_START,
     NOTEREF_FLAG,
     SHIFT_FLAGS,
@@ -92,8 +93,41 @@ def _nest_shift(cur, inherited, own):
     if not depth or not own:
         return cur
     # Superscript wins over another shift, as it does on one run.
-    shift = next(f for f in SHIFT_FLAGS if f in own)
-    return (set(cur) - (set(own) - set(inherited))) | {f"{shift}@{depth + 1}"}
+    shift = next(f for f in (*SHIFT_FLAGS, BASELINE_SHIFT) if f in own)
+    # Its parent's size, `font-size: 100%`: the layer keeps it (#638).
+    size = run_font_size(inherited)
+    keeps = "=" if size is not None and run_font_size(cur) == size else ""
+    nested = f"{shift}@{depth + 1}{keeps}"
+    return (set(cur) - (set(own) - set(inherited))) | {nested}
+
+
+def _whole_baseline_dropped(parts, depth):
+    """`parts` of a shifted element at `depth`, without its children's
+    baseline shift when that is all of its text: Kindle Previewer 4.0.3
+    layers a baseline over part of a shifted element only, so a note marker
+    set back to the baseline inside its <sup> stays a superscript. Each
+    element is judged on its own, an exponent beside it apart (QA on #641)."""
+
+    def baseline(flags):
+        return next(
+            (
+                f
+                for f in flags
+                if (n := nested_shift(f))
+                and n[0] == BASELINE_SHIFT
+                and n[1] == depth + 1
+            ),
+            None,
+        )
+
+    # A space counts as its text, as Previewer counts it (QA on #641).
+    texts = [flags for text, flags in parts if text]
+    if not texts or not all(baseline(flags) for flags in texts):
+        return parts
+    return [
+        (text, frozenset(f for f in flags if f != baseline(flags)))
+        for text, flags in parts
+    ]
 
 
 _UNDERLINE_TAGS = {"u", "ins"}
@@ -1549,6 +1583,8 @@ def _walk_inline(
                 cur.add(FLAG_TEXT_BOTTOM)
             if shift in SHIFT_FLAGS:
                 own_shifts.append(shift)
+            elif str(css.get("vertical-align") or "").strip().lower() == "baseline":
+                own_shifts.append(BASELINE_SHIFT)  # inside a shift only (#638)
         if parent_emphasis is None and elem.getparent() is not None:
             parent_emphasis = _css_emphasis(style_resolver(elem.getparent()))
         if emphasis is not None and parent_emphasis is not None:
@@ -1750,6 +1786,10 @@ def _walk_inline(
     # gone through a cell-aware step, and fused anyway. Both shapes are
     # malformed and an html5 parser would repair them, but the OEB shim parses
     # with plain `etree.fromstring`, which does not. (#128)
+    if own_shifts:
+        parts = _whole_baseline_dropped(
+            parts, sum(1 for f in cur if f in SHIFT_FLAGS or nested_shift(f))
+        )
     if local in _CELL_TAGS and not is_root:
         parts.append((" ", frozenset()))
     if line:
