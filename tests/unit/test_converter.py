@@ -3539,9 +3539,8 @@ class TestSyntheticFrontMatterLabel:
             "the invented label would render as visible text on the page"
         )
 
-    def test_a_leading_title_prints_as_written(self):
-        """The head's first line prints as the book's own paragraph, not as
-        kfxgen's chapter heading, as Previewer prints it (#558)."""
+    def test_real_leading_title_still_renders_as_heading(self):
+        """Control: a genuine heading taken from the book keeps its heading."""
         spine = [
             _spine_item(
                 "book.xhtml",
@@ -3551,7 +3550,7 @@ class TestSyntheticFrontMatterLabel:
         toc = [{"title": "I", "href": "book.xhtml#c1"}]
         chapters = _assemble_chapters_by_coordinate(spine, toc, _silent_log())
         assert chapters[0]["title"] == "Copyright 2026"
-        assert chapters[0].get("_omit_title_heading") is True
+        assert not chapters[0].get("_omit_title_heading")
 
     def test_not_listed_as_a_contents_entry(self):
         chapters = self._front_matter_book()

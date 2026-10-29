@@ -5536,12 +5536,26 @@ def _assemble_chapters_by_coordinate(
         else:
             ch = _flag_nav(_mk(_leading_chapter_title(head), head), 0, first_fi)
             if ch:
-                # Text before the book's first TOC entry: Kindle Previewer
-                # 4.0.3 gives it no entry and prints it as written, whatever
-                # its first line (#558). The title is kfxgen's own label for
-                # it (#133, #143), so it is neither listed nor printed.
+                if ch["title"] != LEADING_TITLE_FALLBACK and _IMG_TOKEN_RE.search(
+                    head[0].get("text") or ""
+                ):
+                    # Titled with the words beside a picture: that paragraph
+                    # prints them, so a heading of them would print them
+                    # twice. Kindle Previewer 4.0.3 prints them once (#525).
+                    ch["_omit_title_heading"] = True
+                if ch["title"] == LEADING_TITLE_FALLBACK:
+                    # Invented label, not the book's own words — suppress it
+                    # as a heading so it cannot print onto the page. Set only
+                    # on this synthetic path: a book whose own TOC names a
+                    # chapter "Front Matter" comes through `coords` and keeps
+                    # its heading. (#133)
+                    ch["_omit_title_heading"] = True
+                # Not in the source TOC: this chapter exists because these
+                # blocks precede the first TOC anchor. Kindle Previewer 4.0.3
+                # lists none, whatever its first line (#558); #143 kept an
+                # entry for one that read as a heading. The content still
+                # ships.
                 ch["_omit_from_toc"] = True
-                ch["_omit_title_heading"] = True
                 chapters.append(ch)
 
     heads = _section_heads(coords, flat, spine_items_ordered, nav_flat, file_offset)
