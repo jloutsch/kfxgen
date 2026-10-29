@@ -103,7 +103,7 @@ def _cut_after_picture_lines(block):
     tokens = list(IMG_TOKEN_RE.finditer(text))
     # Preformatted text stays one entry, picture lines and all, as Previewer
     # keeps it (QA on #590).
-    if not tokens or any(m.group(4) for m in tokens) or block.get("preformatted"):
+    if any(m.group(4) for m in tokens) or block.get("preformatted"):
         return [block]
     if not IMG_TOKEN_RE.sub("", text).strip():
         return [block]
@@ -114,10 +114,10 @@ def _cut_after_picture_lines(block):
     for i, line in enumerate(lines):
         end = start + len(line)
         has_picture = bool(IMG_TOKEN_RE.search(line))
-        # After an empty line, a line holding a picture starts an entry, as
-        # Previewer writes it: a picture alone is then an entry of its own
-        # (QA on #590), one among words a mixed entry (#593).
-        if has_picture and i and not lines[i - 1].strip() and text[:start].strip():
+        # After an empty line, a line starts an entry, as Previewer writes it:
+        # a picture alone is then an entry of its own (QA on #590), one among
+        # words a mixed entry (#593), words a text entry (#602).
+        if line.strip() and i and not lines[i - 1].strip() and text[:start].strip():
             cuts.append((start, start))
         if has_picture and not IMG_TOKEN_RE.sub("", line).strip():
             if i < len(lines) - 1 and text[end + 1 :].strip():
@@ -125,7 +125,7 @@ def _cut_after_picture_lines(block):
         start = end + 1
     if not cuts:
         return [block]
-    pieces, a = [], 0
+    pieces, a, empty_line_cut = [], 0, False
     for b, after in [*cuts, (len(text), None)]:
         # A piece holds its end too: an id after the last word (#487), or at
         # a cut, stays on the piece it ends (QA on #590). Not before a
@@ -146,10 +146,22 @@ def _cut_after_picture_lines(block):
             "anchor_keys": [k for k in block.get("anchor_keys") or () if k in offsets],
             "anchor_offsets": offsets,
         }
+        if after == b:
+            # Before an empty line's cut: one line break kept, as Previewer
+            # keeps it (#602).
+            piece["trailing_break"] = True
         if a:
-            for key in ("heading_level", "space_above", "tight", "clear"):
+            # The paragraph goes on: no space above, clearing or first-line
+            # indent of its own. A heading's parts after an empty line stay
+            # headings, as Previewer lists them (#602).
+            for key in ("space_above", "tight", "clear"):
                 piece.pop(key, None)
+            if not empty_line_cut:
+                piece.pop("heading_level", None)
+            if (piece.get("block_style") or {}).get("indent"):
+                piece["block_style"] = {**piece["block_style"], "indent": None}
         pieces.append(piece)
+        empty_line_cut = after == b
         a = after
     # A key with no offset, or one past the text, stays on the first piece.
     placed = {k for p in pieces for k in p["anchor_keys"]}
@@ -4330,7 +4342,7 @@ class NativeKFXGenerator:
         toc_link_chunks = {}
         toc_link_levels = {}  # chunk index -> depth in the contents (#313)
 
-        def _emit_text_chunks(para_text, preformatted=False):
+        def _emit_text_chunks(para_text, preformatted=False, trailing_break=False):
             """Yield typed chunks from a paragraph that may contain image tokens.
 
             A preformatted paragraph keeps its leading spaces: they are its
@@ -4379,7 +4391,8 @@ class NativeKFXGenerator:
             if last < len(para_text):
                 seg = _trim(para_text[last:])
                 if seg.strip():
-                    chunks.append({"type": "text", "text": seg})
+                    # Before an empty line's cut, one line break stays (#602).
+                    chunks.append({"type": "text", "text": seg + "\n" * trailing_break})
             return chunks
 
         def _append_text_with_spans(
@@ -4538,7 +4551,9 @@ class NativeKFXGenerator:
             if inline:
                 para, para_spans, block_offsets, pictures = inline
             space = 0.0 if block.get("tight") else _space_to_write(block)
-            for chunk in _emit_text_chunks(para, preformatted):
+            for chunk in _emit_text_chunks(
+                para, preformatted, bool(block.get("trailing_break"))
+            ):
                 if chunk["type"] == "image":
                     # Figure ids live on image blocks; without this
                     # a link to a figure resolved to nothing. (#62)

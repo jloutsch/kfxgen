@@ -53,20 +53,20 @@ PREVIEWER = [
     ["M1 ", ("m1a", 3.0, 3.0), "\ncaption ", ("m1b", 3.0, 3.0), " inline."],
     ["M3 start ", ("m3a", 3.0, 3.0), " mid\n", ("m3b", 3.0, 3.0)],
     "end.",
-    # Previewer's text keeps a line break at the end ("W1 words\n"); kfxgen
-    # strips it, as main does. The pictures are entries of their own.
-    "W1 words",
-    "W2 heading",
-    "W4 words",
+    # Previewer's text keeps a line break at the end before an empty line's
+    # cut, and so does kfxgen since #602 (rechecked 2026-10-28). The
+    # pictures are entries of their own.
+    "W1 words\n",
+    "W2 heading\n",
+    "W4 words\n",
     "W4 more.",
     ["W5 words\n", ("w5", 3.0, 3.0)],
     "W5 more.",
-    # Previewer's text keeps one line break ("U1 words\n"); kfxgen strips it.
-    "U1 words",
+    "U1 words\n",
     [("u1", 3.0, 3.0), " tail words."],
-    "U2 words",
+    "U2 words\n",
     [("u2", 3.0, 3.0), " tail."],
-    "U3 words",
+    "U3 words\n",
     ["lead ", ("u3", 3.0, 3.0), " tail words."],
     ["U5 words\n", ("u5", 3.0, 3.0), " tail words."],
     "After.",
@@ -160,4 +160,4 @@ def test_a_link_across_the_cut_covers_both_pieces(calibre):  # noqa: F811
                 "$179" in r for r in e.get("$142") or ()
             ):
                 linked.append(words)
-    assert linked == ["U2 words", " tail."], f"calibre {version}: {linked}"
+    assert linked == ["U2 words\n", " tail."], f"calibre {version}: {linked}"

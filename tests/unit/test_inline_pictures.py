@@ -386,11 +386,11 @@ def test_preformatted_text_with_a_picture_line_is_not_cut(tmp_path):
     [
         (
             "<p>W1 words<br/><br/><img src='b.jpg' alt='a'/></p>",
-            ["W1 words", "picture"],
+            ["W1 words\n", "picture"],
         ),
         (
             "<h1>W2 heading<br/><br/><img src='b.jpg' alt='a'/></h1>",
-            ["W2 heading", "picture"],
+            ["W2 heading\n", "picture"],
         ),
         # One <br/>: the picture stays in the words, as before.
         (
@@ -419,16 +419,16 @@ def test_a_picture_line_after_an_empty_line_is_its_own_entry(tmp_path, body, exp
     [
         (
             "<p>U1 words<br/><br/><img src='s.jpg' alt='a'/> tail words.</p>",
-            ["U1 words", ["pic", " tail words."]],
+            ["U1 words\n", ["pic", " tail words."]],
         ),
         (
             "<p>U3 words<br/><br/>lead <img src='s.jpg' alt='a'/> tail words.</p>",
-            ["U3 words", ["lead ", "pic", " tail words."]],
+            ["U3 words\n", ["lead ", "pic", " tail words."]],
         ),
         (
             "<p>U4 words<br/><br/><img src='s.jpg' alt='a'/>"
             "<img src='s.jpg' alt='b'/> tail words.</p>",
-            ["U4 words", ["pic", "pic", " tail words."]],
+            ["U4 words\n", ["pic", "pic", " tail words."]],
         ),
         # One line break: no cut, as before.
         (
