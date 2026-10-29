@@ -13,10 +13,12 @@ from .inline_style import (
     ALIGN_MAP,
     EXTERNAL_LINK_PREFIX,
     NOTEREF_FLAG,
+    SHIFT_FLAGS,
     TYPOGRAPHY_KEYS,
     VALIGN_MAP,
     css_text_colour,
     math_of,
+    nested_shift,
     ruby_of,
     without_math,
     without_ruby,
@@ -348,6 +350,13 @@ def shift_size(shift):
     if shift == "sub":
         return subscript_metrics()[0]
     return 1.0
+
+
+def shift_path(flags):
+    """A run's vertical shifts, outermost first: its own, then each nested
+    one in depth order (#536)."""
+    nested = sorted((n[1], n[0]) for n in (nested_shift(f) for f in flags) if n)
+    return [f for f in SHIFT_FLAGS if f in flags][:1] + [sh for _d, sh in nested]
 
 
 def subscript_metrics():
@@ -6421,7 +6430,30 @@ class NativeKFXGenerator:
                         chunk["text"],
                         maths,
                     )
-                for s, length, flags in chunk_spans:
+                paths = [shift_path(fl) for _s, _n, fl in chunk_spans]
+
+                def whole_baseline(i, j):
+                    """Whether span i's baseline shift at level j covers all of
+                    the shifted text around it: Previewer writes no layer then,
+                    as for a note marker set back to the baseline (QA on #641)."""
+                    prefix = paths[i][:j]
+                    for step in (-1, 1):
+                        k = i
+                        while 0 <= k + step < len(chunk_spans):
+                            a, b = sorted((k, k + step))
+                            if (
+                                chunk_spans[a][0] + chunk_spans[a][1]
+                                != chunk_spans[b][0]
+                            ):
+                                break
+                            k += step
+                            if paths[k][:j] != prefix:
+                                break
+                            if paths[k][j : j + 1] != [BASELINE_SHIFT]:
+                                return False
+                    return True
+
+                for span_i, (s, length, flags) in enumerate(chunk_spans):
                     flags = without_math(without_ruby(flags))
                     if not flags:
                         continue
@@ -6498,8 +6530,12 @@ class NativeKFXGenerator:
                         and run_font_size((f,)) is None
                     )
                     scale = 1.0
-                    for (outer, kept), (inner, keeps) in zip(levels, levels[1:]):
+                    for j, ((outer, kept), (inner, keeps)) in enumerate(
+                        zip(levels, levels[1:]), 1
+                    ):
                         scale *= 1.0 if kept else shift_size(outer)
+                        if inner == BASELINE_SHIFT and whole_baseline(span_i, j):
+                            continue
                         spans_out.append(
                             (
                                 s,
