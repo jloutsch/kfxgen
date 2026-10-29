@@ -15,12 +15,13 @@ from tests._kfx_introspect import by_type, iter_entries, load_fragments, val
 pytestmark = pytest.mark.unit
 
 
-def _entries(tmp_path, body, css=None):
+def _entries(tmp_path, body, css=None, native_tables=False):
     """The book's text entries, as (text, its style) in reading order."""
     xhtml = f'<html xmlns="http://www.w3.org/1999/xhtml"><body>{body}</body></html>'
     blocks = _conv.extract_blocks_from_html(
         etree.fromstring(xhtml.encode()),
         base_href="c.xhtml",
+        native_tables=native_tables,
         style_resolver=lambda e: dict(
             (k.strip(), v.strip())
             for k, _, v in (d.partition(":") for d in (e.get("style") or "").split(";"))
@@ -172,3 +173,66 @@ def test_a_spacer_line_keeps_only_its_first_line_as_spaces(tmp_path, body, expec
     as plain spaces, and nothing after (QA's E12 on #625, probed 2026-10-28;
     #626)."""
     assert _texts(tmp_path, body) == expected
+
+
+def test_a_cells_text_is_cut_into_entries_in_the_cell(tmp_path):
+    """`<td>W3 cell first<br/><br/>W3 cell after</td>`: Kindle Previewer 4.0.3
+    writes a cell container holding two text entries (#624, probed
+    2026-10-28); a plain cell beside it stays one entry."""
+    _unused, frags = _entries(
+        tmp_path,
+        "<table><tr><td>W3 cell first<br/><br/>W3 cell after</td>"
+        "<td>W3b</td></tr></table>",
+        native_tables=True,
+    )
+    content = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+
+    def shape(e):
+        e = getattr(e, "value", e)
+        if e.get("$145"):
+            return str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+        return [
+            shape(k)
+            for k in e.get("$146") or ()
+            if hasattr(getattr(k, "value", k), "get")
+        ]
+
+    tables = [
+        getattr(e, "value", e)
+        for st in by_type(frags, "$259")
+        for e in iter_entries(val(st)["$146"])
+        if hasattr(e, "get") and str(e.get("$159")) == "$278"
+    ]
+    row = shape(tables[0])
+    while len(row) == 1 and isinstance(row[0], list):
+        row = row[0]
+    assert row == [["W3 cell first\n", "W3 cell after"], "W3b"]
+
+
+def test_a_cut_cells_first_part_has_no_space_above(tmp_path):
+    """The cell's single entry had none on main, and Previewer's first part
+    has none; the part after the cut is spaced as a body cut's is (#625)."""
+    _unused, frags = _entries(
+        tmp_path,
+        "<table><tr><td>W3 cell first<br/><br/>W3 cell after</td>"
+        "<td>W3b</td></tr></table>",
+        native_tables=True,
+    )
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    content = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    above = {}
+
+    def walk(e):
+        e = getattr(e, "value", e)
+        if not hasattr(e, "get"):
+            return
+        if e.get("$145"):
+            text = str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+            above[text] = "$47" in styles.get(str(e.get("$157")), {})
+        for k in e.get("$146") or ():
+            walk(k)
+
+    for st in by_type(frags, "$259"):
+        for e in val(st)["$146"]:
+            walk(e)
+    assert (above["W3 cell first\n"], above["W3 cell after"]) == (False, True)
