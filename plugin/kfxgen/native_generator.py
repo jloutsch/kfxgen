@@ -4840,6 +4840,8 @@ class NativeKFXGenerator:
                             }
                         )
                         if len(parts) > 1:
+                            # The cell's own top: no paragraph space above.
+                            parts[0]["space_above"] = 0.0
                             cell = {
                                 **cell,
                                 "paragraphs": [
@@ -4890,6 +4892,7 @@ class NativeKFXGenerator:
                                     "block_style": para.get("block_style"),
                                     "anchor_keys": para.get("anchor_keys") or [],
                                     "anchor_offsets": para.get("anchor_offsets") or {},
+                                    "space_above": para.get("space_above"),
                                     "in_header_cell": cell_info["header"]
                                     and not cell_info["not_bold"],
                                 }

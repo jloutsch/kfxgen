@@ -207,3 +207,32 @@ def test_a_cells_text_is_cut_into_entries_in_the_cell(tmp_path):
     while len(row) == 1 and isinstance(row[0], list):
         row = row[0]
     assert row == [["W3 cell first\n", "W3 cell after"], "W3b"]
+
+
+def test_a_cut_cells_first_part_has_no_space_above(tmp_path):
+    """The cell's single entry had none on main, and Previewer's first part
+    has none; the part after the cut is spaced as a body cut's is (#625)."""
+    _unused, frags = _entries(
+        tmp_path,
+        "<table><tr><td>W3 cell first<br/><br/>W3 cell after</td>"
+        "<td>W3b</td></tr></table>",
+        native_tables=True,
+    )
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    content = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    above = {}
+
+    def walk(e):
+        e = getattr(e, "value", e)
+        if not hasattr(e, "get"):
+            return
+        if e.get("$145"):
+            text = str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+            above[text] = "$47" in styles.get(str(e.get("$157")), {})
+        for k in e.get("$146") or ():
+            walk(k)
+
+    for st in by_type(frags, "$259"):
+        for e in val(st)["$146"]:
+            walk(e)
+    assert (above["W3 cell first\n"], above["W3 cell after"]) == (False, True)
