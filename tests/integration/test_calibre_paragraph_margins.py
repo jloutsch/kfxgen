@@ -184,3 +184,27 @@ def test_a_cut_paragraphs_margins_go_on_its_first_and_last_parts(calibre):  # no
     assert got["M1 second part"][1] == 1.667, f"calibre {version}: {got}"
     assert got["M3 top only"] == (0.833, None), f"calibre {version}: {got}"
     assert got["M3 later part"][1] is None, f"calibre {version}: {got}"
+
+
+def test_before_a_box_the_paragraph_keeps_no_space_below(calibre):  # noqa: F811
+    """A bordered box spaces itself (#238): the paragraph before it writes
+    no $49, or the gap was the paragraph's line and the box's (2 lines, where
+    Previewer has 0.833; QA on #639). The same before a heading kfxgen
+    spaces its own way."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "box553.epub", tmp / "box553.kfx"
+    _book_epub(
+        epub,
+        "B553",
+        "<h1>Box</h1><p>Q0 plain words before.</p>"
+        "<p style='margin:0 0 1em 0'>Q1 before the box.</p>"
+        "<div style='border:1px solid black;padding:0.5em'><p>Q2 in the box.</p></div>"
+        "<p style='margin:0 0 2em 0'>Q3 before a heading.</p>"
+        "<h2 style='margin-top:0.5em'>Q4 heading</h2><p>Q5 after.</p>",
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Box", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    assert got["Q1"][1] is None, f"calibre {version}: {got}"
+    assert got["Q3"][1] is None, f"calibre {version}: {got}"

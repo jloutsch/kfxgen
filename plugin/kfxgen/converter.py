@@ -3935,6 +3935,13 @@ def _takes_margin(block):
     return block.get("type") is None and not block.get("heading")
 
 
+def _spaces_itself(block):
+    """Whether kfxgen writes `block`'s space above its own way: a heading,
+    a box (#238) or a rule (#230). The paragraph before it then keeps no
+    space below, or the gap was both (QA on #639)."""
+    return bool(block.get("heading")) or block.get("type") in ("box", "rule")
+
+
 def _em_px(block):
     """`block`'s font size in CSS px, for comparing margins across sizes."""
     return (block.get("block_style") or {}).get("font_size") or 16.0
@@ -3957,11 +3964,17 @@ def _place_margin(prev, b, above, top, lines, on_purpose):
         if _takes_margin(b):
             b["margin_above"] = max(up, own) / _em_px(b) + lines
     else:
-        prev["margin_below"] = above
+        if not _spaces_itself(b):
+            prev["margin_below"] = above
         if _takes_margin(b):
             b["margin_above"] = 0.0
-    if not _takes_margin(b) and _takes_margin(prev) and up > own:
-        # Before a heading, a table or a box: the paragraph above keeps it.
+    if (
+        not _takes_margin(b)
+        and not _spaces_itself(b)
+        and _takes_margin(prev)
+        and up > own
+    ):
+        # Before a table: the paragraph above keeps it, as Previewer writes it.
         prev["margin_below"] = above
 
 
