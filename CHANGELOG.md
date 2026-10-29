@@ -1,5 +1,80 @@
 # Changelog
 
+## 5.21.0 — Page numbers, opening place, blank lines, Contents pages
+
+Seventeen changes since 5.20.0. Each one was reviewed, converted through real
+calibre and, where Previewer has an equivalent, compared with Kindle
+Previewer 4.0.3's output for the same book. Estimated page numbers were
+compared with kfxlib's instead.
+Most were also checked against the Gutenberg 90 and a sample of library books
+before and after. Page numbers, the opening place, blank lines in paragraphs and in table
+cells were also checked on a Kindle Paperwhite (5.19.2); the Voyage and Oasis
+were not checked for this release.
+
+### What readers will notice
+
+**Page numbers**
+- A book's own page numbers (an EPUB 3 page list, or the NCX's) are written,
+  so the Kindle can show "Page N" and Go To Page lands on the print page
+  (#578). Labels such as "[Pg 12]", "{vii}" or "Page 3" are cleaned to their
+  number; if any label still isn't a number or a roman numeral, the book's
+  list is not used, as Previewer leaves it out (#612), and the book gets
+  estimated pages instead (below).
+- A book with no page numbers of its own gets estimated ones, about one page
+  per 1,850 characters, placed exactly as kfxlib places them (#586). In the
+  A/B, 70 of 90 Gutenberg books and 117 of 200 library books got them.
+  Previewer writes none for these books; this is a deliberate difference.
+  To turn it off, check "Don't add estimated page numbers" in the plugin's
+  Customize dialog, or convert with `--kfxgen-disable-approximate-pages`.
+
+**Where a new book opens**
+- A new book opens where the book marks the start of its text, usually the
+  first chapter, as Previewer's files do (#579, #609).
+- To open at the cover instead, check "Open new books at the cover" in the
+  Customize dialog, or convert with `--kfxgen-open-at-cover` (#623).
+- Landmark and page targets spelled in other capitals than the file still
+  land (#610).
+
+**Blank lines**
+- A blank line inside a paragraph (`<br/><br/>`) starts a new block, as
+  Previewer writes it: stanzas, letters, captions, headings (#602). A
+  "blank" line of no-break spaces keeps only its spaces (#626).
+- The same inside a table cell (#624).
+
+**Contents pages and the TOC**
+- On a rebuilt Contents page, part headings print as headings (#595), a
+  heading the page also links prints where it is (#614), two headings in a
+  row ("Book One", "The Beginning") keep their order (#618), a heading before
+  an unlisted link goes before the next chapter (#622), and a heading
+  merges into the right one of two same-named entries (#622).
+- Text before a book's first TOC entry, such as a title page, no longer
+  gets a TOC entry of its own, as in Previewer's files (#558). In Gutenberg
+  books that is usually "The Project Gutenberg eBook of …" (51 of 90).
+
+**Header cells**
+- A header cell keeps its own alignment, even when it equals its row's
+  (#601). `inherit`, `initial` and `start` read as Previewer reads them
+  (#616), `inherit` ignores an `align=` attribute above it, and `initial` and
+  `end` follow a right-to-left table (#621).
+
+### Tech debt paid down
+- One reader for a book's own OPF, nav document and NCX, shared by the
+  landmarks and the page list (#612).
+- One cut path for paragraphs and table cells at blank lines (#629).
+- The table-direction lookup is one function, used by data and header
+  cells (#632).
+- A rebuilt Contents page decides heading merges by counting the page's
+  links per entry, not by matching words (#630).
+- The before/after book comparisons now count words in mixed entries and
+  links, after #625's comparison wrongly reported gained words.
+
+### Known differences from Previewer, still open
+- Right-to-left tables: Previewer records each table's, row's and cell's
+  text direction; kfxgen doesn't yet (#605).
+- The rarer cases found during the audit were closed with their counts
+  (#560, #562, #570, #572, #573, #631, #633); others are parked until a book
+  needs them (#456, #483, #501, #515, #536, #538, #553, #565).
+
 ## 5.20.0 — Pictures in text and tables, header cells, Contents pages
 
 Ten fixes since 5.19.0. Each one was reviewed, converted through real
