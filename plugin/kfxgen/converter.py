@@ -4922,7 +4922,10 @@ def extract_blocks_from_html(
             border = fill = None
         kids = blocks[start:]
         # A wrapper around a picture is drawn at its width (#382); one of
-        # only a floated picture keeps #243's floated picture instead.
+        # only a floated picture keeps #243's floated picture instead, with
+        # no box even when bordered or filled: a floated box stops the
+        # Voyage wrapping text beside it (#382), and one at the page's width
+        # drew its border round the page (QA on #644).
         width = _box_width(css)
         side = _float_side(css)
         if width is not None and not any(
@@ -4932,7 +4935,7 @@ def extract_blocks_from_html(
         if width is not None and side and len(kids) == 1:
             m = _IMG_TOKEN_RE.fullmatch(kids[0].get("text") or "")
             if m and m.group(4):
-                width = None
+                return False
         if border is None and fill is None and width is None:
             return False
         if not kids or not any(
