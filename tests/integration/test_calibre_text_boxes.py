@@ -142,3 +142,86 @@ def test_a_padded_pre_is_spaced_by_its_padding(converted):
     assert (_lh(own, "$49") or _lh(after, "$47")) == 0.833, (
         f"calibre {version}: {own} {after}"
     )
+
+
+def _replace_files(epub, files):
+    """Rewrite `epub` with `files` ({name: xhtml body}) in place of those
+    chapters' bodies."""
+    import zipfile
+
+    with zipfile.ZipFile(epub) as z:
+        items = {n: z.read(n) for n in z.namelist()}
+    for name, body in files.items():
+        head = items[name].split(b"<body>")[0]
+        items[name] = head + f"<body>{body}</body></html>".encode()
+    with zipfile.ZipFile(epub, "w") as z:
+        z.writestr("mimetype", items.pop("mimetype"), compress_type=zipfile.ZIP_STORED)
+        for n, b in items.items():
+            z.writestr(n, b)
+
+
+#: A chapter opening with its number in a bordered <p> and its title in the
+#: next, each linking back to the contents, and the same lines in a
+#: bordered <div>. Its TOC label spells out both lines (#552).
+OPENERS = {
+    "c1.xhtml": "<p style='border-bottom:1px solid #000'>"
+    "<a id='n1' href='contents.xhtml#t1'>CHAPTER ONE</a></p>"
+    "<p><a href='contents.xhtml#t1'>The Pilot Light</a></p><p>R1 body words.</p>",
+    "c2.xhtml": "<div style='border:1px solid #000'><p>"
+    "<a id='n2' href='contents.xhtml#t2'>CHAPTER TWO</a></p>"
+    "<p><a href='contents.xhtml#t2'>The Second Light</a></p></div><p>R2 body words.</p>",
+}
+
+
+@pytest.mark.parametrize(
+    ("case", "label"),
+    [("R1", "Chapter One: The Pilot Light"), ("R2", "Chapter Two: The Second Light")],
+)
+def test_a_boxed_opener_spelling_the_label_prints_as_written(calibre, case, label):  # noqa: F811
+    """The label spells out the boxed number and the title line after it,
+    so they print as the book writes them, with their links, and kfxgen
+    prints no heading of its own, as for the same lines unboxed (#552). The
+    split-title cut ate them and printed the label with no links (#643's
+    A/B: 9 chapters in one library book lost 18 links)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / f"open{case}.epub", tmp / f"open{case}.kfx"
+    _book_epub(
+        epub,
+        f"O643{case}",
+        "<h1>Contents</h1><p id='t1'><a href='c1.xhtml'>Chapter One</a></p>"
+        "<p id='t2'><a href='c2.xhtml'>Chapter Two</a></p>",
+        [("c1.xhtml", "One"), ("c2.xhtml", "Two")],
+        [
+            ("c0", "contents.xhtml", "Contents", []),
+            ("c1", "c1.xhtml", "Chapter One: The Pilot Light", []),
+            ("c2", "c2.xhtml", "Chapter Two: The Second Light", []),
+        ],
+    )
+    _replace_files(epub, OPENERS)
+    _ebook_convert(calibre, epub, kfx, True)
+    frags = load_fragments(kfx)
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+
+    def walk(e, entries):
+        e = _plain(e)
+        if not hasattr(e, "get"):
+            return
+        if e.get("$145"):
+            t = str(texts[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+            links = sum(1 for r in e.get("$142") or () if "$179" in r)
+            entries.append((t.strip(), links))
+        for k in e.get("$146") or ():
+            walk(k, entries)
+
+    # The chapter's own storyline: its entries before the body.
+    for st in by_type(frags, "$259"):
+        entries = []
+        for e in val(st)["$146"]:
+            walk(e, entries)
+        if any(t.startswith(case) for t, _n in entries):
+            break
+    opener = [x for x in entries if not x[0].startswith(case)]
+    assert opener == [(t, 1) for t, _n in opener] and len(opener) == 2, (
+        f"calibre {version}: {opener}"
+    )
+    assert label not in [t for t, _n in opener], f"calibre {version}: {opener}"

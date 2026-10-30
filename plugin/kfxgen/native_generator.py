@@ -727,6 +727,16 @@ def _label_blocks(blocks, title):
     return []
 
 
+def _unboxed(blocks):
+    """`blocks` with each box in them replaced by its blocks, as they read
+    before they were boxed: a label spelled over a boxed chapter number and
+    the title after it prints them as written, as unboxed (#552, #643)."""
+    out = []
+    for block in blocks or ():
+        out.extend(_unboxed(block["blocks"]) if block.get("type") == "box" else [block])
+    return out
+
+
 def _book_heading_title(blocks, title):
     """(The text of a chapter's first block, its runs) when `title` is that
     block (see `_label_blocks`), else (`title`, None). The book's heading
@@ -5122,7 +5132,8 @@ class NativeKFXGenerator:
             # over them: they print as they are, each its own entry, and
             # kfxgen prints no heading, as Kindle Previewer 4.0.3 has it (#552).
             label_over_blocks = (
-                not toc_links and len(_label_blocks(chapter.get("blocks"), title)) > 1
+                not toc_links
+                and len(_label_blocks(_unboxed(chapter.get("blocks")), title)) > 1
             )
             omit_heading = (
                 chapter.get("_is_cover")
