@@ -2847,11 +2847,14 @@ _LINE_SPACE_EM = 1.2
 def _margin_em(css, side):
     """An element's declared margin-top or -bottom in ems (1px = 0.45pt,
     12pt = 1em, as for padding); a percentage on Kindle Previewer 4.0.3's
-    scale, 100% = 384pt = 32em (#640); 0 when unset or negative."""
-    em = _padding_em((css or {}).get(f"margin-{side}"))
+    scale, 100% = 384pt = 32em (#640); negative as the book sets it (#640);
+    0 when unset."""
+    value = str((css or {}).get(f"margin-{side}") or "").strip()
+    sign = -1.0 if value.startswith("-") else 1.0
+    em = _padding_em(value.lstrip("-"))
     if isinstance(em, tuple):
-        return em[1] * 0.32
-    return 0.0 if em is None else em
+        return sign * em[1] * 0.32
+    return 0.0 if em is None else sign * em
 
 
 def _is_spacer(elem):
@@ -3971,6 +3974,12 @@ def _page_breaks(css):
     return breaks("before"), breaks("after")
 
 
+def _collapse(a, b):
+    """Two touching margins as one, as in a browser: the largest positive
+    plus the most negative (#640)."""
+    return max(0.0, a, b) + min(0.0, a, b)
+
+
 def _takes_margin(block):
     """Whether kfxgen writes the book's margins on `block`: a paragraph, not
     a heading (kfxgen spaces its headings its own way), a table, a box or a
@@ -3995,7 +4004,7 @@ def _place_margin(prev, b, above, top, lines, on_purpose, pad_up=0.0, pad_own=0.
     the larger of the margin waiting above (`above`, the block before's
     margin-bottom or an invisible <hr>'s) and `b`'s own margin-top, as margins
     collapse in a browser, plus the spacer paragraphs' lines (in ems). `b` takes it
-    when its own margin-top is above 0; otherwise the block before keeps it
+    when it has a margin-top of its own; otherwise the block before keeps it
     as its space below and `b` takes none. Margins are in each block's own
     ems, so they are compared in px. A wrapper's padding above `b`
     (`pad_own`) and below the block before (`pad_up`) is added: padding
@@ -4006,9 +4015,10 @@ def _place_margin(prev, b, above, top, lines, on_purpose, pad_up=0.0, pad_own=0.
         return
     up, own = above * _em_px(prev), top * _em_px(b)
     padding = pad_up * _em_px(prev) + pad_own * _em_px(b)
-    if top > 0 or on_purpose or not _takes_margin(prev):
+    gap = _collapse(up, own)
+    if top != 0 or on_purpose or not _takes_margin(prev):
         if _takes_margin(b):
-            b["margin_above"] = (max(up, own) + padding) / _em_px(b) + lines
+            b["margin_above"] = (gap + padding) / _em_px(b) + lines
     else:
         if not _spaces_itself(b):
             prev["margin_below"] = above + pad_up
@@ -4088,7 +4098,7 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                 padding = (pads.get(id(out[-1])) or (0, 0))[1] + (
                     pads.get(id(b)) or (0, 0)
                 )[0]
-                gaps.append((b, round(max(above, top) + lines + padding, 4), how))
+                gaps.append((b, round(_collapse(above, top) + lines + padding, 4), how))
             above = bottom
         else:
             above = 0.0
@@ -4852,9 +4862,9 @@ def extract_blocks_from_html(
         if not mine:
             return
         first = margins.setdefault(id(mine[0]), [0.0, 0.0])
-        first[0] = max(first[0], top)
+        first[0] = _collapse(first[0], top)
         last = margins.setdefault(id(mine[-1]), [0.0, 0.0])
-        last[1] = max(last[1], bottom)
+        last[1] = _collapse(last[1], bottom)
 
     def _make_box(elem, start, leaf=False):
         """Replace the blocks a bordered or filled container produced with

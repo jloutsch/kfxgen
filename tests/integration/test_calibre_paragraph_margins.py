@@ -276,3 +276,52 @@ def test_a_wrappers_padding_spaces_its_first_and_last_paragraphs(calibre):  # no
     assert got["W4"] == (0.833, None), f"calibre {version}: {got}"
     assert got["W5"] == (None, 0.833), f"calibre {version}: {got}"
     assert got["W6"] == (None, None), f"calibre {version}: {got}"
+
+
+def test_negative_margins_collapse_as_in_a_browser(calibre):  # noqa: F811
+    """A negative margin collapses as in a browser: the largest positive plus
+    the most negative, which may leave a negative gap, as Kindle Previewer
+    4.0.3 writes it (my probe 2026-10-29, #640). kfxgen read a negative
+    margin as none."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "neg640.epub", tmp / "neg640.kfx"
+
+    def p(label, style):
+        return f"<p style='{style}'>{label} words words words words words.</p>"
+
+    _book_epub(
+        epub,
+        "NEG640",
+        "<h1>Negative</h1>"
+        + p("N0", "margin:0")
+        + p("N1", "margin:0 0 1em 0")
+        + p("N2", "margin:-0.5em 0 0 0")
+        + p("N3", "margin:0 0 1em 0")
+        + p("N4", "margin:-1em 0 0 0")
+        + p("N5", "margin:0 0 1em 0")
+        + p("N6", "margin:-2em 0 0 0")
+        + p("N7", "margin:0")
+        + p("N8", "margin:-1em 0 0 0")
+        + p("N9", "margin:0 0 2em 0")
+        + p("NA", "margin:-0.5em 0 0 0")
+        + p("NB", "margin:0 0 -1em 0")
+        + p("NC", "margin:1em 0 0 0")
+        + p("ND", "margin:0 0 -0.5em 0")
+        + p("NE", "margin:0"),
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Negative", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    # Previewer's; it writes a gap of 0 as $47 0, kfxgen writes none: the same.
+    want = {
+        "N2": (0.417, None),
+        "N4": (None, None),
+        "N6": (-0.833, None),
+        "N8": (-0.833, None),
+        "NA": (1.25, None),
+        "NC": (None, None),
+        "ND": (None, -0.417),
+    }
+    wrong = {k: (got.get(k), v) for k, v in want.items() if got.get(k) != v}
+    assert not wrong, f"calibre {version}: (kfxgen, Previewer) {wrong}"
