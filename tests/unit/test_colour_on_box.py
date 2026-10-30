@@ -171,14 +171,13 @@ def test_a_black_box_is_filled_and_its_white_text_kept(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_paragraphs_own_background_is_not_drawn_so_its_text_is_on_the_page(
-    tmp_path,
-):
-    """kfxgen draws no fill for a <p> or a <span>: its white text sits on
-    the page and is darkened, as before."""
+def test_a_paragraphs_own_fill_is_drawn_and_a_spans_is_not(tmp_path):
+    """A filled <p> is a box, as Kindle Previewer 4.0.3 draws it (#643): its
+    white text stays white on its #333. kfxgen draws no fill for a <span>,
+    so its white text sits on the page and is darkened, as before."""
     body = '<p class="pdark">Own fill.</p><p>Plain <span class="white">white run</span>.</p>'
     found = _texts(body, tmp_path)
-    assert found["Own"][0] == 0xFF767676
+    assert found["Own"][0] == 0xFFFFFFFF and found["Own"][2] == 0xFF333333
     assert found["Plain"][1] == [0xFF767676]
 
 
@@ -204,9 +203,10 @@ def test_text_from_a_fill_kfxgen_doesnt_draw_is_measured_against_the_page(tmp_pa
 
 
 @pytest.mark.unit
-def test_inside_a_box_a_paragraphs_own_fill_is_not_the_background(tmp_path):
-    """kfxgen draws the box's #333 and not the <p>'s #EEE, so #777 text is
-    lightened against the box, not darkened against the <p>."""
+def test_inside_a_box_a_paragraphs_own_fill_is_the_background(tmp_path):
+    """A filled <p> in a box is a box in it, as Previewer nests them (#643):
+    #777 text is darkened against the <p>'s #EEE to Previewer's #6C6C6C (my
+    probe, 2026-10-29), not lightened against the box's #333."""
     body = '<div class="dark"><p class="plight">Inner fill.</p></div>'
     colour, _runs, fill = _texts(body, tmp_path)["Inner"]
-    assert fill == 0xFF333333 and _near(colour, 0xFF9B9B9B)
+    assert fill == 0xFFEEEEEE and _near(colour, 0xFF6C6C6C)

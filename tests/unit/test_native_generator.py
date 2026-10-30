@@ -4764,14 +4764,18 @@ def test_the_chapter_title_is_cut_from_a_boxs_first_paragraph(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_title_split_over_a_boxs_first_lines_is_cut(tmp_path):
+def test_a_title_split_over_a_boxs_first_lines_prints_them_as_written(tmp_path):
     """The chapter "IV—Dawn" opens with a box whose first two lines are "IV"
-    and "Dawn": both are the title, as before the box (#238)."""
+    and "Dawn": the label spells them out, so they print as written and
+    kfxgen prints no heading, as for the lines unboxed (#552) and as Kindle
+    Previewer 4.0.3 prints a boxed opener (my probe, #643). The cut ate them
+    (#238) and their links with them."""
     box = _box_block([_para("IV"), _para("Dawn"), _para("The day began.")])
     chapters = [{"title": "IV—Dawn", "text": box["text"], "blocks": [box]}]
     entries, _, text, _ = _book(tmp_path, chapters)
     (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
-    assert [text(k) for k in b["$146"]] == ["The day began."]
+    assert [text(k) for k in b["$146"]] == ["IV", "Dawn", "The day began."]
+    assert [text(e) for e in entries if text(e)] == ["IV", "Dawn", "The day began."]
 
 
 @pytest.mark.unit
@@ -4887,40 +4891,23 @@ def test_ids_waiting_for_a_box_with_no_content_go_to_the_next_block(
 
 
 @pytest.mark.unit
-def _box_spacing(tmp_path, kids, following):
-    box = _box_block(kids, space_above=1.2, space_below=0.0)
-    chapters = [
-        {"title": "One", "text": "x", "blocks": [_para("Before."), box, following]}
-    ]
-    entries, styles, _, _ = _book(tmp_path, chapters)
-    (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
-    st = {str(k): v for k, v in styles[str(b["$157"])].items()}
-    return {k: str(st[k]["$307"]) for k in ("$47", "$49", "$54") if k in st}
-
-
-def _indented(text):
-    return dict(_para(text), block_style={"indent": ("1", "$308")})
-
-
-@pytest.mark.unit
-def test_a_box_fits_kfxgens_paragraph_spacing(tmp_path):
-    """Unindented paragraphs carry a line of space above and none below
-    (#309 review). A box takes a line above. Below, it adds a line only when
-    the next paragraph brings none. Inside, its bottom padding gains the
-    line its first paragraph has at the top, so the text sits evenly."""
-    # Unindented book: the next paragraph spaces itself; padding evened.
-    plain = _box_spacing(tmp_path, [_para("Boxed.")], _para("After."))
-    assert plain == {"$47": "1", "$54": "1.41667"}
-    # Indented book: the box spaces itself below; padding as declared.
-    indented = _box_spacing(tmp_path, [_indented("Boxed.")], _indented("After."))
-    assert indented == {"$47": "1", "$49": "1", "$54": "0.416667"}
-
-
-@pytest.mark.unit
-def test_a_boxs_declared_space_below_counts_the_next_paragraphs_line(tmp_path):
-    """`margin-bottom: 2em` before an unindented paragraph: that paragraph's
-    line (1.2em) is part of it, so the box adds 0.8em, not 2em."""
-    box = _box_block([_para("Boxed.")], space_above=1.2, space_below=2.0)
+@pytest.mark.parametrize(
+    ("margins", "want"),
+    [
+        ({}, {"$54": "0.416667"}),
+        (
+            {"margin_above": 1.0, "margin_below": 0.5},
+            {"$47": "0.833333", "$49": "0.416667", "$54": "0.416667"},
+        ),
+    ],
+)
+def test_a_box_writes_its_margins_on_it_and_its_padding_inside(tmp_path, margins, want):
+    """A box's margins, as the converter placed them, in line heights, and
+    its padding as declared, with no line of kfxgen's added, as Kindle
+    Previewer 4.0.3 writes a box (#643). Before, every box had a line above
+    and its bottom padding a line more, so its fill and border sat a line
+    below the text (QA on #644)."""
+    box = dict(_box_block([_para("Boxed.")]), **margins)
     chapters = [
         {
             "title": "One",
@@ -4931,7 +4918,11 @@ def test_a_boxs_declared_space_below_counts_the_next_paragraphs_line(tmp_path):
     entries, styles, _, _ = _book(tmp_path, chapters)
     (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
     st = {str(k): v for k, v in styles[str(b["$157"])].items()}
-    assert str(st["$49"]["$307"]) == "0.666667"
+    assert {k: str(st[k]["$307"]) for k in ("$47", "$49", "$54") if k in st} == want
+
+
+def _indented(text):
+    return dict(_para(text), block_style={"indent": ("1", "$308")})
 
 
 def _tiny_table(cells):
@@ -5105,19 +5096,21 @@ def test_a_link_to_a_cell_in_a_boxed_table_lands_on_the_cell(tmp_path):
 @pytest.mark.parametrize(
     "title, inner_kids",
     [
-        ("IV—Dawn", ["IV", "Dawn"]),  # split over the nested box's lines
+        # Split over the nested box's lines: they print as written (#552,
+        # #643), once.
+        ("IV—Dawn", ["IV", "Dawn"]),
         ("Dawn", ["Dawn"]),  # whole, in its first line
     ],
 )
-def test_a_title_inside_a_nested_box_is_cut(tmp_path, title, inner_kids):
+def test_a_title_inside_a_nested_box_prints_once(tmp_path, title, inner_kids):
     """A library book opens chapters with a box holding a box holding the
     title: it printed twice until the cuts followed the nested box (#310)."""
     inner = _box_block([_para(t) for t in inner_kids], border=None, padding=None)
     outer = _box_block([inner, _para("The day began.")])
     chapters = [{"title": title, "text": outer["text"], "blocks": [outer]}]
     entries, _, text, _ = _book(tmp_path, chapters)
-    # The heading prints the title once; the box keeps what follows it.
-    assert [text(e) for e in entries if text(e)] == [title, "The day began."]
+    want = inner_kids if len(inner_kids) > 1 else [title]
+    assert [text(e) for e in entries if text(e)] == want + ["The day began."]
 
 
 # ── #318: the title cut stops only between words ─────────────────────────────

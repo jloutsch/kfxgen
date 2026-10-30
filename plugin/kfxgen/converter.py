@@ -2753,8 +2753,9 @@ def _cell_padding(css):
     return out
 
 
-#: Containers drawn as a box when they have a border or a fill (#238).
-_BOX_TAGS = frozenset({"div", "aside", "section", "blockquote", "article"})
+#: Containers drawn as a box when they have a border or a fill (#238), and a
+#: <p> or <pre>, as Kindle Previewer 4.0.3 draws a code listing (#643).
+_BOX_TAGS = frozenset({"div", "aside", "section", "blockquote", "article", "p", "pre"})
 #: Containers drawn as a box at their width when they hold a picture (#382).
 _SIZED_BOX_TAGS = _BOX_TAGS | {"figure"}
 
@@ -2819,23 +2820,6 @@ def _box_background(css):
     # drawn (#383).
     rgb = css_rgb(value)
     return None if rgb in (None, 0xFFFFFF) else 0xFF000000 | rgb
-
-
-#: Space above a box when its CSS sets less: 1 line height (1.2em), what an
-#: unindented paragraph gets above it. kfxgen's paragraphs have space above
-#: and none below, so without it a border sat right under the line before
-#: the box (device check, #309). The space below is the generator's: it
-#: depends on the paragraph that follows (#238).
-_BOX_SPACE_EM = 1.2
-
-
-def _box_space(value, least=0.0):
-    """A box's declared margin above or below, in ems (1px = 0.45pt,
-    12pt = 1em, as for padding), or `least` when that is larger."""
-    em = _padding_em(value)
-    if isinstance(em, tuple) or em is None:
-        em = 0.0
-    return max(em, least)
 
 
 #: An <hr>'s margins in calibre's own sheet, above and below (#230).
@@ -3981,17 +3965,19 @@ def _collapse(a, b):
 
 
 def _takes_margin(block):
-    """Whether kfxgen writes the book's margins on `block`: a paragraph, not
-    a heading (kfxgen spaces its headings its own way), a table, a box or a
-    rule (#553)."""
-    return block.get("type") is None and not block.get("heading")
+    """Whether kfxgen writes the book's margins on `block`: a paragraph or a
+    box, as Kindle Previewer 4.0.3 spaces a box (#643), not a heading
+    (kfxgen spaces its headings its own way), a table or a rule (#553)."""
+    return (block.get("type") is None and not block.get("heading")) or block.get(
+        "type"
+    ) == "box"
 
 
 def _spaces_itself(block):
-    """Whether kfxgen writes `block`'s space above its own way: a heading,
-    a box (#238) or a rule (#230). The paragraph before it then keeps no
-    space below, or the gap was both (QA on #639)."""
-    return bool(block.get("heading")) or block.get("type") in ("box", "rule")
+    """Whether kfxgen writes `block`'s space above its own way: a heading or
+    a rule (#230). The paragraph before it then keeps no space below, or the
+    gap was both (QA on #639)."""
+    return bool(block.get("heading")) or block.get("type") == "rule"
 
 
 def _em_px(block):
@@ -4135,9 +4121,8 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                     pads.get(id(b)) or (0.0,) * 4
                 )[0]
                 gaps.append((b, round(_collapse(above, top) + lines + padding, 4), how))
-            above = bottom
-        else:
-            above = 0.0
+        # A box's margin-bottom waits for the next block, as a paragraph's.
+        above = bottom if kind in (None, "box") else 0.0
         lines = 0.0
         on_purpose = False
         out.append(b)
@@ -4797,10 +4782,14 @@ def extract_blocks_from_html(
                         },
                     }
                 )
-                _note_margins(elem, len(blocks) - 1)
-                # Text written straight in a bordered or filled <div> is a
-                # box around that one paragraph (#310).
-                _make_box(elem, len(blocks) - 1, leaf=True)
+                # Text written straight in a bordered or filled <div>, <p> or
+                # <pre> is a box around that one paragraph (#310, #643); the
+                # box takes its margins and padding. Unboxed, its padding
+                # spaces it, as Previewer pads its text (#643).
+                if not _make_box(elem, len(blocks) - 1, leaf=True):
+                    _note_margins(
+                        elem, len(blocks) - 1, _note_padding(elem, len(blocks) - 1)
+                    )
             else:
                 pending_ids.extend(ids)  # empty anchor block: carry ids forward
                 if _is_spacer(elem):
@@ -4933,7 +4922,10 @@ def extract_blocks_from_html(
             border = fill = None
         kids = blocks[start:]
         # A wrapper around a picture is drawn at its width (#382); one of
-        # only a floated picture keeps #243's floated picture instead.
+        # only a floated picture keeps #243's floated picture instead, with
+        # no box even when bordered or filled: a floated box stops the
+        # Voyage wrapping text beside it (#382), and one at the page's width
+        # drew its border round the page (QA on #644).
         width = _box_width(css)
         side = _float_side(css)
         if width is not None and not any(
@@ -4943,7 +4935,7 @@ def extract_blocks_from_html(
         if width is not None and side and len(kids) == 1:
             m = _IMG_TOKEN_RE.fullmatch(kids[0].get("text") or "")
             if m and m.group(4):
-                width = None
+                return False
         if border is None and fill is None and width is None:
             return False
         if not kids or not any(
@@ -4960,7 +4952,6 @@ def extract_blocks_from_html(
             return False
         left = parse_css_length(css.get("margin-left") or "")
         right = parse_css_length(css.get("margin-right") or "")
-        framed = border is not None or fill is not None
         ids = _dedupe_keep_order([a for b in kids for a in b.get("anchor_ids") or ()])
         # A clear set on the container reached its first block; it is the
         # box's (#381).
@@ -4983,10 +4974,6 @@ def extract_blocks_from_html(
                     "padding": _box_padding(css),
                     "margin_left": _page_share(left) or None,
                     "margin_right": _page_share(right) or None,
-                    "space_above": _box_space(
-                        css.get("margin-top"), _BOX_SPACE_EM if framed else 0.0
-                    ),
-                    "space_below": _box_space(css.get("margin-bottom")),
                     "width": width,
                     "width_px": _box_width_px(css) if width is not None else None,
                     "float": side if width is not None else None,
@@ -4996,7 +4983,29 @@ def extract_blocks_from_html(
                 },
             }
         ]
+        _note_box_margins(blocks[start], css)
         return True
+
+    def _note_box_margins(box, css):
+        """Record a box's margins, spaced as a paragraph's (#553): Kindle
+        Previewer 4.0.3 writes them on the box, and its padding inside it
+        (#643). On a side with no border or padding, the margin of the block
+        inside meets the box's and collapses into it, as in a browser: a
+        filled <div> takes its paragraph's margins (my probe, #643)."""
+        top, bottom = _margin_em(css, "top"), _margin_em(css, "bottom")
+        border = box["box"]["border"] or {}
+        padding = box["box"]["padding"] or {}
+        mine = [b for b in box["blocks"] if b.get("type") not in ("space", "rule")]
+        for side, i, end in (("top", 0, 0), ("bottom", -1, 1)):
+            inner = margins.get(id(mine[i])) if mine else None
+            if inner is None or border.get(side) or padding.get(side):
+                continue
+            if end == 0:
+                top = _collapse(top, inner[0])
+            else:
+                bottom = _collapse(bottom, inner[1])
+            inner[end] = 0.0
+        margins[id(box)] = [top, bottom]
 
     def _carry_container_margins(elem, start):
         """Add a container's side margins to each text block it produced, as
