@@ -46,7 +46,7 @@ BODY = (
     + "<pre style='background-color:#eeeeee;margin:0'>Q3 filled pre</pre>" + _p("Q4", "margin:0")
     + "<pre style='border:1px solid black;margin:0'>Q5 bordered pre</pre>" + _p("Q6", "margin:0")
     + "<pre style='padding:1em 0;margin:0'>Q7 padded pre</pre>" + _p("Q8", "margin:0")
-    + _p("Q9", "border:1px solid black;padding:0.5em;margin:0") + _p("QA", "margin:0")
+    + _p("Q9", "border:1px solid black;padding:0.5em;margin:1em 0") + _p("QA", "margin:0")
     + _p("QB", "background-color:#eeeeee;margin:0") + _p("QC", "margin:0")
     + "<pre style='margin:0'>QD plain pre</pre>" + _p("QE", "margin:0")
 )  # fmt: skip
@@ -111,13 +111,15 @@ def _lh(style, key):
 @pytest.mark.parametrize("case", sorted(PREVIEWER))
 def test_a_bordered_or_filled_pre_or_p_is_a_box(converted, case):
     got, version = converted
-    box, _own = got[case]
+    box, own = got[case]
     fill, bordered, padding = PREVIEWER[case]
     assert box is not None, f"calibre {version}: {case} is not in a box"
     assert (int(box["$70"]) if "$70" in box else None) == fill, (
         f"calibre {version}: {box}"
     )
     assert bool(BORDER_KEYS & set(box)) == bordered, f"calibre {version}: {box}"
+    # The box takes the margins; its text has none of its own.
+    assert not {"$47", "$49"} & set(own), f"calibre {version}: {own}"
     # The top only: below a box kfxgen adds its own line to the padding
     # (#238), where Previewer uses the margins (#643 item 1).
     if padding is not None:
