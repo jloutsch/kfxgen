@@ -186,11 +186,12 @@ def test_a_cut_paragraphs_margins_go_on_its_first_and_last_parts(calibre):  # no
     assert got["M3 later part"][1] is None, f"calibre {version}: {got}"
 
 
-def test_before_a_box_the_paragraph_keeps_no_space_below(calibre):  # noqa: F811
-    """A bordered box spaces itself (#238): the paragraph before it writes
-    no $49, or the gap was the paragraph's line and the box's (2 lines, where
-    Previewer has 0.833; QA on #639). The same before a heading kfxgen
-    spaces its own way."""
+def test_before_a_box_or_a_heading_the_gap_is_written_once(calibre):  # noqa: F811
+    """A box is spaced as a paragraph is (#643): with no margin-top of its
+    own, the paragraph before it keeps the gap, 0.833 for 1em, as Kindle
+    Previewer 4.0.3 writes it (my probe, #643), and the box adds none.
+    Before a heading kfxgen spaces its own way, the paragraph writes no $49,
+    or the gap was both (QA on #639)."""
     tmp, _env, version = calibre
     epub, kfx = tmp / "box553.epub", tmp / "box553.kfx"
     _book_epub(
@@ -206,7 +207,7 @@ def test_before_a_box_the_paragraph_keeps_no_space_below(calibre):  # noqa: F811
     )
     _ebook_convert(calibre, epub, kfx, True)
     got = _spacing(kfx)
-    assert got["Q1"][1] is None, f"calibre {version}: {got}"
+    assert got["Q1"][1] == 0.833, f"calibre {version}: {got}"
     assert got["Q3"][1] is None, f"calibre {version}: {got}"
 
 

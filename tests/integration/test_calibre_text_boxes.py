@@ -120,10 +120,10 @@ def test_a_bordered_or_filled_pre_or_p_is_a_box(converted, case):
     assert bool(BORDER_KEYS & set(box)) == bordered, f"calibre {version}: {box}"
     # The box takes the margins; its text has none of its own.
     assert not {"$47", "$49"} & set(own), f"calibre {version}: {own}"
-    # The top only: below a box kfxgen adds its own line to the padding
-    # (#238), where Previewer uses the margins (#643 item 1).
     if padding is not None:
-        assert _lh(box, "$52") == padding, f"calibre {version}: {box}"
+        assert (_lh(box, "$52"), _lh(box, "$54")) == (padding, padding), (
+            f"calibre {version}: {box}"
+        )
 
 
 @pytest.mark.parametrize("case", ["Q0", "Q2", "Q7", "QD", "QE"])
@@ -225,3 +225,99 @@ def test_a_boxed_opener_spelling_the_label_prints_as_written(calibre, case, labe
         f"calibre {version}: {opener}"
     )
     assert label not in [t for t, _n in opener], f"calibre {version}: {opener}"
+
+
+SPACING_CODE = (
+    "border-top:1px solid #DDD;border-bottom:1px solid #DDD;"
+    "background-color:#fbfbfb;padding:1em 2em;margin:0 0 1.5em"
+)
+SPACING = (
+    "<h1>Spacing</h1>" + _p("B0", "margin:0")
+    + _p("B1", "margin:0 0 1em")
+    + "<div style='border:1px solid black;padding:0.5em;margin:1em 0'>"
+    + _p("B2", "margin:1em 0") + _p("B3", "margin:1em 0") + "</div>"
+    + _p("B4", "margin:1em 0")
+    + _p("B5", "margin:0") + _p("B6", "background-color:#eeeeee;margin:0") + _p("B7", "margin:0")
+    + _p("B8", "margin:0 0 1em")
+    + f"<pre style='{SPACING_CODE}'>B9 code one\nB9 code two</pre>"
+    + _p("BA", "margin:1em 0")
+    + _p("BB", "margin:0") + "<div style='border:1px solid black;margin:2em 0 0'>"
+    + _p("BC", "margin:0") + "</div>" + _p("BD", "margin:0")
+    + _p("BE", "") + _p("BF", "border:1px solid black") + _p("BG", "")
+    + _p("BH", "margin:0") + "<div style='background-color:#eeeeee'>"
+    + _p("BI", "margin:1em 0") + "</div>" + _p("BJ", "margin:0")
+    + _p("BK", "margin:0") + _p("BL", "border-bottom:1px solid black;margin:0 0 0.5em")
+    + _p("BM", "margin:0")
+)  # fmt: skip
+
+#: Kindle Previewer 4.0.3's spacing for each case (my probe, 2026-10-30):
+#: (the box around it: $47, $49, $52, $54), (its own $47, $49), in line
+#: heights; None where nothing is written.
+PREVIEWER_SPACING = {
+    "B1": (None, (None, None)),
+    "B2": ((0.833, None, 0.417, 0.417), (0.833, None)),
+    "B3": ((0.833, None, 0.417, 0.417), (0.833, 0.833)),
+    "B4": (None, (0.833, 0.833)),
+    "B5": (None, (None, None)),
+    "B6": ((None, None, None, None), (None, None)),
+    "B7": (None, (None, None)),
+    "B8": (None, (None, 0.833)),
+    "B9": ((None, None, 0.833, 0.833), (None, None)),
+    "BA": (None, (1.25, 0.833)),
+    "BB": (None, (None, None)),
+    "BC": ((1.667, None, None, None), (None, None)),
+    "BD": (None, (None, None)),
+    "BE": (None, (0.833, None)),
+    "BF": ((0.833, None, None, None), (None, None)),
+    "BG": (None, (0.833, 0.833)),
+    "BH": (None, (None, None)),
+    "BI": ((0.833, 0.833, None, None), (None, None)),
+    "BJ": (None, (None, None)),
+    "BK": (None, (None, None)),
+    "BL": ((None, 0.417, None, None), (None, None)),
+    "BM": (None, (None, None)),
+}
+
+
+def test_boxes_are_spaced_as_previewer_spaces_them(calibre):  # noqa: F811
+    """A box takes its margins as a paragraph does, collapsed with the blocks
+    around it, and only its padding inside it (#643). Before, every box had
+    a line above and its bottom padding a line more (QA on #644)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "bs643.epub", tmp / "bs643.kfx"
+    _book_epub(
+        epub,
+        "BS643",
+        SPACING,
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Spacing", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    frags = load_fragments(kfx)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    got = {}
+
+    def walk(e, box):
+        e = _plain(e)
+        if not hasattr(e, "get"):
+            return
+        style = {str(k): v for k, v in styles.get(str(e.get("$157")), {}).items()}
+        if e.get("$145"):
+            t = str(texts[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+            got[t[:2]] = (box, (_lh(style, "$47"), _lh(style, "$49")))
+            return
+        if str(e.get("$159")) == "$270":
+            box = tuple(_lh(style, k) for k in ("$47", "$49", "$52", "$54"))
+        for k in e.get("$146") or ():
+            walk(k, box)
+
+    for st in by_type(frags, "$259"):
+        for e in val(st)["$146"]:
+            walk(e, None)
+    wrong = {
+        k: (got.get(k), want)
+        for k, want in PREVIEWER_SPACING.items()
+        if got.get(k) != want
+    }
+    assert not wrong, f"calibre {version}: (kfxgen, Previewer) {wrong}"

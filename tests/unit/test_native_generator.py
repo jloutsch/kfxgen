@@ -4891,40 +4891,23 @@ def test_ids_waiting_for_a_box_with_no_content_go_to_the_next_block(
 
 
 @pytest.mark.unit
-def _box_spacing(tmp_path, kids, following):
-    box = _box_block(kids, space_above=1.2, space_below=0.0)
-    chapters = [
-        {"title": "One", "text": "x", "blocks": [_para("Before."), box, following]}
-    ]
-    entries, styles, _, _ = _book(tmp_path, chapters)
-    (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
-    st = {str(k): v for k, v in styles[str(b["$157"])].items()}
-    return {k: str(st[k]["$307"]) for k in ("$47", "$49", "$54") if k in st}
-
-
-def _indented(text):
-    return dict(_para(text), block_style={"indent": ("1", "$308")})
-
-
-@pytest.mark.unit
-def test_a_box_fits_kfxgens_paragraph_spacing(tmp_path):
-    """Unindented paragraphs carry a line of space above and none below
-    (#309 review). A box takes a line above. Below, it adds a line only when
-    the next paragraph brings none. Inside, its bottom padding gains the
-    line its first paragraph has at the top, so the text sits evenly."""
-    # Unindented book: the next paragraph spaces itself; padding evened.
-    plain = _box_spacing(tmp_path, [_para("Boxed.")], _para("After."))
-    assert plain == {"$47": "1", "$54": "1.41667"}
-    # Indented book: the box spaces itself below; padding as declared.
-    indented = _box_spacing(tmp_path, [_indented("Boxed.")], _indented("After."))
-    assert indented == {"$47": "1", "$49": "1", "$54": "0.416667"}
-
-
-@pytest.mark.unit
-def test_a_boxs_declared_space_below_counts_the_next_paragraphs_line(tmp_path):
-    """`margin-bottom: 2em` before an unindented paragraph: that paragraph's
-    line (1.2em) is part of it, so the box adds 0.8em, not 2em."""
-    box = _box_block([_para("Boxed.")], space_above=1.2, space_below=2.0)
+@pytest.mark.parametrize(
+    ("margins", "want"),
+    [
+        ({}, {"$54": "0.416667"}),
+        (
+            {"margin_above": 1.0, "margin_below": 0.5},
+            {"$47": "0.833333", "$49": "0.416667", "$54": "0.416667"},
+        ),
+    ],
+)
+def test_a_box_writes_its_margins_on_it_and_its_padding_inside(tmp_path, margins, want):
+    """A box's margins, as the converter placed them, in line heights, and
+    its padding as declared, with no line of kfxgen's added, as Kindle
+    Previewer 4.0.3 writes a box (#643). Before, every box had a line above
+    and its bottom padding a line more, so its fill and border sat a line
+    below the text (QA on #644)."""
+    box = dict(_box_block([_para("Boxed.")]), **margins)
     chapters = [
         {
             "title": "One",
@@ -4935,7 +4918,11 @@ def test_a_boxs_declared_space_below_counts_the_next_paragraphs_line(tmp_path):
     entries, styles, _, _ = _book(tmp_path, chapters)
     (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
     st = {str(k): v for k, v in styles[str(b["$157"])].items()}
-    assert str(st["$49"]["$307"]) == "0.666667"
+    assert {k: str(st[k]["$307"]) for k in ("$47", "$49", "$54") if k in st} == want
+
+
+def _indented(text):
+    return dict(_para(text), block_style={"indent": ("1", "$308")})
 
 
 def _tiny_table(cells):

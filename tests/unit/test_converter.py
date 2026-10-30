@@ -8383,20 +8383,43 @@ def test_an_anchor_at_the_end_of_a_file_after_a_box_goes_on_its_last_paragraph()
 
 
 @pytest.mark.unit
-def test_a_box_has_space_above():
-    """A line's space above, as an unindented paragraph has, unless its CSS
-    sets more: on the device a border sat right under the line before
-    (#309). The space below is the generator's."""
-    (box,) = _boxes('<div class="box"><p>One.</p></div>')
-    assert (box["box"]["space_above"], box["box"]["space_below"]) == (1.2, 0.0)
+def test_a_box_takes_its_margins_as_a_paragraph_does():
+    """Kindle Previewer 4.0.3 writes a box's margins on it and its padding
+    inside it, collapsed with the blocks around it as paragraphs' are (#553;
+    my probe on #643): a 1em margin-bottom then a box's 2em margin-top is
+    2em on the box; its 1em margin-bottom then a 1em margin-top is 1em on
+    the paragraph after."""
+    m = {"margin-top": "1em", "margin-bottom": "1em"}
     rules = dict(
         _BOX_CSS,
+        m=m,
         wide=dict(_BOX_CSS["box"], **{"margin-top": "2em", "margin-bottom": "1em"}),
     )
-    (wide,) = extract_blocks_from_html(
-        _doc('<div class="wide"><p>One.</p></div>'), style_resolver=_css_by_class(rules)
+    before, box, after = extract_blocks_from_html(
+        _doc(
+            '<p class="m">Before.</p><div class="wide"><p>One.</p></div><p class="m">After.</p>'
+        ),
+        style_resolver=_css_by_class(rules),
     )
-    assert (wide["box"]["space_above"], wide["box"]["space_below"]) == (2.0, 1.0)
+    assert box["margin_above"] == 2.0 and not box.get("margin_below")
+    assert not before.get("margin_below") and after["margin_above"] == 1.0
+
+
+@pytest.mark.unit
+def test_a_filled_box_takes_its_paragraphs_margins():
+    """With no border or padding, a paragraph's margins meet the box's and
+    collapse into it, as in a browser: Previewer writes a filled <div>'s
+    paragraph's 1em margins on the <div> (my probe, #643)."""
+    rules = dict(_BOX_CSS, m={"margin-top": "1em", "margin-bottom": "1em"})
+    before, box, after = extract_blocks_from_html(
+        _doc(
+            '<p>Before.</p><div class="shade"><p class="m">In.</p></div><p>After.</p>'
+        ),
+        style_resolver=_css_by_class(rules),
+    )
+    (inner,) = box["blocks"]
+    assert box["margin_above"] == 1.0 and not inner.get("margin_above")
+    assert before.get("margin_below") is None and not inner.get("margin_below")
 
 
 @pytest.mark.unit
