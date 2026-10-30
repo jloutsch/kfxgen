@@ -325,3 +325,45 @@ def test_negative_margins_collapse_as_in_a_browser(calibre):  # noqa: F811
     }
     wrong = {k: (got.get(k), v) for k, v in want.items() if got.get(k) != v}
     assert not wrong, f"calibre {version}: (kfxgen, Previewer) {wrong}"
+
+
+def test_margins_do_not_collapse_through_padding(calibre):  # noqa: F811
+    """Padding keeps the margins on either side of it apart: a 0.8em
+    paragraph, a wrapper with 1em padding, a 0.8em paragraph inside gives
+    0.667 + 0.833 + 0.667 = 2.167 lh in Kindle Previewer 4.0.3, in and out
+    (QA on #642). The wrapper's own margin collapses with the outside."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "padc642.epub", tmp / "padc642.kfx"
+
+    def p(label):
+        return f"<p style='margin:0.8em 0'>{label} words words words.</p>"
+
+    _book_epub(
+        epub,
+        "PC642",
+        "<h1>Through padding</h1>"
+        + p("X1")
+        + "<div style='padding:1em 0'>"
+        + p("X2")
+        + p("X3")
+        + "</div>"
+        + p("X4")
+        + "<div style='padding:1em 0;margin:2em 0'>"
+        + p("X5")
+        + "</div>"
+        + p("X6"),
+        [("c1.xhtml", "Next")],
+        [
+            ("c0", "contents.xhtml", "Through padding", []),
+            ("c1", "c1.xhtml", "Next", []),
+        ],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    assert got["X2"][0] == 2.167, f"calibre {version}: {got}"  # in
+    assert got["X3"][0] == 0.667, f"calibre {version}: {got}"  # between, inside
+    assert got["X4"][0] == 2.167, f"calibre {version}: {got}"  # out
+    # With a 2em margin on the wrapper: max(0.8em, 2em) + 1em + 0.8em = 3.8em,
+    # as Previewer's file of this book adds up (my probe, 2026-10-29).
+    assert got["X5"][0] == 3.167, f"calibre {version}: {got}"
+    assert got["X6"][0] == 3.167, f"calibre {version}: {got}"

@@ -3999,7 +3999,18 @@ def _em_px(block):
     return (block.get("block_style") or {}).get("font_size") or 16.0
 
 
-def _place_margin(prev, b, above, top, lines, on_purpose, pad_up=0.0, pad_own=0.0):
+def _place_margin(
+    prev,
+    b,
+    above,
+    top,
+    lines,
+    on_purpose,
+    pad_up=0.0,
+    pad_own=0.0,
+    outer_up=0.0,
+    outer_own=0.0,
+):
     """The gap above `b`, as Kindle Previewer 4.0.3 writes it (#553, #538):
     the larger of the margin waiting above (`above`, the block before's
     margin-bottom or an invisible <hr>'s) and `b`'s own margin-top, as margins
@@ -4007,13 +4018,34 @@ def _place_margin(prev, b, above, top, lines, on_purpose, pad_up=0.0, pad_own=0.
     when it has a margin-top of its own; otherwise the block before keeps it
     as its space below and `b` takes none. Margins are in each block's own
     ems, so they are compared in px. A wrapper's padding above `b`
-    (`pad_own`) and below the block before (`pad_up`) is added: padding
-    doesn't collapse (#640)."""
+    (`pad_own`) or below the block before (`pad_up`) keeps the margins on
+    its two sides apart: the wrapper's own margin (`outer_own`, `outer_up`)
+    collapses with the outside, and the paragraph's is added inside (#640,
+    QA on #642)."""
     if prev is None:
         if _takes_margin(b):
-            b["margin_above"] = top + lines + pad_own
+            b["margin_above"] = outer_own + pad_own + top + lines
         return
     up, own = above * _em_px(prev), top * _em_px(b)
+    if pad_up or pad_own:
+        outside = _collapse(
+            outer_up * _em_px(prev) if pad_up else up,
+            outer_own * _em_px(b) if pad_own else own,
+        )
+        inside_up = up + pad_up * _em_px(prev) if pad_up else 0.0
+        inside_own = pad_own * _em_px(b) + own if pad_own else 0.0
+        gap = outside + inside_up + inside_own
+        # As without padding: `b` takes it with a margin or padding of its
+        # own above, else the block before keeps it below.
+        if _takes_margin(b) and (
+            pad_own or top or outer_own or not _takes_margin(prev)
+        ):
+            b["margin_above"] = gap / _em_px(b) + lines
+        elif _takes_margin(prev) and not _spaces_itself(b):
+            prev["margin_below"] = gap / _em_px(prev)
+            if _takes_margin(b):
+                b["margin_above"] = lines
+        return
     padding = pad_up * _em_px(prev) + pad_own * _em_px(b)
     gap = _collapse(up, own)
     if top != 0 or on_purpose or not _takes_margin(prev):
@@ -4073,6 +4105,8 @@ def _space_between(blocks, margins, measured=True, paddings=None):
         top, bottom = margins.get(id(b), (0.0, 0.0))
         if measured:
             pads = paddings or {}
+            up_pads = (pads.get(id(out[-1])) if out else None) or (0.0,) * 4
+            own_pads = pads.get(id(b)) or (0.0,) * 4
             _place_margin(
                 out[-1] if out else None,
                 b,
@@ -4080,8 +4114,10 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                 top,
                 lines,
                 on_purpose,
-                pad_up=(pads.get(id(out[-1])) or (0, 0))[1] if out else 0.0,
-                pad_own=(pads.get(id(b)) or (0, 0))[0],
+                pad_up=up_pads[1],
+                pad_own=own_pads[0],
+                outer_up=up_pads[3],
+                outer_own=own_pads[2],
             )
             if kind == "box":
                 # Its paragraphs are spaced the same way, inside it (#640).
@@ -4095,8 +4131,8 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                     # theirs to space.
                     how = how if how == "spacer" else None
                 pads = paddings or {}
-                padding = (pads.get(id(out[-1])) or (0, 0))[1] + (
-                    pads.get(id(b)) or (0, 0)
+                padding = (pads.get(id(out[-1])) or (0.0,) * 4)[1] + (
+                    pads.get(id(b)) or (0.0,) * 4
                 )[0]
                 gaps.append((b, round(_collapse(above, top) + lines + padding, 4), how))
             above = bottom
@@ -4107,9 +4143,11 @@ def _space_between(blocks, margins, measured=True, paddings=None):
         out.append(b)
     if measured and out and _takes_margin(out[-1]):
         # A file's last paragraph keeps its margin-bottom (#553).
+        last_pads = (paddings or {}).get(id(out[-1])) or (0.0,) * 4
         out[-1]["margin_below"] = (
             max(out[-1].get("margin_below") or 0.0, margins.get(id(out[-1]), (0, 0))[1])
-            + ((paddings or {}).get(id(out[-1])) or (0, 0))[1]
+            + last_pads[1]
+            + last_pads[3]
         )
     if gaps:
         counts = collections.Counter(g for _, g, _ in gaps)
@@ -4790,8 +4828,7 @@ def extract_blocks_from_html(
         _walk_container(elem)
         if not _make_box(elem, start):
             _carry_container_margins(elem, start)
-            _note_margins(elem, start)
-            _note_padding(elem, start)
+            _note_margins(elem, start, _note_padding(elem, start))
 
     def _emit_space(margin=0.0, line=0.0):
         """Space for the next paragraph to take: a spacer's blank line, or an
@@ -4830,10 +4867,10 @@ def extract_blocks_from_html(
         there: Kindle Previewer 4.0.3 draws it as a padded container, and
         padding doesn't collapse (#640)."""
         if style_resolver is None:
-            return
+            return (False, False)
         sides = (style_resolver(elem) or {}).get("padding-sides") or ()
         if len(sides) != 4:
-            return
+            return (False, False)
 
         def em(value):
             v = _padding_em(value)
@@ -4841,17 +4878,20 @@ def extract_blocks_from_html(
 
         top, bottom = em(sides[0]), em(sides[2])
         if not (top or bottom):
-            return
+            return (False, False)
         mine = [b for b in blocks[start:] if b.get("type") not in ("space", "rule")]
         if not mine:
-            return
-        paddings.setdefault(id(mine[0]), [0.0, 0.0])[0] += top
-        paddings.setdefault(id(mine[-1]), [0.0, 0.0])[1] += bottom
+            return (False, False)
+        paddings.setdefault(id(mine[0]), [0.0] * 4)[0] += top
+        paddings.setdefault(id(mine[-1]), [0.0] * 4)[1] += bottom
+        return (bool(top), bool(bottom))
 
-    def _note_margins(elem, start):
+    def _note_margins(elem, start, padded=(False, False)):
         """Record `elem`'s margin-top on the first paragraph it produced and
         its margin-bottom on the last, keeping a larger one already there:
-        margins that touch collapse to the larger, as in a browser (#230)."""
+        margins that touch collapse to the larger, as in a browser (#230).
+        A side with padding keeps its margin outside, apart from the
+        paragraph's: margins don't collapse through padding (QA on #642)."""
         if style_resolver is None:
             return
         css = style_resolver(elem)
@@ -4861,10 +4901,18 @@ def extract_blocks_from_html(
         mine = [b for b in blocks[start:] if b.get("type") not in ("space", "rule")]
         if not mine:
             return
-        first = margins.setdefault(id(mine[0]), [0.0, 0.0])
-        first[0] = _collapse(first[0], top)
-        last = margins.setdefault(id(mine[-1]), [0.0, 0.0])
-        last[1] = _collapse(last[1], bottom)
+        if padded[0]:
+            outer = paddings[id(mine[0])]
+            outer[2] = _collapse(outer[2], top)
+        else:
+            first = margins.setdefault(id(mine[0]), [0.0, 0.0])
+            first[0] = _collapse(first[0], top)
+        if padded[1]:
+            outer = paddings[id(mine[-1])]
+            outer[3] = _collapse(outer[3], bottom)
+        else:
+            last = margins.setdefault(id(mine[-1]), [0.0, 0.0])
+            last[1] = _collapse(last[1], bottom)
 
     def _make_box(elem, start, leaf=False):
         """Replace the blocks a bordered or filled container produced with
