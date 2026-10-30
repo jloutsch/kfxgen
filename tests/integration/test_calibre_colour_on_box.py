@@ -55,14 +55,14 @@ CASES = [
     ("C17", '<div><aside><div class="dark"><p class="white">C17 white in a nested aside.</p></div></aside></div>'),
 ]  # fmt: skip
 
-#: Kindle Previewer 4.0.3's value for each (#383 probe); C6 and C14 are
-#: kfxgen's page value, since kfxgen draws no paragraph fill.
+#: Kindle Previewer 4.0.3's value for each (#383 probe); C14 is kfxgen's
+#: page value. C6's <p> is a filled box, as Previewer draws it (#643).
 EXPECTED = {
     "C1": 0xFFFFFFFF,
     "C2": 0xFFFFFF00,
     "C3": 0xFF9B9B9B,
     "C4": 0xFF616161,
-    "C6": 0xFF767676,
+    "C6": 0xFFFFFFFF,
     "C9": 0xFFFFFFFF,
     "C11": 0xFF9C9C9C,
     "C14": 0xFF767676,
