@@ -34,6 +34,7 @@ div.f40 { float: left; width: 40%; } div.f40 img { width: 100%; }
 div.c40 { width: 40%; margin: 0 auto; } div.c40 img { width: 100%; }
 div.w300 { width: 300px; } div.w300 img { width: 100%; }
 div.open { width: 40%; }
+p.w40 { width: 40%; } p.w40 img { width: 100%; }
 figure.plain { margin: 0; } figure.plain img { width: 50%; }"""
 
 WORDS = "words after the picture. " * 4
@@ -45,6 +46,8 @@ CASES = [
     ("float", f'<div class="f40"><img src="i.jpg" alt="float"/><p>Cap float.</p></div><p>{WORDS}</p>'),
     ("centre", f'<div class="c40"><img src="i.jpg" alt="centre"/><p>Cap centre.</p></div><p>{WORDS}</p>'),
     ("px", f'<div class="w300"><img src="i.jpg" alt="px"/><p>Cap px.</p></div><p>{WORDS}</p>'),
+    # A <p> around a picture is sized as a <div> is (my probe, #643).
+    ("p", f'<p class="w40"><img src="i.jpg" alt="p"/></p><p>{WORDS}</p>'),
     ("nowidth", f'<div class="open"><img src="i.jpg" alt="nowidth"/><p>Cap open.</p></div><p>{WORDS}</p>'),
     ("plain", f'<figure class="plain"><img src="i.jpg" alt="plain"/><figcaption>Cap plain.</figcaption></figure><p>{WORDS}</p>'),
 ]  # fmt: skip
@@ -92,6 +95,7 @@ def _pct(style):
         ("float", "$270", 40.0, "$59", False),
         ("centre", "$269", 40.0, None, True),
         ("px", "$269", 35.156, None, False),
+        ("p", "$269", 40.0, None, False),
     ],
 )
 def test_a_sized_wrapper_is_a_container_at_its_width(

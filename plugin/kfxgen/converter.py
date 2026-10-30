@@ -2757,9 +2757,7 @@ def _cell_padding(css):
 #: <p> or <pre>, as Kindle Previewer 4.0.3 draws a code listing (#643).
 _BOX_TAGS = frozenset({"div", "aside", "section", "blockquote", "article", "p", "pre"})
 #: Containers drawn as a box at their width when they hold a picture (#382).
-_SIZED_BOX_TAGS = frozenset(
-    {"div", "aside", "section", "blockquote", "article", "figure"}
-)
+_SIZED_BOX_TAGS = _BOX_TAGS | {"figure"}
 
 
 def _box_width(css):
@@ -4932,7 +4930,7 @@ def extract_blocks_from_html(
         straight in a bordered <div>); its margins move to the box.
         Returns whether it made a box."""
         tag = _local_tag(elem.tag)
-        if style_resolver is None or tag not in _BOX_TAGS | _SIZED_BOX_TAGS:
+        if style_resolver is None or tag not in _SIZED_BOX_TAGS:
             return False
         css = style_resolver(elem) or {}
         border, fill = _css_border(css), _box_background(css)
@@ -4941,7 +4939,7 @@ def extract_blocks_from_html(
         kids = blocks[start:]
         # A wrapper around a picture is drawn at its width (#382); one of
         # only a floated picture keeps #243's floated picture instead.
-        width = _box_width(css) if tag in _SIZED_BOX_TAGS else None
+        width = _box_width(css)
         side = _float_side(css)
         if width is not None and not any(
             _IMG_TOKEN_RE.search(b.get("text") or "") for b in kids
