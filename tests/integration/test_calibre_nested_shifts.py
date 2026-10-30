@@ -33,6 +33,16 @@ BODY = (
     "<p>N2 y<sub>j<sup>3</sup></sub> end.</p>"
     "<p>N3 a<sup>b<span style='vertical-align:text-top'>c</span>d</sup> end.</p>"
     "<p>N6 plain<sup>9</sup> and H<sub>2</sub>O.</p>"
+    "<p>P7 a<sup>b<span style='vertical-align:baseline'>c</span>d</sup> end.</p>"
+    "<p>P8 e<sup>f<sub style='font-size:100%'>g</sub>h</sup> end.</p>"
+    "<p>P9 e<sup>f<sub style='font-size:100%'>g<sup>z</sup></sub></sup> end.</p>"
+    "<p>PB note<sup><span style='vertical-align:baseline'>12</span></sup> end.</p>"
+    "<p>PC x<sup><span style='vertical-align:baseline'>1</span></sup><sup>2</sup> end.</p>"
+    "<p>PD x<sup>1</sup><sup><span style='vertical-align:baseline'>2</span></sup> end.</p>"
+    "<p>PE m<sup><span style='vertical-align:baseline'>1</span> "
+    "<span style='vertical-align:baseline'>2</span></sup> end.</p>"
+    "<p>PF m<sup> <span style='vertical-align:baseline'>1</span></sup> end.</p>"
+    "<p>PG m<sup><span style='vertical-align:baseline'>1</span> </sup> end.</p>"
 )
 
 
@@ -88,3 +98,43 @@ def test_nested_shifts_are_layered_as_previewer_writes_them(calibre):  # noqa: F
     # the superscript's own.
     assert runs["N1"][2][2] == round(S * S, 4), version
     assert [s for t, v, s in runs["N3"] if v == "$447"] == [round(S, 4)], version
+
+
+def test_baseline_and_a_kept_size_are_layered_as_previewer_writes_them(calibre):  # noqa: F811
+    """`vertical-align: baseline` inside a superscript is a layer at the
+    baseline ($44 $350), and a subscript that keeps its superscript's size
+    (font-size: 100%) is layered at that size, as Kindle Previewer 4.0.3
+    writes them (#638, my probe 2026-10-29)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "n638.epub", tmp / "n638.kfx"
+    _book_epub(
+        epub,
+        "N638",
+        BODY,
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Nested", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    runs = _runs(kfx)
+    assert ("c", "$350", round(S, 4)) in runs["P7"], f"calibre {version}: {runs['P7']}"
+    assert ("g", "$371", round(S, 4)) in runs["P8"], f"calibre {version}: {runs['P8']}"
+    # A baseline span that is all of the superscript: no layer, as Previewer
+    # writes a note marker reset this way (QA on #641).
+    assert [v for t, v, _s in runs["PB"]] == ["$370"], (
+        f"calibre {version}: {runs['PB']}"
+    )
+    # A space in the <sup> counts as its text: the baseline spans are part of
+    # it and layered, as Previewer writes them (QA's P34, P41, P42 on #641).
+    for key in ("PE", "PF", "PG"):
+        assert "$350" in {v for t, v, _s in runs[key]}, (
+            f"calibre {version}: {runs[key]}"
+        )
+    # Each <sup> judged on its own, a superscript beside it apart (QA on #641).
+    for key in ("PC", "PD"):
+        assert {v for t, v, _s in runs[key]} == {"$370"}, (
+            f"calibre {version}: {runs[key]}"
+        )
+    # Under a layer at its parent's size, the next one shrinks from that size.
+    assert ("z", "$370", round(S * S, 4)) in runs["P9"], (
+        f"calibre {version}: {runs['P9']}"
+    )

@@ -25,13 +25,20 @@ FLAG_TEXT_BOTTOM = "text-bottom"
 SHIFT_FLAGS = (FLAG_SUPER, FLAG_SUB, FLAG_TEXT_TOP, FLAG_TEXT_BOTTOM)
 
 
+#: A shift back to the baseline, written only inside another (#638).
+BASELINE_SHIFT = "baseline"
+
+
 def nested_shift(flag):
-    """(shift, depth) of a shift inside another, "sub@2", which is written
-    as a run layered on the outer one (#536); else None."""
+    """(shift, depth, keeps_size) of a shift inside another, "sub@2", which
+    is written as a run layered on the outer one (#536); "=" after the depth
+    when the element keeps its parent's size (#638). Else None."""
     if isinstance(flag, str) and "@" in flag:
         shift, _, depth = flag.partition("@")
-        if shift in SHIFT_FLAGS and depth.isdigit():
-            return shift, int(depth)
+        keeps = depth.endswith("=")
+        depth = depth.rstrip("=")
+        if (shift in SHIFT_FLAGS or shift == BASELINE_SHIFT) and depth.isdigit():
+            return shift, int(depth), keeps
     return None
 
 
