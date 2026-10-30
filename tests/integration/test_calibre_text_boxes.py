@@ -3,7 +3,7 @@ draws it, through calibre's real Stylizer (#643).
 
 kfxgen drew boxes only for <div>, <aside>, <section>, <blockquote> and
 <article> (#238), so a code listing's fill, borders and padding were lost.
-In QA's three lowest-matching library books, Previewer draws 1,790 such
+In QA's three lowest-matching library books, Previewer draws 1,803 such
 <pre> blocks as `$270` boxes and kfxgen none.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
