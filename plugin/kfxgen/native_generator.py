@@ -501,20 +501,6 @@ _LINE_EM = 1.2
 _SIDES = ("top", "right", "bottom", "left")
 
 
-def _has_space_above(block):
-    """Whether `block` brings its own space above: an unindented text
-    paragraph does (1 line, $47) and so does a box; an indented paragraph,
-    a table or a picture does not, as build_fragment_157 writes them (#309,
-    #310)."""
-    if block.get("type") == "table":
-        return False
-    if block.get("type") == "box":
-        return True
-    if not IMG_TOKEN_RE.sub("", block.get("text") or "").strip():
-        return False
-    return (block.get("block_style") or {}).get("indent") is None
-
-
 #: What may be trimmed from a paragraph's edges: ASCII whitespace, never a
 #: non-breaking space the book set for indentation (#244).
 _ASCII_SPACE = " \t\n\r\f"
@@ -4795,33 +4781,21 @@ class NativeKFXGenerator:
             (#434)."""
             return any(c["type"] not in ("open", "close") for c in all_chunks[first:])
 
-        def _emit_box_chunks(block, following):
+        def _emit_box_chunks(block):
             """A box (#238): an `open` chunk, its paragraphs, a `close`. The
             box's own keys (a file's key, ids carried to it) go on its first
             paragraph: a paragraph, not the container, is the link target,
             as a table's first row is (#219). Returns the keys it could not
             place.
 
-            Spacing follows kfxgen's paragraphs, which carry 1 line of space
-            above when unindented and none below (#309 review): the box gets
-            space below only when `following` brings none of its own, and
-            when its first paragraph has space above inside the border, its
-            bottom padding grows by the same, so the text sits evenly."""
+            Its margins are spaced as a paragraph's and written on it, its
+            padding inside it, as Kindle Previewer 4.0.3 writes a box
+            (#643)."""
             box = dict(block["box"])
             if block.get("clear"):
                 box["clear"] = block["clear"]  # (#381)
-            if not _is_frame(box) and _has_space_above(block["blocks"][0]):
-                pad = dict(box.get("padding") or dict.fromkeys(_SIDES, 0.0))
-                if not isinstance(pad["bottom"], tuple):
-                    pad["bottom"] = pad["bottom"] + _LINE_EM
-                    box["padding"] = pad
-            below = box.get("space_below") or 0.0
-            if following is not None and not _has_space_above(following):
-                box["space_below"] = max(below, _LINE_EM)
-            else:
-                # The next paragraph's own line counts toward a declared
-                # margin: only what is beyond it is added (#309 review).
-                box["space_below"] = max(below - _LINE_EM, 0.0)
+            box["space_above"] = block.get("margin_above") or 0.0
+            box["space_below"] = block.get("margin_below") or 0.0
             inner = {k for kid in block["blocks"] for k in _block_keys(kid)}
             own = [k for k in block.get("anchor_keys") or [] if k not in inner]
             all_chunks.append({"type": "open", "node": "box", "box": box})
@@ -4835,8 +4809,7 @@ class NativeKFXGenerator:
                     _emit_table_chunks(kid)
                     unplaced = []
                 elif kid.get("type") == "box":
-                    nxt = kids[k_idx + 1] if k_idx + 1 < len(kids) else None
-                    unplaced = _emit_box_chunks(kid, nxt)
+                    unplaced = _emit_box_chunks(kid)
                 else:
                     unplaced = _emit_paragraph(kid)
                     if box.get("width"):
@@ -5337,12 +5310,7 @@ class NativeKFXGenerator:
                             )
                             unplaced = list(block.get("anchor_keys") or ())
                         elif block.get("type") == "box":
-                            following = (
-                                para_iter[b_idx + 1]
-                                if b_idx + 1 < len(para_iter)
-                                else None
-                            )
-                            unplaced = _emit_box_chunks(block, following)
+                            unplaced = _emit_box_chunks(block)
                         else:
                             if b_idx == 0 and block.get("space_above"):
                                 # A chapter's first paragraph opens a page or
