@@ -2753,10 +2753,13 @@ def _cell_padding(css):
     return out
 
 
-#: Containers drawn as a box when they have a border or a fill (#238).
-_BOX_TAGS = frozenset({"div", "aside", "section", "blockquote", "article"})
+#: Containers drawn as a box when they have a border or a fill (#238), and a
+#: <p> or <pre>, as Kindle Previewer 4.0.3 draws a code listing (#643).
+_BOX_TAGS = frozenset({"div", "aside", "section", "blockquote", "article", "p", "pre"})
 #: Containers drawn as a box at their width when they hold a picture (#382).
-_SIZED_BOX_TAGS = _BOX_TAGS | {"figure"}
+_SIZED_BOX_TAGS = frozenset(
+    {"div", "aside", "section", "blockquote", "article", "figure"}
+)
 
 
 def _box_width(css):
@@ -4797,10 +4800,14 @@ def extract_blocks_from_html(
                         },
                     }
                 )
-                _note_margins(elem, len(blocks) - 1)
-                # Text written straight in a bordered or filled <div> is a
-                # box around that one paragraph (#310).
-                _make_box(elem, len(blocks) - 1, leaf=True)
+                # Text written straight in a bordered or filled <div>, <p> or
+                # <pre> is a box around that one paragraph (#310, #643); the
+                # box takes its margins and padding. Unboxed, its padding
+                # spaces it, as Previewer pads its text (#643).
+                if not _make_box(elem, len(blocks) - 1, leaf=True):
+                    _note_margins(
+                        elem, len(blocks) - 1, _note_padding(elem, len(blocks) - 1)
+                    )
             else:
                 pending_ids.extend(ids)  # empty anchor block: carry ids forward
                 if _is_spacer(elem):
@@ -4925,7 +4932,7 @@ def extract_blocks_from_html(
         straight in a bordered <div>); its margins move to the box.
         Returns whether it made a box."""
         tag = _local_tag(elem.tag)
-        if style_resolver is None or tag not in _SIZED_BOX_TAGS:
+        if style_resolver is None or tag not in _BOX_TAGS | _SIZED_BOX_TAGS:
             return False
         css = style_resolver(elem) or {}
         border, fill = _css_border(css), _box_background(css)
@@ -4934,7 +4941,7 @@ def extract_blocks_from_html(
         kids = blocks[start:]
         # A wrapper around a picture is drawn at its width (#382); one of
         # only a floated picture keeps #243's floated picture instead.
-        width = _box_width(css)
+        width = _box_width(css) if tag in _SIZED_BOX_TAGS else None
         side = _float_side(css)
         if width is not None and not any(
             _IMG_TOKEN_RE.search(b.get("text") or "") for b in kids
