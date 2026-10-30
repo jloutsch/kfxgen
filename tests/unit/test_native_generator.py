@@ -4764,14 +4764,18 @@ def test_the_chapter_title_is_cut_from_a_boxs_first_paragraph(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_title_split_over_a_boxs_first_lines_is_cut(tmp_path):
+def test_a_title_split_over_a_boxs_first_lines_prints_them_as_written(tmp_path):
     """The chapter "IV—Dawn" opens with a box whose first two lines are "IV"
-    and "Dawn": both are the title, as before the box (#238)."""
+    and "Dawn": the label spells them out, so they print as written and
+    kfxgen prints no heading, as for the lines unboxed (#552) and as Kindle
+    Previewer 4.0.3 prints a boxed opener (my probe, #643). The cut ate them
+    (#238) and their links with them."""
     box = _box_block([_para("IV"), _para("Dawn"), _para("The day began.")])
     chapters = [{"title": "IV—Dawn", "text": box["text"], "blocks": [box]}]
     entries, _, text, _ = _book(tmp_path, chapters)
     (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
-    assert [text(k) for k in b["$146"]] == ["The day began."]
+    assert [text(k) for k in b["$146"]] == ["IV", "Dawn", "The day began."]
+    assert [text(e) for e in entries if text(e)] == ["IV", "Dawn", "The day began."]
 
 
 @pytest.mark.unit
@@ -5105,19 +5109,21 @@ def test_a_link_to_a_cell_in_a_boxed_table_lands_on_the_cell(tmp_path):
 @pytest.mark.parametrize(
     "title, inner_kids",
     [
-        ("IV—Dawn", ["IV", "Dawn"]),  # split over the nested box's lines
+        # Split over the nested box's lines: they print as written (#552,
+        # #643), once.
+        ("IV—Dawn", ["IV", "Dawn"]),
         ("Dawn", ["Dawn"]),  # whole, in its first line
     ],
 )
-def test_a_title_inside_a_nested_box_is_cut(tmp_path, title, inner_kids):
+def test_a_title_inside_a_nested_box_prints_once(tmp_path, title, inner_kids):
     """A library book opens chapters with a box holding a box holding the
     title: it printed twice until the cuts followed the nested box (#310)."""
     inner = _box_block([_para(t) for t in inner_kids], border=None, padding=None)
     outer = _box_block([inner, _para("The day began.")])
     chapters = [{"title": title, "text": outer["text"], "blocks": [outer]}]
     entries, _, text, _ = _book(tmp_path, chapters)
-    # The heading prints the title once; the box keeps what follows it.
-    assert [text(e) for e in entries if text(e)] == [title, "The day began."]
+    want = inner_kids if len(inner_kids) > 1 else [title]
+    assert [text(e) for e in entries if text(e)] == want + ["The day began."]
 
 
 # ── #318: the title cut stops only between words ─────────────────────────────
