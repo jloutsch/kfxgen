@@ -4558,16 +4558,36 @@ def extract_blocks_from_html(
         leaf_cells.discard(id(cell))
         out = blocks[start:]
         del blocks[start:]
-        for b in out:
-            if b.get("type") == "box":
-                # A box's paragraphs are spaced by their margins, as outside
-                # a table; the cell's own aren't (#645).
-                b["blocks"] = _space_between(
-                    b["blocks"],
-                    margins,
-                    measured=style_resolver is not None,
-                    paddings=paddings,
-                )
+        texts = [b for b in out if b.get("type") not in ("space", "rule")]
+        for i, b in enumerate(texts):
+            if b.get("type") != "box":
+                continue
+            # A box's paragraphs are spaced by their margins, as outside a
+            # table; the cell's own aren't (#645).
+            b["blocks"] = _space_between(
+                b["blocks"],
+                margins,
+                measured=style_resolver is not None,
+                paddings=paddings,
+            )
+            if style_resolver is None:
+                continue
+
+            # The box itself, against its neighbours in the cell, as Kindle
+            # Previewer 4.0.3 spaces it (QA on #650). A neighbour that isn't
+            # a box is spaced as before: it goes in as a copy.
+            def mine(x):
+                return x if x.get("type") == "box" else dict(x)
+
+            prev = mine(texts[i - 1]) if i else None
+            top, bottom = margins.get(id(b), (0.0, 0.0))
+            above = margins.get(id(texts[i - 1]), (0.0, 0.0))[1] if i else 0.0
+            _place_margin(prev, b, above, top, 0.0, False)
+            if i + 1 < len(texts):
+                after = margins.get(id(texts[i + 1]), (0.0, 0.0))[0]
+                _place_margin(b, mine(texts[i + 1]), bottom, after, 0.0, False)
+            else:
+                b["margin_below"] = bottom / _ems_own(b)
         if nav_listing_at is not None:
             # A contents listing in a cell was recorded at an index inside
             # the cell, whose blocks are taken out; it belongs to the table,

@@ -132,3 +132,58 @@ def test_a_box_in_a_header_cell_is_centred_as_the_cell(converted):
         assert str(boxes[case][2].get("$34")) == "$320", (
             f"calibre {version}: {case} {boxes[case]}"
         )
+
+
+#: A box in a cell is spaced by its margins against its neighbours in the
+#: cell, as Kindle Previewer 4.0.3 spaces it (QA on #650; my probe
+#: 2026-10-31): ($47, $49) on the box, in lh. The box had none, and touched
+#: the paragraph above it.
+SPACED = {"U1": (0.833, 0.833), "U4": (0.833, None), "U6": (0.417, 1.667)}
+
+
+def test_a_box_in_a_cell_is_spaced_by_its_margins(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "u650.epub", tmp / "u650.kfx"
+    bx = "border:1px solid black;padding:0.5em"
+    _book_epub(
+        epub,
+        "U650",
+        "<h1>Spaced</h1><p>U0 before.</p>"
+        f"<table><tr><td><p style='{bx}'>U1 boxed</p></td><td>U2 plain</td></tr>"
+        f"<tr><td><p>U3 plain</p><p style='{bx}'>U4 boxed</p><p>U5 plain</p></td>"
+        "<td><p style='border:1px solid black;margin:0.5em 0 2em'>U6 boxed</p></td>"
+        "</tr></table><p>U7 after.</p>",
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Spaced", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    frags = load_fragments(kfx)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    got = {}
+
+    def lh(style, key):
+        v = style.get(key)
+        return round(float(_plain(v)["$307"]), 3) if v is not None else None
+
+    def walk(e, box):
+        e = _plain(e)
+        if not hasattr(e, "get"):
+            return
+        style = {str(k): v for k, v in styles.get(str(e.get("$157")), {}).items()}
+        if e.get("$145"):
+            t = str(texts[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+            got[t[:2]] = box
+            return
+        for k in e.get("$146") or ():
+            walk(k, style if str(e.get("$159")) == "$270" else box)
+
+    for st in by_type(frags, "$259"):
+        for e in val(st)["$146"]:
+            walk(e, None)
+    wrong = {
+        k: (lh(got[k], "$47"), lh(got[k], "$49"))
+        for k, want in SPACED.items()
+        if got.get(k) is None or (lh(got[k], "$47"), lh(got[k], "$49")) != want
+    }
+    assert not wrong, f"calibre {version}: {wrong}, Previewer {SPACED}"
