@@ -4971,6 +4971,11 @@ class NativeKFXGenerator:
                         inside = len(all_chunks)
                         unplaced = []
                         for para in cell["paragraphs"]:
+                            if para.get("type") == "box":
+                                # A bordered or filled block: a box in the
+                                # cell, as Kindle Previewer draws it (#645).
+                                unplaced += _emit_box_chunks(para)
+                                continue
                             if IMG_TOKEN_RE.search(para["text"]):
                                 # A picture alone, or alone on its line, is
                                 # an image entry in the cell, with no style
