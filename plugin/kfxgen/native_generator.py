@@ -6191,17 +6191,27 @@ class NativeKFXGenerator:
                             )
                     if node == "box":
                         box = chunk["box"]
+                        # Its margins and padding are in its own ems; kfxgen
+                        # writes a box at the main size, so they are scaled
+                        # to it, as Previewer's box `$16` scales them (#647).
+                        own = _rem(box.get("font_px"))
+                        padding = box.get("padding")
+                        if padding and own != 1.0:
+                            padding = {
+                                k: v if isinstance(v, tuple) else round(v * own, 6)
+                                for k, v in padding.items()
+                            }
                         extras["$157"] = IS(
                             _allocate_style(
                                 "_box",
                                 builder=self.build_box_style_157,
                                 border=_border_key(box.get("border")),
                                 background=box.get("background"),
-                                padding=_border_key(box.get("padding")),
+                                padding=_border_key(padding),
                                 margin_left=box.get("margin_left"),
                                 margin_right=box.get("margin_right"),
-                                space_above=box.get("space_above"),
-                                space_below=box.get("space_below"),
+                                space_above=(box.get("space_above") or 0.0) * own,
+                                space_below=(box.get("space_below") or 0.0) * own,
                                 width=box.get("width"),
                                 float_side=box.get("float"),
                                 centred=bool(box.get("centred")),

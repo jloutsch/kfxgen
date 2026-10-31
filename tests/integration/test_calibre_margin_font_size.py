@@ -18,6 +18,7 @@ size: the same space on the page.
 Needs calibre, so it is `slow` and skips without `ebook-convert`."""
 
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -103,6 +104,11 @@ def converted(calibre):  # noqa: F811
         [("c0", "contents.xhtml", "Sizes", []), ("c1", "c1.xhtml", "Next", [])],
     )
     _ebook_convert(calibre, epub, kfx, True)
+    return _boxed(kfx), version
+
+
+def _boxed(kfx):
+    """{case: (its box's style or None, its own style)}."""
     frags = load_fragments(kfx)
     styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
     texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
@@ -123,7 +129,7 @@ def converted(calibre):  # noqa: F811
     for st in by_type(frags, "$259"):
         for e in val(st)["$146"]:
             walk(e, None)
-    return got, version
+    return got
 
 
 @pytest.mark.parametrize("case", sorted(EXPECTED))
@@ -131,6 +137,70 @@ def test_a_margin_is_measured_in_its_elements_font_size(converted, case):
     got, version = converted
     box, own = got[case]
     where, key, want = EXPECTED[case]
+    style = box if where == "box" else own
+    assert style is not None, f"calibre {version}: {case} is not in a box"
+    v = style.get(key)
+    lh = round(float(_plain(v)["$307"]), 3) if v is not None else None
+    assert lh is not None and abs(lh - want) < 0.002, (
+        f"calibre {version}: {case} {key} = {lh}, want {want:.4g}: {style}"
+    )
+
+
+#: A book whose main text is 0.8em (`body { font-size: 0.8em }`): Previewer
+#: still measures a paragraph's px, % and rem margins against the 16px root,
+#: but writes a box at the main size, so a box at that size is unscaled and
+#: one at 16px is 1.25 of it (my probe 2026-10-31, after QA's on #648).
+SMALL_BODY = (
+    "<h1>Small</h1>"
+    + "".join(
+        f"<p style='margin:0'>S{i} {'words ' * 12}</p>" for i in range(4)
+    )
+    + _p("S4", "margin:0 0 24px") + _p("S5")
+    + _p("S6", "margin:0 0 5%") + _p("S7")
+    + _p("S8", "margin:0 0 1.5rem") + _p("S9")
+    + f"<div style='{BOX}padding:1em;margin:0 0 1.5em'><p style='margin:0'>SA box</p></div>"
+    + _p("SB")
+    + f"<div style='{BOX}padding:1em;font-size:1.25em'><p style='margin:0'>SC box</p></div>"
+    + _p("SD")
+)  # fmt: skip
+
+SMALL_EXPECTED = {
+    "S4": ("own", "$49", 0.9375),
+    "S6": ("own", "$49", 1.667),
+    "S8": ("own", "$49", 1.562),
+    "SA": ("box", "$52", 0.8333),
+    "SC": ("box", "$52", 0.8333 * 1.25),
+}
+
+
+@pytest.fixture(scope="module")
+def converted_small(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "s647.epub", tmp / "s647.kfx"
+    _book_epub(
+        epub,
+        "S647",
+        SMALL_BODY,
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Small", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    # The whole book at 0.8em: the page and the chapter after it.
+    with zipfile.ZipFile(epub) as z:
+        files = {n: z.read(n) for n in z.namelist()}
+    with zipfile.ZipFile(epub, "w") as z:
+        for n, data in files.items():
+            if n.endswith(".xhtml"):
+                data = data.replace(b"<body>", b"<body style='font-size:0.8em'>")
+            z.writestr(n, data, compress_type=zipfile.ZIP_STORED)
+    _ebook_convert(calibre, epub, kfx, True)
+    return _boxed(kfx), version
+
+
+@pytest.mark.parametrize("case", sorted(SMALL_EXPECTED))
+def test_a_box_is_measured_against_the_books_main_size(converted_small, case):
+    got, version = converted_small
+    box, own = got[case]
+    where, key, want = SMALL_EXPECTED[case]
     style = box if where == "box" else own
     assert style is not None, f"calibre {version}: {case} is not in a box"
     v = style.get(key)

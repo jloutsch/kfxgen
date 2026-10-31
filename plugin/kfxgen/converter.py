@@ -2722,7 +2722,7 @@ _PADDING_EM_PER_UNIT = {"px": 0.45 / 12, "pt": 1 / 12, "em": 1.0, "rem": 1.0}
 def _padding_em(value, ratio=1.0):
     """A declared padding as Kindle Previewer measures it: ems (1px = 0.45pt,
     12pt = 1em), ("%", n) for a percentage, or None when unreadable. An em
-    is the element's own: `ratio` is its font size against the main 16px
+    is the element's own: `ratio` is its font size against the 16px root
     (#647)."""
     m = re.fullmatch(r"\s*([\d.]+)\s*(px|pt|em|rem|%)?\s*", str(value or ""))
     if not m:
@@ -2737,9 +2737,9 @@ def _padding_em(value, ratio=1.0):
 
 
 def _font_ratio(css):
-    """An element's font size against the main 16px: Kindle Previewer 4.0.3
+    """An element's font size against the 16px root: Kindle Previewer 4.0.3
     measures an em margin or padding in the element's own size, and a px,
-    pt, rem or % one in the main text's (#647)."""
+    pt, rem or % one against the root, whatever the book's main size (#647)."""
     px = css_font_size(css)
     return px / 16.0 if px else 1.0
 
@@ -2839,7 +2839,7 @@ _LINE_SPACE_EM = 1.2
 
 
 def _margin_em(css, side):
-    """An element's declared margin-top or -bottom in the main text's ems
+    """An element's declared margin-top or -bottom in the 16px root's ems
     (1px = 0.45pt, 12pt = 1em, as for padding; an em is the element's own,
     #647); a percentage on Kindle Previewer 4.0.3's scale, 100% = 384pt =
     32em (#640); negative as the book sets it (#640); 0 when unset."""
@@ -2867,14 +2867,20 @@ def _is_spacer(elem):
 
 
 def _box_padding(css):
-    """A box's padding per side, in the main text's ems or ("%", n), or None
-    when it has none: kfxgen writes a box at the main size (#647). Unlike a
-    cell, a box has no default padding (#238)."""
+    """A box's padding per side, in its own ems or ("%", n), or None when it
+    has none: a px, pt or rem padding is the 16px root's, as Kindle Previewer
+    4.0.3 measures it (#647). Unlike a cell, a box has no default padding
+    (#238)."""
     sides = (css or {}).get("padding-sides")
     if not sides:
         return None
     ratio = _font_ratio(css)
-    out = {side: _padding_em(v, ratio) or 0.0 for side, v in zip(_BORDER_SIDES, sides)}
+
+    def own(value):
+        em = _padding_em(value, ratio) or 0.0
+        return em if isinstance(em, tuple) else em / ratio
+
+    out = {side: own(v) for side, v in zip(_BORDER_SIDES, sides)}
     if all(v == 0 for v in out.values()):
         return None
     return out
@@ -3993,10 +3999,10 @@ def _spaces_itself(block):
 
 
 def _ems_own(block):
-    """How many of the main text's ems are one of `block`'s own: its font
-    size against the main 16px. A box has none of its own: kfxgen writes
-    it at the main size (#647)."""
-    return ((block.get("block_style") or {}).get("font_size") or 16.0) / 16.0
+    """How many of the 16px root's ems are one of `block`'s own: its font
+    size against 16px. A box's is its container's (#647)."""
+    px = block.get("font_px") if block.get("type") == "box" else None
+    return (px or (block.get("block_style") or {}).get("font_size") or 16.0) / 16.0
 
 
 def _place_margin(
@@ -4017,7 +4023,7 @@ def _place_margin(
     collapse in a browser, plus the spacer paragraphs' lines (in ems). `b` takes it
     when it has a margin-top of its own; otherwise the block before keeps it
     as its space below and `b` takes none. Margins and padding come in the
-    main text's ems, as Previewer compares them, and are written in the
+    16px root's ems, as Previewer compares them, and are written in the
     block's own (#647). A wrapper's padding above `b`
     (`pad_own`) or below the block before (`pad_up`) keeps the margins on
     its two sides apart: the wrapper's own margin (`outer_own`, `outer_up`)
@@ -4981,6 +4987,7 @@ def extract_blocks_from_html(
                 "text": "\n\n".join(b["text"] for b in kids if b["text"]),
                 "spans": [],
                 "block_style": None,
+                "font_px": css_font_size(css),
                 "blocks": kids,
                 "anchor_ids": ids,
                 "anchor_offsets": dict.fromkeys(ids, 0),
@@ -4988,6 +4995,10 @@ def extract_blocks_from_html(
                     "border": border,
                     "background": fill,
                     "padding": _box_padding(css),
+                    # Its own size: the generator writes its margins and
+                    # padding, in its ems, against the book's main size
+                    # (#647).
+                    "font_px": css_font_size(css),
                     "margin_left": _page_share(left) or None,
                     "margin_right": _page_share(right) or None,
                     "width": width,
