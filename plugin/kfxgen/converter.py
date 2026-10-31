@@ -2719,9 +2719,11 @@ _DEFAULT_PADDING_EM = 0.45 / 12
 _PADDING_EM_PER_UNIT = {"px": 0.45 / 12, "pt": 1 / 12, "em": 1.0, "rem": 1.0}
 
 
-def _padding_em(value):
+def _padding_em(value, ratio=1.0):
     """A declared padding as Kindle Previewer measures it: ems (1px = 0.45pt,
-    12pt = 1em), ("%", n) for a percentage, or None when unreadable."""
+    12pt = 1em), ("%", n) for a percentage, or None when unreadable. An em
+    is the element's own: `ratio` is its font size against the main 16px
+    (#647)."""
     m = re.fullmatch(r"\s*([\d.]+)\s*(px|pt|em|rem|%)?\s*", str(value or ""))
     if not m:
         return None
@@ -2731,7 +2733,15 @@ def _padding_em(value):
         return ("%", n)
     if unit is None:
         return 0.0 if n == 0 else None
-    return n * _PADDING_EM_PER_UNIT[unit]
+    return n * _PADDING_EM_PER_UNIT[unit] * (ratio if unit == "em" else 1.0)
+
+
+def _font_ratio(css):
+    """An element's font size against the main 16px: Kindle Previewer 4.0.3
+    measures an em margin or padding in the element's own size, and a px,
+    pt, rem or % one in the main text's (#647)."""
+    px = css_font_size(css)
+    return px / 16.0 if px else 1.0
 
 
 def _cell_padding(css):
@@ -2829,13 +2839,13 @@ _LINE_SPACE_EM = 1.2
 
 
 def _margin_em(css, side):
-    """An element's declared margin-top or -bottom in ems (1px = 0.45pt,
-    12pt = 1em, as for padding); a percentage on Kindle Previewer 4.0.3's
-    scale, 100% = 384pt = 32em (#640); negative as the book sets it (#640);
-    0 when unset."""
+    """An element's declared margin-top or -bottom in the main text's ems
+    (1px = 0.45pt, 12pt = 1em, as for padding; an em is the element's own,
+    #647); a percentage on Kindle Previewer 4.0.3's scale, 100% = 384pt =
+    32em (#640); negative as the book sets it (#640); 0 when unset."""
     value = str((css or {}).get(f"margin-{side}") or "").strip()
     sign = -1.0 if value.startswith("-") else 1.0
-    em = _padding_em(value.lstrip("-"))
+    em = _padding_em(value.lstrip("-"), _font_ratio(css))
     if isinstance(em, tuple):
         return sign * em[1] * 0.32
     return 0.0 if em is None else sign * em
@@ -2857,12 +2867,14 @@ def _is_spacer(elem):
 
 
 def _box_padding(css):
-    """A box's padding per side, in Previewer's ems or ("%", n), or None when
-    it has none. Unlike a cell, a box has no default padding (#238)."""
+    """A box's padding per side, in the main text's ems or ("%", n), or None
+    when it has none: kfxgen writes a box at the main size (#647). Unlike a
+    cell, a box has no default padding (#238)."""
     sides = (css or {}).get("padding-sides")
     if not sides:
         return None
-    out = {side: _padding_em(v) or 0.0 for side, v in zip(_BORDER_SIDES, sides)}
+    ratio = _font_ratio(css)
+    out = {side: _padding_em(v, ratio) or 0.0 for side, v in zip(_BORDER_SIDES, sides)}
     if all(v == 0 for v in out.values()):
         return None
     return out
@@ -3980,9 +3992,11 @@ def _spaces_itself(block):
     return bool(block.get("heading")) or block.get("type") == "rule"
 
 
-def _em_px(block):
-    """`block`'s font size in CSS px, for comparing margins across sizes."""
-    return (block.get("block_style") or {}).get("font_size") or 16.0
+def _ems_own(block):
+    """How many of the main text's ems are one of `block`'s own: its font
+    size against the main 16px. A box has none of its own: kfxgen writes
+    it at the main size (#647)."""
+    return ((block.get("block_style") or {}).get("font_size") or 16.0) / 16.0
 
 
 def _place_margin(
@@ -4002,46 +4016,43 @@ def _place_margin(
     margin-bottom or an invisible <hr>'s) and `b`'s own margin-top, as margins
     collapse in a browser, plus the spacer paragraphs' lines (in ems). `b` takes it
     when it has a margin-top of its own; otherwise the block before keeps it
-    as its space below and `b` takes none. Margins are in each block's own
-    ems, so they are compared in px. A wrapper's padding above `b`
+    as its space below and `b` takes none. Margins and padding come in the
+    main text's ems, as Previewer compares them, and are written in the
+    block's own (#647). A wrapper's padding above `b`
     (`pad_own`) or below the block before (`pad_up`) keeps the margins on
     its two sides apart: the wrapper's own margin (`outer_own`, `outer_up`)
     collapses with the outside, and the paragraph's is added inside (#640,
     QA on #642)."""
     if prev is None:
         if _takes_margin(b):
-            b["margin_above"] = outer_own + pad_own + top + lines
+            b["margin_above"] = (outer_own + pad_own + top) / _ems_own(b) + lines
         return
-    up, own = above * _em_px(prev), top * _em_px(b)
+    up, own = above, top
     if pad_up or pad_own:
-        outside = _collapse(
-            outer_up * _em_px(prev) if pad_up else up,
-            outer_own * _em_px(b) if pad_own else own,
-        )
-        inside_up = up + pad_up * _em_px(prev) if pad_up else 0.0
-        inside_own = pad_own * _em_px(b) + own if pad_own else 0.0
+        outside = _collapse(outer_up if pad_up else up, outer_own if pad_own else own)
+        inside_up = up + pad_up if pad_up else 0.0
+        inside_own = pad_own + own if pad_own else 0.0
         gap = outside + inside_up + inside_own
         # As without padding: `b` takes it with a margin or padding of its
         # own above, else the block before keeps it below.
         if _takes_margin(b) and (
             pad_own or top or outer_own or not _takes_margin(prev)
         ):
-            b["margin_above"] = gap / _em_px(b) + lines
+            b["margin_above"] = gap / _ems_own(b) + lines
         elif _takes_margin(prev) and not _spaces_itself(b):
-            prev["margin_below"] = gap / _em_px(prev)
+            prev["margin_below"] = gap / _ems_own(prev)
             if _takes_margin(b):
                 b["margin_above"] = lines
         return
-    padding = pad_up * _em_px(prev) + pad_own * _em_px(b)
     gap = _collapse(up, own)
     if top != 0 or on_purpose or not _takes_margin(prev):
         if _takes_margin(b):
-            b["margin_above"] = (gap + padding) / _em_px(b) + lines
+            b["margin_above"] = (gap + pad_up + pad_own) / _ems_own(b) + lines
     else:
         if not _spaces_itself(b):
-            prev["margin_below"] = above + pad_up
+            prev["margin_below"] = (above + pad_up) / _ems_own(prev)
         if _takes_margin(b):
-            b["margin_above"] = pad_own
+            b["margin_above"] = pad_own / _ems_own(b)
     if (
         not _takes_margin(b)
         and not _spaces_itself(b)
@@ -4049,7 +4060,7 @@ def _place_margin(
         and up > own
     ):
         # Before a table: the paragraph above keeps it, as Previewer writes it.
-        prev["margin_below"] = above
+        prev["margin_below"] = above / _ems_own(prev)
 
 
 def _space_between(blocks, margins, measured=True, paddings=None):
@@ -4129,10 +4140,13 @@ def _space_between(blocks, margins, measured=True, paddings=None):
     if measured and out and _takes_margin(out[-1]):
         # A file's last paragraph keeps its margin-bottom (#553).
         last_pads = (paddings or {}).get(id(out[-1])) or (0.0,) * 4
+        own = _ems_own(out[-1])
         out[-1]["margin_below"] = (
-            max(out[-1].get("margin_below") or 0.0, margins.get(id(out[-1]), (0, 0))[1])
-            + last_pads[1]
-            + last_pads[3]
+            max(
+                out[-1].get("margin_below") or 0.0,
+                margins.get(id(out[-1]), (0, 0))[1] / own,
+            )
+            + (last_pads[1] + last_pads[3]) / own
         )
     if gaps:
         counts = collections.Counter(g for _, g, _ in gaps)
@@ -4857,12 +4871,14 @@ def extract_blocks_from_html(
         padding doesn't collapse (#640)."""
         if style_resolver is None:
             return (False, False)
-        sides = (style_resolver(elem) or {}).get("padding-sides") or ()
+        css = style_resolver(elem) or {}
+        sides = css.get("padding-sides") or ()
         if len(sides) != 4:
             return (False, False)
+        ratio = _font_ratio(css)
 
         def em(value):
-            v = _padding_em(value)
+            v = _padding_em(value, ratio)
             return v[1] * 0.32 if isinstance(v, tuple) else (v or 0.0)
 
         top, bottom = em(sides[0]), em(sides[2])
