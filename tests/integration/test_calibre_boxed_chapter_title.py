@@ -109,3 +109,40 @@ def test_a_box_opening_with_the_title_holds_the_heading_and_the_rest(calibre):  
         f"calibre {version}: {got}"
     )
     assert by_text["K1 after the box."] is None, f"calibre {version}: {got}"
+
+
+def test_a_title_run_into_a_boxed_paragraph_prints_as_written(calibre):  # noqa: F811
+    """A box opening with "Boxed Title. K3 …": Kindle Previewer 4.0.3 prints
+    no heading and keeps the paragraph whole (QA on #651, my probe). kfxgen
+    printed its heading and left ". K3 …" in the box (#654)."""
+    got, version = _convert(
+        calibre,
+        "R654",
+        f"<div style='{BOX}'><p>Boxed Title. K3 the words run on.</p></div>"
+        "<p>K4 after.</p>",
+    )
+    texts = [t for t, _ in got]
+    assert "Boxed Title" not in texts, f"calibre {version}: {got}"
+    assert _bordered(dict(got)["Boxed Title. K3 the words run on."]), (
+        f"calibre {version}: {got}"
+    )
+
+
+def test_a_boxed_heading_after_a_lead_paragraph_prints_once(calibre):  # noqa: F811
+    """A lead paragraph, then a boxed `<h2>` with `page-break-before`: Kindle
+    Previewer 4.0.3 prints the lead, then the boxed heading, and no label
+    (QA on #651, my probe). kfxgen printed its label above the lead as well,
+    the title twice (#654)."""
+    got, version = _convert(
+        calibre,
+        "P654",
+        "<p>W0 a lead paragraph.</p>"
+        f"<div style='{BOX};page-break-before:always'><h2>Boxed Title</h2></div>"
+        "<p>W1 after the box.</p>",
+    )
+    texts = [t for t, _ in got]
+    assert texts.count("Boxed Title") == 1, f"calibre {version}: {got}"
+    assert texts.index("W0 a lead paragraph.") < texts.index("Boxed Title"), (
+        f"calibre {version}: {got}"
+    )
+    assert _bordered(dict(got)["Boxed Title"]), f"calibre {version}: {got}"
