@@ -3125,16 +3125,20 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
     `walk_cell` walks the cell as the body is walked, so its headings, list
     items, loose text and anchors become the same blocks they would outside
     a table. Returns None when that leaves no text."""
-    paragraphs = [
-        {
+
+    def in_cell(p):
+        if p.get("type") == "box":
+            # Its paragraphs are the cell's text, aligned as the cell's
+            # (#645): a <th>'s centred.
+            return {**p, "blocks": [in_cell(k) for k in p["blocks"]]}
+        return {
             **p,
             "block_style": _cell_block_style(
                 cell, None, p.get("block_style"), style_resolver
             ),
         }
-        for p in walk_cell(cell)
-        if p.get("text")
-    ]
+
+    paragraphs = [in_cell(p) for p in walk_cell(cell) if p.get("text")]
     if not paragraphs:
         return None
     css = style_resolver(cell) if style_resolver is not None else None

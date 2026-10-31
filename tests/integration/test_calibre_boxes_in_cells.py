@@ -37,7 +37,8 @@ BODY = (
     f"<table><tr><td><p style='{BX}' id='t1'>L1 bordered</p></td><td>L2 plain</td></tr>"
     f"<tr><td><p style='margin:0'>L3 plain</p><div style='{BX}'><p style='margin:0'>L4 first</p>"
     f"<p style='margin:0' id='t2'>L5 second</p></div></td>"
-    f"<td><pre style='{FILL}'><span id='t3'>L6</span> filled</pre></td></tr></table>"
+    f"<td><pre style='{FILL}'><span id='t3'>L6</span> filled</pre></td></tr>"
+    f"<tr><th><p style='{BX}'>L8 boxed header</p></th><th>L9 plain header</th></tr></table>"
     "<p>L7 after.</p>"
 )
 BORDER_KEYS = {"$88", "$89", "$90", "$91", "$92"}
@@ -120,3 +121,14 @@ def test_links_land_on_the_paragraph_in_the_box(converted):
     assert sorted(v for v in anchors.values() if v) == ["L1", "L5", "L6"], (
         f"calibre {version}: {anchors}"
     )
+
+
+def test_a_box_in_a_header_cell_is_centred_as_the_cell(converted):
+    """`<th><p style="border:…">`: the text centred, as Previewer writes it
+    (`$34` `$320`), and as the plain header cell beside it. The box's
+    paragraphs first came out justified."""
+    boxes, _, version = converted
+    for case in ("L8", "L9"):
+        assert str(boxes[case][2].get("$34")) == "$320", (
+            f"calibre {version}: {case} {boxes[case]}"
+        )
