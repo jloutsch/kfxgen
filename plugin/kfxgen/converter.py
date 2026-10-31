@@ -4082,10 +4082,11 @@ def _place_margin(
     collapses with the outside, and the paragraph's is added inside (#640,
     QA on #642). `fixed` is space margins don't collapse through: a rule
     with a height between (QA on #649)."""
-    if b.get("heading") and pad_own:
-        # A heading first in a padded wrapper: kfxgen's own line above it,
-        # and the wrapper's padding, which was lost (QA on #642).
-        b["margin_above"] = _LINE_SPACE_EM + pad_own / _ems_own(b)
+    if b.get("heading") and (pad_own or fixed):
+        # A heading first in a padded wrapper, or after a rule with a
+        # height: kfxgen's own line above it, and the padding or the rule's
+        # space, which were lost (QA on #642, #655).
+        b["margin_above"] = _LINE_SPACE_EM + (pad_own + fixed) / _ems_own(b)
     if prev is None:
         if _takes_margin(b):
             b["margin_above"] = (outer_own + pad_own + top + fixed) / _ems_own(

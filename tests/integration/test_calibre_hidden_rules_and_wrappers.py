@@ -181,3 +181,28 @@ def test_a_rule_with_a_height_keeps_its_margins_apart(calibre):  # noqa: F811
     got = _spacing(kfx)
     wrong = {k: got[k] for k, want in HEIGHTS.items() if not _near(got[k][0], want)}
     assert not wrong, f"calibre {version}: {wrong}, Previewer {HEIGHTS}"
+
+
+def test_a_rule_with_a_height_before_a_heading_adds_its_space(calibre):  # noqa: F811
+    """`<p>` (1em), `<hr style="border:none;margin:1em 0;height:3px">`,
+    `<h2>`: Kindle Previewer 4.0.3 spaces the heading as a paragraph: the
+    paragraph's 16px (collapsed with the rule's 9.6px), the rule's 1.8px, and
+    the h2's 24px (collapsed with the rule's 9.6px), 41.8px (my probe; QA on
+    #649). kfxgen spaces its headings its own way, a line,
+    and dropped the rule's space (28.8px). Now the line and the rule's
+    1.1125em: (1.2 + 1.1125 / 1.5) / 1.2 = 1.618 lh at the h2's 1.5em, 46.6px
+    (#655)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "x655.epub", tmp / "x655.kfx"
+    _book_epub(
+        epub,
+        "X655",
+        "<h1>Rule</h1><p style='margin:1em 0'>X0 before.</p>"
+        "<hr style='border:none;margin:1em 0;height:3px'/>"
+        "<h2 style='margin:1em 0'>X1 heading</h2><p style='margin:1em 0'>X2 after.</p>",
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Rule", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    assert _near(got["X1"][0], 1.618), f"calibre {version}: {got}"
