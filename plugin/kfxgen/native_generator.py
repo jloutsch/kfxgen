@@ -647,18 +647,17 @@ def _heading_near_start(blocks):
     cell. kfxgen then prints no label of its own, as Kindle Previewer has
     it; a section with no heading near its start keeps its label (#492).
     A first block that is the heading prints in the label's place (#481).
-    A heading in a box past the first block counts: the label printed
-    above the book's boxed heading, the title twice (#654). A first box
-    holding the title is drawn round kfxgen's heading (#646)."""
+    A heading in a box counts, unless it opens the chapter's first box:
+    the label printed above the book's boxed heading, the title twice
+    (#654). A first box opening with the title is drawn round kfxgen's
+    heading (#646)."""
     for i, block in enumerate(_drop_edge_rules(blocks or ())[:_MAX_SPLIT_TITLE_BLOCKS]):
         if block.get("heading"):
             return True
-        if (
-            i
-            and block.get("type") == "box"
-            and any(b.get("heading") for b in _unboxed([block]))
-        ):
-            return True
+        if block.get("type") == "box":
+            kids = _unboxed([block])
+            if any(b.get("heading") for b in (kids if i else kids[1:])):
+                return True
         for row in (block.get("table") or {}).get("rows") or ():
             for cell in row["cells"]:
                 if cell.get("heading") or any(

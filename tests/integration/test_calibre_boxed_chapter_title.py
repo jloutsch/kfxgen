@@ -146,3 +146,18 @@ def test_a_boxed_heading_after_a_lead_paragraph_prints_once(calibre):  # noqa: F
         f"calibre {version}: {got}"
     )
     assert _bordered(dict(got)["Boxed Title"]), f"calibre {version}: {got}"
+
+
+def test_a_title_inside_a_first_box_after_an_intro_prints_once(calibre):  # noqa: F811
+    """A chapter's first box holding an intro line, then the title as an
+    `<h3>`: Kindle Previewer 4.0.3 prints the box only (QA on #656, my
+    probe). kfxgen printed its label above the box as well (#654)."""
+    got, version = _convert(
+        calibre,
+        "Y654",
+        f"<div style='{BOX}'><p>Y0 an intro line.</p><h3>Boxed Title</h3>"
+        "<p>Y1 in the box.</p></div><p>Y2 after.</p>",
+    )
+    texts = [t for t, _ in got]
+    assert texts.count("Boxed Title") == 1, f"calibre {version}: {got}"
+    assert texts[0] == "Y0 an intro line.", f"calibre {version}: {got}"
