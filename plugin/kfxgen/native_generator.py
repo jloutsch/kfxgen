@@ -4775,6 +4775,25 @@ class NativeKFXGenerator:
             chunk["anchor_keys"] = _dedupe_keys((chunk.get("anchor_keys") or []) + keys)
             chunk.setdefault("anchor_offsets", {}).update(dict.fromkeys(keys, 0))
 
+        def _box_heading(block, close=True):
+            """Open the box `block`, which opened with the chapter's title,
+            before kfxgen's heading printing it, as Kindle Previewer 4.0.3
+            draws it round the book's heading (#646). The cut dropped a box
+            holding only the title, and printed the heading above the rest.
+            With `close` it holds the heading alone; otherwise the rest of
+            the box follows in it, `opened`."""
+            box = dict(block["box"])
+            if block.get("clear"):
+                box["clear"] = block["clear"]
+            box["space_above"] = block.get("margin_above") or 0.0
+            box["space_below"] = block.get("margin_below") or 0.0
+            h = len(all_chunks) - 1
+            all_chunks.insert(h, {"type": "open", "node": "box", "box": box})
+            if close:
+                all_chunks.append({"type": "close"})
+            heading_chunk_indices.discard(h)
+            heading_chunk_indices.add(h + 1)
+
         def _emitted_content(first):
             """Whether a chunk from `first` on can take anchor keys: a box
             whose paragraphs emitted nothing is only its `open` and `close`
@@ -4798,7 +4817,8 @@ class NativeKFXGenerator:
             box["space_below"] = block.get("margin_below") or 0.0
             inner = {k for kid in block["blocks"] for k in _block_keys(kid)}
             own = [k for k in block.get("anchor_keys") or [] if k not in inner]
-            all_chunks.append({"type": "open", "node": "box", "box": box})
+            if not block.get("opened"):  # opened before the heading (#646)
+                all_chunks.append({"type": "open", "node": "box", "box": box})
             pending = own
             kids = block["blocks"]
             for k_idx, kid in enumerate(kids):
@@ -5206,6 +5226,21 @@ class NativeKFXGenerator:
                                 iter_blocks = (
                                     [kept_box] if kept_box else []
                                 ) + iter_blocks[1:]
+                                # Only when the title was a block of its
+                                # own: a paragraph running it in keeps the
+                                # rest in the box, the heading above.
+                                if (
+                                    all_chunks[-1] is heading_chunk
+                                    and first["blocks"][0].get("type") != "box"
+                                    and (
+                                        kept_box is None
+                                        or len(kept_box["blocks"])
+                                        < len(first["blocks"])
+                                    )
+                                ):
+                                    _box_heading(first, close=kept_box is None)
+                                    if kept_box is not None:
+                                        kept_box["opened"] = True
                             elif first.get("type") == "box":
                                 # Not the paragraph cut: a box is written from
                                 # its blocks, so trimming its joined text
