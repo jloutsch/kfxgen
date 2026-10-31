@@ -144,3 +144,40 @@ def test_a_heading_first_in_a_padded_wrapper_keeps_the_padding(calibre):  # noqa
     _ebook_convert(calibre, epub, kfx, True)
     got = _spacing(kfx)
     assert _near(got["C1"][0], 1.556), f"calibre {version}: {got}"
+
+
+#: Between `p {margin: 1em 0}` paragraphs: an <hr> with a height the book
+#: sets keeps each margin on its own side, 0.6 of its margins and height
+#: (QA on #649; my probe 2026-10-31). Previewer's total space between the
+#: paragraphs, in lh; with no top margin of its own it leaves the paragraph
+#: above its `$49` (0.833) and writes the rest after, which kfxgen writes
+#: as one `$47`. Exactly 2px is calibre's UA height, which calibre's CSS
+#: rewrite can't tell from a book's 2px: taken as none.
+HEIGHT_BODY = "<h1>Heights</h1><p style='margin:1em 0'>H0 before.</p>" + "".join(
+    f"<hr style='border:none;{css}'/><p style='margin:1em 0'>{label} after.</p>"
+    for label, css in (
+        ("H1", "margin:1em 0;height:1px"),
+        ("H2", "margin:1em 0;height:3px"),
+        ("H3", "margin:0;height:3px"),
+        ("H4", "margin:2em 0;height:3px"),
+        ("H5", "margin:1em 0"),
+        ("H6", "margin:0;height:10px"),
+    )
+)
+HEIGHTS = {"H1": 1.698, "H2": 1.76, "H3": 1.76, "H4": 2.094, "H5": 0.833, "H6": 1.979}
+
+
+def test_a_rule_with_a_height_keeps_its_margins_apart(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "h649.epub", tmp / "h649.kfx"
+    _book_epub(
+        epub,
+        "H649",
+        HEIGHT_BODY,
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Heights", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    wrong = {k: got[k] for k, want in HEIGHTS.items() if not _near(got[k][0], want)}
+    assert not wrong, f"calibre {version}: {wrong}, Previewer {HEIGHTS}"
