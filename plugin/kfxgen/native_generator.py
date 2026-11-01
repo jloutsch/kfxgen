@@ -650,7 +650,7 @@ def _heading_near_start(blocks):
     A heading in a box counts, unless it opens the chapter's first box:
     the label printed above the book's boxed heading, the title twice
     (#654). A first box opening with the title is drawn round kfxgen's
-    heading (#646). So does a heading in a box in a table cell (#660)."""
+    heading (#646). A heading in a box in a table cell counts too (#660)."""
     for i, block in enumerate(_drop_edge_rules(blocks or ())[:_MAX_SPLIT_TITLE_BLOCKS]):
         if block.get("heading"):
             return True
