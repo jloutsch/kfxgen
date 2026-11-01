@@ -4062,19 +4062,18 @@ def _collapse(a, b):
 
 
 def _takes_margin(block):
-    """Whether kfxgen writes the book's margins on `block`: a paragraph or a
-    box, as Kindle Previewer 4.0.3 spaces a box (#643), not a heading
-    (kfxgen spaces its headings its own way), a table or a rule (#553)."""
-    return (block.get("type") is None and not block.get("heading")) or block.get(
-        "type"
-    ) == "box"
+    """Whether kfxgen writes the book's margins on `block`: a paragraph, a
+    heading (#658) or a box, as Kindle Previewer 4.0.3 spaces a box (#643),
+    not a table or a rule (#553)."""
+    return block.get("type") in (None, "box")
 
 
 def _spaces_itself(block):
-    """Whether kfxgen writes `block`'s space above its own way: a heading or
-    a rule (#230). The paragraph before it then keeps no space below, or the
-    gap was both (QA on #639)."""
-    return bool(block.get("heading")) or block.get("type") == "rule"
+    """Whether kfxgen writes `block`'s space above its own way: a rule
+    (#230). The paragraph before it then keeps no space below, or the gap
+    was both (QA on #639). A heading did too, a line above it, until it took
+    the book's margins as Previewer does (#658)."""
+    return block.get("type") == "rule"
 
 
 def _ems_own(block):
@@ -4110,11 +4109,6 @@ def _place_margin(
     collapses with the outside, and the paragraph's is added inside (#640,
     QA on #642). `fixed` is space margins don't collapse through: a rule
     with a height between (QA on #649)."""
-    if b.get("heading") and (pad_own or fixed):
-        # A heading first in a padded wrapper, or after a rule with a
-        # height: kfxgen's own line above it, and the padding or the rule's
-        # space, which were lost (QA on #642, #655).
-        b["margin_above"] = _LINE_SPACE_EM + (pad_own + fixed) / _ems_own(b)
     if prev is None:
         if _takes_margin(b):
             # An invisible <hr> before it keeps its margin below, collapsed

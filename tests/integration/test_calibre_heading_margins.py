@@ -1,0 +1,108 @@
+"""A heading's space above and below, from its CSS margins as Kindle
+Previewer 4.0.3 writes them (#658; my probe, 2026-11-01, a page with a
+DOCTYPE, `p { margin: 1em 0 }`).
+
+kfxgen spaced its headings its own way: a line of the heading's own above
+it, whatever the book set. In a 26-book library sample every one of 590
+headings past a chapter's start had a different space above it than in
+Previewer's book, a third by a line or more. A heading's margins now
+collapse with its neighbours' as a paragraph's do (#553): the larger of the
+two, on the heading when its own margin-top is set, else kept below the
+block before. Calibre's own sheet gives h1-h4 their usual margins.
+
+Needs calibre, so it is `slow` and skips without `ebook-convert`."""
+
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "plugin"))
+sys.path.insert(0, str(REPO))
+
+from tests.integration.test_calibre_contents_part_headings import (  # noqa: E402
+    _book_epub,
+)
+from tests.integration.test_calibre_paragraph_margins import _spacing  # noqa: E402
+from tests.integration.test_calibre_table_rows import (  # noqa: E402
+    _ebook_convert,
+    calibre,  # noqa: F401  (fixture)
+)
+
+pytestmark = [pytest.mark.slow, pytest.mark.integration]
+
+P = "margin:1em 0"
+BX = "border:1px solid black;padding:0.5em"
+
+
+def _p(label, style=P):
+    return f"<p style='{style}'>{label} words.</p>"
+
+
+BODY = (
+    "<h1>Headings</h1>" + _p("A1")
+    + "<h3>A2 plain h3</h3>" + _p("A3")
+    + "<h2>A4 plain h2</h2>" + _p("A5")
+    + "<h1>A6 plain h1</h1>" + _p("A7")
+    + "<h4>A8 plain h4</h4>" + _p("A9")
+    + "<h2>B0 h2</h2><h3>B1 h3 under h2</h3>" + _p("B2")
+    + "<h2 style='margin:3em 0 0.5em'>B3 big h2</h2>" + _p("B4")
+    + "<h3 style='margin:0'>B5 zero h3</h3>" + _p("B6")
+    + _p("B7", "margin:0 0 3em")
+    + "<h3>B8 h3 after a tail</h3>" + _p("B9", "margin:0")
+    + f"<div style='{BX}'><h3>C5 boxed h3</h3>" + _p("C6") + "</div>" + _p("C7")
+    + f"<div style='{BX}'>" + _p("C8") + "<h3>C9 last in a box</h3></div>"
+    + _p("D0")
+)  # fmt: skip
+
+#: Previewer's ($47, $49) on each heading, in the heading's own line heights.
+PREVIEWER = {
+    "A2": (0.833, None),
+    "A4": (0.692, None),
+    "A6": (0.558, None),
+    "A8": (1.108, None),
+    "B1": (0.887, None),
+    "B3": (2.5, None),
+    "B5": (None, None),
+    "B8": (2.137, 0.833),
+    "C5": (0.833, None),
+    "C9": (0.833, 0.833),
+}
+
+
+def _near(a, b):
+    return (a is None) == (b is None) and (a is None or abs(a - b) < 0.002)
+
+
+@pytest.fixture(scope="module")
+def converted(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "h658.epub", tmp / "h658.kfx"
+    _book_epub(
+        epub,
+        "H658",
+        BODY,
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Headings", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    return _spacing(kfx), version
+
+
+@pytest.mark.parametrize("case", sorted(PREVIEWER))
+def test_a_headings_space_is_its_css_margin(converted, case):
+    got, version = converted
+    want = PREVIEWER[case]
+    assert _near(got[case][0], want[0]) and _near(got[case][1], want[1]), (
+        f"calibre {version}: {case} ($47, $49) = {got[case]}, Previewer {want}"
+    )
+
+
+def test_the_paragraph_after_a_heading_is_spaced_as_before(converted):
+    """The heading's margin-bottom met the next paragraph's margin-top
+    before, and still does: A3 and B2 keep Previewer's space."""
+    got, version = converted
+    assert _near(got["A3"][0], 0.975) and _near(got["B2"][0], 0.975), (
+        f"calibre {version}: {got}"
+    )

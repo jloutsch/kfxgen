@@ -59,11 +59,9 @@ CASES = [
         "c1",
         "INDEX",
         "".join(f'<p class="ix">Entry {n}, {n * 7}</p>' for n in range(1, 5)),
-        # The heading's margin-bottom above the first entry: Previewer writes
-        # it below the heading (0.6917 of its lines), kfxgen, which spaces its
-        # headings its own way, above the entry; the same space (#553).
-        [("Entry 1, 7", "1.0375")]
-        + [(f"Entry {n}, {n * 7}", None) for n in range(2, 5)],
+        # The heading's margin-bottom: below the heading (0.6917 of its
+        # lines), as Previewer writes it, not above the entry (#553, #658).
+        [("Entry 1, 7", None)] + [(f"Entry {n}, {n * 7}", None) for n in range(2, 5)],
     ),
     (
         "c1",
@@ -72,8 +70,9 @@ CASES = [
         f'<p class="np">{_LONG}</p>',
         # No margin and no indent: no space between them, as Previewer and a
         # browser draw them (#553); #331 kept a line between prose paragraphs.
+        # The heading's margin-bottom is the heading's (#658).
         [
-            ("“Yes.”", "1.0375"),
+            ("“Yes.”", None),
             (_LONG.strip(), None),
             ("“No.”", None),
             (_LONG.strip(), None),

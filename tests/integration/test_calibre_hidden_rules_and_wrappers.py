@@ -128,10 +128,10 @@ def test_padded_wrappers_keep_the_margins_inside_them(converted, case):
 
 def test_a_heading_first_in_a_padded_wrapper_keeps_the_padding(calibre):  # noqa: F811
     """`<div style="padding:1em 0"><h2>…`: Previewer draws the padding
-    above the heading (QA on #642). kfxgen spaces its headings its own way,
-    a line above, and dropped the padding: the heading had 1 lh. Now the
-    line and the padding: (1.2em + 1em / 1.5) / 1.2em = 1.556 lh at the
-    heading's 1.5em."""
+    above the heading (QA on #642), then the h2's own margin, 0.83em of its
+    1.5em (#658): (1em + 1.245em) / 1.8em = 1.247 lh, as Previewer's
+    container (0.833 lh) and heading (0.692 of its own) add up. kfxgen gave
+    1 lh, then its own line and the padding, 1.556."""
     tmp, _env, version = calibre
     epub, kfx = tmp / "h643.epub", tmp / "h643.kfx"
     _book_epub(
@@ -145,7 +145,7 @@ def test_a_heading_first_in_a_padded_wrapper_keeps_the_padding(calibre):  # noqa
     )  # fmt: skip
     _ebook_convert(calibre, epub, kfx, True)
     got = _spacing(kfx)
-    assert _near(got["C1"][0], 1.556), f"calibre {version}: {got}"
+    assert _near(got["C1"][0], 1.247), f"calibre {version}: {got}"
 
 
 #: Between `p {margin: 1em 0}` paragraphs: an <hr> with a height the book
@@ -190,10 +190,10 @@ def test_a_rule_with_a_height_before_a_heading_adds_its_space(calibre):  # noqa:
     `<h2>`: Kindle Previewer 4.0.3 spaces the heading as a paragraph: the
     paragraph's 16px (collapsed with the rule's 9.6px), the rule's 1.8px, and
     the h2's 24px (collapsed with the rule's 9.6px), 41.8px (my probe; QA on
-    #649). kfxgen spaces its headings its own way, a line,
-    and dropped the rule's space (28.8px). Now the line and the rule's
-    1.1125em: (1.2 + 1.1125 / 1.5) / 1.2 = 1.618 lh at the h2's 1.5em, 46.6px
-    (#655)."""
+    #649). kfxgen spaced its headings its own way, a line, and dropped the
+    rule's space (28.8px); #655 added it to the line (46.6px). Now the
+    heading's margin as a paragraph's: 41.8px, 1.451 lh at the h2's 1.5em
+    (#658)."""
     tmp, _env, version = calibre
     epub, kfx = tmp / "x655.epub", tmp / "x655.kfx"
     _book_epub(
@@ -207,7 +207,7 @@ def test_a_rule_with_a_height_before_a_heading_adds_its_space(calibre):  # noqa:
     )
     _ebook_convert(calibre, epub, kfx, True)
     got = _spacing(kfx)
-    assert _near(got["X1"][0], 1.618), f"calibre {version}: {got}"
+    assert _near(got["X1"][0], 1.451), f"calibre {version}: {got}"
 
 
 #: An invisible <hr> first in a file: Previewer keeps its margin below and
