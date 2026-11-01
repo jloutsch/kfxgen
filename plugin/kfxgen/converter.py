@@ -1034,6 +1034,9 @@ def _drop_keys(blocks, keys):
             cells = [c for r in tbl["rows"] for c in r["cells"]]
             parts += [tbl, *tbl["rows"], *cells]
             parts += [p for c in cells for p in c.get("paragraphs") or ()]
+            for part in parts:
+                if part.get("type") == "box":
+                    _drop_keys(part["blocks"], keys)  # (#645)
         for part in parts:
             if part.get("anchor_keys"):
                 part["anchor_keys"] = [k for k in part["anchor_keys"] if k not in keys]
@@ -3122,16 +3125,20 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
     `walk_cell` walks the cell as the body is walked, so its headings, list
     items, loose text and anchors become the same blocks they would outside
     a table. Returns None when that leaves no text."""
-    paragraphs = [
-        {
+
+    def in_cell(p):
+        if p.get("type") == "box":
+            # Its paragraphs are the cell's text, aligned as the cell's
+            # (#645): a <th>'s centred.
+            return {**p, "blocks": [in_cell(k) for k in p["blocks"]]}
+        return {
             **p,
             "block_style": _cell_block_style(
                 cell, None, p.get("block_style"), style_resolver
             ),
         }
-        for p in walk_cell(cell)
-        if p.get("text")
-    ]
+
+    paragraphs = [in_cell(p) for p in walk_cell(cell) if p.get("text")]
     if not paragraphs:
         return None
     css = style_resolver(cell) if style_resolver is not None else None
@@ -3204,6 +3211,20 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
         dict.fromkeys(_BORDER_SIDES, ("inset", 0.45, None)) if attr_px else None
     )
 
+    def holds_box(cell):
+        """Whether a block in the cell is bordered or filled: walked as the
+        body is, it is a box in the cell, as Kindle Previewer 4.0.3 draws
+        it; one cell entry lost it (#645)."""
+        if style_resolver is None:
+            return False
+        for d in cell.iter():
+            if d is cell or _local_tag(d.tag) not in _BOX_TAGS:
+                continue
+            css = style_resolver(d) or {}
+            if _css_border(css) is not None or _box_background(css) is not None:
+                return True
+        return False
+
     def build_cell(cell):
         built = None
         # A cell with a picture is walked as the body is, so the picture is a
@@ -3211,7 +3232,9 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
         # Only what an <epub:switch> draws counts (#315).
         shown = _shown_tree(cell)
         has_picture = any(_local_tag(d.tag) == "img" for d in shown.iter())
-        if walk_cell is not None and (_cell_paragraph_count(shown) >= 2 or has_picture):
+        if walk_cell is not None and (
+            _cell_paragraph_count(shown) >= 2 or has_picture or holds_box(shown)
+        ):
             built = _paragraph_cell(cell, style_resolver, walk_cell)
         if built is None:
             built = _table_cell(cell, style_resolver, base_href)
@@ -3714,6 +3737,11 @@ def _attach_anchor_keys(blocks, base_href):
                     if normalized
                     else {}
                 )
+            for part in paragraphs:
+                if part.get("type") == "box":
+                    # A box in a cell (#645): its blocks are the targets.
+                    for kid in part["blocks"]:
+                        key_block(kid)
 
     for block in blocks:
         key_block(block)
@@ -4530,6 +4558,36 @@ def extract_blocks_from_html(
         leaf_cells.discard(id(cell))
         out = blocks[start:]
         del blocks[start:]
+        texts = [b for b in out if b.get("type") not in ("space", "rule")]
+        for i, b in enumerate(texts):
+            if b.get("type") != "box":
+                continue
+            # A box's paragraphs are spaced by their margins, as outside a
+            # table; the cell's own aren't (#645).
+            b["blocks"] = _space_between(
+                b["blocks"],
+                margins,
+                measured=style_resolver is not None,
+                paddings=paddings,
+            )
+            if style_resolver is None:
+                continue
+
+            # The box itself, against its neighbours in the cell, as Kindle
+            # Previewer 4.0.3 spaces it (QA on #650). A neighbour that isn't
+            # a box is spaced as before: it goes in as a copy.
+            def mine(x):
+                return x if x.get("type") == "box" else dict(x)
+
+            prev = mine(texts[i - 1]) if i else None
+            top, bottom = margins.get(id(b), (0.0, 0.0))
+            above = margins.get(id(texts[i - 1]), (0.0, 0.0))[1] if i else 0.0
+            _place_margin(prev, b, above, top, 0.0, False)
+            if i + 1 < len(texts):
+                after = margins.get(id(texts[i + 1]), (0.0, 0.0))[0]
+                _place_margin(b, mine(texts[i + 1]), bottom, after, 0.0, False)
+            else:
+                b["margin_below"] = bottom / _ems_own(b)
         if nav_listing_at is not None:
             # A contents listing in a cell was recorded at an index inside
             # the cell, whose blocks are taken out; it belongs to the table,
