@@ -4754,12 +4754,29 @@ def test_a_rebuilt_contents_pages_own_keys_land_on_its_heading(tmp_path):
 
 
 @pytest.mark.unit
-def test_the_chapter_title_is_cut_from_a_boxs_first_paragraph(tmp_path):
+def test_a_title_run_into_a_boxs_first_paragraph_prints_as_written(tmp_path):
+    """ "Notes. A first note." opening a box: the book prints the title there,
+    so kfxgen prints no heading and cuts nothing, as Kindle Previewer 4.0.3
+    has it (QA on #651, my probe) and as for the paragraph unboxed (#468).
+    The cut left ". A first note." in the box (#654)."""
     box = _box_block([_para("Notes. A first note."), _para("A second note.")])
     chapters = [{"title": "Notes", "text": box["text"], "blocks": [box]}]
     entries, _, text, _ = _book(tmp_path, chapters)
     (b,) = [e for e in entries if str(e.get("$159")) == "$270"]
-    assert [text(k) for k in b["$146"]] == [". A first note.", "A second note."]
+    assert [text(k) for k in b["$146"]] == ["Notes. A first note.", "A second note."]
+    assert [text(e) for e in entries if text(e)] == [
+        "Notes. A first note.",
+        "A second note.",
+    ]
+
+
+@pytest.mark.unit
+def test_the_chapter_title_is_cut_from_a_boxs_first_paragraph(tmp_path):
+    """A box whose first paragraph is the title alone: kfxgen's heading
+    prints it, in the box (#646), and the paragraph is cut."""
+    box = _box_block([_para("Notes"), _para("A first note.")])
+    chapters = [{"title": "Notes", "text": box["text"], "blocks": [box]}]
+    entries, _, text, _ = _book(tmp_path, chapters)
     assert [text(e) for e in entries if text(e)].count("Notes") == 1
 
 

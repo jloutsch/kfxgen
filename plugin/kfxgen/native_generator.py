@@ -611,8 +611,11 @@ def _title_runs_in(blocks, title):
     into its text ("Chapter One was a long day"). The book prints the title
     there, so kfxgen prints no heading of its own and cuts nothing, as
     Kindle Previewer has it (#468). A heading, and a paragraph that is the
-    title alone, are cut as before."""
+    title alone, are cut as before. A box's first paragraph counts too: the
+    cut left ". K3 …" in it (#654)."""
     first = next(iter(_drop_edge_rules(blocks or ())), None)
+    while first is not None and first.get("type") == "box":
+        first = next(iter(first.get("blocks") or ()), None)
     if first is None or first.get("type") not in (None, "text") or first.get("heading"):
         return False
     text = (first.get("text") or "").lstrip()
@@ -643,10 +646,18 @@ def _heading_near_start(blocks):
     blocks, past the first: after an epigraph or a picture, or in a table
     cell. kfxgen then prints no label of its own, as Kindle Previewer has
     it; a section with no heading near its start keeps its label (#492).
-    A first block that is the heading prints in the label's place (#481)."""
-    for block in _drop_edge_rules(blocks or ())[:_MAX_SPLIT_TITLE_BLOCKS]:
+    A first block that is the heading prints in the label's place (#481).
+    A heading in a box counts, unless it opens the chapter's first box:
+    the label printed above the book's boxed heading, the title twice
+    (#654). A first box opening with the title is drawn round kfxgen's
+    heading (#646)."""
+    for i, block in enumerate(_drop_edge_rules(blocks or ())[:_MAX_SPLIT_TITLE_BLOCKS]):
         if block.get("heading"):
             return True
+        if block.get("type") == "box":
+            kids = _unboxed([block])
+            if any(b.get("heading") for b in (kids if i else kids[1:])):
+                return True
         for row in (block.get("table") or {}).get("rows") or ():
             for cell in row["cells"]:
                 if cell.get("heading") or any(
