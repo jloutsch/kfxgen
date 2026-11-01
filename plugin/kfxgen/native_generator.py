@@ -5303,6 +5303,13 @@ class NativeKFXGenerator:
                                         }
                                         # And the rest of its style (#490).
                                         heading_chunk["book_style"] = bs
+                                        # And its margin below, kept for
+                                        # a margin-less paragraph (QA on
+                                        # #665).
+                                        if first.get("margin_below"):
+                                            heading_chunk["space_below"] = first[
+                                                "margin_below"
+                                            ]
                                         # And its level (#461).
                                         if first.get("heading_level"):
                                             heading_chunk["heading_level"] = first[
@@ -6345,6 +6352,8 @@ class NativeKFXGenerator:
                             attrs["no_align"] = True
                         if book.get("italic"):
                             attrs["italic"] = True
+                        if chunk.get("space_below"):
+                            attrs["space_below"] = chunk["space_below"]
                         entry_styles.append(
                             _allocate_style("_h", **attrs, **(typo or {}))
                         )

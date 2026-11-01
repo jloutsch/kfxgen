@@ -21,6 +21,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "plugin"))
 sys.path.insert(0, str(REPO))
 
+from tests.integration.test_calibre_contents_links import _build  # noqa: E402
 from tests.integration.test_calibre_contents_part_headings import (  # noqa: E402
     _book_epub,
 )
@@ -106,3 +107,49 @@ def test_the_paragraph_after_a_heading_is_spaced_as_before(converted):
     assert _near(got["A3"][0], 0.975) and _near(got["B2"][0], 0.975), (
         f"calibre {version}: {got}"
     )
+
+
+#: A chapter that opens with the book's heading, which prints as kfxgen's
+#: chapter title: its margin-bottom stays its own `$49` before a margin-less
+#: paragraph, as Previewer writes it (QA on #665: the space was lost). Each
+#: (heading's $49, first paragraph's $47) in their own line heights.
+OPENERS = {
+    "o1.xhtml": "<h1>One</h1><p style='margin:0'>O1 text.</p>",
+    "o2.xhtml": "<h2 style='margin:0.83em 0 2em'>Two</h2><p style='margin:0'>O2 text.</p>",
+    "o3.xhtml": f"<h1>Three</h1>{_p('O3')}",
+    # A label spelled over two blocks: they print as written (#552), the
+    # h2 with its own margins, 0.692 of its lines below, as Previewer's.
+    "o4.xhtml": "<p style='margin:0'>IV</p><h2>Four</h2><p style='margin:0'>O4 text.</p>",
+}
+OPENED = {
+    "On": (0.558, None),
+    "Tw": (1.667, None),
+    "Th": (None, 1.117),
+    "Fo": (0.692, None),
+}
+
+
+def test_a_chapter_title_keeps_its_space_below(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "o665.epub", tmp / "o665.kfx"
+    _build(
+        epub,
+        OPENERS,
+        [
+            ("One", "o1.xhtml"),
+            ("Two", "o2.xhtml"),
+            ("Three", "o3.xhtml"),
+            ("IV Four", "o4.xhtml"),
+        ],
+        "o665",
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    first = {"On": "O1", "Tw": "O2", "Th": "O3", "Fo": "O4"}
+    pairs = {k: (got[k][1], got[first[k]][0]) for k in OPENED}
+    wrong = {
+        k: v
+        for k, v in pairs.items()
+        if not (_near(v[0], OPENED[k][0]) and _near(v[1], OPENED[k][1]))
+    }
+    assert not wrong, f"calibre {version}: {wrong}, Previewer {OPENED}"
