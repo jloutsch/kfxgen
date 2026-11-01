@@ -4118,10 +4118,13 @@ def _place_margin(
     if prev is None:
         if _takes_margin(b):
             # An invisible <hr> before it keeps its margin below, collapsed
-            # with `b`'s own: a box has none, and lost it (#659).
-            b["margin_above"] = (
-                outer_own + pad_own + _collapse(above, top) + fixed
-            ) / _ems_own(b) + lines
+            # with the margin it touches: a padded wrapper's, else `b`'s own.
+            # A box has none, and lost it (#659, QA on #662).
+            if pad_own:
+                space = _collapse(above, outer_own) + pad_own + top
+            else:
+                space = outer_own + _collapse(above, top)
+            b["margin_above"] = (space + fixed) / _ems_own(b) + lines
         return
     up, own = above, top
     if pad_up or pad_own:

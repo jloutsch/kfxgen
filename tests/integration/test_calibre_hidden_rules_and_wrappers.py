@@ -226,8 +226,34 @@ FIRST_FILES = {
     "f3.xhtml": _hr("margin:1em 0") + _p("H1") + _p("H2"),
     "f4.xhtml": _hr("margin:1em 0;height:3px") + _p("J1", "margin:1em 0") + _p("J2"),
     "f5.xhtml": f"<div style='{BX}'><p>K1 boxed.</p></div>" + _p("K2"),
+    # A padded wrapper: the rule's margin collapses with the wrapper's, and
+    # the padding keeps the paragraph's apart (QA on #662).
+    "f6.xhtml": _hr("margin:1em 0")
+    + "<div style='padding:1em 0;margin:0'>"
+    + _p("L1", "margin:0.5em 0")
+    + "</div>"
+    + _p("L2"),
+    "f7.xhtml": _hr("margin:1em 0")
+    + "<div style='padding:1em 0;margin:1em 0'>"
+    + _p("M1", "margin:0.5em 0")
+    + "</div>"
+    + _p("M2"),
+    "f8.xhtml": _hr("margin:1em 0")
+    + "<div style='padding-top:1em;margin:0'>"
+    + _p("N1", "margin:1.5em 0")
+    + "</div>"
+    + _p("N2"),
 }
-FIRST = {"F1": 0.5, "G1": 1.094, "H1": 0.5, "J1": 1.427, "K1": None}
+FIRST = {
+    "F1": 0.5,
+    "G1": 1.094,
+    "H1": 0.5,
+    "J1": 1.427,
+    "K1": None,
+    "L1": 1.75,
+    "M1": 2.083,
+    "N1": 2.583,
+}
 
 
 def _first_spaces(kfx):
