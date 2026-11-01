@@ -4117,9 +4117,11 @@ def _place_margin(
         b["margin_above"] = _LINE_SPACE_EM + (pad_own + fixed) / _ems_own(b)
     if prev is None:
         if _takes_margin(b):
-            b["margin_above"] = (outer_own + pad_own + top + fixed) / _ems_own(
-                b
-            ) + lines
+            # An invisible <hr> before it keeps its margin below, collapsed
+            # with `b`'s own: a box has none, and lost it (#659).
+            b["margin_above"] = (
+                outer_own + pad_own + _collapse(above, top) + fixed
+            ) / _ems_own(b) + lines
         return
     up, own = above, top
     if pad_up or pad_own:
