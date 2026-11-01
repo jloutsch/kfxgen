@@ -24,6 +24,8 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "plugin"))
 sys.path.insert(0, str(REPO))
 
+from tests._kfx_introspect import by_type, load_fragments, val  # noqa: E402
+from tests.integration.test_calibre_contents_links import _build  # noqa: E402
 from tests.integration.test_calibre_contents_part_headings import (  # noqa: E402
     _book_epub,
 )
@@ -206,3 +208,78 @@ def test_a_rule_with_a_height_before_a_heading_adds_its_space(calibre):  # noqa:
     _ebook_convert(calibre, epub, kfx, True)
     got = _spacing(kfx)
     assert _near(got["X1"][0], 1.618), f"calibre {version}: {got}"
+
+
+#: An invisible <hr> first in a file: Previewer keeps its margin below and
+#: collapses it with the next block's margin-top, as mid-file (my probe,
+#: 2026-11-01, kpr4 4.0.3, DOCTYPE pages). kfxgen took the block's own
+#: margin-top alone, so a box (no margin of its own) or a margin-less
+#: paragraph lost the rule's space: 0 for 0.5 lh, and 0.594 for 1.094 lh
+#: past a rule with a height (#659). Each file's first block's $47, on the
+#: box's container for a box, in lh.
+BX = "border:1px solid black;padding:0.5em"
+FIRST_FILES = {
+    "f1.xhtml": f"{_hr('margin:1em 0')}<div style='{BX}'><p>F1 boxed.</p></div>"
+    + _p("F2"),
+    "f2.xhtml": f"{_hr('margin:1em 0;height:3px')}<div style='{BX}'>"
+    "<p style='margin:1em 0'>G1 boxed.</p></div>" + _p("G2"),
+    "f3.xhtml": _hr("margin:1em 0") + _p("H1") + _p("H2"),
+    "f4.xhtml": _hr("margin:1em 0;height:3px") + _p("J1", "margin:1em 0") + _p("J2"),
+    "f5.xhtml": f"<div style='{BX}'><p>K1 boxed.</p></div>" + _p("K2"),
+    # A padded wrapper: the rule's margin collapses with the wrapper's, and
+    # the padding keeps the paragraph's apart (QA on #662).
+    "f6.xhtml": _hr("margin:1em 0")
+    + "<div style='padding:1em 0;margin:0'>"
+    + _p("L1", "margin:0.5em 0")
+    + "</div>"
+    + _p("L2"),
+    "f7.xhtml": _hr("margin:1em 0")
+    + "<div style='padding:1em 0;margin:1em 0'>"
+    + _p("M1", "margin:0.5em 0")
+    + "</div>"
+    + _p("M2"),
+    "f8.xhtml": _hr("margin:1em 0")
+    + "<div style='padding-top:1em;margin:0'>"
+    + _p("N1", "margin:1.5em 0")
+    + "</div>"
+    + _p("N2"),
+}
+FIRST = {
+    "F1": 0.5,
+    "G1": 1.094,
+    "H1": 0.5,
+    "J1": 1.427,
+    "K1": None,
+    "L1": 1.75,
+    "M1": 2.083,
+    "N1": 2.583,
+}
+
+
+def _first_spaces(kfx):
+    """{label: the $47 above each top-level block, in lh}: a box's on its
+    container. kfxgen's own TOC label, above each file's first block, is
+    not the book's."""
+    frags = load_fragments(kfx)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    got = {}
+    for st in by_type(frags, "$259"):
+        for top in val(st)["$146"]:
+            e = getattr(top, "value", top)
+            space = styles.get(str(e.get("$157")), {}).get("$47")
+            while not e.get("$145"):
+                e = getattr(e["$146"][0], "value", e["$146"][0])
+            t = str(texts[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+            got[t[:2]] = None if space is None else round(float(space["$307"]), 3)
+    return got
+
+
+def test_a_rule_first_in_a_file_keeps_its_space_below(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "f659.epub", tmp / "f659.kfx"
+    _build(epub, FIRST_FILES, [(f"T{i}", n) for i, n in enumerate(FIRST_FILES)], "f659")
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _first_spaces(kfx)
+    wrong = {k: got.get(k) for k, want in FIRST.items() if not _near(got.get(k), want)}
+    assert not wrong, f"calibre {version}: {wrong}, Previewer {FIRST}"
