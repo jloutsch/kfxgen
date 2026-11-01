@@ -66,3 +66,48 @@ def test_a_heading_near_the_start_takes_the_labels_place(calibre):  # noqa: F811
         "S3 text.",
         "More.",
     ], f"calibre {version}"
+
+
+BX = "border:1px solid black;padding:0.5em"
+BOXED_FILES = {
+    "d1.xhtml": "<p>E1 lead words.</p><table><tr><td>"
+    f"<div style='{BX}'><h3>Epsilon</h3><p>E2 text.</p></div></td><td>E3 plain</td>"
+    "</tr></table><p>E4 after.</p>",
+    "d2.xhtml": f"<table><tr><td><div style='{BX}'><h3>G1 cell head</h3>"
+    "<p>G2 text.</p></div></td><td>G3 plain</td></tr></table><p>G4 after.</p>",
+    "d3.xhtml": "<p>N1 text.</p><p>More.</p>",
+}
+BOXED_TOC = [("Epsilon", "d1.xhtml"), ("Gamma", "d2.xhtml"), ("Nu", "d3.xhtml")]
+
+
+def test_a_heading_in_a_box_in_a_table_cell_takes_the_labels_place(calibre):  # noqa: F811
+    """A bordered box in a cell is a box since #645, its heading inside it.
+    Kindle Previewer 4.0.3 prints no label over the section, as for a
+    heading in a plain cell (QA's probe on #650, 2026-11-01). kfxgen printed
+    its label: "Epsilon" twice where the cell's heading is the label (#660)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "head660.epub", tmp / "head660.kfx"
+    _build(epub, BOXED_FILES, BOXED_TOC, "head660")
+    _ebook_convert(calibre, epub, kfx, True)
+    frags = load_fragments(kfx)
+    content = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    lines = [
+        str(content[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+        for st in by_type(frags, "$259")
+        for e in iter_entries(val(st)["$146"])
+        if hasattr(e, "get") and e.get("$145")
+    ]
+    assert lines == [
+        "E1 lead words.",
+        "Epsilon",
+        "E2 text.",
+        "E3 plain",
+        "E4 after.",
+        "G1 cell head",
+        "G2 text.",
+        "G3 plain",
+        "G4 after.",
+        "Nu",
+        "N1 text.",
+        "More.",
+    ], f"calibre {version}: {lines}"
