@@ -8589,8 +8589,9 @@ def test_an_hr_with_no_border_is_space_above_the_next_paragraph():
             r={**_NO_BORDER, "margin-top": "1em", "margin-bottom": "1.5em"}
         ),
     )
-    # An empty block's margins collapse to the larger, as in a browser.
-    assert _gaps(blocks) == [("x", None), ("y", None), ("a", None), ("b", 1.5)]
+    # Its margins collapse to the larger, as in a browser, and Kindle
+    # Previewer 4.0.3 keeps 0.6 of it (#643).
+    assert _gaps(blocks) == [("x", None), ("y", None), ("a", None), ("b", 0.9)]
 
 
 @pytest.mark.unit

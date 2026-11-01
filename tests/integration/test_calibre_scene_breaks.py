@@ -56,7 +56,8 @@ CASES = [
         "c1",
         "NOBORDER",
         '<p>{c} lead</p><hr class="space"/><p>after</p>',
-        [("after", "0.833333")],
+        # 0.6 of its 1em, as Kindle Previewer 4.0.3 writes it (#643).
+        [("after", "0.5")],
     ),
     (
         "c1",

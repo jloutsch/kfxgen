@@ -214,6 +214,17 @@ def _computed_value(style, prop):
         return style.get(prop)
 
 
+def _book_height(stylizer, elem):
+    """An <hr>'s height as the book sets it, or None. calibre's UA sheet
+    gives every <hr> `height: 2px`, which Kindle Previewer, reading the book
+    itself, doesn't have; any height the book sets counts there, even 1px
+    (QA on #649). calibre rewrites the book's CSS from computed styles
+    before an output plugin sees it: a plain <hr> and one the book gives
+    2px share one class, so exactly 2px is taken as calibre's."""
+    value = stylizer.style(elem).get("height")
+    return None if value is None or str(value).strip() == "2px" else value
+
+
 def _specified_inherited(stylizer, elem, prop):
     """The value `prop` was given on `elem` or its nearest ancestor that sets
     it, as written: CSS inheritance without calibre's computed conversion."""
@@ -532,7 +543,11 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # attributes into the element's CSS (and strips them),
                     # so this is the one place both spellings meet.
                     "width": st.get("width"),
-                    "height": st.get("height"),
+                    "height": (
+                        _book_height(stylizer, elem)
+                        if _local_tag(elem.tag) == "hr"
+                        else st.get("height")
+                    ),
                     # A page drawn as a background layer carries its picture
                     # here and nowhere in the markup (#168). `background`
                     # shorthand is not consulted: Stylizer does not expand it,
@@ -2836,6 +2851,16 @@ def _box_background(css):
 _RULE_SPACE_EM = 0.5
 #: One blank line: what a spacer paragraph (`<p>&nbsp;</p>`) adds (#230).
 _LINE_SPACE_EM = 1.2
+#: An <hr> that draws nothing: Kindle Previewer 4.0.3 reads its lengths in
+#: CSS units (1em = 16px = 12pt, 100% = 74em) and keeps 0.6 of them (#643).
+_HIDDEN_RULE_EM_PER_UNIT = {
+    "px": 1 / 16,
+    "pt": 1 / 12,
+    "em": 1.0,
+    "rem": 1.0,
+    "%": 0.74,
+}
+_HIDDEN_RULE_SHARE = 0.6
 
 
 def _margin_em(css, side):
@@ -2849,6 +2874,32 @@ def _margin_em(css, side):
     if isinstance(em, tuple):
         return sign * em[1] * 0.32
     return 0.0 if em is None else sign * em
+
+
+def _hidden_rule_em(css):
+    """(margin-top, height, margin-bottom) of an <hr> that draws nothing, in
+    the 16px root's ems, as Kindle Previewer 4.0.3 spaces it on the
+    paragraph after (my probes, #643): 0.6 of each, on its own scale. An em
+    is the rule's own. A 5% margin is 1.85 lh, where a paragraph's is 1.333.
+    With no height its margins collapse into one, with each other and the
+    paragraphs' around it; with a height the book sets, even 1px, each
+    collapses with its own side's (QA on #649)."""
+    ratio = _font_ratio(css)
+
+    def em(value):
+        m = re.fullmatch(r"\s*(-?[\d.]+)\s*(px|pt|em|rem|%)?\s*", str(value or ""))
+        if not m or m.group(2) is None:
+            return 0.0
+        unit = m.group(2)
+        n = float(m.group(1)) * _HIDDEN_RULE_EM_PER_UNIT[unit]
+        return n * ratio if unit == "em" else n
+
+    top, bottom = em(css.get("margin-top")), em(css.get("margin-bottom"))
+    height = max(0.0, em(css.get("height")))
+    share = _HIDDEN_RULE_SHARE
+    if not height:
+        return _collapse(top, bottom) * share, 0.0, 0.0
+    return top * share, height * share, bottom * share
 
 
 def _is_spacer(elem):
@@ -4012,6 +4063,7 @@ def _place_margin(
     top,
     lines,
     on_purpose,
+    fixed=0.0,
     pad_up=0.0,
     pad_own=0.0,
     outer_up=0.0,
@@ -4028,17 +4080,24 @@ def _place_margin(
     (`pad_own`) or below the block before (`pad_up`) keeps the margins on
     its two sides apart: the wrapper's own margin (`outer_own`, `outer_up`)
     collapses with the outside, and the paragraph's is added inside (#640,
-    QA on #642)."""
+    QA on #642). `fixed` is space margins don't collapse through: a rule
+    with a height between (QA on #649)."""
+    if b.get("heading") and pad_own:
+        # A heading first in a padded wrapper: kfxgen's own line above it,
+        # and the wrapper's padding, which was lost (QA on #642).
+        b["margin_above"] = _LINE_SPACE_EM + pad_own / _ems_own(b)
     if prev is None:
         if _takes_margin(b):
-            b["margin_above"] = (outer_own + pad_own + top) / _ems_own(b) + lines
+            b["margin_above"] = (outer_own + pad_own + top + fixed) / _ems_own(
+                b
+            ) + lines
         return
     up, own = above, top
     if pad_up or pad_own:
         outside = _collapse(outer_up if pad_up else up, outer_own if pad_own else own)
         inside_up = up + pad_up if pad_up else 0.0
         inside_own = pad_own + own if pad_own else 0.0
-        gap = outside + inside_up + inside_own
+        gap = outside + inside_up + inside_own + fixed
         # As without padding: `b` takes it with a margin or padding of its
         # own above, else the block before keeps it below.
         if _takes_margin(b) and (
@@ -4050,7 +4109,7 @@ def _place_margin(
             if _takes_margin(b):
                 b["margin_above"] = lines
         return
-    gap = _collapse(up, own)
+    gap = _collapse(up, own) + fixed
     if top != 0 or on_purpose or not _takes_margin(prev):
         if _takes_margin(b):
             b["margin_above"] = (gap + pad_up + pad_own) / _ems_own(b) + lines
@@ -4097,11 +4156,18 @@ def _space_between(blocks, margins, measured=True, paddings=None):
     gaps = []  # (block, gap, how: "spacer", "margin" or None beside a heading)
     above = 0.0  # the larger margin waiting: the paragraph before's, an <hr>'s
     lines = 0.0
+    fixed = 0.0  # space past a rule with a height (QA on #649)
     on_purpose = False
     for b in blocks:
         kind = b.get("type")
         if kind == "space":
-            above = max(above, b["margin"])
+            if b.get("height"):
+                # Margins don't collapse through it: the one above it meets
+                # the waiting margin, the one below it the next block's.
+                fixed += _collapse(above, b["margin"]) + b["height"]
+                above = b["margin_after"]
+            else:
+                above = max(above, b["margin"])
             lines += b["line"]
             on_purpose = True
             continue
@@ -4117,6 +4183,7 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                 top,
                 lines,
                 on_purpose,
+                fixed=fixed,
                 pad_up=up_pads[1],
                 pad_own=own_pads[0],
                 outer_up=up_pads[3],
@@ -4137,10 +4204,13 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                 padding = (pads.get(id(out[-1])) or (0.0,) * 4)[1] + (
                     pads.get(id(b)) or (0.0,) * 4
                 )[0]
-                gaps.append((b, round(_collapse(above, top) + lines + padding, 4), how))
+                gaps.append(
+                    (b, round(_collapse(above, top) + fixed + lines + padding, 4), how)
+                )
         # A box's margin-bottom waits for the next block, as a paragraph's.
         above = bottom if kind in (None, "box") else 0.0
         lines = 0.0
+        fixed = 0.0
         on_purpose = False
         out.append(b)
     if measured and out and _takes_margin(out[-1]):
@@ -4839,12 +4909,22 @@ def extract_blocks_from_html(
             _carry_container_margins(elem, start)
             _note_margins(elem, start, _note_padding(elem, start))
 
-    def _emit_space(margin=0.0, line=0.0):
+    def _emit_space(margin=0.0, line=0.0, height=0.0, margin_after=0.0):
         """Space for the next paragraph to take: a spacer's blank line, or an
         <hr> that draws nothing, whose margins collapse with the paragraphs'
         around it. A cell keeps only blocks with text, so in a cell it is
         dropped, as before."""
-        blocks.append({**_EMPTY_BLOCK, "type": "space", "margin": margin, "line": line})
+        blocks.append(
+            {
+                **_EMPTY_BLOCK,
+                "type": "space",
+                "margin": margin,
+                "line": line,
+                # A rule with a height: the margin past it (QA on #649).
+                "height": height,
+                "margin_after": margin_after,
+            }
+        )
 
     def _emit_rule(elem):
         """An <hr>: a rule, as Kindle Previewer writes it ($596), with its
@@ -4853,8 +4933,8 @@ def extract_blocks_from_html(
         pending_ids.extend(_own_anchor_ids(elem))
         css = style_resolver(elem) if style_resolver is not None else None
         if css is not None and _css_border(css) is None:
-            # An empty block's own margins collapse into one, the larger.
-            _emit_space(margin=max(_margin_em(css, "top"), _margin_em(css, "bottom")))
+            top, height, bottom = _hidden_rule_em(css)
+            _emit_space(margin=top, height=height, margin_after=bottom)
             return
 
         def space(side):
@@ -4893,8 +4973,17 @@ def extract_blocks_from_html(
         mine = [b for b in blocks[start:] if b.get("type") not in ("space", "rule")]
         if not mine:
             return (False, False)
-        paddings.setdefault(id(mine[0]), [0.0] * 4)[0] += top
-        paddings.setdefault(id(mine[-1]), [0.0] * 4)[1] += bottom
+        # An inner wrapper's margin waiting outside its padding is now inside
+        # this one's: padding keeps it from collapsing with the margins
+        # beyond (QA on #642).
+        first = paddings.setdefault(id(mine[0]), [0.0] * 4)
+        if top:
+            first[0] += first[2] + top
+            first[2] = 0.0
+        last = paddings.setdefault(id(mine[-1]), [0.0] * 4)
+        if bottom:
+            last[1] += last[3] + bottom
+            last[3] = 0.0
         return (bool(top), bool(bottom))
 
     def _note_margins(elem, start, padded=(False, False)):
@@ -4912,13 +5001,15 @@ def extract_blocks_from_html(
         mine = [b for b in blocks[start:] if b.get("type") not in ("space", "rule")]
         if not mine:
             return
-        if padded[0]:
+        # A padded wrapper inside, here or deeper, keeps the paragraph's
+        # margin apart: this one meets that wrapper's margin (#643).
+        if padded[0] or (paddings.get(id(mine[0])) or (0.0,))[0]:
             outer = paddings[id(mine[0])]
             outer[2] = _collapse(outer[2], top)
         else:
             first = margins.setdefault(id(mine[0]), [0.0, 0.0])
             first[0] = _collapse(first[0], top)
-        if padded[1]:
+        if padded[1] or (paddings.get(id(mine[-1])) or (0.0,) * 2)[1]:
             outer = paddings[id(mine[-1])]
             outer[3] = _collapse(outer[3], bottom)
         else:
