@@ -4275,10 +4275,19 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                 edge = (b["box"].get("border") or {}).get("bottom") or (
                     b["box"].get("padding") or {}
                 ).get("bottom")
-                if not edge and last is not None and last.get("margin_below"):
+                keep = last.get("padding_below", 0.0) if last is not None else 0.0
+                if (
+                    not edge
+                    and last is not None
+                    and (last.get("margin_below") or 0.0) > keep
+                    and _has_real_text(last.get("text"))
+                ):
                     # Nothing at its bottom edge: the space below its last
-                    # block leaves the box, as Previewer writes it (QA on #682).
-                    tail = max(tail, last.pop("margin_below") * _ems_own(last))
+                    # block leaves the box, as Previewer writes it; its own
+                    # padding stays, and a picture's spacer is dropped, as
+                    # Previewer drops it (QA on #682).
+                    tail = max(tail, (last["margin_below"] - keep) * _ems_own(last))
+                    last["margin_below"] = keep
                 if tail and edge:
                     # Spacers after a table that ends the box: below it,
                     # inside the box, in its padding (#675).
@@ -4332,6 +4341,8 @@ def _space_between(blocks, margins, measured=True, paddings=None):
             max(out[-1].get("margin_below") or 0.0, below)
             + (last_pads[1] + last_pads[3]) / own
         )
+        # Its own padding, which stays with it in an open box (QA on #682).
+        out[-1]["padding_below"] = last_pads[1] / own
     if gaps:
         counts = collections.Counter(g for _, g, _ in gaps)
         # The most common; of two as common, the smaller.

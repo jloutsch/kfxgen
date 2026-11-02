@@ -324,7 +324,9 @@ def test_an_open_boxs_trailing_space_leaves_it(calibre):  # noqa: F811
       next paragraph;
     - an open box ending p + spacer, or an open box + spacer: the p's 1em
       meets the spacer's 0.6em first, 1.927 above the next paragraph, none
-      below the p (kfxgen kept it inside and added the next margin: 2.427)."""
+      below the p (kfxgen kept it inside and added the next margin: 2.427);
+    - an open box ending a picture's paragraph + spacer: the spacer is
+      dropped, 0.833."""
     tmp, _env, version = calibre
     epub, kfx = tmp / "o682.epub", tmp / "o682.kfx"
     table = "<table><tr><td>Tc cell</td></tr></table>"
@@ -339,11 +341,15 @@ def test_an_open_boxs_trailing_space_leaves_it(calibre):  # noqa: F811
         + _p("C2")
         + f"<div style='{fill}'><div style='{fill}'>{_p('D1')}</div>{SP}</div>"
         + _p("D2")
+        # A picture's paragraph, then a spacer: Previewer drops the spacer
+        # (QA on #682: 1.927 when it left the box).
+        + f"<div style='{fill}'>{_p('E1')}<p><img src='x.png'/></p>{SP}</div>"
+        + _p("E2")
     )
     _build(epub, {"o.xhtml": body}, [("O", "o.xhtml")], "o682")
     _ebook_convert(calibre, epub, kfx, True)
     got = _spacing(kfx)
-    wanted = {"A2": 0.833, "B2": 1.594, "C2": 1.927, "D2": 1.927}
+    wanted = {"A2": 0.833, "B2": 1.594, "C2": 1.927, "D2": 1.927, "E2": 0.833}
     wrong = {k: got[k][0] for k, w in wanted.items() if not _near(got[k][0], w)}
     assert not wrong, f"calibre {version}: {wrong}, Previewer {wanted}"
     assert got["C1"][1] is None, f"calibre {version}: C1 $49 = {got['C1'][1]}"
