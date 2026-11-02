@@ -4626,36 +4626,14 @@ def extract_blocks_from_html(
         leaf_cells.discard(id(cell))
         out = blocks[start:]
         del blocks[start:]
-        texts = [b for b in out if b.get("type") not in ("space", "rule")]
-        for i, b in enumerate(texts):
-            if b.get("type") != "box":
-                continue
-            # A box's paragraphs are spaced by their margins, as outside a
-            # table; the cell's own aren't (#645).
-            b["blocks"] = _space_between(
-                b["blocks"],
-                margins,
-                measured=style_resolver is not None,
-                paddings=paddings,
-            )
-            if style_resolver is None:
-                continue
-
-            # The box itself, against its neighbours in the cell, as Kindle
-            # Previewer 4.0.3 spaces it (QA on #650). A neighbour that isn't
-            # a box is spaced as before: it goes in as a copy.
-            def mine(x):
-                return x if x.get("type") == "box" else dict(x)
-
-            prev = mine(texts[i - 1]) if i else None
-            top, bottom = margins.get(id(b), (0.0, 0.0))
-            above = margins.get(id(texts[i - 1]), (0.0, 0.0))[1] if i else 0.0
-            _place_margin(prev, b, above, top, 0.0, False)
-            if i + 1 < len(texts):
-                after = margins.get(id(texts[i + 1]), (0.0, 0.0))[0]
-                _place_margin(b, mine(texts[i + 1]), bottom, after, 0.0, False)
-            else:
-                b["margin_below"] = bottom / _ems_own(b)
+        if style_resolver is not None:
+            # The cell's paragraphs and boxes are spaced by their margins, as
+            # outside a table, with its spacers' space (#645, #655, #675):
+            # Kindle Previewer 4.0.3 writes each paragraph's margins in the
+            # cell. A cell of one paragraph is written flat, as before.
+            out = _space_between(out, margins, measured=True, paddings=paddings)
+        else:
+            out = [b for b in out if b.get("type") not in ("space", "rule")]
         if nav_listing_at is not None:
             # A contents listing in a cell was recorded at an index inside
             # the cell, whose blocks are taken out; it belongs to the table,
@@ -5002,7 +4980,10 @@ def extract_blocks_from_html(
                 # <pre> is a box around that one paragraph (#310, #643); the
                 # box takes its margins and padding. Unboxed, its padding
                 # spaces it, as Previewer pads its text (#643).
-                if not _make_box(elem, len(blocks) - 1, leaf=True):
+                if id(elem) in leaf_cells:
+                    # The cell itself, as below (#655).
+                    pass
+                elif not _make_box(elem, len(blocks) - 1, leaf=True):
                     _note_margins(
                         elem, len(blocks) - 1, _note_padding(elem, len(blocks) - 1)
                     )
@@ -5036,6 +5017,10 @@ def extract_blocks_from_html(
 
         start = len(blocks)
         _walk_container(elem)
+        if id(elem) in leaf_cells:
+            # The cell itself: its padding is the cell's, written on it, and
+            # a cell has no margins (#655).
+            return
         if not _make_box(elem, start):
             _carry_container_margins(elem, start)
             _note_margins(elem, start, _note_padding(elem, start))

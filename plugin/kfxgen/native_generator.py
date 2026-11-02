@@ -5014,7 +5014,12 @@ class NativeKFXGenerator:
                                     "block_style": para.get("block_style"),
                                     "anchor_keys": para.get("anchor_keys") or [],
                                     "anchor_offsets": para.get("anchor_offsets") or {},
-                                    "space_above": para.get("space_above"),
+                                    # Its margins, as Kindle Previewer writes
+                                    # them in a cell (#655).
+                                    "space_above": para.get(
+                                        "margin_above", para.get("space_above")
+                                    ),
+                                    "space_below": para.get("margin_below"),
                                     "in_header_cell": cell_info["header"]
                                     and not cell_info["not_bold"],
                                 }
