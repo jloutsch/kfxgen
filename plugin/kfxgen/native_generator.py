@@ -6182,14 +6182,23 @@ class NativeKFXGenerator:
             entry_nodes = []
             entry_extras = []
             open_fills.clear()
+            # Each open container's size when it is a cell, else None (#681).
+            open_sizes = []
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
                 if chunk.get("type") == "open":
                     open_fills.append(
                         (chunk.get("box") or chunk.get("cell") or {}).get("background")
                     )
+                    open_sizes.append(
+                        _block_font_size(ch_idx, chunk)
+                        if chunk.get("node") == "cell"
+                        else None
+                    )
                 elif chunk.get("type") == "close" and open_fills:
                     open_fills.pop()
+                    if open_sizes:
+                        open_sizes.pop()
                 if chunk.get("type") in ("open", "close"):
                     node = chunk.get("node")
                     if node == "table":
@@ -6414,6 +6423,11 @@ class NativeKFXGenerator:
                 else:
                     bs = chunk.get("block_style") or {}
                     attrs = {"font_size": _block_font_size(ch_idx, chunk)}
+                    cell_fs = next((f for f in reversed(open_sizes) if f), None)
+                    if cell_fs not in (None, 1.0) and attrs["font_size"] == 1.0:
+                        # At the main size in a cell that isn't: say 1, or
+                        # it takes the cell's, as Previewer writes it (#681).
+                        attrs["explicit_size"] = True
                     if _line_ratio(chunk) != 1.0:
                         attrs["line_height"] = _line_ratio(chunk)
                     if bs.get("align"):

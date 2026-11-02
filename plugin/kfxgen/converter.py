@@ -2546,6 +2546,19 @@ def _cell_paragraph_count(cell):
     )
 
 
+def _loose_cell_text(cell):
+    """Whether text is written straight in the cell beside its blocks: a
+    paragraph of its own, as Kindle Previewer 4.0.3 writes it, not joined to
+    the block after it (#681)."""
+    if (cell.text or "").strip():
+        return True
+    return any(
+        (d.tail or "").strip()
+        for d in cell
+        if isinstance(d.tag, str) and _local_tag(d.tag) in _CELL_BLOCK_TAGS
+    )
+
+
 def _longest_cell_run(cell):
     """The longest text entry a cell would be written as.
 
@@ -3276,6 +3289,20 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
                 return True
         return False
 
+    def spaced_block(cell):
+        """Whether the cell's one block has margins of its own: Kindle
+        Previewer 4.0.3 writes them in the cell, as it does a cell of
+        several blocks' (#681: a cell of one <p>, 0.833 above and below)."""
+        if style_resolver is None:
+            return False
+        for d in cell.iter():
+            if d is cell or _local_tag(d.tag) not in _CELL_BLOCK_TAGS:
+                continue
+            css = style_resolver(d) or {}
+            if _margin_em(css, "top") or _margin_em(css, "bottom"):
+                return True
+        return False
+
     def build_cell(cell):
         built = None
         # A cell with a picture is walked as the body is, so the picture is a
@@ -3284,7 +3311,11 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
         shown = _shown_tree(cell)
         has_picture = any(_local_tag(d.tag) == "img" for d in shown.iter())
         if walk_cell is not None and (
-            _cell_paragraph_count(shown) >= 2 or has_picture or holds_box(shown)
+            _cell_paragraph_count(shown) >= 2
+            or has_picture
+            or holds_box(shown)
+            or (_cell_paragraph_count(shown) and _loose_cell_text(shown))
+            or spaced_block(shown)
         ):
             built = _paragraph_cell(cell, style_resolver, walk_cell)
         if built is None:
@@ -4285,10 +4316,25 @@ def _space_between(blocks, margins, measured=True, paddings=None):
             if kind == "box":
                 # Its paragraphs are spaced the same way, inside it (#640).
                 b["blocks"] = _space_between(b["blocks"], margins, measured, paddings)
-                tail = (
-                    b["blocks"][-1].pop("trailing_space", 0.0) if b["blocks"] else 0.0
-                )
-                if tail:
+                last = b["blocks"][-1] if b["blocks"] else None
+                tail = last.pop("trailing_space", 0.0) if last else 0.0
+                edge = (b["box"].get("border") or {}).get("bottom") or (
+                    b["box"].get("padding") or {}
+                ).get("bottom")
+                keep = last.get("padding_below", 0.0) if last is not None else 0.0
+                if (
+                    not edge
+                    and last is not None
+                    and (last.get("margin_below") or 0.0) > keep
+                    and _has_real_text(last.get("text"))
+                ):
+                    # Nothing at its bottom edge: the space below its last
+                    # block leaves the box, as Previewer writes it; its own
+                    # padding stays, and a picture's spacer is dropped, as
+                    # Previewer drops it (QA on #682).
+                    tail = max(tail, (last["margin_below"] - keep) * _ems_own(last))
+                    last["margin_below"] = keep
+                if tail and edge:
                     # Spacers after a table that ends the box: below it,
                     # inside the box, in its padding (#675).
                     pad = dict(
@@ -4296,6 +4342,12 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                     )
                     pad["bottom"] = (pad.get("bottom") or 0.0) + tail / _ems_own(b)
                     b["box"]["padding"] = pad
+                elif tail:
+                    # It collapses with the box's margin below, where the run
+                    # around the box meets it, the next block's or its own end
+                    # (#680, QA on #682).
+                    mine = margins.setdefault(id(b), [0.0, 0.0])
+                    mine[1] = bottom = _collapse(mine[1], tail)
         if kind is None:
             if out:
                 beside = b.get("heading") or out[-1].get("heading")
@@ -4335,6 +4387,8 @@ def _space_between(blocks, margins, measured=True, paddings=None):
             max(out[-1].get("margin_below") or 0.0, below)
             + (last_pads[1] + last_pads[3]) / own
         )
+        # Its own padding, which stays with it in an open box (QA on #682).
+        out[-1]["padding_below"] = last_pads[1] / own
     if gaps:
         counts = collections.Counter(g for _, g, _ in gaps)
         # The most common; of two as common, the smaller.
@@ -5341,9 +5395,17 @@ def extract_blocks_from_html(
         border = box["box"]["border"] or {}
         padding = box["box"]["padding"] or {}
         mine = [b for b in box["blocks"] if b.get("type") not in ("space", "rule")]
+        # A spacer or rule after the last block meets its margin first: the
+        # margin stays with it (QA on #682).
+        spaced_end = bool(box["blocks"]) and box["blocks"][-1].get("type") in (
+            "space",
+            "rule",
+        )
         for side, i, end in (("top", 0, 0), ("bottom", -1, 1)):
             inner = margins.get(id(mine[i])) if mine else None
             if inner is None or border.get(side) or padding.get(side):
+                continue
+            if end and spaced_end:
                 continue
             if end == 0:
                 top = _collapse(top, inner[0])

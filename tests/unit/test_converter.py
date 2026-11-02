@@ -6489,8 +6489,10 @@ def _cell_texts(body, native):
     [
         ("<td><p>one two</p><p>three</p></td>", False, ["one two three"]),
         ("<td><p>one two</p><p>three</p></td>", True, [["one two", "three"]]),
-        ("<td>one<p>two</p></td>", True, ["one two"]),
-        ("<td><p>one</p>two</td>", True, ["one two"]),
+        # Text written straight in the cell beside a block: a paragraph of
+        # its own, as Kindle Previewer 4.0.3 writes it (#681).
+        ("<td>one<p>two</p></td>", True, [["one", "two"]]),
+        ("<td><p>one</p>two</td>", True, [["one", "two"]]),
         (
             '<td><img src="a.png"/><p>one</p><p>two</p></td>',
             True,
