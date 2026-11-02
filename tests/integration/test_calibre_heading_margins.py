@@ -265,3 +265,39 @@ def test_a_headings_margin_before_a_spacer_is_its_em_number(calibre):  # noqa: F
         if not _near(got[k][0], want)
     }
     assert not wrong, f"calibre {version}: {wrong}, Previewer {SPACED_PREVIEWER}"
+
+
+#: A heading that opens a file, printing as kfxgen's chapter title: Kindle
+#: Previewer 4.0.3 writes its margin-top as `$47`, with a spacer's or a
+#: padded wrapper's space before it, where kfxgen wrote its own `$46` 2 lh
+#: (#653, #671; my probe, 2026-11-02). Each title's $47, in its own lh;
+#: Dfour's 1.247 is the wrapper's 1em padding and the h2's 1.245em, in its
+#: 1.8em line, as Previewer's container and heading add up.
+OPENING = {
+    "p1.xhtml": ("Aone", "<h1>Aone</h1>", 0.558),
+    "p2.xhtml": ("Btwo", "<h2>Btwo</h2>", 0.692),
+    "p3.xhtml": ("Cthree", "<p style='margin:1em 0'>&#160;</p><h1>Cthree</h1>", 1.105),
+    "p4.xhtml": ("Dfour", "<div style='padding:1em 0'><h2>Dfour</h2>", 1.247),
+}
+
+
+def test_a_chapter_title_keeps_its_space_above(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "p671.epub", tmp / "p671.kfx"
+    files = {
+        name: head
+        + "<p style='margin:1em 0'>Body text.</p>"
+        + ("</div>" if head.startswith("<div") else "")
+        for name, (_, head, _) in OPENING.items()
+    }
+    toc = [(title, name) for name, (title, _, _) in OPENING.items()]
+    _build(epub, files, toc, "p671")
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    wrong = {
+        title: got.get(title[:2])
+        for title, _, want in OPENING.values()
+        if got.get(title[:2], (None,))[0] is None
+        or abs(got[title[:2]][0] - want) > 0.002
+    }
+    assert not wrong, f"calibre {version}: {wrong}"
