@@ -178,7 +178,21 @@ SPACED = {
     + "<p style='margin:1em 0'>&#160;</p>" + _p("D2")
     + _p("F0") + "<h3>F1 h3</h3><hr style='border:none;margin:1em 0;height:3px'/>"
     + _p("F2")
-    # In px it is as before, 1.25 root ems (QA on #673).
+    # In rem it is read in the heading's size too; in px as before, 1.25
+    # root ems (QA on #673).
+    + _p("H0") + "<h3 style='margin:1em 0 1rem'>H1 h3</h3>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("H2")
+    # A rule, then a spacer: only the first reads the heading's (QA on #673).
+    + _p("J0") + "<h3>J1 h3</h3><hr style='border:none;margin:1em 0'/>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("J2")
+    # Any block with its own size, and a wrapper's em margin it wins with.
+    + _p("K0") + _p("K1", "margin:1em 0;font-size:0.8em")
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("K2")
+    + _p("L0") + _p("L1", "margin:1em 0;font-size:1.5em")
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("L2")
+    + _p("M0") + "<div style='margin-bottom:2em'>"
+    + _p("M1", "margin:1em 0;font-size:1.5em") + "</div>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("M2")
     + _p("G0") + "<h3 style='margin:1em 0 20px'>G1 h3</h3>"
     + "<p style='margin:1em 0'>&#160;</p>" + _p("G2")
     # Nothing collapses: the same total as Previewer's 0.833 on the h3 and
@@ -193,6 +207,11 @@ SPACED_PREVIEWER = {
     "D2": 3.094,
     "F2": 1.76,
     "G2": 2.052,
+    "H2": 2.139,
+    "J2": 2.26,
+    "K2": 2.26,
+    "L2": 2.26,
+    "M2": 2.538,
     "E2": 1.569,
 }
 

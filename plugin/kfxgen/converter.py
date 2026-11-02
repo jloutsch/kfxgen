@@ -4227,10 +4227,11 @@ def _space_between(blocks, margins, measured=True, paddings=None):
         kind = b.get("type")
         if kind == "space":
             if b["margin"] and not on_purpose and out and out[-1].get("bottom_in_em"):
-                # A heading's margin-bottom in ems meets the first spacer's or
-                # rule's after it as its em number in the root's, as Previewer
-                # reads the rule's own lengths: an h3's 1em is 1em, not 1.17.
-                # One in px or % is as before (#669, QA on #673).
+                # The margin-bottom waiting above, in em or rem, meets the
+                # first spacer's or rule's as Previewer reads it: in the
+                # block's own size, an h3's 1em as 1em, not 1.17, and a 0.8em
+                # paragraph's as 1em; a px or % one as before (#669, QA on
+                # #673).
                 above /= _ems_own(out[-1])
             if b.get("height"):
                 # Margins don't collapse through it: the one above it meets
@@ -5107,10 +5108,6 @@ def extract_blocks_from_html(
         mine = [b for b in blocks[start:] if b.get("type") not in ("space", "rule")]
         if not mine:
             return
-        if mine[-1].get("heading") and re.fullmatch(r"h[1-6]", _local_tag(elem.tag)):
-            # In ems, a spacer after it reads it as its em number (#669).
-            unit = str(css.get("margin-bottom") or "").strip().lower()
-            mine[-1]["bottom_in_em"] = unit.endswith("em") and not unit.endswith("rem")
         # A padded wrapper inside, here or deeper, keeps the paragraph's
         # margin apart: this one meets that wrapper's margin (#643).
         if padded[0] or (paddings.get(id(mine[0])) or (0.0,))[0]:
@@ -5124,6 +5121,11 @@ def extract_blocks_from_html(
             outer[3] = _collapse(outer[3], bottom)
         else:
             last = margins.setdefault(id(mine[-1]), [0.0, 0.0])
+            if bottom and bottom >= last[1]:
+                # Whether the margin that wins is in em or rem: a spacer
+                # after the block reads it in the block's own size (#669).
+                unit = str(css.get("margin-bottom") or "").strip().lower()
+                mine[-1]["bottom_in_em"] = unit.endswith("em")
             last[1] = _collapse(last[1], bottom)
 
     def _make_box(elem, start, leaf=False):
