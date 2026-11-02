@@ -2793,6 +2793,20 @@ _BOX_TAGS = frozenset({"div", "aside", "section", "blockquote", "article", "p", 
 _SIZED_BOX_TAGS = _BOX_TAGS | {"figure"}
 
 
+def _has_content(elem):
+    """Whether an element shows anything: text, or a picture, rule or table
+    in it."""
+    if not isinstance(elem.tag, str):
+        return False
+    if "".join(elem.itertext()).strip():
+        return True
+    return any(
+        _local_tag(d.tag) in ("img", "svg", "hr", "table")
+        for d in elem.iter()
+        if isinstance(d.tag, str)
+    )
+
+
 def _box_width(css):
     """A wrapper's CSS width as a share of the page, in %, or None for none,
     `auto`, the full width or anything unreadable (#382). A px width is
@@ -5131,11 +5145,16 @@ def extract_blocks_from_html(
             stops = (_css_border(css) or {}).get(side) or _padding_em(
                 str(pads.get(side) or "").strip()
             )
-            kids = [k for k in a if isinstance(k.tag, str)]
-            at_edge = bool(kids) and (
-                (kids[0] is child and not (a.text or "").strip())
-                if side == "top"
-                else (kids[-1] is child and not (child.tail or "").strip())
+            # Nothing with content, and no text, on that side of `child` in
+            # `a`: an empty element (an <a id> marking a place) is no block,
+            # and the margin collapses past it (QA on #684).
+            kids = list(a)
+            at = kids.index(child) if child in kids else -1
+            near = kids[:at] if side == "top" else kids[at + 1 :]
+            text = (a.text or "") if side == "top" else (child.tail or "")
+            at_edge = at >= 0 and not (
+                text.strip()
+                or any(_has_content(k) or (k.tail or "").strip() for k in near)
             )
             if at_edge and not stops:
                 child = a

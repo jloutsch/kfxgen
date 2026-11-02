@@ -490,6 +490,13 @@ def test_a_percent_margin_is_measured_per_side(calibre):  # noqa: F811
         + close
         for k, (open_, close, _) in SECOND.items()
     )
+    # An empty <a id> before the paragraph is no block: its margin still
+    # collapses out of the width-only wrapper, the page's (QA on #684).
+    body += (
+        _p("W0")
+        + "<div style='width:50%'><a id='w1'></a><p style='margin:10% 0'>W1 ten.</p></div>"
+        + _p("W2", "margin:1em 0")
+    )
     body += (
         _p("R0")
         + "<div style='padding-top:0.5em;width:50%'><p style='margin:10% 0'>R1 ten.</p></div>"
@@ -505,7 +512,7 @@ def test_a_percent_margin_is_measured_per_side(calibre):  # noqa: F811
     )
     _ebook_convert(calibre, epub, kfx, True)
     got = _spacing(kfx)
-    want = {k: v for k, (_, _, v) in SECOND.items()} | {"R2": 2.667}
+    want = {k: v for k, (_, _, v) in SECOND.items()} | {"R2": 2.667, "W1": 2.667}
     wrong = {
         k: got[k][0]
         for k, w in want.items()
