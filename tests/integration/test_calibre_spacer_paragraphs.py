@@ -26,6 +26,7 @@ from tests.integration.test_calibre_contents_links import _build  # noqa: E402
 from tests.integration.test_calibre_hidden_rules_and_wrappers import (  # noqa: E402
     _first_spaces,
 )
+from tests.integration.test_calibre_paragraph_margins import _spacing  # noqa: E402
 from tests.integration.test_calibre_table_rows import (  # noqa: E402
     _ebook_convert,
     calibre,  # noqa: F401  (fixture)
@@ -66,7 +67,12 @@ FILES = {
     + _z("S0") + "<p style='margin:1em 0'><br/></p>" + _z("S1")
     + _z("T0") + _sp("margin:2em 0") + _z("T1")
     + _z("U0") + _sp("margin:1em 0;font-size:50%") + _z("U1")
-    + _z("V0") + _sp("margin:0") + _z("V1"),
+    + _z("V0") + _sp("margin:0") + _z("V1")
+    # Its line is its own line height, 19px only for `normal` (QA on #667).
+    + _z("W0") + _sp("margin:0;line-height:1.5") + _z("W1")
+    + _z("X0") + _sp("margin:0;line-height:2") + _z("X1")
+    + _z("Y0") + _sp("margin:0;line-height:3") + _z("Y1")
+    + _z("Z0") + _sp("margin:0;line-height:40px") + _z("Z1"),
 }  # fmt: skip
 
 #: Previewer's $47 above each, in lh: a box's on its container.
@@ -85,6 +91,10 @@ PREVIEWER = {
     "T1": 2.594,
     "U1": 1.094,
     "V1": 0.594,
+    "W1": 0.75,
+    "X1": 1.0,
+    "Y1": 1.5,
+    "Z1": 1.25,
 }
 
 
@@ -102,3 +112,27 @@ def test_a_spacer_is_spaced_as_previewer_spaces_it(calibre):  # noqa: F811
         k: got.get(k) for k, want in PREVIEWER.items() if not _near(got.get(k), want)
     }
     assert not wrong, f"calibre {version}: {wrong}, Previewer {PREVIEWER}"
+
+
+def test_a_spacer_before_a_table_keeps_its_space(calibre):  # noqa: F811
+    """1em paragraph, spacer, table: Previewer puts the whole stack on the
+    table, 1.958 lh with its cells' padding (QA on #667). kfxgen writes the
+    space before a table below the paragraph above (#553): the paragraph's
+    1em collapsed with the spacer's 0.6em, its 0.7125em line and its 0.6em
+    margin-bottom, 2.3125em, 1.927 lh. The spacer's line was lost: 0.531."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "t663.epub", tmp / "t663.kfx"
+    _build(
+        epub,
+        {
+            "t.xhtml": _p("K0")
+            + SP
+            + "<table><tr><td>K1 cell</td></tr></table>"
+            + _p("K2")
+        },
+        [("T", "t.xhtml")],
+        "t663",
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    below = _spacing(kfx)["K0"][1]
+    assert _near(below, 1.927), f"calibre {version}: K0 $49 = {below}, want 1.927"
