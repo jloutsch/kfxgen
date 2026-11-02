@@ -907,6 +907,18 @@ def _table_opens_with_title(block, title):
     return j is not None and _opens_with_title(_row_text(rows[j]).lstrip(), title)
 
 
+def _keep_space_above(heading_chunk, block):
+    """Put the space above `block`, the book's heading printing as kfxgen's
+    chapter title, on that title, in px: its margin-top, and a spacer's or a
+    padded wrapper's before it, as Kindle Previewer 4.0.3 writes it as the
+    heading's `$47` at a file's start, in place of kfxgen's own `$46` 2 lh
+    (#653, #671)."""
+    if heading_chunk is not None and "margin_above" in block:
+        # 0 too: the book set none, and Previewer writes none (QA on #686).
+        px = (block.get("block_style") or {}).get("font_size") or 16.0
+        heading_chunk["space_above_px"] = (block["margin_above"] or 0.0) * px
+
+
 def _keep_space_below(heading_chunk, block):
     """Put the margin below `block`, the book's heading printing as kfxgen's
     chapter title, on that title, in px (QA on #665). It waits there for a
@@ -5323,6 +5335,7 @@ class NativeKFXGenerator:
                                         # a margin-less paragraph (QA on
                                         # #665).
                                         _keep_space_below(heading_chunk, first)
+                                        _keep_space_above(heading_chunk, first)
                                         # And its level (#461).
                                         if first.get("heading_level"):
                                             heading_chunk["heading_level"] = first[
@@ -6378,6 +6391,13 @@ class NativeKFXGenerator:
                             attrs["space_below"] = chunk["space_below_px"] / (
                                 attrs["font_size"] * (main_px or 16.0)
                             )
+                        if chunk.get("space_above_px") is not None:
+                            # The book's space above, as Previewer writes it,
+                            # in place of kfxgen's own (#653, #671).
+                            attrs["space_above"] = chunk["space_above_px"] / (
+                                attrs["font_size"] * (main_px or 16.0)
+                            )
+                            attrs["margin_top"] = None
                         entry_styles.append(
                             _allocate_style("_h", **attrs, **(typo or {}))
                         )
