@@ -77,7 +77,9 @@ CASES = [
         "c1",
         "SPACER",
         "<p>{c} lead</p><p>&#160;</p><p>after</p>",
-        [("after", "1")],
+        # 0.6 of a 19px line, its margins 0 here, as Kindle Previewer 4.0.3
+        # writes it (#663); kfxgen wrote a 1.2em line.
+        [("after", "0.59375")],
     ),
     ("c1", "EMPTY", "<p>{c} lead</p><p> </p><p>after</p>", [("after", None)]),
     (
@@ -90,7 +92,8 @@ CASES = [
         "c1",
         "SPACERMARGIN",
         '<p>{c} lead</p><p>&#160;</p><p class="break">after</p>',
-        [("after", "2.66667")],
+        # The spacer's 0.6 of 19px and the 2em past it (#663).
+        [("after", "2.26042")],
     ),
 ]
 

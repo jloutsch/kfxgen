@@ -2905,6 +2905,32 @@ def _hidden_rule_em(css):
     return top * share, height * share, bottom * share
 
 
+#: The line a spacer paragraph stands for in Kindle Previewer 4.0.3 when its
+#: line height is `normal`, at any font size (my probes, #663).
+_SPACER_LINE_PX = 19.0
+
+
+def _spacer_em(css):
+    """(margin-top, height, margin-bottom) of a spacer paragraph, in the 16px
+    root's ems, as Kindle Previewer 4.0.3 spaces it (#663): as an <hr> that
+    draws nothing with a height, its own margins and its line: its own line
+    height, or 19px for `normal` (QA on #667: 1.5, 2, 3 and 40px). The
+    resolver gives `normal` as 1.2, the same as a 1.2 the book sets."""
+    factor = css.get("line-height")
+    if not isinstance(factor, (int, float)) or abs(factor - 1.2) < 1e-6:
+        line = _SPACER_LINE_PX
+    else:
+        line = factor * (css_font_size(css) or 16.0)
+    return _hidden_rule_em(
+        {
+            "margin-top": css.get("margin-top"),
+            "margin-bottom": css.get("margin-bottom"),
+            "font-size": css.get("font-size"),
+            "height": f"{line}px",
+        }
+    )
+
+
 def _is_spacer(elem):
     """A paragraph that holds only a non-breaking space or a <br>: a blank
     line the book put in on purpose, often for a scene break (#230). An
@@ -4150,10 +4176,11 @@ def _place_margin(
         not _takes_margin(b)
         and not _spaces_itself(b)
         and _takes_margin(prev)
-        and up > own
+        and (up > own or fixed)
     ):
-        # Before a table: the paragraph above keeps it, as Previewer writes it.
-        prev["margin_below"] = above / _ems_own(prev)
+        # Before a table: the paragraph above keeps it, as Previewer writes it,
+        # with a spacer's or a sized rule's space between (QA on #667).
+        prev["margin_below"] = (above + fixed) / _ems_own(prev)
 
 
 def _space_between(blocks, margins, measured=True, paddings=None):
@@ -4941,7 +4968,12 @@ def extract_blocks_from_html(
             else:
                 pending_ids.extend(ids)  # empty anchor block: carry ids forward
                 if _is_spacer(elem):
-                    _emit_space(line=_LINE_SPACE_EM)
+                    css = style_resolver(elem) if style_resolver is not None else None
+                    if css is None:
+                        _emit_space(line=_LINE_SPACE_EM)
+                    else:
+                        top, height, bottom = _spacer_em(css)
+                        _emit_space(margin=top, height=height, margin_after=bottom)
             return
 
         # No `parent_is_block` guard. It used to be here to avoid emitting an
