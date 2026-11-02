@@ -176,3 +176,29 @@ def test_a_spacer_before_a_table_keeps_its_space(calibre):  # noqa: F811
     _ebook_convert(calibre, epub, kfx, True)
     below = _spacing(kfx)["K0"][1]
     assert _near(below, 1.927), f"calibre {version}: K0 $49 = {below}, want 1.927"
+
+
+#: Spacers and an <hr> that draws nothing after the last block of a bordered
+#: box, or of a file: Kindle Previewer 4.0.3 keeps their space below that
+#: block, inside the box (#670; my probe, 2026-11-01). kfxgen dropped it, so
+#: each block kept only its own 1em, 0.833 lh. The block's $49, in lh.
+LAST_FILES = {
+    "x.xhtml": _p("A0") + f"<div style='{BX}'>{_p('A1')}{SP}</div>" + _p("A2")
+    + _p("B0") + f"<div style='{BX}'>{_p('B1')}{_sp('margin:0')}</div>" + _p("B2")
+    + _p("C0") + f"<div style='{BX}'>{_p('C1')}{SP}{SP}</div>" + _p("C2")
+    + _p("D0") + f"<div style='{BX}'>{_p('D1')}"
+    + "<hr style='border:none;margin:1em 0'/></div>" + _p("D2")
+    + _p("E0") + _p("E1") + SP,
+    "y.xhtml": _p("F1"),
+}  # fmt: skip
+LAST = {"A1": 1.927, "B1": 1.427, "C1": 3.021, "D1": 0.833, "E1": 1.927}
+
+
+def test_a_spacer_last_in_a_box_or_a_file_keeps_its_space(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "x670.epub", tmp / "x670.kfx"
+    _build(epub, LAST_FILES, [("X", "x.xhtml"), ("Y", "y.xhtml")], "x670")
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    wrong = {k: got[k][1] for k, want in LAST.items() if not _near(got[k][1], want)}
+    assert not wrong, f"calibre {version}: {wrong}, Previewer {LAST}"

@@ -4286,14 +4286,17 @@ def _space_between(blocks, margins, measured=True, paddings=None):
         on_purpose = False
         out.append(b)
     if measured and out and _takes_margin(out[-1]):
-        # A file's last paragraph keeps its margin-bottom (#553).
+        # A file's or a box's last paragraph keeps its margin-bottom (#553),
+        # met by the spacers and invisible <hr>s after it: their space stays
+        # below it, inside the box, as Previewer writes it (#670).
         last_pads = (paddings or {}).get(id(out[-1])) or (0.0,) * 4
         own = _ems_own(out[-1])
+        if on_purpose:
+            below = (fixed + above) / own + lines
+        else:
+            below = margins.get(id(out[-1]), (0, 0))[1] / own
         out[-1]["margin_below"] = (
-            max(
-                out[-1].get("margin_below") or 0.0,
-                margins.get(id(out[-1]), (0, 0))[1] / own,
-            )
+            max(out[-1].get("margin_below") or 0.0, below)
             + (last_pads[1] + last_pads[3]) / own
         )
     if gaps:
