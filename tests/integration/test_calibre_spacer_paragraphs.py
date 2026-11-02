@@ -73,6 +73,16 @@ FILES = {
     + _z("X0") + _sp("margin:0;line-height:2") + _z("X1")
     + _z("Y0") + _sp("margin:0;line-height:3") + _z("Y1")
     + _z("Z0") + _sp("margin:0;line-height:40px") + _z("Z1"),
+    # A line height the book writes, even 1.2 or `normal`, is the spacer's
+    # own: `normal` 4/3 of its font size, rounded to a px; only an unset one
+    # is 19px, whatever the font size around it (#668).
+    "l.xhtml": _z("B0") + _sp("margin:0;line-height:normal") + _z("BB")
+    + _z("C0") + _sp("margin:0;font-size:200%;line-height:normal") + _z("CC")
+    + _z("D0") + _sp("margin:0;font-size:200%;line-height:1.2") + _z("DD")
+    + _z("G0") + _sp("margin:0;font-size:150%;line-height:normal") + _z("GG")
+    + _z("H0") + _sp("margin:0;font-size:50%;line-height:normal") + _z("HH")
+    + "<div style='font-size:200%'>" + _z("F0") + _sp("margin:0") + _z("FF")
+    + "</div>",
 }  # fmt: skip
 
 #: Previewer's $47 above each, in lh: a box's on its container.
@@ -95,6 +105,13 @@ PREVIEWER = {
     "X1": 1.0,
     "Y1": 1.5,
     "Z1": 1.25,
+    "BB": 0.656,
+    "CC": 1.344,
+    "DD": 1.188,
+    "GG": 1.0,
+    "HH": 0.344,
+    # In FF's own line heights, at its 2em.
+    "FF": 0.297,
 }
 
 
@@ -112,6 +129,29 @@ def test_a_spacer_is_spaced_as_previewer_spaces_it(calibre):  # noqa: F811
         k: got.get(k) for k, want in PREVIEWER.items() if not _near(got.get(k), want)
     }
     assert not wrong, f"calibre {version}: {wrong}, Previewer {PREVIEWER}"
+
+
+def test_a_margin_less_spacer_before_a_table_keeps_its_line(calibre):  # noqa: F811
+    """`<p style="margin:0">`, a `margin:0` spacer, a table: no margin waits
+    above the table, so only the spacer's line carries it, 0.594 lh, as
+    Previewer's 0.625 on the table less its cells' 0.031 (QA on #667,
+    #668: dropping it failed no test)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "u668.epub", tmp / "u668.kfx"
+    _build(
+        epub,
+        {
+            "u.xhtml": _z("J0")
+            + _sp("margin:0")
+            + "<table><tr><td>J1 cell</td></tr></table>"
+            + _p("J2")
+        },
+        [("T", "u.xhtml")],
+        "u668",
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    below = _spacing(kfx)["J0"][1]
+    assert _near(below, 0.594), f"calibre {version}: J0 $49 = {below}, want 0.594"
 
 
 def test_a_spacer_before_a_table_keeps_its_space(calibre):  # noqa: F811

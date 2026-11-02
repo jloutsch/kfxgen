@@ -474,6 +474,11 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     "font-size": round(_font_size_px(stylizer, elem, sizes), 3),
                     # A factor of its own font size, for $42 (#463).
                     "line-height": _line_height_factor(stylizer, elem, sizes),
+                    # As written, or None when no element sets it: the
+                    # factor says 1.2 for both `normal` and unset (#668).
+                    "line-height-declared": _specified_inherited(
+                        stylizer, elem, "line-height"
+                    ),
                     # A drop cap: the paragraph's `::first-letter`, and a
                     # floated span's float (#240). Declared: neither
                     # inherits. Only a <p> is read for an initial, and
@@ -2905,22 +2910,27 @@ def _hidden_rule_em(css):
     return top * share, height * share, bottom * share
 
 
-#: The line a spacer paragraph stands for in Kindle Previewer 4.0.3 when its
-#: line height is `normal`, at any font size (my probes, #663).
+#: The line a spacer paragraph stands for in Kindle Previewer 4.0.3 when no
+#: element sets a line height, at any font size (my probes, #663, #668).
 _SPACER_LINE_PX = 19.0
 
 
 def _spacer_em(css):
     """(margin-top, height, margin-bottom) of a spacer paragraph, in the 16px
     root's ems, as Kindle Previewer 4.0.3 spaces it (#663): as an <hr> that
-    draws nothing with a height, its own margins and its line: its own line
-    height, or 19px for `normal` (QA on #667: 1.5, 2, 3 and 40px). The
-    resolver gives `normal` as 1.2, the same as a 1.2 the book sets."""
+    draws nothing with a height, its own margins and its line, in whole px
+    (my probes, #668): 19px when no element sets a line height; 4/3 of its
+    font size for a `normal` the book writes (21px at 16px); else its own
+    line height (QA on #667: 1.5, 2, 3 and 40px; 1.2 at 32px is 38px)."""
+    own = css_font_size(css) or 16.0
     factor = css.get("line-height")
-    if not isinstance(factor, (int, float)) or abs(factor - 1.2) < 1e-6:
-        line = _SPACER_LINE_PX
+    declared = str(css.get("line-height-declared") or "").strip().lower()
+    if declared == "normal":
+        line = round(own * 4 / 3)
+    elif isinstance(factor, (int, float)) and (declared or abs(factor - 1.2) > 1e-6):
+        line = round(factor * own)
     else:
-        line = factor * (css_font_size(css) or 16.0)
+        line = _SPACER_LINE_PX
     return _hidden_rule_em(
         {
             "margin-top": css.get("margin-top"),
