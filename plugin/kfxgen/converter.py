@@ -4270,6 +4270,17 @@ def _space_between(blocks, margins, measured=True, paddings=None):
             if kind == "box":
                 # Its paragraphs are spaced the same way, inside it (#640).
                 b["blocks"] = _space_between(b["blocks"], margins, measured, paddings)
+                tail = (
+                    b["blocks"][-1].pop("trailing_space", 0.0) if b["blocks"] else 0.0
+                )
+                if tail:
+                    # Spacers after a table that ends the box: below it,
+                    # inside the box, in its padding (#675).
+                    pad = dict(
+                        b["box"].get("padding") or dict.fromkeys(_BORDER_SIDES, 0.0)
+                    )
+                    pad["bottom"] = (pad.get("bottom") or 0.0) + tail / _ems_own(b)
+                    b["box"]["padding"] = pad
         if kind is None:
             if out:
                 beside = b.get("heading") or out[-1].get("heading")
@@ -4291,6 +4302,10 @@ def _space_between(blocks, margins, measured=True, paddings=None):
         fixed = 0.0
         on_purpose = False
         out.append(b)
+    if measured and out and on_purpose and not _takes_margin(out[-1]):
+        # Spacers after a table or a picture that ends the run: their space,
+        # for a box to keep inside it (#675).
+        out[-1]["trailing_space"] = fixed + above + lines
     if measured and out and _takes_margin(out[-1]):
         # A file's or a box's last paragraph keeps its margin-bottom (#553),
         # met by the spacers and invisible <hr>s after it: their space stays
