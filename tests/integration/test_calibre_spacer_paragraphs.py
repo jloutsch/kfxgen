@@ -388,3 +388,37 @@ def test_an_open_box_edge_is_read_from_its_border_and_padding(calibre):  # noqa:
     assert _near(pads[0], 2.01), f"calibre {version}: K box $54 = {pads}"
     assert _near(got["L2"][0], 1.927), f"calibre {version}: L2 = {got['L2']}"
     assert _near(got["M1"][1], 0.417), f"calibre {version}: M1 = {got['M1']}"
+
+
+def test_a_spacer_after_a_padded_paragraph_meets_its_outer_margin(calibre):  # noqa: F811
+    """A paragraph with padding below, then a spacer (#685; my probe,
+    2026-11-02): Kindle Previewer 4.0.3 keeps the padding with the
+    paragraph, its margin outside the padding meets the spacer's, and the
+    spacer's margin-bottom the next paragraph's. kfxgen added the margin
+    after the spacer's space instead. Each next paragraph's $47 here is
+    Previewer's padding (0.417) and its gap, written on the one entry:
+    - padded p, spacer, p: 2.677 (kfxgen 2.844);
+    - padded p, `margin:0` spacer, p: 2.677 (1.844);
+    - padded p, spacer, `margin:0` p: 2.344 (2.844 below the padded p);
+    - in a grey box with nothing below: the p keeps its 0.417, and 1.927
+      leaves the box (#682);
+    - a padded wrapper: unchanged, 3.594."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "p685.epub", tmp / "p685.kfx"
+    pad = "margin:1em 0;padding-bottom:0.5em"
+    body = (
+        _p("A0") + _p("A1", pad) + SP + _p("A2")
+        + _p("C0") + _p("C1", pad) + _sp("margin:0") + _p("C2")
+        + _p("E0") + _p("E1", pad) + SP + _p("E2", "margin:0")
+        + _p("B0")
+        + f"<div style='background-color:#cccccc'>{_p('B1', pad)}{SP}</div>"
+        + _p("B2")
+        + _p("D0") + f"<div style='padding:1em 0'>{_p('D1')}</div>" + SP + _p("D2")
+    )  # fmt: skip
+    _build(epub, {"p.xhtml": body}, [("P", "p.xhtml")], "p685")
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    wanted = {"A2": 2.677, "C2": 2.677, "E2": 2.344, "B2": 1.927, "D2": 3.594}
+    wrong = {k: got[k][0] for k, w in wanted.items() if not _near(got[k][0], w)}
+    assert not wrong, f"calibre {version}: {wrong}, Previewer {wanted}"
+    assert _near(got["B1"][1], 0.417), f"calibre {version}: B1 = {got['B1']}"
