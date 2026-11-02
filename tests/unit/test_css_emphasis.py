@@ -161,11 +161,22 @@ def test_the_only_paragraph_in_a_cell_keeps_its_css_bold():
 
 @pytest.mark.unit
 def test_a_cell_mixing_text_and_a_bold_paragraph_bolds_only_the_paragraph():
-    cells = _cells(
-        '<table><tr><td>plain <p class="hb">bold</p></td><td>x</td></tr>'
-        "<tr><td>a</td><td>b</td></tr></table>"
+    # The text written straight in the cell is a paragraph of its own, as
+    # Kindle Previewer 4.0.3 writes it (#681), not joined to the bold one.
+    blocks = _conv.extract_blocks_from_html(
+        _doc(
+            '<table><tr><td>plain <p class="hb">bold</p></td><td>x</td></tr>'
+            "<tr><td>a</td><td>b</td></tr></table>"
+        ),
+        style_resolver=_resolver(),
+        native_tables=True,
     )
-    assert [r.strip() for r in _runs(*cells[0], BOLD)] == ["bold"]
+    (table,) = [b["table"] for b in blocks if b.get("table")]
+    paragraphs = table["rows"][0]["cells"][0]["paragraphs"]
+    assert [p["text"].strip() for p in paragraphs] == ["plain", "bold"]
+    # The paragraph's CSS bold is its own, as for any paragraph (#372).
+    bold = [bool((p.get("block_style") or {}).get("bold")) for p in paragraphs]
+    assert bold == [False, True]
 
 
 @pytest.mark.unit
