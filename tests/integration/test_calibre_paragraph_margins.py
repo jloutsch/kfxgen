@@ -497,6 +497,16 @@ def test_a_percent_margin_is_measured_per_side(calibre):  # noqa: F811
         + "<div style='width:50%'><a id='w1'></a><p style='margin:10% 0'>W1 ten.</p></div>"
         + _p("W2", "margin:1em 0")
     )
+    # Text written straight in the wrapper before or after the paragraph
+    # keeps that side's margin in: 1.333 (QA on #684: dropping either check
+    # gave 2.667).
+    body += (
+        _p("X0")
+        + "<div style='width:50%'>lead <p style='margin:10% 0'>X1 ten.</p></div>"
+        + _p("Y0")
+        + "<div style='width:50%'><p style='margin:10% 0'>Y1 ten.</p> tail</div>"
+        + _p("Y2", "margin:0")
+    )
     body += (
         _p("R0")
         + "<div style='padding-top:0.5em;width:50%'><p style='margin:10% 0'>R1 ten.</p></div>"
@@ -512,10 +522,18 @@ def test_a_percent_margin_is_measured_per_side(calibre):  # noqa: F811
     )
     _ebook_convert(calibre, epub, kfx, True)
     got = _spacing(kfx)
-    want = {k: v for k, (_, _, v) in SECOND.items()} | {"R2": 2.667, "W1": 2.667}
+    want = {k: v for k, (_, _, v) in SECOND.items()} | {
+        "R2": 2.667,
+        "W1": 2.667,
+        "X1": 1.333,
+    }
     wrong = {
         k: got[k][0]
         for k, w in want.items()
         if got[k][0] is None or abs(got[k][0] - w) > 0.002
     }
     assert not wrong, f"calibre {version}: {wrong}, Previewer {want}"
+    below = got["Y1"][1]
+    assert below is not None and abs(below - 1.333) < 0.002, (
+        f"calibre {version}: Y1 below = {below}, Previewer 1.333"
+    )
