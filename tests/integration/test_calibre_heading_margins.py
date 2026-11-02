@@ -193,6 +193,23 @@ SPACED = {
     + _p("M0") + "<div style='margin-bottom:2em'>"
     + _p("M1", "margin:1em 0;font-size:1.5em") + "</div>"
     + "<p style='margin:1em 0'>&#160;</p>" + _p("M2")
+    # Only when the paragraph's own margin is in em too (QA on #673).
+    + _p("N0") + "<div style='margin-bottom:2em'>"
+    + _p("N1", "margin:16px 0;font-size:0.8em") + "</div>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("N2")
+    + _p("O0") + "<div style='margin-bottom:40px'>"
+    + _p("O1", "margin:1em 0;font-size:1.5em") + "</div>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("O2")
+    # Only the margin that wins counts: an em wrapper's that loses to a px
+    # one inside it is not read in the paragraph's size (#676).
+    + _p("P0") + "<div style='margin-bottom:0.5em'><div style='margin-bottom:40px'>"
+    + _p("P1", "margin:1em 0;font-size:1.5em") + "</div></div>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("P2")
+    # A box with its own size, as a paragraph (#676).
+    + _p("Q0") + "<div style='border:1px solid black;padding:0.5em;"
+    + "font-size:1.5em;margin-bottom:1em'>"
+    + _p("Q1", "margin:1em 0;font-size:0.6667em") + "</div>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("Q2")
     + _p("G0") + "<h3 style='margin:1em 0 20px'>G1 h3</h3>"
     + "<p style='margin:1em 0'>&#160;</p>" + _p("G2")
     # Nothing collapses: the same total as Previewer's 0.833 on the h3 and
@@ -212,6 +229,10 @@ SPACED_PREVIEWER = {
     "K2": 2.26,
     "L2": 2.26,
     "M2": 2.538,
+    "N2": 3.094,
+    "O2": 2.677,
+    "P2": 2.677,
+    "Q2": 2.26,
     "E2": 1.569,
 }
 
