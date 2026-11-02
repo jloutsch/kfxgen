@@ -4270,10 +4270,25 @@ def _space_between(blocks, margins, measured=True, paddings=None):
             if kind == "box":
                 # Its paragraphs are spaced the same way, inside it (#640).
                 b["blocks"] = _space_between(b["blocks"], margins, measured, paddings)
-                tail = (
-                    b["blocks"][-1].pop("trailing_space", 0.0) if b["blocks"] else 0.0
-                )
-                if tail:
+                last = b["blocks"][-1] if b["blocks"] else None
+                tail = last.pop("trailing_space", 0.0) if last else 0.0
+                edge = (b["box"].get("border") or {}).get("bottom") or (
+                    b["box"].get("padding") or {}
+                ).get("bottom")
+                keep = last.get("padding_below", 0.0) if last is not None else 0.0
+                if (
+                    not edge
+                    and last is not None
+                    and (last.get("margin_below") or 0.0) > keep
+                    and _has_real_text(last.get("text"))
+                ):
+                    # Nothing at its bottom edge: the space below its last
+                    # block leaves the box, as Previewer writes it; its own
+                    # padding stays, and a picture's spacer is dropped, as
+                    # Previewer drops it (QA on #682).
+                    tail = max(tail, (last["margin_below"] - keep) * _ems_own(last))
+                    last["margin_below"] = keep
+                if tail and edge:
                     # Spacers after a table that ends the box: below it,
                     # inside the box, in its padding (#675).
                     pad = dict(
@@ -4281,6 +4296,12 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                     )
                     pad["bottom"] = (pad.get("bottom") or 0.0) + tail / _ems_own(b)
                     b["box"]["padding"] = pad
+                elif tail:
+                    # It collapses with the box's margin below, where the run
+                    # around the box meets it, the next block's or its own end
+                    # (#680, QA on #682).
+                    mine = margins.setdefault(id(b), [0.0, 0.0])
+                    mine[1] = bottom = _collapse(mine[1], tail)
         if kind is None:
             if out:
                 beside = b.get("heading") or out[-1].get("heading")
@@ -4320,6 +4341,8 @@ def _space_between(blocks, margins, measured=True, paddings=None):
             max(out[-1].get("margin_below") or 0.0, below)
             + (last_pads[1] + last_pads[3]) / own
         )
+        # Its own padding, which stays with it in an open box (QA on #682).
+        out[-1]["padding_below"] = last_pads[1] / own
     if gaps:
         counts = collections.Counter(g for _, g, _ in gaps)
         # The most common; of two as common, the smaller.
@@ -5247,9 +5270,17 @@ def extract_blocks_from_html(
         border = box["box"]["border"] or {}
         padding = box["box"]["padding"] or {}
         mine = [b for b in box["blocks"] if b.get("type") not in ("space", "rule")]
+        # A spacer or rule after the last block meets its margin first: the
+        # margin stays with it (QA on #682).
+        spaced_end = bool(box["blocks"]) and box["blocks"][-1].get("type") in (
+            "space",
+            "rule",
+        )
         for side, i, end in (("top", 0, 0), ("bottom", -1, 1)):
             inner = margins.get(id(mine[i])) if mine else None
             if inner is None or border.get(side) or padding.get(side):
+                continue
+            if end and spaced_end:
                 continue
             if end == 0:
                 top = _collapse(top, inner[0])
