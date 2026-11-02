@@ -4273,7 +4273,10 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                 tail = (
                     b["blocks"][-1].pop("trailing_space", 0.0) if b["blocks"] else 0.0
                 )
-                if tail:
+                edge = (b["box"].get("border") or {}).get("bottom") or (
+                    b["box"].get("padding") or {}
+                ).get("bottom")
+                if tail and edge:
                     # Spacers after a table that ends the box: below it,
                     # inside the box, in its padding (#675).
                     pad = dict(
@@ -4281,6 +4284,10 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                     )
                     pad["bottom"] = (pad.get("bottom") or 0.0) + tail / _ems_own(b)
                     b["box"]["padding"] = pad
+                elif tail:
+                    # Nothing at its bottom edge: the space collapses with the
+                    # margin below, as Previewer writes it (#680).
+                    bottom = _collapse(bottom, tail)
         if kind is None:
             if out:
                 beside = b.get("heading") or out[-1].get("heading")
