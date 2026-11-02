@@ -5293,6 +5293,10 @@ def extract_blocks_from_html(
             first[0] = _collapse(first[0], top)
         if padded[1] or (paddings.get(id(mine[-1])) or (0.0,) * 2)[1]:
             outer = paddings[id(mine[-1])]
+            if bottom and bottom >= outer[3]:
+                # Outside the padding too: a spacer after it reads it in the
+                # block's own size (#669, QA on #688).
+                mine[-1]["bottom_in_em"] = unit.endswith("em")
             outer[3] = _collapse(outer[3], bottom)
         else:
             last = margins.setdefault(id(mine[-1]), [0.0, 0.0])

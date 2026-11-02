@@ -414,11 +414,24 @@ def test_a_spacer_after_a_padded_paragraph_meets_its_outer_margin(calibre):  # n
         + f"<div style='background-color:#cccccc'>{_p('B1', pad)}{SP}</div>"
         + _p("B2")
         + _p("D0") + f"<div style='padding:1em 0'>{_p('D1')}</div>" + SP + _p("D2")
+        # At 1.5em: its em margin read in its own size, 1em, as #669 reads
+        # one with no padding; a px one isn't (QA on #688).
+        + _p("F0") + _p("F1", pad + ";font-size:1.5em") + SP + _p("F2")
+        + _p("G0") + _p("G1", pad + ";font-size:1.5em;margin-bottom:24px") + SP
+        + _p("G2")
     )  # fmt: skip
     _build(epub, {"p.xhtml": body}, [("P", "p.xhtml")], "p685")
     _ebook_convert(calibre, epub, kfx, True)
     got = _spacing(kfx)
-    wanted = {"A2": 2.677, "C2": 2.677, "E2": 2.344, "B2": 1.927, "D2": 3.594}
+    wanted = {
+        "A2": 2.677,
+        "C2": 2.677,
+        "E2": 2.344,
+        "B2": 1.927,
+        "D2": 3.594,
+        "F2": 2.885,
+        "G2": 2.802,
+    }
     wrong = {k: got[k][0] for k, w in wanted.items() if not _near(got[k][0], w)}
     assert not wrong, f"calibre {version}: {wrong}, Previewer {wanted}"
     assert _near(got["B1"][1], 0.417), f"calibre {version}: B1 = {got['B1']}"
