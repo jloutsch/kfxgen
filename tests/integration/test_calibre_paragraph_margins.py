@@ -507,6 +507,17 @@ def test_a_percent_margin_is_measured_per_side(calibre):  # noqa: F811
         + "<div style='width:50%'><p style='margin:10% 0'>Y1 ten.</p> tail</div>"
         + _p("Y2", "margin:0")
     )
+    # A hidden element is no block (2.667); text after an empty anchor, or a
+    # picture, before the paragraph keeps its margin in (1.333) (QA on #684).
+    for k, lead in (
+        ("H1", "<span style='display:none'>hidden</span>"),
+        ("J1", "<a id='j1'></a>lead "),
+        ("M1", "<img src='x.png'/>"),
+    ):
+        body += (
+            _p(f"{k[0]}0")
+            + f"<div style='width:50%'>{lead}<p style='margin:10% 0'>{k} ten.</p></div>"
+        )
     body += (
         _p("R0")
         + "<div style='padding-top:0.5em;width:50%'><p style='margin:10% 0'>R1 ten.</p></div>"
@@ -526,6 +537,9 @@ def test_a_percent_margin_is_measured_per_side(calibre):  # noqa: F811
         "R2": 2.667,
         "W1": 2.667,
         "X1": 1.333,
+        "H1": 2.667,
+        "J1": 1.333,
+        "M1": 1.333,
     }
     wrong = {
         k: got[k][0]

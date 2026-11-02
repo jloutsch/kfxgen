@@ -5146,15 +5146,24 @@ def extract_blocks_from_html(
                 str(pads.get(side) or "").strip()
             )
             # Nothing with content, and no text, on that side of `child` in
-            # `a`: an empty element (an <a id> marking a place) is no block,
-            # and the margin collapses past it (QA on #684).
+            # `a`: an empty element (an <a id> marking a place), or one not
+            # shown, is no block, and the margin collapses past it (QA on
+            # #684).
             kids = list(a)
             at = kids.index(child) if child in kids else -1
             near = kids[:at] if side == "top" else kids[at + 1 :]
             text = (a.text or "") if side == "top" else (child.tail or "")
             at_edge = at >= 0 and not (
                 text.strip()
-                or any(_has_content(k) or (k.tail or "").strip() for k in near)
+                or any(
+                    (
+                        _has_content(k)
+                        and str((style_resolver(k) or {}).get("display") or "").strip()
+                        != "none"
+                    )
+                    or (k.tail or "").strip()
+                    for k in near
+                )
             )
             if at_edge and not stops:
                 child = a
