@@ -4226,12 +4226,18 @@ def _space_between(blocks, margins, measured=True, paddings=None):
     for b in blocks:
         kind = b.get("type")
         if kind == "space":
-            if b["margin"] and not on_purpose and out and out[-1].get("bottom_in_em"):
+            if (
+                b["margin"]
+                and not on_purpose
+                and out
+                and out[-1].get("bottom_in_em")
+                and out[-1].get("own_bottom_em")
+            ):
                 # The margin-bottom waiting above, in em or rem, meets the
                 # first spacer's or rule's as Previewer reads it: in the
                 # block's own size, an h3's 1em as 1em, not 1.17, and a 0.8em
-                # paragraph's as 1em; a px or % one as before (#669, QA on
-                # #673).
+                # paragraph's as 1em, when the block's own margin is in em or
+                # rem too; a px or % one as before (#669, QA on #673).
                 above /= _ems_own(out[-1])
             if b.get("height"):
                 # Margins don't collapse through it: the one above it meets
@@ -5106,9 +5112,15 @@ def extract_blocks_from_html(
             return
         css = style_resolver(elem)
         top, bottom = _margin_em(css, "top"), _margin_em(css, "bottom")
+        mine = [b for b in blocks[start:] if b.get("type") not in ("space", "rule")]
+        unit = str((css or {}).get("margin-bottom") or "").strip().lower()
+        if mine and mine[-1].get("type") is None and "own_bottom_em" not in mine[-1]:
+            # The paragraph's own margin-bottom, noted first: the margin
+            # waiting above a spacer is read in its size unless this one is
+            # set and not in em or rem (#669, QA on #673 and #677).
+            mine[-1]["own_bottom_em"] = not bottom or unit.endswith("em")
         if not (top or bottom):
             return
-        mine = [b for b in blocks[start:] if b.get("type") not in ("space", "rule")]
         if not mine:
             return
         # A padded wrapper inside, here or deeper, keeps the paragraph's
@@ -5127,7 +5139,6 @@ def extract_blocks_from_html(
             if bottom and bottom >= last[1]:
                 # Whether the margin that wins is in em or rem: a spacer
                 # after the block reads it in the block's own size (#669).
-                unit = str(css.get("margin-bottom") or "").strip().lower()
                 mine[-1]["bottom_in_em"] = unit.endswith("em")
             last[1] = _collapse(last[1], bottom)
 
@@ -5226,6 +5237,13 @@ def extract_blocks_from_html(
         inside meets the box's and collapses into it, as in a browser: a
         filled <div> takes its paragraph's margins (my probe, #643)."""
         top, bottom = _margin_em(css, "top"), _margin_em(css, "bottom")
+        # In em or rem, a spacer after it reads it in the box's own size, as
+        # a paragraph's (QA on #673, #676).
+        in_em = bool(bottom) and str(
+            css.get("margin-bottom") or ""
+        ).strip().lower().endswith("em")
+        box["bottom_in_em"] = in_em
+        box["own_bottom_em"] = not bottom or in_em
         border = box["box"]["border"] or {}
         padding = box["box"]["padding"] or {}
         mine = [b for b in box["blocks"] if b.get("type") not in ("space", "rule")]
