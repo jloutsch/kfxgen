@@ -2546,6 +2546,19 @@ def _cell_paragraph_count(cell):
     )
 
 
+def _loose_cell_text(cell):
+    """Whether text is written straight in the cell beside its blocks: a
+    paragraph of its own, as Kindle Previewer 4.0.3 writes it, not joined to
+    the block after it (#681)."""
+    if (cell.text or "").strip():
+        return True
+    return any(
+        (d.tail or "").strip()
+        for d in cell
+        if isinstance(d.tag, str) and _local_tag(d.tag) in _CELL_BLOCK_TAGS
+    )
+
+
 def _longest_cell_run(cell):
     """The longest text entry a cell would be written as.
 
@@ -2793,6 +2806,20 @@ _BOX_TAGS = frozenset({"div", "aside", "section", "blockquote", "article", "p", 
 _SIZED_BOX_TAGS = _BOX_TAGS | {"figure"}
 
 
+def _has_content(elem):
+    """Whether an element shows anything: text, or a picture, rule or table
+    in it."""
+    if not isinstance(elem.tag, str):
+        return False
+    if "".join(elem.itertext()).strip():
+        return True
+    return any(
+        _local_tag(d.tag) in ("img", "svg", "hr", "table")
+        for d in elem.iter()
+        if isinstance(d.tag, str)
+    )
+
+
 def _box_width(css):
     """A wrapper's CSS width as a share of the page, in %, or None for none,
     `auto`, the full width or anything unreadable (#382). A px width is
@@ -2871,16 +2898,17 @@ _HIDDEN_RULE_EM_PER_UNIT = {
 _HIDDEN_RULE_SHARE = 0.6
 
 
-def _margin_em(css, side):
+def _margin_em(css, side, share=1.0):
     """An element's declared margin-top or -bottom in the 16px root's ems
     (1px = 0.45pt, 12pt = 1em, as for padding; an em is the element's own,
     #647); a percentage on Kindle Previewer 4.0.3's scale, 100% = 384pt =
-    32em (#640); negative as the book sets it (#640); 0 when unset."""
+    32em (#640), of `share` of the page: inside a box, the box's width
+    (#652); negative as the book sets it (#640); 0 when unset."""
     value = str((css or {}).get(f"margin-{side}") or "").strip()
     sign = -1.0 if value.startswith("-") else 1.0
     em = _padding_em(value.lstrip("-"), _font_ratio(css))
     if isinstance(em, tuple):
-        return sign * em[1] * 0.32
+        return sign * em[1] * 0.32 * share
     return 0.0 if em is None else sign * em
 
 
@@ -3261,6 +3289,20 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
                 return True
         return False
 
+    def spaced_block(cell):
+        """Whether the cell's one block has margins of its own: Kindle
+        Previewer 4.0.3 writes them in the cell, as it does a cell of
+        several blocks' (#681: a cell of one <p>, 0.833 above and below)."""
+        if style_resolver is None:
+            return False
+        for d in cell.iter():
+            if d is cell or _local_tag(d.tag) not in _CELL_BLOCK_TAGS:
+                continue
+            css = style_resolver(d) or {}
+            if _margin_em(css, "top") or _margin_em(css, "bottom"):
+                return True
+        return False
+
     def build_cell(cell):
         built = None
         # A cell with a picture is walked as the body is, so the picture is a
@@ -3269,7 +3311,11 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
         shown = _shown_tree(cell)
         has_picture = any(_local_tag(d.tag) == "img" for d in shown.iter())
         if walk_cell is not None and (
-            _cell_paragraph_count(shown) >= 2 or has_picture or holds_box(shown)
+            _cell_paragraph_count(shown) >= 2
+            or has_picture
+            or holds_box(shown)
+            or (_cell_paragraph_count(shown) and _loose_cell_text(shown))
+            or spaced_block(shown)
         ):
             built = _paragraph_cell(cell, style_resolver, walk_cell)
         if built is None:
@@ -4270,10 +4316,25 @@ def _space_between(blocks, margins, measured=True, paddings=None):
             if kind == "box":
                 # Its paragraphs are spaced the same way, inside it (#640).
                 b["blocks"] = _space_between(b["blocks"], margins, measured, paddings)
-                tail = (
-                    b["blocks"][-1].pop("trailing_space", 0.0) if b["blocks"] else 0.0
-                )
-                if tail:
+                last = b["blocks"][-1] if b["blocks"] else None
+                tail = last.pop("trailing_space", 0.0) if last else 0.0
+                edge = (b["box"].get("border") or {}).get("bottom") or (
+                    b["box"].get("padding") or {}
+                ).get("bottom")
+                keep = last.get("padding_below", 0.0) if last is not None else 0.0
+                if (
+                    not edge
+                    and last is not None
+                    and (last.get("margin_below") or 0.0) > keep
+                    and _has_real_text(last.get("text"))
+                ):
+                    # Nothing at its bottom edge: the space below its last
+                    # block leaves the box, as Previewer writes it; its own
+                    # padding stays, and a picture's spacer is dropped, as
+                    # Previewer drops it (QA on #682).
+                    tail = max(tail, (last["margin_below"] - keep) * _ems_own(last))
+                    last["margin_below"] = keep
+                if tail and edge:
                     # Spacers after a table that ends the box: below it,
                     # inside the box, in its padding (#675).
                     pad = dict(
@@ -4281,6 +4342,12 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                     )
                     pad["bottom"] = (pad.get("bottom") or 0.0) + tail / _ems_own(b)
                     b["box"]["padding"] = pad
+                elif tail:
+                    # It collapses with the box's margin below, where the run
+                    # around the box meets it, the next block's or its own end
+                    # (#680, QA on #682).
+                    mine = margins.setdefault(id(b), [0.0, 0.0])
+                    mine[1] = bottom = _collapse(mine[1], tail)
         if kind is None:
             if out:
                 beside = b.get("heading") or out[-1].get("heading")
@@ -4320,6 +4387,8 @@ def _space_between(blocks, margins, measured=True, paddings=None):
             max(out[-1].get("margin_below") or 0.0, below)
             + (last_pads[1] + last_pads[3]) / own
         )
+        # Its own padding, which stays with it in an open box (QA on #682).
+        out[-1]["padding_below"] = last_pads[1] / own
     if gaps:
         counts = collections.Counter(g for _, g, _ in gaps)
         # The most common; of two as common, the smaller.
@@ -5102,6 +5171,84 @@ def extract_blocks_from_html(
             last[3] = 0.0
         return (bool(top), bool(bottom))
 
+    def _box_share(elem, side):
+        """The share of the page a % margin on `side` of `elem` is measured
+        against, as Kindle Previewer 4.0.3 measures it (#652; QA on #684):
+        the width of the first block round it the margin stays inside, and
+        of each block round that. Walking out, a block the margin collapses
+        out of on that side (`elem` first or last in it, nothing there to
+        stop it) is skipped. From the containing block out: one with a width
+        of its own is that wide (CSS width is the content's, so nothing comes
+        off), a % of the block round it; one without loses its side borders
+        and padding. Side margins don't narrow it: a blockquote's 10% leaves
+        its paragraphs' 10% as the page's. calibre writes its own page
+        margins on the <body> in place of the book's, so a body's side
+        margins, which narrow it in Previewer, can't be read."""
+        chain = []
+        for a in elem.iterancestors():
+            if not isinstance(a.tag, str):
+                continue
+            if _local_tag(a.tag) in ("body", "html"):
+                break
+            chain.append(a)
+        child = elem
+        held = None
+        for i, a in enumerate(chain):
+            css = style_resolver(a) or {}
+            pads = dict(zip(_BORDER_SIDES, css.get("padding-sides") or ()))
+            stops = (_css_border(css) or {}).get(side) or _padding_em(
+                str(pads.get(side) or "").strip()
+            )
+            # Nothing with content, and no text, on that side of `child` in
+            # `a`: an empty element (an <a id> marking a place), or one not
+            # shown, is no block, and the margin collapses past it (QA on
+            # #684).
+            kids = list(a)
+            at = kids.index(child) if child in kids else -1
+            near = kids[:at] if side == "top" else kids[at + 1 :]
+            text = (a.text or "") if side == "top" else (child.tail or "")
+            at_edge = at >= 0 and not (
+                text.strip()
+                or any(
+                    (
+                        _has_content(k)
+                        and str((style_resolver(k) or {}).get("display") or "").strip()
+                        != "none"
+                    )
+                    or (k.tail or "").strip()
+                    for k in near
+                )
+            )
+            if at_edge and not stops:
+                child = a
+                continue
+            held = i
+            break
+        if held is None:
+            return 1.0
+        share = 1.0
+        for a in reversed(chain[held:]):
+            css = style_resolver(a) or {}
+            width = parse_css_length(str(css.get("width") or ""))
+            if width and width[1] == "$314" and 0 < float(width[0]) < 100:
+                share *= float(width[0]) / 100
+                continue
+            if width and width[1] in _CSS_PX:
+                share = float(width[0]) * _CSS_PX[width[1]] * 0.45 / 384
+                continue
+            border = _css_border(css) or {}
+            share -= sum(
+                border.get(s, (None, 0.0, None))[1] / 384 for s in ("left", "right")
+            )
+            pads = dict(zip(_BORDER_SIDES, css.get("padding-sides") or ()))
+            outer = share
+            for s in ("left", "right"):
+                em = _padding_em(str(pads.get(s) or "").strip())
+                share -= (
+                    em[1] / 100 * outer if isinstance(em, tuple) else (em or 0.0) / 32
+                )
+        return max(share, 0.05)
+
     def _note_margins(elem, start, padded=(False, False)):
         """Record `elem`'s margin-top on the first paragraph it produced and
         its margin-bottom on the last, keeping a larger one already there:
@@ -5111,7 +5258,8 @@ def extract_blocks_from_html(
         if style_resolver is None:
             return
         css = style_resolver(elem)
-        top, bottom = _margin_em(css, "top"), _margin_em(css, "bottom")
+        top = _margin_em(css, "top", _box_share(elem, "top"))
+        bottom = _margin_em(css, "bottom", _box_share(elem, "bottom"))
         mine = [b for b in blocks[start:] if b.get("type") not in ("space", "rule")]
         unit = str((css or {}).get("margin-bottom") or "").strip().lower()
         if mine and mine[-1].get("type") is None and "own_bottom_em" not in mine[-1]:
@@ -5247,9 +5395,17 @@ def extract_blocks_from_html(
         border = box["box"]["border"] or {}
         padding = box["box"]["padding"] or {}
         mine = [b for b in box["blocks"] if b.get("type") not in ("space", "rule")]
+        # A spacer or rule after the last block meets its margin first: the
+        # margin stays with it (QA on #682).
+        spaced_end = bool(box["blocks"]) and box["blocks"][-1].get("type") in (
+            "space",
+            "rule",
+        )
         for side, i, end in (("top", 0, 0), ("bottom", -1, 1)):
             inner = margins.get(id(mine[i])) if mine else None
             if inner is None or border.get(side) or padding.get(side):
+                continue
+            if end and spaced_end:
                 continue
             if end == 0:
                 top = _collapse(top, inner[0])

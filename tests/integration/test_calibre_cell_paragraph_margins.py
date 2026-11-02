@@ -22,6 +22,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "plugin"))
 sys.path.insert(0, str(REPO))
 
+from tests._kfx_introspect import by_type, iter_entries, load_fragments, val  # noqa: E402
 from tests.integration.test_calibre_contents_links import _build  # noqa: E402
 from tests.integration.test_calibre_paragraph_margins import _spacing  # noqa: E402
 from tests.integration.test_calibre_table_rows import (  # noqa: E402
@@ -57,6 +58,18 @@ BODY = (
     + _p("A5")
     + _table(_p("G1", "margin:0") + _p("G2", "margin:0"))
     + _p("A6")
+    # Text written straight in the cell beside a block: a paragraph of its
+    # own, not joined to it (#681).
+    + _table("H1 loose" + _p("H2"))
+    + _p("A7")
+    + _table(_p("J1") + "J2 loose")
+    + _p("A8")
+    # A cell of one paragraph with margins: written in the cell (#681); one
+    # with none stays flat.
+    + _table(_p("K1"))
+    + _p("A9")
+    + _table(_p("L1", "margin:0"))
+    + _p("B0")
 )  # fmt: skip
 
 #: Previewer's ($47, $49) on each paragraph, in its own line heights.
@@ -72,6 +85,12 @@ PREVIEWER = {
     "F2": (0.975, 0.833),
     "G1": (None, None),
     "G2": (None, None),
+    "H1": (None, None),
+    "H2": (0.833, 0.833),
+    "J1": (0.833, 0.833),
+    "J2": (None, None),
+    "K1": (0.833, 0.833),
+    "L1": (None, None),
 }
 
 
@@ -91,3 +110,40 @@ def test_cell_paragraphs_are_spaced_by_their_margins(calibre):  # noqa: F811
         if not (k in got and _near(got[k][0], above) and _near(got[k][1], below))
     }
     assert not wrong, f"calibre {version}: {wrong}, Previewer {PREVIEWER}"
+
+
+def _entry_size(kfx, label):
+    """The $16 on the text entry starting with `label`, or None."""
+    frags = load_fragments(kfx)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    for st in by_type(frags, "$259"):
+        for e in iter_entries(val(st)["$146"]):
+            if hasattr(e, "get") and e.get("$145"):
+                t = str(texts[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+                if t.startswith(label):
+                    size = styles.get(str(e.get("$157")), {}).get("$16")
+                    return None if size is None else float(size["$307"])
+    return None
+
+
+def test_a_cell_paragraph_at_the_main_size_says_so(calibre):  # noqa: F811
+    """A table inheriting a 7pt body, its cell paragraphs at the book's main
+    size (1.125rem, most of the book's text): the cell container is at
+    0.5185, and Kindle Previewer 4.0.3 writes `$16` 1 on each paragraph. kfxgen
+    wrote none, so they took the cell's 0.5185 (QA on #679, #681)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "s681.epub", tmp / "s681.kfx"
+    rem = "margin:1em 0;font-size:1.125rem;line-height:1.4em"
+    body = (
+        "<div style='font-size:7pt'>"
+        + "".join(_p(f"M{i} main size line of text.", rem) for i in range(30))
+        + "<table style='font-size:inherit'><tr><td>"
+        + _p("N1 first", rem)
+        + _p("N2 second", rem)
+        + "</td><td>N3 x</td></tr></table></div>"
+    )
+    _build(epub, {"s.xhtml": body}, [("Small", "s.xhtml")], "s681")
+    _ebook_convert(calibre, epub, kfx, True)
+    sizes = {k: _entry_size(kfx, k) for k in ("N1", "N2")}
+    assert sizes == {"N1": 1.0, "N2": 1.0}, f"calibre {version}: {sizes}"

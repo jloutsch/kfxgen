@@ -368,3 +368,186 @@ def test_margins_do_not_collapse_through_padding(calibre):  # noqa: F811
     # as Previewer's file of this book adds up (my probe, 2026-10-29).
     assert got["X5"][0] == 3.167, f"calibre {version}: {got}"
     assert got["X6"][0] == 3.167, f"calibre {version}: {got}"
+
+
+#: A % margin inside a box, measured against the box's width less its side
+#: borders and padding, as Kindle Previewer 4.0.3 measures it (#652; my
+#: probe, 2026-11-02, a page with a DOCTYPE). Each wrapper's 1% margin-bottom,
+#: on its 0.9em paragraph's $49, in lh. kfxgen read it against the page,
+#: 0.2963 in each. A body's side margins narrow the box in Previewer too;
+#: calibre writes its own page margins on the <body> in their place, so
+#: kfxgen can't read them.
+BOX_PERCENT = {
+    "F1": ("border:3px dotted gray", 0.2942),
+    "G1": ("border:1px solid black;padding:0 2em", 0.2586),
+    "H1": ("background-color:#dddddd;width:50%", 0.1481),
+}
+
+
+def test_a_percent_margin_in_a_box_is_of_its_width(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    note = "<div style='margin:0 0 1% 0;font-size:0.9em'><p style='margin:0'>{} note.</p></div>"
+    body = "".join(
+        _p(f"{k[0]}0")
+        + f"<div style='{box}'>"
+        + note.format(k)
+        + note.format(f"{k[0]}2")
+        + "</div>"
+        for k, (box, _) in BOX_PERCENT.items()
+    ) + _p("Z9")
+    epub, kfx = tmp / "p652.epub", tmp / "p652.kfx"
+    _book_epub(
+        epub,
+        "P652",
+        body,
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Boxes", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    wrong = {
+        k: got[k][1]
+        for k, (_, want) in BOX_PERCENT.items()
+        # Within 0.001: main's 0.2963 is 0.0021 from F1's 0.2942.
+        if got[k][1] is None or abs(got[k][1] - want) > 0.001
+    }
+    assert not wrong, f"calibre {version}: {wrong}, Previewer {BOX_PERCENT}"
+
+
+#: `p { margin: 10% 0 }` in containers (QA on #684, my probe 2026-11-02),
+#: the paragraph's $47 in lh, as Kindle Previewer 4.0.3 writes it (K1 and
+#: J1: Previewer writes it on the wrapper the margin collapses out of, the
+#: same space). A width set is the content's; nested widths multiply; a
+#: wrapper with nothing above or below lets the margin out, measured
+#: outside it; side margins don't narrow; a margin leaving an open box is
+#: the page's again (E2).
+B1 = "border:1px solid black"
+CONTAINED = {
+    "A1": (f"<div style='{B1}'>", "</div>", 2.66),
+    "B1": (f"<div style='{B1};padding:0.5em 10%'>", "</div>", 2.127),
+    "C1": (f"<div style='{B1};padding:0.5em 2em'>", "</div>", 2.327),
+    "F1": ("<blockquote style='margin:0 10%'>", "</blockquote>", 2.667),
+    "G1": (f"<div style='{B1};width:50%'>", "</div>", 1.333),
+    "H1": (f"<div style='{B1};width:300px'>", "</div>", 0.9375),
+    "I1": (f"<div style='{B1};width:50%'><div style='{B1}'>", "</div></div>", 1.327),
+    "J1": (f"<div style='{B1}'><div style='width:50%'>", "</div></div>", 2.66),
+    "K1": ("<div style='width:50%'>", "</div>", 2.667),
+}
+
+
+def test_a_percent_margin_is_of_the_blocks_that_keep_it_in(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    body = "".join(
+        _p(f"{k[0]}0") + open_ + f"<p style='margin:10% 0'>{k} ten.</p>" + close
+        for k, (open_, close, _) in CONTAINED.items()
+    )
+    body += (
+        "<div style='border-left:10px solid black'>"
+        "<p style='margin:10% 0'>E1 ten.</p></div>" + _p("E2", "margin:1em 0")
+    )
+    epub, kfx = tmp / "w684.epub", tmp / "w684.kfx"
+    _book_epub(
+        epub,
+        "W684",
+        body,
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Widths", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    want = {k: v for k, (_, _, v) in CONTAINED.items()} | {"E2": 2.667}
+    wrong = {
+        k: got[k][0]
+        for k, w in want.items()
+        if got[k][0] is None or abs(got[k][0] - w) > 0.002
+    }
+    assert not wrong, f"calibre {version}: {wrong}, Previewer {want}"
+
+
+#: The same paragraph second in its wrapper, so its margin-top stays inside
+#: it (QA on #684): Previewer measures each side against the first block it
+#: stays inside, and each block round that. R1's margin-bottom collapses out
+#: of a wrapper with padding above only, the page's again (R2 2.667).
+SECOND = {
+    "S1": ("<div style='width:50%'>", "</div>", 1.333),
+    "T1": (f"<div style='{B1}'><div style='width:50%'>", "</div></div>", 1.33),
+    "U1": (
+        "<div style='background-color:#dddddd'><div style='width:50%'>",
+        "</div></div>",
+        1.333,
+    ),
+    "V1": ("<div style='padding:0 2em'>", "</div>", 2.333),
+}
+
+
+def test_a_percent_margin_is_measured_per_side(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    body = "".join(
+        _p(f"{k[0]}0")
+        + open_
+        + _p(f"{k[0]}9 first")
+        + f"<p style='margin:10% 0'>{k} ten.</p>"
+        + close
+        for k, (open_, close, _) in SECOND.items()
+    )
+    # An empty <a id> before the paragraph is no block: its margin still
+    # collapses out of the width-only wrapper, the page's (QA on #684).
+    body += (
+        _p("W0")
+        + "<div style='width:50%'><a id='w1'></a><p style='margin:10% 0'>W1 ten.</p></div>"
+        + _p("W2", "margin:1em 0")
+    )
+    # Text written straight in the wrapper before or after the paragraph
+    # keeps that side's margin in: 1.333 (QA on #684: dropping either check
+    # gave 2.667).
+    body += (
+        _p("X0")
+        + "<div style='width:50%'>lead <p style='margin:10% 0'>X1 ten.</p></div>"
+        + _p("Y0")
+        + "<div style='width:50%'><p style='margin:10% 0'>Y1 ten.</p> tail</div>"
+        + _p("Y2", "margin:0")
+    )
+    # A hidden element is no block (2.667); text after an empty anchor, or a
+    # picture, before the paragraph keeps its margin in (1.333) (QA on #684).
+    for k, lead in (
+        ("H1", "<span style='display:none'>hidden</span>"),
+        ("J1", "<a id='j1'></a>lead "),
+        ("M1", "<img src='x.png'/>"),
+    ):
+        body += (
+            _p(f"{k[0]}0")
+            + f"<div style='width:50%'>{lead}<p style='margin:10% 0'>{k} ten.</p></div>"
+        )
+    body += (
+        _p("R0")
+        + "<div style='padding-top:0.5em;width:50%'><p style='margin:10% 0'>R1 ten.</p></div>"
+        + _p("R2", "margin:1em 0")
+    )
+    epub, kfx = tmp / "s684.epub", tmp / "s684.kfx"
+    _book_epub(
+        epub,
+        "S684",
+        body,
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Sides", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    want = {k: v for k, (_, _, v) in SECOND.items()} | {
+        "R2": 2.667,
+        "W1": 2.667,
+        "X1": 1.333,
+        "H1": 2.667,
+        "J1": 1.333,
+        "M1": 1.333,
+    }
+    wrong = {
+        k: got[k][0]
+        for k, w in want.items()
+        if got[k][0] is None or abs(got[k][0] - w) > 0.002
+    }
+    assert not wrong, f"calibre {version}: {wrong}, Previewer {want}"
+    below = got["Y1"][1]
+    assert below is not None and abs(below - 1.333) < 0.002, (
+        f"calibre {version}: Y1 below = {below}, Previewer 1.333"
+    )
