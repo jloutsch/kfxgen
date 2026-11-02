@@ -2871,17 +2871,27 @@ _HIDDEN_RULE_EM_PER_UNIT = {
 _HIDDEN_RULE_SHARE = 0.6
 
 
-def _margin_em(css, side):
+def _margin_em(css, side, share=1.0):
     """An element's declared margin-top or -bottom in the 16px root's ems
     (1px = 0.45pt, 12pt = 1em, as for padding; an em is the element's own,
     #647); a percentage on Kindle Previewer 4.0.3's scale, 100% = 384pt =
-    32em (#640); negative as the book sets it (#640); 0 when unset."""
+    32em (#640), of `share` of the page: inside a box, the box's width
+    (#652); negative as the book sets it (#640); 0 when unset."""
     value = str((css or {}).get(f"margin-{side}") or "").strip()
     sign = -1.0 if value.startswith("-") else 1.0
     em = _padding_em(value.lstrip("-"), _font_ratio(css))
     if isinstance(em, tuple):
-        return sign * em[1] * 0.32
+        return sign * em[1] * 0.32 * share
     return 0.0 if em is None else sign * em
+
+
+def _page_part(value):
+    """A side length as a share of Kindle Previewer's 384pt page: a % as
+    written, a length at 12pt to the em and 0.45pt to the px (#652)."""
+    em = _padding_em(str(value or "").strip())
+    if isinstance(em, tuple):
+        return em[1] / 100
+    return (em or 0.0) / 32
 
 
 def _hidden_rule_em(css):
@@ -5102,6 +5112,37 @@ def extract_blocks_from_html(
             last[3] = 0.0
         return (bool(top), bool(bottom))
 
+    def _box_share(elem):
+        """The share of the page a % margin of `elem` is measured against:
+        the page outside a box (#640); inside one, the box's width less its
+        side borders and padding, as Kindle Previewer 4.0.3 measures it (#652:
+        1% in a box with 3px borders is 0.993 of 1%)."""
+        for a in elem.iterancestors():
+            if not isinstance(a.tag, str):
+                continue
+            tag = _local_tag(a.tag)
+            if tag in ("body", "html"):
+                return 1.0
+            if tag not in _SIZED_BOX_TAGS:
+                continue
+            css = style_resolver(a) or {}
+            border = _css_border(css)
+            if border is None and _box_background(css) is None:
+                continue
+            # calibre writes its own page margins on the <body> in place of
+            # the book's, so a body's side margins, which Previewer takes off
+            # the box too, can't be read (#652).
+            page = 1.0
+            page *= (_box_width(css) or 100.0) / 100
+            edges = sum(
+                (border or {}).get(side, (None, 0.0, None))[1] / 384
+                for side in ("left", "right")
+            )
+            pads = dict(zip(_BORDER_SIDES, css.get("padding-sides") or ()))
+            edges += sum(_page_part(pads.get(side)) for side in ("left", "right"))
+            return max(page - edges, 0.1)
+        return 1.0
+
     def _note_margins(elem, start, padded=(False, False)):
         """Record `elem`'s margin-top on the first paragraph it produced and
         its margin-bottom on the last, keeping a larger one already there:
@@ -5111,7 +5152,8 @@ def extract_blocks_from_html(
         if style_resolver is None:
             return
         css = style_resolver(elem)
-        top, bottom = _margin_em(css, "top"), _margin_em(css, "bottom")
+        share = _box_share(elem)
+        top, bottom = _margin_em(css, "top", share), _margin_em(css, "bottom", share)
         mine = [b for b in blocks[start:] if b.get("type") not in ("space", "rule")]
         unit = str((css or {}).get("margin-bottom") or "").strip().lower()
         if mine and mine[-1].get("type") is None and "own_bottom_em" not in mine[-1]:

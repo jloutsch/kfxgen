@@ -368,3 +368,47 @@ def test_margins_do_not_collapse_through_padding(calibre):  # noqa: F811
     # as Previewer's file of this book adds up (my probe, 2026-10-29).
     assert got["X5"][0] == 3.167, f"calibre {version}: {got}"
     assert got["X6"][0] == 3.167, f"calibre {version}: {got}"
+
+
+#: A % margin inside a box, measured against the box's width less its side
+#: borders and padding, as Kindle Previewer 4.0.3 measures it (#652; my
+#: probe, 2026-11-02, a page with a DOCTYPE). Each wrapper's 1% margin-bottom,
+#: on its 0.9em paragraph's $49, in lh. kfxgen read it against the page,
+#: 0.2963 in each. A body's side margins narrow the box in Previewer too;
+#: calibre writes its own page margins on the <body> in their place, so
+#: kfxgen can't read them.
+BOX_PERCENT = {
+    "F1": ("border:3px dotted gray", 0.2942),
+    "G1": ("border:1px solid black;padding:0 2em", 0.2586),
+    "H1": ("background-color:#dddddd;width:50%", 0.1481),
+}
+
+
+def test_a_percent_margin_in_a_box_is_of_its_width(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    note = "<div style='margin:0 0 1% 0;font-size:0.9em'><p style='margin:0'>{} note.</p></div>"
+    body = "".join(
+        _p(f"{k[0]}0")
+        + f"<div style='{box}'>"
+        + note.format(k)
+        + note.format(f"{k[0]}2")
+        + "</div>"
+        for k, (box, _) in BOX_PERCENT.items()
+    ) + _p("Z9")
+    epub, kfx = tmp / "p652.epub", tmp / "p652.kfx"
+    _book_epub(
+        epub,
+        "P652",
+        body,
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Boxes", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    wrong = {
+        k: got[k][1]
+        for k, (_, want) in BOX_PERCENT.items()
+        # Within 0.001: main's 0.2963 is 0.0021 from F1's 0.2942.
+        if got[k][1] is None or abs(got[k][1] - want) > 0.001
+    }
+    assert not wrong, f"calibre {version}: {wrong}, Previewer {BOX_PERCENT}"
