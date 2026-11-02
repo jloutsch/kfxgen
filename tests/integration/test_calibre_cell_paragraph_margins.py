@@ -69,6 +69,10 @@ BODY = (
     + _table(_p("K1"))
     + _p("A9")
     + _table(_p("L1", "margin:0"))
+    + _p("Q0")
+    # A margin below only is still the paragraph's own (QA on #683: checking
+    # the margin-top alone left it flat, 0.031 / 0.031).
+    + _table(_p("N1", "margin:0 0 1em"))
     + _p("B0")
 )  # fmt: skip
 
@@ -91,6 +95,7 @@ PREVIEWER = {
     "J2": (None, None),
     "K1": (0.833, 0.833),
     "L1": (None, None),
+    "N1": (None, 0.833),
 }
 
 
