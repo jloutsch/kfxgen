@@ -2806,6 +2806,20 @@ _BOX_TAGS = frozenset({"div", "aside", "section", "blockquote", "article", "p", 
 _SIZED_BOX_TAGS = _BOX_TAGS | {"figure"}
 
 
+def _has_content(elem):
+    """Whether an element shows anything: text, or a picture, rule or table
+    in it."""
+    if not isinstance(elem.tag, str):
+        return False
+    if "".join(elem.itertext()).strip():
+        return True
+    return any(
+        _local_tag(d.tag) in ("img", "svg", "hr", "table")
+        for d in elem.iter()
+        if isinstance(d.tag, str)
+    )
+
+
 def _box_width(css):
     """A wrapper's CSS width as a share of the page, in %, or None for none,
     `auto`, the full width or anything unreadable (#382). A px width is
@@ -2884,16 +2898,17 @@ _HIDDEN_RULE_EM_PER_UNIT = {
 _HIDDEN_RULE_SHARE = 0.6
 
 
-def _margin_em(css, side):
+def _margin_em(css, side, share=1.0):
     """An element's declared margin-top or -bottom in the 16px root's ems
     (1px = 0.45pt, 12pt = 1em, as for padding; an em is the element's own,
     #647); a percentage on Kindle Previewer 4.0.3's scale, 100% = 384pt =
-    32em (#640); negative as the book sets it (#640); 0 when unset."""
+    32em (#640), of `share` of the page: inside a box, the box's width
+    (#652); negative as the book sets it (#640); 0 when unset."""
     value = str((css or {}).get(f"margin-{side}") or "").strip()
     sign = -1.0 if value.startswith("-") else 1.0
     em = _padding_em(value.lstrip("-"), _font_ratio(css))
     if isinstance(em, tuple):
-        return sign * em[1] * 0.32
+        return sign * em[1] * 0.32 * share
     return 0.0 if em is None else sign * em
 
 
@@ -5156,6 +5171,84 @@ def extract_blocks_from_html(
             last[3] = 0.0
         return (bool(top), bool(bottom))
 
+    def _box_share(elem, side):
+        """The share of the page a % margin on `side` of `elem` is measured
+        against, as Kindle Previewer 4.0.3 measures it (#652; QA on #684):
+        the width of the first block round it the margin stays inside, and
+        of each block round that. Walking out, a block the margin collapses
+        out of on that side (`elem` first or last in it, nothing there to
+        stop it) is skipped. From the containing block out: one with a width
+        of its own is that wide (CSS width is the content's, so nothing comes
+        off), a % of the block round it; one without loses its side borders
+        and padding. Side margins don't narrow it: a blockquote's 10% leaves
+        its paragraphs' 10% as the page's. calibre writes its own page
+        margins on the <body> in place of the book's, so a body's side
+        margins, which narrow it in Previewer, can't be read."""
+        chain = []
+        for a in elem.iterancestors():
+            if not isinstance(a.tag, str):
+                continue
+            if _local_tag(a.tag) in ("body", "html"):
+                break
+            chain.append(a)
+        child = elem
+        held = None
+        for i, a in enumerate(chain):
+            css = style_resolver(a) or {}
+            pads = dict(zip(_BORDER_SIDES, css.get("padding-sides") or ()))
+            stops = (_css_border(css) or {}).get(side) or _padding_em(
+                str(pads.get(side) or "").strip()
+            )
+            # Nothing with content, and no text, on that side of `child` in
+            # `a`: an empty element (an <a id> marking a place), or one not
+            # shown, is no block, and the margin collapses past it (QA on
+            # #684).
+            kids = list(a)
+            at = kids.index(child) if child in kids else -1
+            near = kids[:at] if side == "top" else kids[at + 1 :]
+            text = (a.text or "") if side == "top" else (child.tail or "")
+            at_edge = at >= 0 and not (
+                text.strip()
+                or any(
+                    (
+                        _has_content(k)
+                        and str((style_resolver(k) or {}).get("display") or "").strip()
+                        != "none"
+                    )
+                    or (k.tail or "").strip()
+                    for k in near
+                )
+            )
+            if at_edge and not stops:
+                child = a
+                continue
+            held = i
+            break
+        if held is None:
+            return 1.0
+        share = 1.0
+        for a in reversed(chain[held:]):
+            css = style_resolver(a) or {}
+            width = parse_css_length(str(css.get("width") or ""))
+            if width and width[1] == "$314" and 0 < float(width[0]) < 100:
+                share *= float(width[0]) / 100
+                continue
+            if width and width[1] in _CSS_PX:
+                share = float(width[0]) * _CSS_PX[width[1]] * 0.45 / 384
+                continue
+            border = _css_border(css) or {}
+            share -= sum(
+                border.get(s, (None, 0.0, None))[1] / 384 for s in ("left", "right")
+            )
+            pads = dict(zip(_BORDER_SIDES, css.get("padding-sides") or ()))
+            outer = share
+            for s in ("left", "right"):
+                em = _padding_em(str(pads.get(s) or "").strip())
+                share -= (
+                    em[1] / 100 * outer if isinstance(em, tuple) else (em or 0.0) / 32
+                )
+        return max(share, 0.05)
+
     def _note_margins(elem, start, padded=(False, False)):
         """Record `elem`'s margin-top on the first paragraph it produced and
         its margin-bottom on the last, keeping a larger one already there:
@@ -5165,7 +5258,8 @@ def extract_blocks_from_html(
         if style_resolver is None:
             return
         css = style_resolver(elem)
-        top, bottom = _margin_em(css, "top"), _margin_em(css, "bottom")
+        top = _margin_em(css, "top", _box_share(elem, "top"))
+        bottom = _margin_em(css, "bottom", _box_share(elem, "bottom"))
         mine = [b for b in blocks[start:] if b.get("type") not in ("space", "rule")]
         unit = str((css or {}).get("margin-bottom") or "").strip().lower()
         if mine and mine[-1].get("type") is None and "own_bottom_em" not in mine[-1]:
