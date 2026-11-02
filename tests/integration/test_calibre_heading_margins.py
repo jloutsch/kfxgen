@@ -120,12 +120,18 @@ OPENERS = {
     # A label spelled over two blocks: they print as written (#552), the
     # h2 with its own margins, 0.692 of its lines below, as Previewer's.
     "o4.xhtml": "<p style='margin:0'>IV</p><h2>Four</h2><p style='margin:0'>O4 text.</p>",
+    # In a box, drawn round kfxgen's title (#646, QA on #665): the h1's 2em
+    # of its 32px, 64px, at kfxgen's 1.2rem title, 2.778 of its lines, the
+    # 3.333 main lines Previewer writes.
+    "o5.xhtml": f"<div style='{BX}'><h1 style='margin:0.67em 0 2em'>Five</h1>"
+    "<p style='margin:0'>O5 text.</p></div>",
 }
 OPENED = {
     "On": (0.558, None),
     "Tw": (1.667, None),
     "Th": (None, 1.117),
     "Fo": (0.692, None),
+    "Fi": (2.778, None),
 }
 
 
@@ -140,12 +146,13 @@ def test_a_chapter_title_keeps_its_space_below(calibre):  # noqa: F811
             ("Two", "o2.xhtml"),
             ("Three", "o3.xhtml"),
             ("IV Four", "o4.xhtml"),
+            ("Five", "o5.xhtml"),
         ],
         "o665",
     )
     _ebook_convert(calibre, epub, kfx, True)
     got = _spacing(kfx)
-    first = {"On": "O1", "Tw": "O2", "Th": "O3", "Fo": "O4"}
+    first = {"On": "O1", "Tw": "O2", "Th": "O3", "Fo": "O4", "Fi": "O5"}
     pairs = {k: (got[k][1], got[first[k]][0]) for k in OPENED}
     wrong = {
         k: v

@@ -907,6 +907,16 @@ def _table_opens_with_title(block, title):
     return j is not None and _opens_with_title(_row_text(rows[j]).lstrip(), title)
 
 
+def _keep_space_below(heading_chunk, block):
+    """Put the margin below `block`, the book's heading printing as kfxgen's
+    chapter title, on that title, in px (QA on #665). It waits there for a
+    paragraph with no margin-top, as Kindle Previewer 4.0.3 writes it as the
+    heading's `$49`; the title's own size divides it."""
+    if heading_chunk is not None and block.get("margin_below"):
+        px = (block.get("block_style") or {}).get("font_size") or 16.0
+        heading_chunk["space_below_px"] = block["margin_below"] * px
+
+
 def _eat_split_title(blocks, title):
     """Drop the leading blocks that together make up `title` (#64).
 
@@ -5255,6 +5265,7 @@ class NativeKFXGenerator:
                                     )
                                 ):
                                     _box_heading(first, close=kept_box is None)
+                                    _keep_space_below(heading_chunk, first["blocks"][0])
                                     if kept_box is not None:
                                         kept_box["opened"] = True
                             elif first.get("type") == "box":
@@ -5306,10 +5317,7 @@ class NativeKFXGenerator:
                                         # And its margin below, kept for
                                         # a margin-less paragraph (QA on
                                         # #665).
-                                        if first.get("margin_below"):
-                                            heading_chunk["space_below"] = first[
-                                                "margin_below"
-                                            ]
+                                        _keep_space_below(heading_chunk, first)
                                         # And its level (#461).
                                         if first.get("heading_level"):
                                             heading_chunk["heading_level"] = first[
@@ -6352,10 +6360,22 @@ class NativeKFXGenerator:
                             attrs["no_align"] = True
                         if book.get("italic"):
                             attrs["italic"] = True
-                        if chunk.get("space_below"):
-                            attrs["space_below"] = chunk["space_below"]
+                        if chunk.get("space_below_px"):
+                            attrs["space_below"] = chunk["space_below_px"] / (
+                                attrs["font_size"] * (main_px or 16.0)
+                            )
                         entry_styles.append(
                             _allocate_style("_h", **attrs, **(typo or {}))
+                        )
+                    elif chunk.get("space_below_px"):
+                        attrs = heading_attrs[ch_idx]
+                        below = chunk["space_below_px"] / (
+                            attrs["font_size"] * (main_px or 16.0)
+                        )
+                        entry_styles.append(
+                            _allocate_style(
+                                "_h", **attrs, **(typo or {}), space_below=below
+                            )
                         )
                     else:
                         entry_styles.append(
