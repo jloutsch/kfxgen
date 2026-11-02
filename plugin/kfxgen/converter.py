@@ -2905,6 +2905,27 @@ def _hidden_rule_em(css):
     return top * share, height * share, bottom * share
 
 
+#: The line a spacer paragraph stands for in Kindle Previewer 4.0.3, at any
+#: font size (my probes, #663).
+_SPACER_LINE = "19px"
+
+
+def _spacer_em(css):
+    """(margin-top, height, margin-bottom) of a spacer paragraph, in the 16px
+    root's ems, as Kindle Previewer 4.0.3 spaces it (#663): as an <hr> that
+    draws nothing with a height, its own margins and a 19px line. A spacer
+    with a `line-height` of its own is taken at 19px too (not probed past
+    `line-height: 2`, which Previewer draws 32px)."""
+    return _hidden_rule_em(
+        {
+            "margin-top": css.get("margin-top"),
+            "margin-bottom": css.get("margin-bottom"),
+            "font-size": css.get("font-size"),
+            "height": _SPACER_LINE,
+        }
+    )
+
+
 def _is_spacer(elem):
     """A paragraph that holds only a non-breaking space or a <br>: a blank
     line the book put in on purpose, often for a scene break (#230). An
@@ -4941,7 +4962,12 @@ def extract_blocks_from_html(
             else:
                 pending_ids.extend(ids)  # empty anchor block: carry ids forward
                 if _is_spacer(elem):
-                    _emit_space(line=_LINE_SPACE_EM)
+                    css = style_resolver(elem) if style_resolver is not None else None
+                    if css is None:
+                        _emit_space(line=_LINE_SPACE_EM)
+                    else:
+                        top, height, bottom = _spacer_em(css)
+                        _emit_space(margin=top, height=height, margin_after=bottom)
             return
 
         # No `parent_is_block` guard. It used to be here to avoid emitting an
