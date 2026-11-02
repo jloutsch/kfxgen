@@ -210,6 +210,19 @@ SPACED = {
     + "font-size:1.5em;margin-bottom:1em'>"
     + _p("Q1", "margin:1em 0;font-size:0.6667em") + "</div>"
     + "<p style='margin:1em 0'>&#160;</p>" + _p("Q2")
+    # A block with no margin-bottom of its own takes the wrapper's in its
+    # size; a box with a px one doesn't; a box with none does (QA on #677).
+    + _p("R0") + "<div style='margin-bottom:2em'>"
+    + _p("R1", "margin:0;font-size:0.8em") + "</div>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("R2")
+    + _p("S0") + "<div style='margin-bottom:2em'><div style='border:1px solid black;"
+    + "padding:0.5em;font-size:1.5em;margin-bottom:24px'>"
+    + _p("S1", "margin:0;font-size:0.6667em") + "</div></div>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("S2")
+    + _p("T0") + "<div style='margin-bottom:2em'><div style='border:1px solid black;"
+    + "padding:0.5em;font-size:1.5em;margin-bottom:0'>"
+    + _p("T1", "margin:0;font-size:0.6667em") + "</div></div>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("T2")
     + _p("G0") + "<h3 style='margin:1em 0 20px'>G1 h3</h3>"
     + "<p style='margin:1em 0'>&#160;</p>" + _p("G2")
     # Nothing collapses: the same total as Previewer's 0.833 on the h3 and
@@ -233,6 +246,9 @@ SPACED_PREVIEWER = {
     "O2": 2.677,
     "P2": 2.677,
     "Q2": 2.26,
+    "R2": 3.51,
+    "S2": 3.094,
+    "T2": 2.538,
     "E2": 1.569,
 }
 

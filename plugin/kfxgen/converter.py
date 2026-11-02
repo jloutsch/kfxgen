@@ -5116,9 +5116,9 @@ def extract_blocks_from_html(
         unit = str((css or {}).get("margin-bottom") or "").strip().lower()
         if mine and mine[-1].get("type") is None and "own_bottom_em" not in mine[-1]:
             # The paragraph's own margin-bottom, noted first: the margin
-            # waiting above a spacer is read in its size only when this one
-            # is in em or rem too (#669, QA on #673).
-            mine[-1]["own_bottom_em"] = bool(bottom) and unit.endswith("em")
+            # waiting above a spacer is read in its size unless this one is
+            # set and not in em or rem (#669, QA on #673 and #677).
+            mine[-1]["own_bottom_em"] = not bottom or unit.endswith("em")
         if not (top or bottom):
             return
         if not mine:
@@ -5242,7 +5242,8 @@ def extract_blocks_from_html(
         in_em = bool(bottom) and str(
             css.get("margin-bottom") or ""
         ).strip().lower().endswith("em")
-        box["own_bottom_em"] = box["bottom_in_em"] = in_em
+        box["bottom_in_em"] = in_em
+        box["own_bottom_em"] = not bottom or in_em
         border = box["box"]["border"] or {}
         padding = box["box"]["padding"] or {}
         mine = [b for b in box["blocks"] if b.get("type") not in ("space", "rule")]
