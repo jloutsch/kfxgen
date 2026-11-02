@@ -178,6 +178,9 @@ SPACED = {
     + "<p style='margin:1em 0'>&#160;</p>" + _p("D2")
     + _p("F0") + "<h3>F1 h3</h3><hr style='border:none;margin:1em 0;height:3px'/>"
     + _p("F2")
+    # In px it is as before, 1.25 root ems (QA on #673).
+    + _p("G0") + "<h3 style='margin:1em 0 20px'>G1 h3</h3>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("G2")
     # Nothing collapses: the same total as Previewer's 0.833 on the h3 and
     # 0.594 on E2, written on E2.
     + _p("E0") + "<h3>E1 h3</h3><p style='margin:0'>&#160;</p>"
@@ -189,6 +192,7 @@ SPACED_PREVIEWER = {
     "C2": 0.833,
     "D2": 3.094,
     "F2": 1.76,
+    "G2": 2.052,
     "E2": 1.569,
 }
 

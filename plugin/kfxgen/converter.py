@@ -4226,10 +4226,11 @@ def _space_between(blocks, margins, measured=True, paddings=None):
     for b in blocks:
         kind = b.get("type")
         if kind == "space":
-            if b["margin"] and not on_purpose and out and out[-1].get("heading"):
-                # A heading's margin-bottom meets the first spacer's or rule's
-                # after it as its em number in the root's, as Previewer reads
-                # the rule's own lengths: an h3's 1em is 1em, not 1.17 (#669).
+            if b["margin"] and not on_purpose and out and out[-1].get("bottom_in_em"):
+                # A heading's margin-bottom in ems meets the first spacer's or
+                # rule's after it as its em number in the root's, as Previewer
+                # reads the rule's own lengths: an h3's 1em is 1em, not 1.17.
+                # One in px or % is as before (#669, QA on #673).
                 above /= _ems_own(out[-1])
             if b.get("height"):
                 # Margins don't collapse through it: the one above it meets
@@ -5106,6 +5107,10 @@ def extract_blocks_from_html(
         mine = [b for b in blocks[start:] if b.get("type") not in ("space", "rule")]
         if not mine:
             return
+        if mine[-1].get("heading") and re.fullmatch(r"h[1-6]", _local_tag(elem.tag)):
+            # In ems, a spacer after it reads it as its em number (#669).
+            unit = str(css.get("margin-bottom") or "").strip().lower()
+            mine[-1]["bottom_in_em"] = unit.endswith("em") and not unit.endswith("rem")
         # A padded wrapper inside, here or deeper, keeps the paragraph's
         # margin apart: this one meets that wrapper's margin (#643).
         if padded[0] or (paddings.get(id(mine[0])) or (0.0,))[0]:
