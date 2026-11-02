@@ -913,9 +913,10 @@ def _keep_space_above(heading_chunk, block):
     padded wrapper's before it, as Kindle Previewer 4.0.3 writes it as the
     heading's `$47` at a file's start, in place of kfxgen's own `$46` 2 lh
     (#653, #671)."""
-    if heading_chunk is not None and block.get("margin_above"):
+    if heading_chunk is not None and "margin_above" in block:
+        # 0 too: the book set none, and Previewer writes none (QA on #686).
         px = (block.get("block_style") or {}).get("font_size") or 16.0
-        heading_chunk["space_above_px"] = block["margin_above"] * px
+        heading_chunk["space_above_px"] = (block["margin_above"] or 0.0) * px
 
 
 def _keep_space_below(heading_chunk, block):
@@ -6381,7 +6382,7 @@ class NativeKFXGenerator:
                             attrs["space_below"] = chunk["space_below_px"] / (
                                 attrs["font_size"] * (main_px or 16.0)
                             )
-                        if chunk.get("space_above_px"):
+                        if chunk.get("space_above_px") is not None:
                             # The book's space above, as Previewer writes it,
                             # in place of kfxgen's own (#653, #671).
                             attrs["space_above"] = chunk["space_above_px"] / (

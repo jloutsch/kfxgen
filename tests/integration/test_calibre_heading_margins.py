@@ -21,6 +21,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "plugin"))
 sys.path.insert(0, str(REPO))
 
+from tests._kfx_introspect import by_type, iter_entries, load_fragments, val  # noqa: E402
 from tests.integration.test_calibre_contents_links import _build  # noqa: E402
 from tests.integration.test_calibre_contents_part_headings import (  # noqa: E402
     _book_epub,
@@ -278,7 +279,24 @@ OPENING = {
     "p2.xhtml": ("Btwo", "<h2>Btwo</h2>", 0.692),
     "p3.xhtml": ("Cthree", "<p style='margin:1em 0'>&#160;</p><h1>Cthree</h1>", 1.105),
     "p4.xhtml": ("Dfour", "<div style='padding:1em 0'><h2>Dfour</h2>", 1.247),
+    # None set: none written, and not kfxgen's $46 either (QA on #686).
+    "p5.xhtml": ("Efive", "<h1 style='margin-top:0'>Efive</h1>", None),
 }
+
+
+def _title_keys(kfx, titles):
+    """{title: the set of style keys on its entry}."""
+    frags = load_fragments(kfx)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    out = {}
+    for st in by_type(frags, "$259"):
+        for e in iter_entries(val(st)["$146"]):
+            if hasattr(e, "get") and e.get("$145"):
+                t = str(texts[str(e["$145"]["name"])][int(e["$145"]["$403"])])
+                if t in titles:
+                    out[t] = {str(k) for k in styles.get(str(e.get("$157")), {})}
+    return out
 
 
 def test_a_chapter_title_keeps_its_space_above(calibre):  # noqa: F811
@@ -297,7 +315,10 @@ def test_a_chapter_title_keeps_its_space_above(calibre):  # noqa: F811
     wrong = {
         title: got.get(title[:2])
         for title, _, want in OPENING.values()
-        if got.get(title[:2], (None,))[0] is None
-        or abs(got[title[:2]][0] - want) > 0.002
+        if not _near(got.get(title[:2], (None,))[0], want)
     }
     assert not wrong, f"calibre {version}: {wrong}"
+    # The book's space in place of kfxgen's own: no $46 beside it.
+    keys = _title_keys(kfx, {title for title, _, _ in OPENING.values()})
+    doubled = {t: k for t, k in keys.items() if "$46" in k}
+    assert len(keys) == len(OPENING) and not doubled, f"calibre {version}: {keys}"
