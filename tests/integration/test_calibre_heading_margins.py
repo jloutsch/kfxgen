@@ -160,3 +160,48 @@ def test_a_chapter_title_keeps_its_space_below(calibre):  # noqa: F811
         if not (_near(v[0], OPENED[k][0]) and _near(v[1], OPENED[k][1]))
     }
     assert not wrong, f"calibre {version}: {wrong}, Previewer {OPENED}"
+
+
+#: A heading, then a spacer or an <hr> that draws nothing, then a paragraph
+#: (`p { margin: 1em 0 }`): Kindle Previewer 4.0.3 collapses the heading's
+#: margin-bottom with the spacer's or rule's margin-top as its em number in
+#: the 16px root's, as it reads a rule's own lengths (#643): an h3's 1em is
+#: 1em, not its 1.17. Before a `margin:0` spacer nothing collapses, and the
+#: heading keeps its own (#669; my probe, 2026-11-01). The paragraph's $47,
+#: in lh.
+SPACED = {
+    "s.xhtml": "<h1>Spaced</h1>"
+    + _p("A0") + "<h3>A1 h3</h3><p style='margin:1em 0'>&#160;</p>" + _p("A2")
+    + _p("B0") + "<h2>B1 h2</h2><p style='margin:1em 0'>&#160;</p>" + _p("B2")
+    + _p("C0") + "<h3>C1 h3</h3><hr style='border:none;margin:1em 0'/>" + _p("C2")
+    + _p("D0") + "<h3 style='margin:1em 0 2em'>D1 h3</h3>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("D2")
+    + _p("F0") + "<h3>F1 h3</h3><hr style='border:none;margin:1em 0;height:3px'/>"
+    + _p("F2")
+    # Nothing collapses: the same total as Previewer's 0.833 on the h3 and
+    # 0.594 on E2, written on E2.
+    + _p("E0") + "<h3>E1 h3</h3><p style='margin:0'>&#160;</p>"
+    + _p("E2", "margin:0"),
+}  # fmt: skip
+SPACED_PREVIEWER = {
+    "A2": 2.26,
+    "B2": 2.119,
+    "C2": 0.833,
+    "D2": 3.094,
+    "F2": 1.76,
+    "E2": 1.569,
+}
+
+
+def test_a_headings_margin_before_a_spacer_is_its_em_number(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "s669.epub", tmp / "s669.kfx"
+    _build(epub, SPACED, [("Spaced", "s.xhtml")], "s669")
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    wrong = {
+        k: got[k][0]
+        for k, want in SPACED_PREVIEWER.items()
+        if not _near(got[k][0], want)
+    }
+    assert not wrong, f"calibre {version}: {wrong}, Previewer {SPACED_PREVIEWER}"

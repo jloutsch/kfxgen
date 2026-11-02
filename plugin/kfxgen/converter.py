@@ -4226,6 +4226,11 @@ def _space_between(blocks, margins, measured=True, paddings=None):
     for b in blocks:
         kind = b.get("type")
         if kind == "space":
+            if b["margin"] and not on_purpose and out and out[-1].get("heading"):
+                # A heading's margin-bottom meets the first spacer's or rule's
+                # after it as its em number in the root's, as Previewer reads
+                # the rule's own lengths: an h3's 1em is 1em, not 1.17 (#669).
+                above /= _ems_own(out[-1])
             if b.get("height"):
                 # Margins don't collapse through it: the one above it meets
                 # the waiting margin, the one below it the next block's.
