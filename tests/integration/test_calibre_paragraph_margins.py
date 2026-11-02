@@ -462,3 +462,53 @@ def test_a_percent_margin_is_of_the_blocks_that_keep_it_in(calibre):  # noqa: F8
         if got[k][0] is None or abs(got[k][0] - w) > 0.002
     }
     assert not wrong, f"calibre {version}: {wrong}, Previewer {want}"
+
+
+#: The same paragraph second in its wrapper, so its margin-top stays inside
+#: it (QA on #684): Previewer measures each side against the first block it
+#: stays inside, and each block round that. R1's margin-bottom collapses out
+#: of a wrapper with padding above only, the page's again (R2 2.667).
+SECOND = {
+    "S1": ("<div style='width:50%'>", "</div>", 1.333),
+    "T1": (f"<div style='{B1}'><div style='width:50%'>", "</div></div>", 1.33),
+    "U1": (
+        "<div style='background-color:#dddddd'><div style='width:50%'>",
+        "</div></div>",
+        1.333,
+    ),
+    "V1": ("<div style='padding:0 2em'>", "</div>", 2.333),
+}
+
+
+def test_a_percent_margin_is_measured_per_side(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    body = "".join(
+        _p(f"{k[0]}0")
+        + open_
+        + _p(f"{k[0]}9 first")
+        + f"<p style='margin:10% 0'>{k} ten.</p>"
+        + close
+        for k, (open_, close, _) in SECOND.items()
+    )
+    body += (
+        _p("R0")
+        + "<div style='padding-top:0.5em;width:50%'><p style='margin:10% 0'>R1 ten.</p></div>"
+        + _p("R2", "margin:1em 0")
+    )
+    epub, kfx = tmp / "s684.epub", tmp / "s684.kfx"
+    _book_epub(
+        epub,
+        "S684",
+        body,
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Sides", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    want = {k: v for k, (_, _, v) in SECOND.items()} | {"R2": 2.667}
+    wrong = {
+        k: got[k][0]
+        for k, w in want.items()
+        if got[k][0] is None or abs(got[k][0] - w) > 0.002
+    }
+    assert not wrong, f"calibre {version}: {wrong}, Previewer {want}"
