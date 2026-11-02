@@ -4226,6 +4226,13 @@ def _space_between(blocks, margins, measured=True, paddings=None):
     for b in blocks:
         kind = b.get("type")
         if kind == "space":
+            if b["margin"] and not on_purpose and out and out[-1].get("bottom_in_em"):
+                # The margin-bottom waiting above, in em or rem, meets the
+                # first spacer's or rule's as Previewer reads it: in the
+                # block's own size, an h3's 1em as 1em, not 1.17, and a 0.8em
+                # paragraph's as 1em; a px or % one as before (#669, QA on
+                # #673).
+                above /= _ems_own(out[-1])
             if b.get("height"):
                 # Margins don't collapse through it: the one above it meets
                 # the waiting margin, the one below it the next block's.
@@ -5114,6 +5121,11 @@ def extract_blocks_from_html(
             outer[3] = _collapse(outer[3], bottom)
         else:
             last = margins.setdefault(id(mine[-1]), [0.0, 0.0])
+            if bottom and bottom >= last[1]:
+                # Whether the margin that wins is in em or rem: a spacer
+                # after the block reads it in the block's own size (#669).
+                unit = str(css.get("margin-bottom") or "").strip().lower()
+                mine[-1]["bottom_in_em"] = unit.endswith("em")
             last[1] = _collapse(last[1], bottom)
 
     def _make_box(elem, start, leaf=False):

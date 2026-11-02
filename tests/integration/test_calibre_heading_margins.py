@@ -160,3 +160,71 @@ def test_a_chapter_title_keeps_its_space_below(calibre):  # noqa: F811
         if not (_near(v[0], OPENED[k][0]) and _near(v[1], OPENED[k][1]))
     }
     assert not wrong, f"calibre {version}: {wrong}, Previewer {OPENED}"
+
+
+#: A heading, then a spacer or an <hr> that draws nothing, then a paragraph
+#: (`p { margin: 1em 0 }`): Kindle Previewer 4.0.3 collapses the heading's
+#: margin-bottom with the spacer's or rule's margin-top as its em number in
+#: the 16px root's, as it reads a rule's own lengths (#643): an h3's 1em is
+#: 1em, not its 1.17. Before a `margin:0` spacer nothing collapses, and the
+#: heading keeps its own (#669; my probe, 2026-11-01). The paragraph's $47,
+#: in lh.
+SPACED = {
+    "s.xhtml": "<h1>Spaced</h1>"
+    + _p("A0") + "<h3>A1 h3</h3><p style='margin:1em 0'>&#160;</p>" + _p("A2")
+    + _p("B0") + "<h2>B1 h2</h2><p style='margin:1em 0'>&#160;</p>" + _p("B2")
+    + _p("C0") + "<h3>C1 h3</h3><hr style='border:none;margin:1em 0'/>" + _p("C2")
+    + _p("D0") + "<h3 style='margin:1em 0 2em'>D1 h3</h3>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("D2")
+    + _p("F0") + "<h3>F1 h3</h3><hr style='border:none;margin:1em 0;height:3px'/>"
+    + _p("F2")
+    # In rem it is read in the heading's size too; in px as before, 1.25
+    # root ems (QA on #673).
+    + _p("H0") + "<h3 style='margin:1em 0 1rem'>H1 h3</h3>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("H2")
+    # A rule, then a spacer: only the first reads the heading's (QA on #673).
+    + _p("J0") + "<h3>J1 h3</h3><hr style='border:none;margin:1em 0'/>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("J2")
+    # Any block with its own size, and a wrapper's em margin it wins with.
+    + _p("K0") + _p("K1", "margin:1em 0;font-size:0.8em")
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("K2")
+    + _p("L0") + _p("L1", "margin:1em 0;font-size:1.5em")
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("L2")
+    + _p("M0") + "<div style='margin-bottom:2em'>"
+    + _p("M1", "margin:1em 0;font-size:1.5em") + "</div>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("M2")
+    + _p("G0") + "<h3 style='margin:1em 0 20px'>G1 h3</h3>"
+    + "<p style='margin:1em 0'>&#160;</p>" + _p("G2")
+    # Nothing collapses: the same total as Previewer's 0.833 on the h3 and
+    # 0.594 on E2, written on E2.
+    + _p("E0") + "<h3>E1 h3</h3><p style='margin:0'>&#160;</p>"
+    + _p("E2", "margin:0"),
+}  # fmt: skip
+SPACED_PREVIEWER = {
+    "A2": 2.26,
+    "B2": 2.119,
+    "C2": 0.833,
+    "D2": 3.094,
+    "F2": 1.76,
+    "G2": 2.052,
+    "H2": 2.139,
+    "J2": 2.26,
+    "K2": 2.26,
+    "L2": 2.26,
+    "M2": 2.538,
+    "E2": 1.569,
+}
+
+
+def test_a_headings_margin_before_a_spacer_is_its_em_number(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "s669.epub", tmp / "s669.kfx"
+    _build(epub, SPACED, [("Spaced", "s.xhtml")], "s669")
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    wrong = {
+        k: got[k][0]
+        for k, want in SPACED_PREVIEWER.items()
+        if not _near(got[k][0], want)
+    }
+    assert not wrong, f"calibre {version}: {wrong}, Previewer {SPACED_PREVIEWER}"
