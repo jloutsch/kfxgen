@@ -355,3 +355,36 @@ def test_an_open_boxs_trailing_space_leaves_it(calibre):  # noqa: F811
     assert got["C1"][1] is None, f"calibre {version}: C1 $49 = {got['C1'][1]}"
     boxes = _box_spaces_below(kfx)
     assert _near(boxes[1], 1.594), f"calibre {version}: A's inner box $49, {boxes}"
+
+
+def test_an_open_box_edge_is_read_from_its_border_and_padding(calibre):  # noqa: F811
+    """Three rows no test held (QA on #682, its mutations):
+    - a filled box with padding below, ending table + spacer: padding holds
+      the edge, so the space goes in it, $54 0.417 + 1.594 (from the bottom
+      border alone, it collapsed out: 2.042 in all, Previewer 2.875);
+    - an open box ending an h3 + spacer: the h3's space below leaves the
+      box in the h3's own size, 1.927 above the next paragraph (unscaled,
+      1.647);
+    - an open box ending a padded paragraph + spacer: the paragraph keeps
+      its 0.5em padding below it, 0.417, inside the fill (#685 has the
+      rest of that gap)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "e682.epub", tmp / "e682.kfx"
+    table = "<table><tr><td>Tc cell</td></tr></table>"
+    fill = "background-color:#cccccc"
+    body = (
+        _p("K0")
+        + f"<div style='{fill};padding-bottom:0.5em'>{_p('K1')}{table}{SP}</div>"
+        + _p("K2")
+        + f"<div style='{fill}'><h3>L1 head</h3>{SP}</div>"
+        + _p("L2")
+        + f"<div style='{fill}'>{_p('M1', 'margin:1em 0;padding-bottom:0.5em')}{SP}</div>"
+        + _p("M2")
+    )
+    _build(epub, {"e.xhtml": body}, [("E", "e.xhtml")], "e682")
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    pads = _box_paddings_below(kfx)
+    assert _near(pads[0], 2.01), f"calibre {version}: K box $54 = {pads}"
+    assert _near(got["L2"][0], 1.927), f"calibre {version}: L2 = {got['L2']}"
+    assert _near(got["M1"][1], 0.417), f"calibre {version}: M1 = {got['M1']}"
