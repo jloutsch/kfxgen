@@ -2885,15 +2885,6 @@ def _margin_em(css, side, share=1.0):
     return 0.0 if em is None else sign * em
 
 
-def _page_part(value):
-    """A side length as a share of Kindle Previewer's 384pt page: a % as
-    written, a length at 12pt to the em and 0.45pt to the px (#652)."""
-    em = _padding_em(str(value or "").strip())
-    if isinstance(em, tuple):
-        return em[1] / 100
-    return (em or 0.0) / 32
-
-
 def _hidden_rule_em(css):
     """(margin-top, height, margin-bottom) of an <hr> that draws nothing, in
     the 16px root's ems, as Kindle Previewer 4.0.3 spaces it on the
@@ -4510,6 +4501,8 @@ def extract_blocks_from_html(
     break_at = []
     # Cells walked as a paragraph when they hold no blocks (#565).
     leaf_cells = set()
+    # id(block) -> [top, bottom]: the share a winning % margin was read in.
+    pct_shares = {}
     # (index, side): the next block shown from that index starts below the
     # floats on that side, set by an element's `clear`. An empty clearing
     # element passes it on, as Kindle Previewer does (#381).
@@ -5114,34 +5107,59 @@ def extract_blocks_from_html(
 
     def _box_share(elem):
         """The share of the page a % margin of `elem` is measured against:
-        the page outside a box (#640); inside one, the box's width less its
-        side borders and padding, as Kindle Previewer 4.0.3 measures it (#652:
-        1% in a box with 3px borders is 0.993 of 1%)."""
+        the width of the blocks around it that keep it in, as Kindle
+        Previewer 4.0.3 measures it (#652; QA on #684). From the body in,
+        each block with a border or padding above or below (one without
+        lets the margin collapse out, measured outside it): one with a
+        width of its own is that wide (CSS width is the content's, so
+        nothing comes off), a % of the block around it; one without loses
+        its side borders and padding. Side margins don't narrow it, as
+        Previewer has it: a blockquote's 10% leaves its paragraphs' 10% as
+        the page's. calibre
+        writes its own page margins on the <body> in place of the book's, so
+        a body's side margins, which narrow it in Previewer, can't be read.
+        """
+        chain = []
         for a in elem.iterancestors():
             if not isinstance(a.tag, str):
                 continue
-            tag = _local_tag(a.tag)
-            if tag in ("body", "html"):
-                return 1.0
-            if tag not in _SIZED_BOX_TAGS:
-                continue
+            if _local_tag(a.tag) in ("body", "html"):
+                break
+            chain.append(a)
+        share = 1.0
+        for a in reversed(chain):
             css = style_resolver(a) or {}
-            border = _css_border(css)
-            if border is None and _box_background(css) is None:
+            border = _css_border(css) or {}
+            pads = dict(zip(_BORDER_SIDES, css.get("padding-sides") or ()))
+            if (
+                not border
+                and _box_background(css) is None
+                and not any(
+                    _padding_em(str(pads.get(side) or "").strip())
+                    for side in ("top", "bottom")
+                )
+            ):
+                # Not a box, and nothing above or below it stops a margin
+                # collapsing out of it: measured outside it (QA on #684).
                 continue
-            # calibre writes its own page margins on the <body> in place of
-            # the book's, so a body's side margins, which Previewer takes off
-            # the box too, can't be read (#652).
-            page = 1.0
-            page *= (_box_width(css) or 100.0) / 100
-            edges = sum(
-                (border or {}).get(side, (None, 0.0, None))[1] / 384
+            width = parse_css_length(str(css.get("width") or ""))
+            if width and width[1] == "$314" and 0 < float(width[0]) < 100:
+                share *= float(width[0]) / 100
+                continue
+            if width and width[1] in _CSS_PX:
+                share = float(width[0]) * _CSS_PX[width[1]] * 0.45 / 384
+                continue
+            share -= sum(
+                border.get(side, (None, 0.0, None))[1] / 384
                 for side in ("left", "right")
             )
-            pads = dict(zip(_BORDER_SIDES, css.get("padding-sides") or ()))
-            edges += sum(_page_part(pads.get(side)) for side in ("left", "right"))
-            return max(page - edges, 0.1)
-        return 1.0
+            outer = share
+            for side in ("left", "right"):
+                em = _padding_em(str(pads.get(side) or "").strip())
+                share -= (
+                    em[1] / 100 * outer if isinstance(em, tuple) else (em or 0.0) / 32
+                )
+        return max(share, 0.05)
 
     def _note_margins(elem, start, padded=(False, False)):
         """Record `elem`'s margin-top on the first paragraph it produced and
@@ -5154,6 +5172,13 @@ def extract_blocks_from_html(
         css = style_resolver(elem)
         share = _box_share(elem)
         top, bottom = _margin_em(css, "top", share), _margin_em(css, "bottom", share)
+        # A % margin read in a box's width, by side (QA on #684).
+        pct = {
+            side: share
+            for side in ("top", "bottom")
+            if share != 1.0
+            and str((css or {}).get(f"margin-{side}") or "").strip().endswith("%")
+        }
         mine = [b for b in blocks[start:] if b.get("type") not in ("space", "rule")]
         unit = str((css or {}).get("margin-bottom") or "").strip().lower()
         if mine and mine[-1].get("type") is None and "own_bottom_em" not in mine[-1]:
@@ -5172,6 +5197,8 @@ def extract_blocks_from_html(
             outer[2] = _collapse(outer[2], top)
         else:
             first = margins.setdefault(id(mine[0]), [0.0, 0.0])
+            if top and top >= first[0]:
+                pct_shares.setdefault(id(mine[0]), [None, None])[0] = pct.get("top")
             first[0] = _collapse(first[0], top)
         if padded[1] or (paddings.get(id(mine[-1])) or (0.0,) * 2)[1]:
             outer = paddings[id(mine[-1])]
@@ -5179,6 +5206,7 @@ def extract_blocks_from_html(
         else:
             last = margins.setdefault(id(mine[-1]), [0.0, 0.0])
             if bottom and bottom >= last[1]:
+                pct_shares.setdefault(id(mine[-1]), [None, None])[1] = pct.get("bottom")
                 # Whether the margin that wins is in em or rem: a spacer
                 # after the block reads it in the block's own size (#669).
                 mine[-1]["bottom_in_em"] = unit.endswith("em")
@@ -5293,10 +5321,12 @@ def extract_blocks_from_html(
             inner = margins.get(id(mine[i])) if mine else None
             if inner is None or border.get(side) or padding.get(side):
                 continue
+            # Out of the box, a % margin is the page's again (QA on #684).
+            scale = (pct_shares.get(id(mine[i])) or (None, None))[end] or 1.0
             if end == 0:
-                top = _collapse(top, inner[0])
+                top = _collapse(top, inner[0] / scale)
             else:
-                bottom = _collapse(bottom, inner[1])
+                bottom = _collapse(bottom, inner[1] / scale)
             inner[end] = 0.0
         margins[id(box)] = [top, bottom]
 

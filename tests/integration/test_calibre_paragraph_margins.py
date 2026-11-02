@@ -412,3 +412,53 @@ def test_a_percent_margin_in_a_box_is_of_its_width(calibre):  # noqa: F811
         if got[k][1] is None or abs(got[k][1] - want) > 0.001
     }
     assert not wrong, f"calibre {version}: {wrong}, Previewer {BOX_PERCENT}"
+
+
+#: `p { margin: 10% 0 }` in containers (QA on #684, my probe 2026-11-02),
+#: the paragraph's $47 in lh, as Kindle Previewer 4.0.3 writes it (K1 and
+#: J1: Previewer writes it on the wrapper the margin collapses out of, the
+#: same space). A width set is the content's; nested widths multiply; a
+#: wrapper with nothing above or below lets the margin out, measured
+#: outside it; side margins don't narrow; a margin leaving an open box is
+#: the page's again (E2).
+B1 = "border:1px solid black"
+CONTAINED = {
+    "A1": (f"<div style='{B1}'>", "</div>", 2.66),
+    "B1": (f"<div style='{B1};padding:0.5em 10%'>", "</div>", 2.127),
+    "C1": (f"<div style='{B1};padding:0.5em 2em'>", "</div>", 2.327),
+    "F1": ("<blockquote style='margin:0 10%'>", "</blockquote>", 2.667),
+    "G1": (f"<div style='{B1};width:50%'>", "</div>", 1.333),
+    "H1": (f"<div style='{B1};width:300px'>", "</div>", 0.9375),
+    "I1": (f"<div style='{B1};width:50%'><div style='{B1}'>", "</div></div>", 1.327),
+    "J1": (f"<div style='{B1}'><div style='width:50%'>", "</div></div>", 2.66),
+    "K1": ("<div style='width:50%'>", "</div>", 2.667),
+}
+
+
+def test_a_percent_margin_is_of_the_blocks_that_keep_it_in(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    body = "".join(
+        _p(f"{k[0]}0") + open_ + f"<p style='margin:10% 0'>{k} ten.</p>" + close
+        for k, (open_, close, _) in CONTAINED.items()
+    )
+    body += (
+        "<div style='border-left:10px solid black'>"
+        "<p style='margin:10% 0'>E1 ten.</p></div>" + _p("E2", "margin:1em 0")
+    )
+    epub, kfx = tmp / "w684.epub", tmp / "w684.kfx"
+    _book_epub(
+        epub,
+        "W684",
+        body,
+        [("c1.xhtml", "Next")],
+        [("c0", "contents.xhtml", "Widths", []), ("c1", "c1.xhtml", "Next", [])],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    want = {k: v for k, (_, _, v) in CONTAINED.items()} | {"E2": 2.667}
+    wrong = {
+        k: got[k][0]
+        for k, w in want.items()
+        if got[k][0] is None or abs(got[k][0] - w) > 0.002
+    }
+    assert not wrong, f"calibre {version}: {wrong}, Previewer {want}"
