@@ -2546,6 +2546,19 @@ def _cell_paragraph_count(cell):
     )
 
 
+def _loose_cell_text(cell):
+    """Whether text is written straight in the cell beside its blocks: a
+    paragraph of its own, as Kindle Previewer 4.0.3 writes it, not joined to
+    the block after it (#681)."""
+    if (cell.text or "").strip():
+        return True
+    return any(
+        (d.tail or "").strip()
+        for d in cell
+        if isinstance(d.tag, str) and _local_tag(d.tag) in _CELL_BLOCK_TAGS
+    )
+
+
 def _longest_cell_run(cell):
     """The longest text entry a cell would be written as.
 
@@ -3261,6 +3274,20 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
                 return True
         return False
 
+    def spaced_block(cell):
+        """Whether the cell's one block has margins of its own: Kindle
+        Previewer 4.0.3 writes them in the cell, as it does a cell of
+        several blocks' (#681: a cell of one <p>, 0.833 above and below)."""
+        if style_resolver is None:
+            return False
+        for d in cell.iter():
+            if d is cell or _local_tag(d.tag) not in _CELL_BLOCK_TAGS:
+                continue
+            css = style_resolver(d) or {}
+            if _margin_em(css, "top") or _margin_em(css, "bottom"):
+                return True
+        return False
+
     def build_cell(cell):
         built = None
         # A cell with a picture is walked as the body is, so the picture is a
@@ -3269,7 +3296,11 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
         shown = _shown_tree(cell)
         has_picture = any(_local_tag(d.tag) == "img" for d in shown.iter())
         if walk_cell is not None and (
-            _cell_paragraph_count(shown) >= 2 or has_picture or holds_box(shown)
+            _cell_paragraph_count(shown) >= 2
+            or has_picture
+            or holds_box(shown)
+            or (_cell_paragraph_count(shown) and _loose_cell_text(shown))
+            or spaced_block(shown)
         ):
             built = _paragraph_cell(cell, style_resolver, walk_cell)
         if built is None:
