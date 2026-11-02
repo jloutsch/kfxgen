@@ -22,6 +22,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "plugin"))
 sys.path.insert(0, str(REPO))
 
+from tests._kfx_introspect import by_type, load_fragments, val  # noqa: E402
 from tests.integration.test_calibre_contents_links import _build  # noqa: E402
 from tests.integration.test_calibre_hidden_rules_and_wrappers import (  # noqa: E402
     _first_spaces,
@@ -202,3 +203,34 @@ def test_a_spacer_last_in_a_box_or_a_file_keeps_its_space(calibre):  # noqa: F81
     got = _spacing(kfx)
     wrong = {k: got[k][1] for k, want in LAST.items() if not _near(got[k][1], want)}
     assert not wrong, f"calibre {version}: {wrong}, Previewer {LAST}"
+
+
+def test_a_spacer_after_a_table_last_in_a_box_keeps_its_space(calibre):  # noqa: F811
+    """A box ending in a table, then a spacer: Kindle Previewer 4.0.3 writes
+    the spacer's space, 0.6em + its 0.7125em line + 0.6em, 1.594 lh, below
+    the table inside the box (#675). kfxgen dropped it. It now goes in the
+    box's padding below, the same place on the page: 0.417 + 1.594."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "t675.epub", tmp / "t675.kfx"
+    _build(
+        epub,
+        {
+            "t.xhtml": _p("B6")
+            + f"<div style='{BX}'>{_p('B7')}<table><tr><td>B8 cell</td></tr></table>"
+            + f"{SP}</div>"
+            + _p("B9")
+        },
+        [("T", "t.xhtml")],
+        "t675",
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    frags = load_fragments(kfx)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    below = None
+    for st in by_type(frags, "$259"):
+        for e in val(st)["$146"]:
+            e = getattr(e, "value", e)
+            if str(e.get("$159")) == "$270":
+                pad = styles.get(str(e.get("$157")), {}).get("$54")
+                below = None if pad is None else round(float(pad["$307"]), 3)
+    assert _near(below, 2.01), f"calibre {version}: box $54 = {below}, want 2.01"
