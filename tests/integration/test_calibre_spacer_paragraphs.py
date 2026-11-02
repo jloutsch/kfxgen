@@ -290,3 +290,62 @@ def test_a_trailing_spacer_in_a_box_is_spaced_by_its_edge(calibre):  # noqa: F81
     assert pads[0] is None, f"calibre {version}: filled box $54 = {pads[0]}"
     assert _near(pads[1], 2.719), f"calibre {version}: 1.5em box $54 = {pads[1]}"
     assert _near(pads[2], 0.417), f"calibre {version}: J box $54 = {pads[2]}"
+
+
+def _box_spaces_below(kfx):
+    """Each box's $49, outer before inner, in reading order."""
+    frags = load_fragments(kfx)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    out = []
+
+    def walk(e):
+        e = getattr(e, "value", e)
+        if not hasattr(e, "get"):
+            return
+        if str(e.get("$159")) == "$270":
+            below = styles.get(str(e.get("$157")), {}).get("$49")
+            out.append(None if below is None else round(float(below["$307"]), 3))
+        for k in e.get("$146") or ():
+            walk(k)
+
+    for st in by_type(frags, "$259"):
+        for e in val(st)["$146"]:
+            walk(e)
+    return out
+
+
+def test_an_open_boxs_trailing_space_leaves_it(calibre):  # noqa: F811
+    """Boxes with nothing at their bottom edge (a fill, no border or padding)
+    let the space after their last block out, as Kindle Previewer 4.0.3
+    writes it (QA on #682; my probe):
+    - a bordered box ending an open box (p, table, spacer): the open box
+      keeps 1.594 below it, inside the bordered one (#682 lost it: 0);
+    - an open box ending an open box (p, table, spacer): 1.594 above the
+      next paragraph;
+    - an open box ending p + spacer, or an open box + spacer: the p's 1em
+      meets the spacer's 0.6em first, 1.927 above the next paragraph, none
+      below the p (kfxgen kept it inside and added the next margin: 2.427)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "o682.epub", tmp / "o682.kfx"
+    table = "<table><tr><td>Tc cell</td></tr></table>"
+    fill = "background-color:#cccccc"
+    body = (
+        _p("A0")
+        + f"<div style='{BX}'><div style='{fill}'>{_p('A1')}{table}{SP}</div></div>"
+        + _p("A2")
+        + f"<div style='{fill}'><div style='{fill}'>{_p('B1')}{table}{SP}</div></div>"
+        + _p("B2")
+        + f"<div style='{fill}'>{_p('C1')}{SP}</div>"
+        + _p("C2")
+        + f"<div style='{fill}'><div style='{fill}'>{_p('D1')}</div>{SP}</div>"
+        + _p("D2")
+    )
+    _build(epub, {"o.xhtml": body}, [("O", "o.xhtml")], "o682")
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    wanted = {"A2": 0.833, "B2": 1.594, "C2": 1.927, "D2": 1.927}
+    wrong = {k: got[k][0] for k, w in wanted.items() if not _near(got[k][0], w)}
+    assert not wrong, f"calibre {version}: {wrong}, Previewer {wanted}"
+    assert got["C1"][1] is None, f"calibre {version}: C1 $49 = {got['C1'][1]}"
+    boxes = _box_spaces_below(kfx)
+    assert _near(boxes[1], 1.594), f"calibre {version}: A's inner box $49, {boxes}"

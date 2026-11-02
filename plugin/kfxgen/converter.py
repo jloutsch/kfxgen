@@ -4270,12 +4270,15 @@ def _space_between(blocks, margins, measured=True, paddings=None):
             if kind == "box":
                 # Its paragraphs are spaced the same way, inside it (#640).
                 b["blocks"] = _space_between(b["blocks"], margins, measured, paddings)
-                tail = (
-                    b["blocks"][-1].pop("trailing_space", 0.0) if b["blocks"] else 0.0
-                )
+                last = b["blocks"][-1] if b["blocks"] else None
+                tail = last.pop("trailing_space", 0.0) if last else 0.0
                 edge = (b["box"].get("border") or {}).get("bottom") or (
                     b["box"].get("padding") or {}
                 ).get("bottom")
+                if not edge and last is not None and last.get("margin_below"):
+                    # Nothing at its bottom edge: the space below its last
+                    # block leaves the box, as Previewer writes it (QA on #682).
+                    tail = max(tail, last.pop("margin_below") * _ems_own(last))
                 if tail and edge:
                     # Spacers after a table that ends the box: below it,
                     # inside the box, in its padding (#675).
@@ -4285,9 +4288,11 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                     pad["bottom"] = (pad.get("bottom") or 0.0) + tail / _ems_own(b)
                     b["box"]["padding"] = pad
                 elif tail:
-                    # Nothing at its bottom edge: the space collapses with the
-                    # margin below, as Previewer writes it (#680).
-                    bottom = _collapse(bottom, tail)
+                    # It collapses with the box's margin below, where the run
+                    # around the box meets it, the next block's or its own end
+                    # (#680, QA on #682).
+                    mine = margins.setdefault(id(b), [0.0, 0.0])
+                    mine[1] = bottom = _collapse(mine[1], tail)
         if kind is None:
             if out:
                 beside = b.get("heading") or out[-1].get("heading")
@@ -5254,9 +5259,17 @@ def extract_blocks_from_html(
         border = box["box"]["border"] or {}
         padding = box["box"]["padding"] or {}
         mine = [b for b in box["blocks"] if b.get("type") not in ("space", "rule")]
+        # A spacer or rule after the last block meets its margin first: the
+        # margin stays with it (QA on #682).
+        spaced_end = bool(box["blocks"]) and box["blocks"][-1].get("type") in (
+            "space",
+            "rule",
+        )
         for side, i, end in (("top", 0, 0), ("bottom", -1, 1)):
             inner = margins.get(id(mine[i])) if mine else None
             if inner is None or border.get(side) or padding.get(side):
+                continue
+            if end and spaced_end:
                 continue
             if end == 0:
                 top = _collapse(top, inner[0])
