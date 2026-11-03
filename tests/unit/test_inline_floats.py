@@ -311,3 +311,89 @@ def test_a_linked_float_first_keeps_the_next_float_in_the_words(tmp_path):
     )
     (wrapper,) = [n for n in story if n[0] == "box" and set(n[2]) <= {"$47", "$49"}]
     assert [k[0] for k in wrapper[3]] == ["mixed"]
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        "L1 item <img src='b.jpg' alt='a' style='float:left;width:20%'/> words.",
+        "<img src='b.jpg' alt='a' style='float:right;width:20%'/>L2 lead item.",
+    ],
+    ids=["middle", "first"],
+)
+def test_a_list_items_float_is_unfloated_in_its_words(tmp_path, item):
+    """Previewer floats nothing in a list item (#699): the picture stays in
+    the item's words, unfloated, and the item isn't wrapped. kfxgen writes
+    the bullet as text, so a float first stays after it in the words."""
+    story, _ = _story(tmp_path, f"<h1>One</h1><ul><li>{item}</li></ul>")
+    assert not [
+        n for n in _walk(story) if n[0] == "box" and set(n[2]) <= {"$47", "$49"}
+    ]
+    (mixed,) = [n for n in _walk(story) if n[0] == "mixed"]
+    (pic,) = [p for p in mixed[1] if not isinstance(p, str)]
+    assert "$140" not in pic[1] and pic[1]["$56"] == "6.4$308"
+
+
+def test_a_float_first_in_a_list_items_second_paragraph_is_unfloated(tmp_path):
+    """A list item's later paragraph has no bullet before its float: the
+    picture is an entry of its own, not floated (#699)."""
+    story, _ = _story(
+        tmp_path,
+        "<h1>One</h1><ul><li><p>L3 first.</p><p><img src='b.jpg' alt='a' "
+        "style='float:left;width:20%'/>L3 second paragraph.</p></li></ul>",
+    )
+    pictures = [n for n in _walk(story) if n[0] == "picture"]
+    assert pictures and all("$140" not in p[1] for p in pictures)
+    assert not [
+        n for n in _walk(story) if n[0] == "box" and set(n[2]) <= {"$47", "$49"}
+    ]
+
+
+def test_a_lead_float_in_a_spaced_list_paragraph_keeps_the_space(tmp_path):
+    """The paragraph's own margin goes on a container round the picture and
+    the words, as Previewer writes it; the words take none of their own (QA
+    on #701: the space was lost)."""
+    story, frags = _story(
+        tmp_path,
+        "<h1>One</h1><ul><li><p>L4 first.</p><p style='margin-top:2em'>"
+        "<img src='b.jpg' alt='a' style='float:left;width:20%'/>L4 second.</p>"
+        "</li></ul>",
+    )
+    (box,) = [n for n in _walk(story) if n[0] == "box" and "$47" in n[2]]
+    assert box[2]["$47"] == "1.66667$310"
+    assert [k[0] for k in box[3]] == ["picture", "text"]
+    assert "$140" not in box[3][0][1]
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    for st in by_type(frags, "$259"):
+        for e in val(st)["$146"]:
+            e = getattr(e, "value", e)
+            for kid in e.get("$146") or ():
+                kid = getattr(kid, "value", kid)
+                if hasattr(kid, "get") and kid.get("$145"):
+                    assert "$47" not in {str(k) for k in styles[str(kid["$157"])]}
+
+
+def test_a_picture_alone_in_a_list_item_is_unfloated(tmp_path):
+    """QA on #701: Previewer floats nothing in a list item, a lone picture
+    included."""
+    story, _ = _story(
+        tmp_path,
+        "<h1>One</h1><ul><li><img src='b.jpg' alt='a' style='float:left;"
+        "width:20%'/></li><li>Next item.</li></ul>",
+    )
+    pictures = [n for n in _walk(story) if n[0] == "picture"]
+    assert pictures and all("$140" not in p[1] for p in pictures)
+
+
+def test_a_lead_float_containers_margin_below_and_clear(tmp_path):
+    """The container takes the paragraph's margin below and its clear as
+    well as its margin above, as Previewer writes them (QA on #701)."""
+    story, _ = _story(
+        tmp_path,
+        "<h1>One</h1><ul><li><p>L5 first.</p><p style='margin-bottom:2em;"
+        "clear:both'><img src='b.jpg' alt='a' style='float:left;width:20%'/>"
+        "L5 words.</p></li></ul>",
+    )
+    (box,) = [n for n in _walk(story) if n[0] == "box" and "$49" in n[2]]
+    assert box[2]["$49"] == "1.66667$310"
+    assert "$628" in box[2]
