@@ -154,6 +154,8 @@ class _Manifest:
 class _Spine:
     def __init__(self, items: list[_ManifestItem]) -> None:
         self._items = items
+        # As calibre's OEBReader sets it: "ltr" or "rtl", else None (#246).
+        self.page_progression_direction: str | None = None
 
     def __iter__(self) -> Iterator[_ManifestItem]:
         return iter(self._items)
@@ -242,6 +244,10 @@ class EpubAsOeb:
             if idref in items:
                 spine_items.append(items[idref])
         self._spine = _Spine(spine_items)
+        ppd_el = opf.find(f"{_OPF_NS}spine")
+        ppd = ppd_el.get("page-progression-direction") if ppd_el is not None else None
+        if ppd in {"ltr", "rtl"}:
+            self._spine.page_progression_direction = ppd
 
         # The NCX calibre reads is the one `<spine toc="...">` names. A book can
         # carry more than one, and the first in the zip need not be it.
