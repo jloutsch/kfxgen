@@ -3295,6 +3295,12 @@ def test_a_hidden_anchor_between_rows_writes_nothing():
         ("<table><div>x</div><tr><td>a</td></tr></table>", ["x"]),
         ("<table><tr><p>kept</p><td>a</td></tr></table>", ["kept"]),
         ("<table><tr><span>kept</span><td>a</td></tr></table>", ["kept"]),
+        ("<table><tbody><tr>LOOSE<td>a</td></tr></tbody></table>", ["LOOSE"]),
+        (
+            "<table><tbody><tr><td>a</td><span>kept</span><td>b</td></tr></tbody>"
+            "</table>",
+            ["kept"],
+        ),
         (
             "<table><tr><td>a</td></tr><span>M2 span</span><p>M3 para</p>"
             "<b>M4 bold</b> tail<tr><td>b</td></tr></table>",
@@ -3313,6 +3319,8 @@ def test_a_hidden_anchor_between_rows_writes_nothing():
         "div-in-table",
         "p-in-tr",
         "span-in-tr",
+        "text-in-a-tbody-row",
+        "span-in-a-tbody-row",
         "inline-block-inline",
     ],
 )
@@ -3340,6 +3348,33 @@ def test_a_picture_outside_the_cells_runs_with_the_moved_words():
     blocks = _conv.extract_blocks_from_html(_doc(html), native_tables=True)
     assert [b.get("type") for b in blocks] == [None, "table"]
     assert blocks[0]["text"].startswith("S2 bold\x00IMG\x01p.jpg")
+
+
+@pytest.mark.unit
+def test_a_blank_stray_elements_id_is_kept():
+    """`<span id="r3"> </span>` between rows writes no words, but its id still
+    lands, on the table (QA on #705: dropping it left links with no target)."""
+    html = '<table><tr><td>a</td></tr><span id="r3"> </span><tr><td>b</td></tr></table>'
+    blocks = _conv.extract_blocks_from_html(_doc(html), native_tables=True)
+    assert [b.get("type") for b in blocks] == ["table"]
+    assert "r3" in blocks[0]["anchor_ids"]
+
+
+@pytest.mark.unit
+def test_a_hidden_picture_between_rows_writes_nothing():
+    """QA on #705: without the hidden check, the picture showed before the
+    table."""
+    html = (
+        "<table><tr><td>a</td></tr><img class='h' src='p.jpg' alt='x'/>"
+        "<tr><td>b</td></tr></table>"
+    )
+    blocks = _conv.extract_blocks_from_html(
+        _doc(html),
+        native_tables=True,
+        style_resolver=lambda e: {"display": "none"} if e.get("class") == "h" else {},
+    )
+    assert [b.get("type") for b in blocks] == ["table"]
+    assert "IMG" not in blocks[0]["text"]
 
 
 @pytest.mark.unit
