@@ -4268,10 +4268,21 @@ def _space_between(blocks, margins, measured=True, paddings=None):
     above = 0.0  # the larger margin waiting: the paragraph before's, an <hr>'s
     lines = 0.0
     fixed = 0.0  # space past a rule with a height (QA on #649)
+    # A padded block's padding, and the margin inside it, which the spacers
+    # after it don't reach (#685).
+    held = 0.0
     on_purpose = False
     for b in blocks:
         kind = b.get("type")
         if kind == "space":
+            prev_pads = (paddings or {}).get(id(out[-1])) if out else None
+            if measured and not on_purpose and prev_pads and prev_pads[1]:
+                # After a padded block the spacer meets the margin outside
+                # its padding; the padding, and the margin inside it, stay
+                # where they are, as Previewer spaces them (#685).
+                held = above + prev_pads[1]
+                above = prev_pads[3]
+                prev_pads[3] = 0.0
             if (
                 b["margin"]
                 and not on_purpose
@@ -4307,10 +4318,10 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                 top,
                 lines,
                 on_purpose,
-                fixed=fixed,
-                pad_up=up_pads[1],
+                fixed=fixed + held,
+                pad_up=0.0 if held else up_pads[1],
                 pad_own=own_pads[0],
-                outer_up=up_pads[3],
+                outer_up=0.0 if held else up_pads[3],
                 outer_own=own_pads[2],
             )
             if kind == "box":
@@ -4367,6 +4378,7 @@ def _space_between(blocks, margins, measured=True, paddings=None):
         above = bottom if kind in (None, "box") else 0.0
         lines = 0.0
         fixed = 0.0
+        held = 0.0
         on_purpose = False
         out.append(b)
     if measured and out and on_purpose and not _takes_margin(out[-1]):
@@ -5281,6 +5293,10 @@ def extract_blocks_from_html(
             first[0] = _collapse(first[0], top)
         if padded[1] or (paddings.get(id(mine[-1])) or (0.0,) * 2)[1]:
             outer = paddings[id(mine[-1])]
+            if bottom and bottom >= outer[3]:
+                # Outside the padding too: a spacer after it reads it in the
+                # block's own size (#669, QA on #688).
+                mine[-1]["bottom_in_em"] = unit.endswith("em")
             outer[3] = _collapse(outer[3], bottom)
         else:
             last = margins.setdefault(id(mine[-1]), [0.0, 0.0])
