@@ -7,7 +7,7 @@ Five fixes since 5.22.0. Each was reviewed, converted through real calibre and c
 ### What readers will notice
 
 **Pictures in table cells**
-- A sized picture alone in a table cell keeps its size (#698, #701). It used to show at its own pixels. kfxgen writes Previewer's cap at the markup's width; Previewer's share of the cell comes from its own table layout, so kfxgen writes 100%. The two show the same width while the cell is at least the cap divided by Previewer's share (about 6em to 16em in the library books checked); in a narrower cell kfxgen's picture is wider. In QA's comparison of 35 library books, 66 of 81 changed pictures that could be compared equal Previewer's exactly, and the other 15 have its cap.
+- A sized picture alone in a table cell keeps its size (#698, #701). It used to show at its own pixels. kfxgen writes Previewer's cap at the markup's width; Previewer's share of the cell comes from its own table layout, so kfxgen writes 100%. The two show the same width while the cell is at least the cap divided by Previewer's share (about 6em to 19em in the library books checked); in a narrower cell kfxgen's picture is wider. In QA's comparison of 35 library books, 66 of 81 changed pictures that could be compared equal Previewer's exactly, and the other 15 have its cap.
 - A table with a bare `<a/>` between its rows or cells stays a table (#702, #703). One library book lost two picture tables to it.
 - Text or elements sitting in a table outside its cells go in front of the table, as Previewer moves them, and the table stays a table (#704, #706, #705). These tables used to be written as paragraphs.
 
