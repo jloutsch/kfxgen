@@ -324,6 +324,29 @@ def test_a_vertical_align_length_is_a_baseline_shift(tmp_path, value, shift):
     assert "$44" not in style
 
 
+def test_two_pictures_with_different_shifts_keep_their_own(tmp_path):
+    """Pictures of one size share a style only when their shift is the same
+    too (QA on #695: with the shift out of the style key, every later
+    picture took the first one's)."""
+    _book(
+        tmp_path,
+        "<h1>One</h1><p>Q <img src='b.jpg' alt='x' style='height:1em;"
+        "vertical-align:-0.2em'/> and <img src='b.jpg' alt='y' style='height:1em;"
+        "vertical-align:3px'/> after.</p>",
+    )
+    frags = load_fragments(tmp_path / "i.kfx")
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    shifts = [
+        f"{s['$31']['$307']}{s['$31']['$306']}"
+        for st in by_type(frags, "$259")
+        for e in val(st)["$146"]
+        for part in (getattr(e, "value", e).get("$146") or ())
+        if hasattr(part, "get") and str(part.get("$159")) == "$271"
+        for s in [styles[str(part["$157"])]]
+    ]
+    assert shifts == ["-0.2$308", "1.35$318"]
+
+
 @pytest.mark.parametrize(
     ("body", "expected"),
     [
