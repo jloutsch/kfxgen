@@ -102,6 +102,24 @@ def _valign_shift(text):
     return f"{round(number, 5):g}", _SHIFT_UNITS[unit]
 
 
+def _inline_float_style(side, m, width_px):
+    """The style key of a floated picture inside a paragraph's words, as
+    Kindle Previewer 4.0.3 writes it (#565, probed): ("float", side, `$56`
+    as a % of its 512 px column, whether `$65` 100% caps it, whether the
+    markup sizes it). A % width as written, an em one at 16px with the cap,
+    px and pt as pixels; with no width, its own pixels. No height."""
+    pct, fill = width_px / 512 * 100, False
+    if m and m.group(1) == "w":
+        number, unit = float(m.group(2)), m.group(3) or "px"
+        if unit == "%":
+            pct = number
+        elif unit == "em":
+            pct, fill = number * 16 / 512 * 100, True
+        else:
+            pct = number * (4 / 3 if unit == "pt" else 1.0) / 512 * 100
+    return ("float", side, f"{round(pct, 5):g}", fill, bool(m))
+
+
 def _inline_length_em(m, font_size):
     """A size hint's length (`_SIZE_HINT_RE` match, not %) in the
     paragraph's em: em as written, px at 0.45pt and pt with 1em = 12pt."""
@@ -109,6 +127,37 @@ def _inline_length_em(m, font_size):
     if unit == "em":
         return number
     return number * (0.45 if unit == "px" else 1.0) / 12 / (font_size or 1)
+
+
+def _floats_among_words(block):
+    """Whether `block` is a paragraph holding words and a floated picture,
+    which Kindle Previewer 4.0.3 wraps in a container (#565)."""
+    if block.get("float_wrapped") or block.get("preformatted"):
+        return False
+    text = block.get("text") or ""
+    tokens = list(IMG_TOKEN_RE.finditer(text))
+    return any(m.group(4) for m in tokens) and bool(IMG_TOKEN_RE.sub("", text).strip())
+
+
+def _slice_block(block, a, b):
+    """The part [a, b) of a paragraph block, its runs and anchors moved with
+    the text. An anchor at `b` belongs to the next part."""
+    offsets = {
+        k: (o or 0) - a
+        for k, o in (block.get("anchor_offsets") or {}).items()
+        if a <= (o or 0) < b or (b == len(block["text"]) and (o or 0) >= b)
+    }
+    return {
+        **block,
+        "text": block["text"][a:b],
+        "spans": [
+            (max(s, a) - a, min(s + n, b) - max(s, a), f)
+            for s, n, f in block.get("spans") or ()
+            if min(s + n, b) > max(s, a)
+        ],
+        "anchor_keys": [k for k in block.get("anchor_keys") or () if k in offsets],
+        "anchor_offsets": offsets,
+    }
 
 
 def _cut_after_picture_lines(block):
@@ -304,7 +353,10 @@ _TABLE_NODE_TYPES = {
 
 def _is_frame(box):
     """A box drawn as Previewer's plain container: a wrapper's width around
-    a picture, with no border, fill or float (#382)."""
+    a picture, with no border, fill or float (#382), or the container round
+    a paragraph holding a floated picture (#565)."""
+    if box.get("float_wrapper"):
+        return True
     return bool(box.get("width")) and not (
         box.get("border") or box.get("background") is not None or box.get("float")
     )
@@ -1772,8 +1824,9 @@ class NativeKFXGenerator:
         alone is kept the same way, the width following it; a height given
         with a width is kept too, its shape aside, as is a vertical-align,
         a keyword in `$44` or a length in `$31` (#565). A % height stays a
-        %, with a width only if one is given. A picture the markup sizes is marked `$546: $377`, as
-        Previewer marks it."""
+        %, with a width only if one is given. A picture the markup sizes is
+        marked `$546: $377`, as Previewer marks it. A floated one (`fl` in
+        its extras) is written as `_inline_float_style` says."""
         _kind, resource, alt, hint, font_size, extra = item
         extras = dict(e.split("=", 1) for e in (extra or "").split(";") if "=" in e)
         (eid,) = eids
@@ -1788,6 +1841,27 @@ class NativeKFXGenerator:
         w_em, h_em, fill = width / scale, height / scale, False
         m = _SIZE_HINT_RE.match(hint or "")
         number, unit = (float(m.group(2)), m.group(3) or "px") if m else (0, "")
+        if extras.get("fl") in ("left", "right"):
+            size = _inline_float_style(extras["fl"], m, width)
+            if size not in self._inline_picture_styles:
+                name = f"s_ipic{len(self._inline_picture_styles)}"
+                self.symtab.create_local_symbol(name)
+                side, pct, fill, sized = size[1:]
+                value = IonStruct(
+                    IS("$140"),
+                    IS("$59" if side == "left" else "$61"),
+                    IS("$56"),
+                    IonStruct(IS("$307"), IonDecimal(pct), IS("$306"), IS("$314")),
+                )
+                if fill:
+                    value[IS("$65")] = IonStruct(
+                        IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")
+                    )
+                if sized:
+                    value[IS("$546")] = IS("$377")
+                value[IS("$173")] = IS(name)
+                self._inline_picture_styles[size] = (name, value)
+            return self._inline_picture_struct(eid, alt, size, resource)
         given = _SIZE_HINT_RE.match(f"h={extras.get('h', '')}")
         # A % height stays a %, as Previewer writes it, and so does the
         # width beside it: an em or % one as written, a px or pt one as a %
@@ -1857,6 +1931,11 @@ class NativeKFXGenerator:
                 )
             value[IS("$173")] = IS(name)
             self._inline_picture_styles[size] = (name, value)
+        return self._inline_picture_struct(eid, alt, size, resource)
+
+    def _inline_picture_struct(self, eid, alt, size, resource):
+        """The `$271` entry of a picture inside a paragraph's words, its
+        style the one `size` keys."""
         return IonStruct(
             IS("$155"),
             eid,
@@ -4649,7 +4728,7 @@ class NativeKFXGenerator:
             all_chunks.append(chunk)
             return set(mine)
 
-        def _inline_pictures(para, para_spans, offsets):
+        def _inline_pictures(para, para_spans, offsets, floats_in_words=False):
             """(text, spans, offsets, pictures) for a paragraph whose words
             hold pictures, or None (#529). Each picture becomes one
             character, U+FFFC, and `pictures` lists (offset, (resource,
@@ -4658,7 +4737,9 @@ class NativeKFXGenerator:
             pictures alone, or one with a floated picture, is cut at them as
             before."""
             tokens = list(IMG_TOKEN_RE.finditer(para))
-            if not tokens or any(m.group(4) for m in tokens):
+            # A float among words is written in them (#565); one at the
+            # start was taken out before, by `_emit_floated_paragraph`.
+            if not tokens or (any(m.group(4) for m in tokens) and not floats_in_words):
                 return None
             # Pictures alone: entries. A line of only a picture after words
             # stays in them; `_cut_after_picture_lines` has cut the
@@ -4672,6 +4753,9 @@ class NativeKFXGenerator:
                     m.group(1), image_resources, self._resolved_image_refs
                 )
                 at = sum(len(t) for t in text)
+                extra = m.group(5)
+                if m.group(4):
+                    extra = ";".join(filter(None, (extra, f"fl={m.group(4)}")))
                 if resource is not None:
                     pictures.append(
                         (
@@ -4680,13 +4764,17 @@ class NativeKFXGenerator:
                                 resource[0],
                                 m.group(2).replace("\x02", " "),
                                 m.group(3),
-                                m.group(5),
+                                extra,
                             ),
                         )
                     )
                     text.append(INLINE_PICTURE)
-                cuts.append((m.start(), m.end(), 1 if resource is not None else 0))
-                last = m.end()
+                end = m.end()
+                if m.group(4):
+                    # Previewer drops the space after a floated picture.
+                    end += len(para[end:]) - len(para[end:].lstrip(" "))
+                cuts.append((m.start(), end, 1 if resource is not None else 0))
+                last = end
             text.append(para[last:])
 
             def moved(i):
@@ -4714,6 +4802,53 @@ class NativeKFXGenerator:
                 pictures,
             )
 
+        def _emit_floated_paragraph(block):
+            """A paragraph holding a floated picture and words, as Kindle
+            Previewer 4.0.3 writes it (#565): a container carrying the
+            paragraph's space, holding the pictures floated at its start as
+            entries, then the rest as one entry, the later floats among its
+            words. Returns the anchor keys it could not place."""
+            text = block["text"]
+            lead = 0
+            for m in IMG_TOKEN_RE.finditer(text):
+                if not m.group(4) or text[lead : m.start()].strip(_ASCII_SPACE):
+                    break
+                lead = m.end()
+            if block.get("tight"):
+                space = 0.0
+            elif "margin_above" in block:
+                space = block["margin_above"]
+            else:
+                space = _space_to_write(block)
+                if space is None:
+                    # kfxgen's own: a line above an unindented paragraph.
+                    indent = (block.get("block_style") or {}).get("indent")
+                    space = 0.0 if indent else _LINE_EM
+            box = {
+                "space_above": space,
+                "space_below": block.get("margin_below"),
+                "float_wrapper": True,
+            }
+            if block.get("clear"):
+                box["clear"] = block["clear"]
+            all_chunks.append({"type": "open", "node": "box", "box": box})
+            first = len(all_chunks)
+            inner = {**block, "tight": True, "float_wrapped": True}
+            for key in ("margin_above", "margin_below", "space_above", "clear"):
+                inner.pop(key, None)
+            unplaced = []
+            if lead:
+                head = _slice_block(inner, 0, lead)
+                head.pop("heading_level", None)
+                unplaced += _emit_paragraph(head)
+                inner = _slice_block(inner, lead, len(text))
+            unplaced += _emit_paragraph(inner)
+            all_chunks.append({"type": "close"})
+            if not _emitted_content(first):
+                # Nothing inside: no container either.
+                del all_chunks[first - 1 :]
+            return unplaced
+
         def _emit_paragraph(block, inline_pictures=True):
             """A paragraph's chunks: its text, cut at each picture into text
             and image chunks, with spans and anchors placed on the piece
@@ -4728,6 +4863,8 @@ class NativeKFXGenerator:
                 pieces = _cut_after_picture_lines(block)
                 if len(pieces) > 1:
                     return [k for p in pieces for k in _emit_paragraph(p)]
+                if _floats_among_words(block):
+                    return _emit_floated_paragraph(block)
             preformatted = bool(block.get("preformatted"))
             para = (
                 block["text"].rstrip(_ASCII_SPACE)
@@ -4744,7 +4881,7 @@ class NativeKFXGenerator:
             # Not in a table cell, whose pictures are entries of their own
             # (#262).
             inline = inline_pictures and _inline_pictures(
-                para, para_spans, block_offsets
+                para, para_spans, block_offsets, bool(block.get("float_wrapped"))
             )
             if inline:
                 para, para_spans, block_offsets, pictures = inline
