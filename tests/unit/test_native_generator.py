@@ -3928,14 +3928,15 @@ def _float_pic(href="a.png"):
         ),
         (
             [_para(f"C2 words {_float_pic()} more.")],
-            [("text", "C2 words"), ("picture", False, True), ("text", "more.")],
+            [("mixed", ["C2 words ", "picture", "more."])],
         ),
     ],
     ids=["lead", "middle"],
 )
 def test_a_cells_floated_pictures_are_not_wrapped(tmp_path, paragraphs, expected):
-    """Previewer writes no container round a cell's paragraph (QA on #697):
-    a cell keeps its floated pictures as it did before #565's floats."""
+    """Previewer writes no container round a cell's paragraph (QA on #697),
+    and floats nothing in a cell (#699): a float first is a picture entry, one
+    among the words stays in them unfloated, the space after it dropped."""
     _, _, shapes = _picture_book(tmp_path, [_picture_table(paragraphs)])
     assert shapes == expected
 
@@ -3948,6 +3949,54 @@ def test_a_box_in_a_cell_keeps_its_floats_unwrapped(tmp_path):
     _, cell, _ = _picture_book(tmp_path, [_picture_table([box])])
     (inner,) = [e for e in cell["$146"] if str(e["$159"]) == "$270"]
     assert [str(k["$159"]) for k in inner["$146"]] == ["$271", "$269"]
+
+
+def _sized_pic(size, href="a.png"):
+    return f"\x00IMG\x01{href}\x01x\x01{size}\x00"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "size, expected",
+    [
+        ("w=40", {"$56": "100$314", "$65": "18$318"}),
+        ("w=120px", {"$56": "100$314", "$65": "54$318"}),
+        ("w=2em", {"$56": "100$314", "$65": "2$308"}),
+        ("w=50%", {"$56": "50$314", "$65": "50$314"}),
+        ("h=50%", {"$57": "50$314"}),
+        ("h=3em", {"$56": "100$314", "$65": "4$308"}),
+    ],
+    ids=["attribute", "px", "em", "percent", "percent-height", "em-height"],
+)
+def test_a_sized_picture_alone_in_a_cell_keeps_its_size(tmp_path, size, expected):
+    """Kindle Previewer 4.0.3 caps a cell's picture at the markup's width in
+    `$65` (px at 0.45pt) and gives `$56` a share of the cell from its own
+    layout; kfxgen writes 100%, the same width while the cell is as wide.
+    A % width is both, a % height `$57`, a height alone its shape's width
+    (a.png is 400 x 300: 3em high is 4em wide) (#698)."""
+    frags, cell, _ = _picture_book(
+        tmp_path, [_picture_table([_para(_sized_pic(size))])]
+    )
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    (picture,) = cell["$146"]
+    style = styles[str(picture["$157"])]
+    got = {
+        str(k): f"{v['$307']}{v['$306']}"
+        for k, v in style.items()
+        if str(k) in ("$56", "$57", "$65")
+    }
+    assert got == expected
+    assert str(style["$546"]) == "$377"
+
+
+@pytest.mark.unit
+def test_a_box_in_a_box_in_a_cell_keeps_its_floats_unwrapped(tmp_path):
+    """The cell's mark reaches boxes within boxes (#700)."""
+    inner = _box_block([_para(f"{_float_pic()}B2 words in nested boxes.")])
+    _, cell, _ = _picture_book(tmp_path, [_picture_table([_box_block([inner])])])
+    (outer,) = [e for e in cell["$146"] if str(e["$159"]) == "$270"]
+    (box,) = [e for e in outer["$146"] if str(e["$159"]) == "$270"]
+    assert [str(k["$159"]) for k in box["$146"]] == ["$271", "$269"]
 
 
 @pytest.mark.unit

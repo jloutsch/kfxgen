@@ -141,12 +141,12 @@ def _inline_length_em(m, font_size):
 def _floats_among_words(block):
     """Whether `block` is a paragraph holding words and a floated picture,
     which Kindle Previewer 4.0.3 wraps in a container (#565)."""
-    # Not in a table cell, which Previewer doesn't wrap (QA on #697), nor
-    # preformatted text, which stays as it was.
+    # Not in a table cell or a list item, where Previewer floats nothing
+    # (#699), nor preformatted text, which stays as it was.
     if (
         block.get("float_wrapped")
         or block.get("preformatted")
-        or block.get("in_cell_paragraph")
+        or _floats_unfloated(block)
     ):
         return False
     text = block.get("text") or ""
@@ -158,6 +158,67 @@ def _floats_among_words(block):
         if m.group(4) and not _picture_link(m.start(), spans)
     ]
     return bool(floats) and bool(IMG_TOKEN_RE.sub("", text).strip())
+
+
+def _in_cell(block):
+    """`block` and every block inside it marked as in a table cell, boxes
+    within boxes too (#700)."""
+    out = {**block, "in_cell_paragraph": True}
+    if block.get("blocks"):
+        out["blocks"] = [_in_cell(kid) for kid in block["blocks"]]
+    return out
+
+
+def _floats_unfloated(block):
+    """Whether `block` is in a table cell or a list item, where Kindle
+    Previewer 4.0.3 writes a floated picture unfloated (#699)."""
+    return bool(block.get("in_cell_paragraph") or block.get("in_list"))
+
+
+def _unfloated_floats_in_words(block):
+    """Whether `block` holds words and a floated picture where Previewer
+    writes it unfloated (#699): a cell or a list item."""
+    if block.get("float_wrapped") or block.get("preformatted"):
+        return False
+    if not _floats_unfloated(block):
+        return False
+    text = block.get("text") or ""
+    return any(m.group(4) for m in IMG_TOKEN_RE.finditer(text)) and bool(
+        IMG_TOKEN_RE.sub("", text).strip()
+    )
+
+
+def _cell_picture_style(size, dims):
+    """The style of a picture alone in a table cell, as (key, (value, unit))
+    pairs for `build_cell_picture_style_157`, or None for one the markup
+    doesn't size (#698). Kindle Previewer 4.0.3 caps it at the markup's
+    width in `$65` (px at 0.45pt, em and % as written) and gives `$56` a
+    share of the cell it measures from its own layout (42%, 100%, 15% for
+    the same picture in three tables); kfxgen writes 100%, which shows the
+    same width while the cell is as wide. A % width is both, as Previewer
+    writes it; a % height is `$57`; a height alone gives the width its
+    shape gives."""
+    m = _SIZE_HINT_RE.match(size or "")
+    if not m:
+        return None
+    axis, number, unit = m.group(1), float(m.group(2)), m.group(3) or "px"
+    pct = ("100", "$314")
+    if axis == "w":
+        if unit == "%":
+            share = (f"{number:g}", "$314")
+            return (("$56", share), ("$65", share))
+    elif unit == "%":
+        return (("$57", (f"{number:g}", "$314")),)
+    else:
+        w, h = dims or (None, None)
+        if not (w and h):
+            return None
+        number *= w / h
+    if unit == "em":
+        cap = (f"{round(number, 4):g}", "$308")
+    else:
+        cap = (f"{round(number * (0.45 if unit == 'px' else 1.0), 4):g}", "$318")
+    return (("$56", pct), ("$65", cap))
 
 
 def _slice_block(block, a, b):
@@ -3246,6 +3307,18 @@ class NativeKFXGenerator:
         _write_clear(value, clear)
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
+    def build_cell_picture_style_157(self, entity_name, values):
+        """$157 for a picture alone in a table cell the markup sizes (#698):
+        `values` as `_cell_picture_style` gives them, marked `$546: $377`."""
+        self.symtab.create_local_symbol(entity_name)
+        value = IonStruct(IS("$173"), IS(entity_name))
+        for key, (number, unit) in values:
+            value[IS(key)] = IonStruct(
+                IS("$307"), IonDecimal(number), IS("$306"), IS(unit)
+            )
+        value[IS("$546")] = IS("$377")
+        return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
+
     def build_part_style_157(self, entity_name, border=None):
         """$157 for a table row or row group that draws its own border under
         border-collapse, as Kindle Previewer writes it (#264)."""
@@ -4749,7 +4822,9 @@ class NativeKFXGenerator:
             all_chunks.append(chunk)
             return set(mine)
 
-        def _inline_pictures(para, para_spans, offsets, floats_in_words=False):
+        def _inline_pictures(
+            para, para_spans, offsets, floats_in_words=False, unfloat=False
+        ):
             """(text, spans, offsets, pictures) for a paragraph whose words
             hold pictures, or None (#529). Each picture becomes one
             character, U+FFFC, and `pictures` lists (offset, (resource,
@@ -4778,7 +4853,7 @@ class NativeKFXGenerator:
                 # A linked picture is written unfloated, its link kept: the
                 # Voyage drops a floated picture's link (#378).
                 floated = m.group(4) and not _picture_link(m.start(), para_spans)
-                if floated:
+                if floated and not unfloat:
                     extra = ";".join(filter(None, (extra, f"fl={m.group(4)}")))
                 if resource is not None:
                     pictures.append(
@@ -4879,6 +4954,37 @@ class NativeKFXGenerator:
                 del all_chunks[first - 1 :]
             return unplaced
 
+        def _emit_unfloated_paragraph(block):
+            """A paragraph in a table cell or a list item holding words and a
+            floated picture, as Kindle Previewer 4.0.3 writes it (#699): the
+            pictures floated at its start are entries, unfloated, and the
+            rest is one entry with the later floats unfloated among its
+            words, the space after each dropped."""
+            text = block["text"]
+            lead = 0
+            for m in IMG_TOKEN_RE.finditer(text):
+                if (
+                    not m.group(4)
+                    or text[lead : m.start()].strip(_ASCII_SPACE)
+                    or _picture_link(m.start(), block.get("spans") or ())
+                ):
+                    break
+                lead = m.end()
+            unplaced = []
+            rest = {**block, "float_wrapped": True}
+            if lead:
+                head = _slice_block(block, 0, lead)
+                head.pop("heading_level", None)
+                first = len(all_chunks)
+                unplaced += _emit_paragraph(head)
+                for chunk in all_chunks[first:]:
+                    chunk.pop("float", None)
+                rest = _slice_block(rest, lead, len(text))
+                for key in ("margin_above", "space_above", "clear"):
+                    rest.pop(key, None)
+                rest["tight"] = True
+            return unplaced + _emit_paragraph(rest)
+
         def _emit_paragraph(block, inline_pictures=True):
             """A paragraph's chunks: its text, cut at each picture into text
             and image chunks, with spans and anchors placed on the piece
@@ -4895,6 +5001,8 @@ class NativeKFXGenerator:
                     return [k for p in pieces for k in _emit_paragraph(p)]
                 if _floats_among_words(block):
                     return _emit_floated_paragraph(block)
+                if _unfloated_floats_in_words(block):
+                    return _emit_unfloated_paragraph(block)
             preformatted = bool(block.get("preformatted"))
             para = (
                 block["text"].rstrip(_ASCII_SPACE)
@@ -4911,7 +5019,11 @@ class NativeKFXGenerator:
             # Not in a table cell, whose pictures are entries of their own
             # (#262).
             inline = inline_pictures and _inline_pictures(
-                para, para_spans, block_offsets, bool(block.get("float_wrapped"))
+                para,
+                para_spans,
+                block_offsets,
+                bool(block.get("float_wrapped")),
+                _floats_unfloated(block),
             )
             if inline:
                 para, para_spans, block_offsets, pictures = inline
@@ -5230,15 +5342,7 @@ class NativeKFXGenerator:
                             if para.get("type") == "box":
                                 # A bordered or filled block: a box in the
                                 # cell, as Kindle Previewer draws it (#645).
-                                unplaced += _emit_box_chunks(
-                                    {
-                                        **para,
-                                        "blocks": [
-                                            {**kid, "in_cell_paragraph": True}
-                                            for kid in para["blocks"]
-                                        ],
-                                    }
-                                )
+                                unplaced += _emit_box_chunks(_in_cell(para))
                                 continue
                             if IMG_TOKEN_RE.search(para["text"]):
                                 # A picture alone, or alone on its line, is
@@ -6592,11 +6696,24 @@ class NativeKFXGenerator:
                     entry_emphasis_spans.append(None)
                     continue
                 if chunk.get("type") == "image":
-                    entry_styles.append(
-                        None
-                        if chunk.get("in_cell")
-                        else _image_style_for(chunk) or story_names[ch_idx]
-                    )
+                    if chunk.get("in_cell"):
+                        cell_style = _cell_picture_style(
+                            chunk.get("size"),
+                            resource_to_dims.get(chunk.get("resource")),
+                        )
+                        entry_styles.append(
+                            _allocate_style(
+                                "_cpic",
+                                builder=self.build_cell_picture_style_157,
+                                values=cell_style,
+                            )
+                            if cell_style
+                            else None
+                        )
+                    else:
+                        entry_styles.append(
+                            _image_style_for(chunk) or story_names[ch_idx]
+                        )
                     entry_link_targets.append(None)
                     entry_link_styles.append(None)
                     entry_link_text_lengths.append(None)

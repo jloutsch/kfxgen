@@ -5054,6 +5054,17 @@ def extract_blocks_from_html(
                         ),
                         # A table row written as a paragraph (#219).
                         "row": _local_tag(elem.tag) == "tr",
+                        # In a list item: Previewer floats no picture there
+                        # (#699).
+                        **(
+                            {"in_list": True}
+                            if _local_tag(elem.tag) == "li"
+                            or any(
+                                isinstance(a.tag, str) and _local_tag(a.tag) == "li"
+                                for a in elem.iterancestors()
+                            )
+                            else {}
+                        ),
                         # Its text as a producer writes it into a TOC label:
                         # the heading match reads it (#402, #404).
                         **(

@@ -311,3 +311,39 @@ def test_a_linked_float_first_keeps_the_next_float_in_the_words(tmp_path):
     )
     (wrapper,) = [n for n in story if n[0] == "box" and set(n[2]) <= {"$47", "$49"}]
     assert [k[0] for k in wrapper[3]] == ["mixed"]
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        "L1 item <img src='b.jpg' alt='a' style='float:left;width:20%'/> words.",
+        "<img src='b.jpg' alt='a' style='float:right;width:20%'/>L2 lead item.",
+    ],
+    ids=["middle", "first"],
+)
+def test_a_list_items_float_is_unfloated_in_its_words(tmp_path, item):
+    """Previewer floats nothing in a list item (#699): the picture stays in
+    the item's words, unfloated, and the item isn't wrapped. kfxgen writes
+    the bullet as text, so a float first stays after it in the words."""
+    story, _ = _story(tmp_path, f"<h1>One</h1><ul><li>{item}</li></ul>")
+    assert not [
+        n for n in _walk(story) if n[0] == "box" and set(n[2]) <= {"$47", "$49"}
+    ]
+    (mixed,) = [n for n in _walk(story) if n[0] == "mixed"]
+    (pic,) = [p for p in mixed[1] if not isinstance(p, str)]
+    assert "$140" not in pic[1] and pic[1]["$56"] == "6.4$308"
+
+
+def test_a_float_first_in_a_list_items_second_paragraph_is_unfloated(tmp_path):
+    """A list item's later paragraph has no bullet before its float: the
+    picture is an entry of its own, not floated (#699)."""
+    story, _ = _story(
+        tmp_path,
+        "<h1>One</h1><ul><li><p>L3 first.</p><p><img src='b.jpg' alt='a' "
+        "style='float:left;width:20%'/>L3 second paragraph.</p></li></ul>",
+    )
+    pictures = [n for n in _walk(story) if n[0] == "picture"]
+    assert pictures and all("$140" not in p[1] for p in pictures)
+    assert not [
+        n for n in _walk(story) if n[0] == "box" and set(n[2]) <= {"$47", "$49"}
+    ]
