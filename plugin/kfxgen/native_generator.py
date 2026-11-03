@@ -146,8 +146,14 @@ def _floats_among_words(block):
     ):
         return False
     text = block.get("text") or ""
-    tokens = list(IMG_TOKEN_RE.finditer(text))
-    return any(m.group(4) for m in tokens) and bool(IMG_TOKEN_RE.sub("", text).strip())
+    spans = block.get("spans") or ()
+    # A linked picture is written unfloated, its link kept (#378).
+    floats = [
+        m
+        for m in IMG_TOKEN_RE.finditer(text)
+        if m.group(4) and not _picture_link(m.start(), spans)
+    ]
+    return bool(floats) and bool(IMG_TOKEN_RE.sub("", text).strip())
 
 
 def _slice_block(block, a, b):
@@ -4765,7 +4771,10 @@ class NativeKFXGenerator:
                 )
                 at = sum(len(t) for t in text)
                 extra = m.group(5)
-                if m.group(4):
+                # A linked picture is written unfloated, its link kept: the
+                # Voyage drops a floated picture's link (#378).
+                floated = m.group(4) and not _picture_link(m.start(), para_spans)
+                if floated:
                     extra = ";".join(filter(None, (extra, f"fl={m.group(4)}")))
                 if resource is not None:
                     pictures.append(
@@ -4781,7 +4790,7 @@ class NativeKFXGenerator:
                     )
                     text.append(INLINE_PICTURE)
                 end = m.end()
-                if m.group(4):
+                if floated:
                     # Previewer drops the space after a floated picture.
                     end += len(para[end:]) - len(para[end:].lstrip(" "))
                 cuts.append((m.start(), end, 1 if resource is not None else 0))
@@ -4822,8 +4831,8 @@ class NativeKFXGenerator:
             text = block["text"]
             lead = 0
             for m in IMG_TOKEN_RE.finditer(text):
-                # A linked float stays in the words, floated, as Previewer
-                # keeps it (QA on #697).
+                # A linked picture isn't floated: the Voyage drops a floated
+                # picture's link (#378), so it stays in the words.
                 if (
                     not m.group(4)
                     or text[lead : m.start()].strip(_ASCII_SPACE)

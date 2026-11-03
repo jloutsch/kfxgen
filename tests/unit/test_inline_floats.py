@@ -194,18 +194,38 @@ def _texts(node):
     return ""
 
 
-def test_a_linked_float_first_stays_in_the_words(tmp_path):
-    """Previewer keeps a linked float in the one mixed entry, floated (QA on
-    #697): no picture entry of its own, and only the paragraph's space."""
+def test_a_linked_float_is_not_floated(tmp_path):
+    """The Voyage drops a floated picture's link (#378), so a linked one is
+    written unfloated, its link kept, as on main, where Previewer floats
+    it (QA on #697). Alone, it doesn't make the paragraph a container."""
     story, _ = _story(
         tmp_path,
         "<h1>One</h1><p><a href='c.xhtml'><img src='b.jpg' alt='a' "
         "style='float:left;width:20%'/></a>L1 words after.</p>",
     )
+    # No float container: the only $269 is the link's own (#355).
+    assert not [n for n in story if n[0] == "box" and set(n[2]) <= {"$47", "$49"}]
+    pictures = [n for n in _walk(story) if n[0] == "picture"] + [
+        p
+        for n in _walk(story)
+        if n[0] == "mixed"
+        for p in n[1]
+        if not isinstance(p, str)
+    ]
+    assert pictures and all("$140" not in p[1] for p in pictures)
+
+
+def test_a_linked_picture_among_floats_stays_unfloated(tmp_path):
+    story, _ = _story(
+        tmp_path,
+        "<h1>One</h1><p>K words <img src='b.jpg' alt='f' style='float:left'/> "
+        "and <a href='c.xhtml'><img src='b.jpg' alt='l' style='float:right;"
+        "width:10%'/></a> linked.</p>",
+    )
     (wrapper,) = [n for n in story if n[0] == "box"]
-    ((kind, parts),) = wrapper[3]
-    assert kind == "mixed"
-    assert parts[0][1]["$140"] == "$59" and parts[1:] == ["L1 words after."]
+    ((_m, parts),) = wrapper[3]
+    floated = [p[1].get("$140") for p in parts if not isinstance(p, str)]
+    assert floated == ["$59", None]
 
 
 def test_the_container_takes_the_paragraphs_clear(tmp_path):
