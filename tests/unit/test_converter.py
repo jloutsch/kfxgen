@@ -3189,6 +3189,32 @@ def test_an_anchor_only_after_the_last_row_carries_past_the_table():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "html",
+    [
+        "<table><tr><td>a</td><td>b</td></tr><a/><tr><td>c</td><td>d</td></tr></table>",
+        '<table><tr><td>a</td></tr><a class="x"/><tr><td>c</td></tr></table>',
+        "<table><tbody><tr><td>a</td></tr><a/><tr><td>c</td></tr></tbody></table>",
+        "<table><tr><td>a</td><a/><td>b</td></tr></table>",
+    ],
+    ids=["in-table", "with-a-class", "in-tbody", "in-a-row"],
+)
+def test_an_anchor_with_no_id_or_content_keeps_the_table_native(html):
+    """Kindle Previewer 4.0.3 ignores a bare `<a/>` between a table's rows or
+    cells and writes the table; kfxgen dropped it to paragraphs, a library
+    book's picture tables with it (#702)."""
+    assert _conv._table_is_native(_first_table(html))
+    _, table, _ = _block(html)
+    assert all(r["cells"] for r in table["table"]["rows"])
+
+
+@pytest.mark.unit
+def test_an_anchor_with_content_still_stops_a_native_table():
+    html = "<table><tr><td>a</td></tr><a>loose words</a><tr><td>c</td></tr></table>"
+    assert not _conv._table_is_native(_first_table(html))
+
+
+@pytest.mark.unit
 def test_caption_becomes_its_own_paragraph():
     captions, table = _caption_and_table(
         "<table><caption>Census</caption><tr><td>a</td></tr></table>"
