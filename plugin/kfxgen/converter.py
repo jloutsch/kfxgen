@@ -2222,6 +2222,38 @@ def _is_contentless_anchor(elem):
     )
 
 
+def _foster_parents(table):
+    """`table`, its row groups and its rows: where content that isn't a
+    table part sits outside every cell."""
+    groups = [c for c in table if _local_tag(c.tag) in _ROW_GROUP_TAGS - {"table"}]
+    rows = [r for g in [table, *groups] for r in g if _local_tag(r.tag) == "tr"]
+    return [table, *groups, *rows]
+
+
+def _fostered_content(table):
+    """What sits in `table` outside its cells, in document order: elements
+    (an empty <a> excepted, #702) and loose text, as `(element, None)` or
+    `(None, text)`. Kindle Previewer 4.0.3 moves it all in front of the
+    table, as HTML's parser does, and keeps the table (#704)."""
+    parents = _foster_parents(table)
+    out = []
+    for e in table.iter():
+        if e not in parents:
+            continue
+        if (e.text or "").strip():
+            out.append((None, e.text))
+        for c in e:
+            if not isinstance(c.tag, str):
+                pass
+            elif _local_tag(c.tag) in _TABLE_PART_TAGS | _CELL_TAGS:
+                pass
+            elif not _is_contentless_anchor(c):
+                out.append((c, None))
+            if (c.tail or "").strip():
+                out.append((None, c.tail))
+    return out
+
+
 def _anchors_follow_rows(elem):
     """True when a table's link targets sit after the row each one names.
 
@@ -2501,16 +2533,8 @@ def _table_is_native(table, style_resolver=None):
         if tag in _ROW_GROUP_TAGS or tag == "tr" or tag in _CELL_TAGS:
             if e is not table and (_is_hidden(e, style_resolver) or _is_nav_listing(e)):
                 return False
-        if tag in _ROW_GROUP_TAGS or tag == "tr":
-            if (e.text or "").strip() or any((c.tail or "").strip() for c in e):
-                return False
-        if tag in _ROW_GROUP_TAGS and any(
-            isinstance(c.tag, str)
-            and _local_tag(c.tag) not in _TABLE_PART_TAGS
-            and not _is_contentless_anchor(c)
-            for c in e
-        ):
-            return False
+        # Text and elements outside the cells are moved in front of the
+        # table, as Previewer does, or ignored when an empty <a> (#702, #704).
         if tag == "caption":
             # A hidden caption would be shown; only the first is kept.
             if _is_hidden(e, style_resolver):
@@ -2520,15 +2544,6 @@ def _table_is_native(table, style_resolver=None):
                 return False
         if tag == "tr":
             if _local_tag(e.getparent().tag) not in _ROW_GROUP_TAGS:
-                return False
-            # Only cells and empty anchors are read from a row; an anchor
-            # with no id is ignored there too (#702).
-            if any(
-                isinstance(c.tag, str)
-                and _local_tag(c.tag) not in _CELL_TAGS
-                and not _is_contentless_anchor(c)
-                for c in e
-            ):
                 return False
             rows += 1
         elif tag == "table" and e is not table:
@@ -4609,6 +4624,65 @@ def extract_blocks_from_html(
     # element passes it on, as Kindle Previewer does (#381).
     clear_at = []
 
+    def _emit_fostered(table):
+        """What sits in `table` outside its cells, in front of it, as Kindle
+        Previewer 4.0.3 writes it (#704): loose text and inline elements run
+        together into one paragraph, a block element is walked as its own.
+        The ids carried from before the table name the first of them."""
+        parts = []
+
+        def flush():
+            if not parts:
+                return
+            text, spans, mark_offsets = normalize_runs_with_anchors(parts)
+            parts.clear()
+            if not text.strip():
+                pending_ids.extend(mark_offsets)
+                return
+            ids = _dedupe_keep_order(pending_ids + list(mark_offsets))
+            pending_ids.clear()
+            blocks.append(
+                {
+                    "text": text,
+                    "spans": spans,
+                    "block_style": None,
+                    "anchor_ids": ids,
+                    "anchor_offsets": {aid: mark_offsets.get(aid, 0) for aid in ids},
+                }
+            )
+
+        for el, text in _fostered_content(table):
+            if el is None:
+                parts.append((text, frozenset()))
+            elif _local_tag(el.tag) == "img":
+                # A picture runs with the words, as Previewer writes it. Its
+                # token is built here: `_walk_inline` builds one for a child.
+                if _is_hidden(el, style_resolver):
+                    parts.extend(make_anchor_mark(a) for a in _subtree_anchor_ids(el))
+                    continue
+                parts.extend(make_anchor_mark(a) for a in _own_anchor_ids(el))
+                token = _make_img_token(
+                    _resolve_img_src(base_href, el.get("src", "") or ""),
+                    el.get("alt", "") or "",
+                    _img_size_hint(el, style_resolver),
+                    None,
+                    _img_inline_extras(el, style_resolver),
+                )
+                parts.append((token, frozenset()))
+            elif el.tag in block_tags:
+                flush()
+                _walk(el)
+            else:
+                parts.extend(
+                    _walk_inline(
+                        el,
+                        style_resolver=style_resolver,
+                        is_root=False,
+                        base_href=base_href,
+                    )
+                )
+        flush()
+
     def _take_marker(text, spans, mark_offsets):
         """Prefix the pending list marker, if any, to a text block."""
         # A picture is not text: an image-only item stays an image block,
@@ -4970,6 +5044,9 @@ def extract_blocks_from_html(
                 # row's text, recording none (#282).
                 del nav_listing_at[listings:]
         if native:
+            # Content outside the cells goes first, in front of the caption,
+            # and takes the ids carried from before the table (#704).
+            _emit_fostered(elem)
             # The caption is walked like any block, as the rows build walks
             # it: each block in it is its own paragraph, with its style and
             # ids, and anchors carried from before the table land on its
