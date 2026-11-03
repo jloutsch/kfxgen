@@ -7966,18 +7966,20 @@ def _shape(blocks):
     [
         # Kindle Previewer's two probe shapes (#263): the row's text before and
         # after the inner table stays a row paragraph; the table is its own.
+        # Each cell's text is a paragraph of its own, not run into the next
+        # cell's (#681).
         (
             f"<table><tr><td>A</td><td>{_INNER}</td></tr><tr><td>c</td><td>d</td></tr></table>",
             ["A", ("TABLE", [["in1", "in2"], ["in3", "in4"]]), "c d"],
         ),
         (
             f"<table><tr><td>B</td><td><p>Before.</p>{_INNER}<p>After.</p></td></tr></table>",
-            ["B Before.", ("TABLE", [["in1", "in2"], ["in3", "in4"]]), "After."],
+            ["B", "Before.", ("TABLE", [["in1", "in2"], ["in3", "in4"]]), "After."],
         ),
         # The inner table further down inside its cell.
         (
             f"<table><tr><td>A</td><td><div><span>s</span>{_INNER}</div></td></tr></table>",
-            ["A s", ("TABLE", [["in1", "in2"], ["in3", "in4"]])],
+            ["A", "s", ("TABLE", [["in1", "in2"], ["in3", "in4"]])],
         ),
         # A box inside a box: one table.
         (
@@ -8982,6 +8984,54 @@ def test_rows_written_as_paragraphs_are_not_tight_lines():
     )
     assert [b["text"] for b in blocks] == ["r0", "r1", "r2", "r3"]
     assert _tight(blocks) == []
+
+
+@pytest.mark.unit
+def test_a_header_cell_split_round_a_table_keeps_its_bold():
+    """A `<th>` holding a table: its own text, a paragraph of its own since
+    #681, keeps the cell's bold, which it has no paragraph style to carry
+    (QA on #692)."""
+    body = f"<table><tr><th>Head{_INNER}</th><td>other</td></tr></table>"
+
+    def resolver(elem):
+        return {"font-weight": "bold"} if elem.tag.endswith("th") else {}
+
+    blocks = extract_blocks_from_html(
+        _doc(body), native_tables=True, style_resolver=resolver
+    )
+    texts = {b["text"]: b for b in blocks if b.get("type") is None}
+    assert texts["Head"]["block_style"]["bold"] is True
+    assert not (texts["other"].get("block_style") or {}).get("bold")
+
+
+@pytest.mark.unit
+def test_a_split_cells_weight_and_ids_stay_its_own():
+    """A row split round a table (#681), QA's three rows on #692: a normal
+    paragraph in a bold header cell stays normal; a cell bold by a numeric
+    weight is bold; an id on the cell itself names its first piece."""
+    body = (
+        f"<table><tr><th><p class='n'>Plain</p>{_INNER}</th>"
+        f"<td class='w' id='cid'>Heavy{_INNER}</td></tr></table>"
+    )
+
+    def resolver(elem):
+        if elem.tag.endswith("th"):
+            return {"font-weight": "bold"}
+        if elem.get("class") == "w":
+            return {"font-weight": "700"}
+        if elem.get("class") == "n":
+            return {"font-weight": "normal"}
+        return {}
+
+    blocks = extract_blocks_from_html(
+        _doc(body), native_tables=True, style_resolver=resolver, base_href="c.xhtml"
+    )
+    texts = {b["text"]: b for b in blocks if b.get("type") is None}
+    assert not texts["Plain"]["block_style"]["bold"]
+    assert texts["Heavy"]["block_style"]["bold"] is True
+    assert "cid" in texts["Heavy"]["anchor_ids"] or "c.xhtml#cid" in (
+        texts["Heavy"].get("anchor_keys") or texts["Heavy"]["anchor_ids"]
+    )
 
 
 @pytest.mark.unit

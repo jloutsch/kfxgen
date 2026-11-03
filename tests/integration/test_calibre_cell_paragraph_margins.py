@@ -152,3 +152,28 @@ def test_a_cell_paragraph_at_the_main_size_says_so(calibre):  # noqa: F811
     _ebook_convert(calibre, epub, kfx, True)
     sizes = {k: _entry_size(kfx, k) for k in ("N1", "N2")}
     assert sizes == {"N1": 1.0, "N2": 1.0}, f"calibre {version}: {sizes}"
+
+
+def test_a_cell_holding_a_table_keeps_its_paragraphs_apart_and_spaced(calibre):  # noqa: F811
+    """A row holding a table (#263's path): Kindle Previewer 4.0.3 splits the
+    outer table round the inner one, and the outer cell's paragraphs keep
+    their margins, 0.833 above and below (#681; my probe, 2026-11-02).
+    kfxgen ran the row's text together, cell into cell ("Q1 outer last
+    words. R1 x"), as lines with no space."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "n681.epub", tmp / "n681.kfx"
+    inner = "<table><tr><td>S1 inner</td><td>S2 inner</td></tr></table>"
+    body = (
+        _p("A0")
+        + f"<table><tr><td>{_p('P1 outer first')}{inner}{_p('Q1 outer last')}</td>"
+        + "<td>R1 x</td></tr></table>"
+        + _p("A1")
+    )
+    _build(epub, {"n.xhtml": body}, [("Nested", "n.xhtml")], "n681")
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _spacing(kfx)
+    assert _near(got["P1"][0], 0.833) and _near(got["P1"][1], 0.833), (
+        f"calibre {version}: P1 {got.get('P1')}"
+    )
+    assert _near(got["Q1"][0], 0.833), f"calibre {version}: Q1 {got.get('Q1')}"
+    assert "R1" in got, f"calibre {version}: R1 joined to Q1, {sorted(got)}"
