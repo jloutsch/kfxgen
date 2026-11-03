@@ -6,20 +6,22 @@ Thirty-one changes since 5.21.0 (29 fixes, a test and a comment). Each fix
 was reviewed, converted through real calibre and compared with Kindle
 Previewer 4.0.3's output for the same book. Most layout changes were checked
 on a Kindle Paperwhite (5.19.2), and several, including the table and cell
-changes, also on the Voyage (5.13.6). Seven follow-ups that only change the
-size of a space kfxgen already wrote were not checked on a Kindle (#672,
-#673, #674, #677, #678, #688, #689). The Oasis was not checked for this
-release.
+changes, also on the Voyage (5.13.6). Nine were not checked on a Kindle:
+seven that only change the size of a space kfxgen already wrote (#672, #673,
+#674, #677, #678, #688, #689), a heading in a boxed table cell no longer
+printing twice (#661), and an invisible `<hr>` first in a file keeping its
+space below (#662). The Oasis was not checked for this release.
 
 **Most books will look different after this update.** kfxgen used to put
 about a line of space above every paragraph without a first-line indent, and
 drop the book's own margins. It now spaces paragraphs, headings, boxes and
 table cells by the book's CSS, as Previewer does. For the first and largest
-of these changes (#639), before and after on the Gutenberg 90 and 200
-library books: the spacing changed in 90 and 199 books, and no book's words
-or links changed. In the whole of The Adventures of Sherlock Holmes,
+of these changes (#639, measured on its first commit, before two review
+fixes), before and after on the Gutenberg 90 and 200 library books: the
+spacing changed in 90 and 199 books, no book's words changed, and the number
+of links didn't change. In the whole of The Adventures of Sherlock Holmes,
 paragraph spacing matched Previewer's in 21 of 2,603 paragraphs before #639
-and in 2,575 after it.
+and in 2,575 on that commit.
 
 ### What readers will notice
 
@@ -62,7 +64,7 @@ and in 2,575 after it.
 ### Known differences from Previewer
 - `!important` in CSS: kfxgen follows it, as calibre does; Previewer ignores
   it. In the samples checked this changed code listings in 3 of 26 library
-  books, all with one stylesheet, and no Gutenberg book (#690, closed).
+  books, which share one stylesheet, and no Gutenberg book (#690, closed).
 - A row split around a nested table lists its cells in their written order;
   Previewer puts a later cell before the nested table.
 - Still open: right-to-left tables (#605), `start`/`end` alignment in
