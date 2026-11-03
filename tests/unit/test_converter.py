@@ -8987,6 +8987,24 @@ def test_rows_written_as_paragraphs_are_not_tight_lines():
 
 
 @pytest.mark.unit
+def test_a_header_cell_split_round_a_table_keeps_its_bold():
+    """A `<th>` holding a table: its own text, a paragraph of its own since
+    #681, keeps the cell's bold, which it has no paragraph style to carry
+    (QA on #692)."""
+    body = f"<table><tr><th>Head{_INNER}</th><td>other</td></tr></table>"
+
+    def resolver(elem):
+        return {"font-weight": "bold"} if elem.tag.endswith("th") else {}
+
+    blocks = extract_blocks_from_html(
+        _doc(body), native_tables=True, style_resolver=resolver
+    )
+    texts = {b["text"]: b for b in blocks if b.get("type") is None}
+    assert texts["Head"]["block_style"]["bold"] is True
+    assert not (texts["other"].get("block_style") or {}).get("bold")
+
+
+@pytest.mark.unit
 def test_rows_split_around_a_nested_table_are_not_tight_lines():
     """Two rows that each hold a nested table (#263): the text after the
     first table and before the second are rows too."""

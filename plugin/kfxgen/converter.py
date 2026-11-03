@@ -4765,7 +4765,27 @@ def extract_blocks_from_html(
             ):
                 continue
             pending_ids.extend(_own_anchor_ids(cell))
+            first = len(blocks)
             _walk_container(cell)
+            weight = (
+                str(
+                    ((style_resolver(cell) if style_resolver else None) or {}).get(
+                        "font-weight"
+                    )
+                    or ""
+                )
+                .strip()
+                .lower()
+            )
+            if weight in ("bold", "bolder") or (
+                weight.isdigit() and int(weight) >= 600
+            ):
+                # A header cell's bold, which its own text, written straight
+                # in it, has no paragraph style to carry (QA on #692).
+                for b in blocks[first:]:
+                    style = b.get("block_style") or {}
+                    if b.get("type") is None and "bold" not in style:
+                        b["block_style"] = {**style, "bold": True}
         for b in blocks[start:]:
             if b.get("type") is not None:
                 continue
