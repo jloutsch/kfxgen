@@ -3990,6 +3990,18 @@ def test_a_sized_picture_alone_in_a_cell_keeps_its_size(tmp_path, size, expected
 
 
 @pytest.mark.unit
+def test_the_words_after_a_cells_lead_float_take_no_space(tmp_path):
+    """Previewer writes the words straight after the picture (QA on #701:
+    without `tight` they got kfxgen's line above)."""
+    frags, cell, _ = _picture_book(
+        tmp_path, [_picture_table([_para(f"{_float_pic()}C9 words after.")])]
+    )
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    (text,) = [e for e in cell["$146"] if e.get("$145")]
+    assert "$47" not in {str(k) for k in styles[str(text["$157"])]}
+
+
+@pytest.mark.unit
 def test_a_box_in_a_box_in_a_cell_keeps_its_floats_unwrapped(tmp_path):
     """The cell's mark reaches boxes within boxes (#700)."""
     inner = _box_block([_para(f"{_float_pic()}B2 words in nested boxes.")])

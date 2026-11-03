@@ -4972,18 +4972,37 @@ class NativeKFXGenerator:
                 lead = m.end()
             unplaced = []
             rest = {**block, "float_wrapped": True}
-            if lead:
-                head = _slice_block(block, 0, lead)
-                head.pop("heading_level", None)
-                first = len(all_chunks)
-                unplaced += _emit_paragraph(head)
-                for chunk in all_chunks[first:]:
-                    chunk.pop("float", None)
-                rest = _slice_block(rest, lead, len(text))
-                for key in ("margin_above", "space_above", "clear"):
-                    rest.pop(key, None)
-                rest["tight"] = True
-            return unplaced + _emit_paragraph(rest)
+            if not lead:
+                return _emit_paragraph(rest)
+            # The paragraph's own margins go on a container round the
+            # pictures and the words, as Previewer writes them (QA on #701);
+            # with none, there's no container, as in a bare cell.
+            above = 0.0 if block.get("tight") else block.get("margin_above") or 0.0
+            below = block.get("margin_below") or 0.0
+            boxed = bool(above or below)
+            if boxed:
+                box = {
+                    "space_above": above,
+                    "space_below": below,
+                    "float_wrapper": True,
+                }
+                if block.get("clear"):
+                    box["clear"] = block["clear"]
+                all_chunks.append({"type": "open", "node": "box", "box": box})
+            inner = {**rest, "tight": True}
+            for key in ("margin_above", "margin_below", "space_above", "clear"):
+                inner.pop(key, None)
+            head = _slice_block(inner, 0, lead)
+            head.pop("heading_level", None)
+            first = len(all_chunks)
+            unplaced += _emit_paragraph(head)
+            for chunk in all_chunks[first:]:
+                chunk.pop("float", None)
+            # The words go on below the pictures with no space of their own.
+            unplaced += _emit_paragraph(_slice_block(inner, lead, len(text)))
+            if boxed:
+                all_chunks.append({"type": "close"})
+            return unplaced
 
         def _emit_paragraph(block, inline_pictures=True):
             """A paragraph's chunks: its text, cut at each picture into text
@@ -5003,6 +5022,16 @@ class NativeKFXGenerator:
                     return _emit_floated_paragraph(block)
                 if _unfloated_floats_in_words(block):
                     return _emit_unfloated_paragraph(block)
+                if block.get("in_list") and not block.get("float_wrapped"):
+                    # A picture alone in a list item isn't floated either,
+                    # as Previewer writes it (QA on #701).
+                    first = len(all_chunks)
+                    unplaced = _emit_paragraph(
+                        {**block, "float_wrapped": True}, inline_pictures
+                    )
+                    for chunk in all_chunks[first:]:
+                        chunk.pop("float", None)
+                    return unplaced
             preformatted = bool(block.get("preformatted"))
             para = (
                 block["text"].rstrip(_ASCII_SPACE)
