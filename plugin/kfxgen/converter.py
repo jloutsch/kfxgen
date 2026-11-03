@@ -2222,6 +2222,22 @@ def _is_contentless_anchor(elem):
     )
 
 
+def _fostered_anchors(table):
+    """The <a> elements with content sitting between `table`'s rows or cells,
+    in document order. Kindle Previewer 4.0.3 moves them in front of the
+    table, as HTML's parser does, and keeps the table (#704)."""
+    return [
+        c
+        for e in table.iter()
+        if _local_tag(e.tag) in _ROW_GROUP_TAGS | {"tr"}
+        and (e is table or not _local_tag(e.tag) == "table")
+        for c in e
+        if isinstance(c.tag, str)
+        and _local_tag(c.tag) == "a"
+        and not _is_contentless_anchor(c)
+    ]
+
+
 def _anchors_follow_rows(elem):
     """True when a table's link targets sit after the row each one names.
 
@@ -2504,10 +2520,12 @@ def _table_is_native(table, style_resolver=None):
         if tag in _ROW_GROUP_TAGS or tag == "tr":
             if (e.text or "").strip() or any((c.tail or "").strip() for c in e):
                 return False
+        # An <a> there, with content or none, is moved out or ignored, as
+        # Previewer does (#702, #704).
         if tag in _ROW_GROUP_TAGS and any(
             isinstance(c.tag, str)
             and _local_tag(c.tag) not in _TABLE_PART_TAGS
-            and not _is_contentless_anchor(c)
+            and _local_tag(c.tag) != "a"
             for c in e
         ):
             return False
@@ -2521,12 +2539,12 @@ def _table_is_native(table, style_resolver=None):
         if tag == "tr":
             if _local_tag(e.getparent().tag) not in _ROW_GROUP_TAGS:
                 return False
-            # Only cells and empty anchors are read from a row; an anchor
-            # with no id is ignored there too (#702).
+            # Only cells and anchors are read from a row: an empty one is
+            # ignored (#702), one with content moved out (#704).
             if any(
                 isinstance(c.tag, str)
                 and _local_tag(c.tag) not in _CELL_TAGS
-                and not _is_contentless_anchor(c)
+                and _local_tag(c.tag) != "a"
                 for c in e
             ):
                 return False
@@ -4609,6 +4627,34 @@ def extract_blocks_from_html(
     # element passes it on, as Kindle Previewer does (#381).
     clear_at = []
 
+    def _emit_fostered(table):
+        """The words of the <a> elements between `table`'s rows or cells, as
+        one paragraph before it: Kindle Previewer 4.0.3 moves them there and
+        joins them, as HTML's parser does (#704). Their links and ids come
+        with them."""
+        parts = []
+        for a in _fostered_anchors(table):
+            parts.extend(
+                _walk_inline(
+                    a, style_resolver=style_resolver, is_root=False, base_href=base_href
+                )
+            )
+        if not parts:
+            return
+        text, spans, mark_offsets = normalize_runs_with_anchors(parts)
+        if not text.strip():
+            return
+        ids = _dedupe_keep_order(list(mark_offsets))
+        blocks.append(
+            {
+                "text": text,
+                "spans": spans,
+                "block_style": None,
+                "anchor_ids": ids,
+                "anchor_offsets": {aid: mark_offsets.get(aid, 0) for aid in ids},
+            }
+        )
+
     def _take_marker(text, spans, mark_offsets):
         """Prefix the pending list marker, if any, to a text block."""
         # A picture is not text: an image-only item stays an image block,
@@ -4996,6 +5042,7 @@ def extract_blocks_from_html(
                 )
                 table["anchor_offsets"] = dict.fromkeys(table["anchor_ids"], 0)
                 pending_ids.clear()
+            _emit_fostered(elem)
             blocks.append(table)
             native_made.add(id(elem))
             pending_ids.extend(trailing)

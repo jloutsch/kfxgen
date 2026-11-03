@@ -3210,19 +3210,57 @@ def test_an_anchor_with_no_id_or_content_keeps_the_table_native(html):
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "inside",
-    ["loose words", "<span>words</span>", '<img src="p.jpg"/>'],
+    ("inside", "text"),
+    [
+        ("loose words", "loose words"),
+        ("<span>span words</span>", "span words"),
+        ('<img src="p.jpg"/>', None),
+    ],
     ids=["text", "element", "picture"],
 )
-def test_an_anchor_with_content_still_stops_a_native_table(inside):
-    """An `<a>` holding words or a picture isn't skipped: a native table
-    would drop them (QA on #703: with child elements counted as no content,
-    a span's words and a picture vanished)."""
+def test_an_anchor_with_content_is_moved_before_the_table(inside, text):
+    """Kindle Previewer 4.0.3 moves an `<a>` with content from between a
+    table's rows to just before the table, as HTML's parser does, and keeps
+    the table (#704). Nothing is lost: words and pictures alike (QA on #703)."""
     html = (
         f'<table><tr><td>a</td></tr><a href="#x">{inside}</a>'
         "<tr><td>c</td></tr></table>"
     )
-    assert not _conv._table_is_native(_first_table(html))
+    assert _conv._table_is_native(_first_table(html))
+    blocks = _conv.extract_blocks_from_html(
+        _doc(html), native_tables=True, base_href="c.xhtml"
+    )
+    assert [b.get("type") for b in blocks] == [None, "table"]
+    if text:
+        assert blocks[0]["text"] == text
+        assert any(
+            _conv._is_link_flag(f) for _s, _n, fl in blocks[0]["spans"] for f in fl
+        )
+    else:
+        assert "\x00IMG" in blocks[0]["text"]
+    assert _cells(blocks[1]) == [["a"], ["c"]]
+
+
+@pytest.mark.unit
+def test_anchors_moved_from_a_table_join_into_one_paragraph_with_their_ids():
+    """Previewer joins them with no space between, as the parser does: "Y2
+    named wordsY4 second link". A named one keeps its id (#704)."""
+    html = (
+        "<table><tr><td>a</td></tr><a id='y2'>Y2 named words</a><tr><td>b</td></tr>"
+        "<a href='#z'>Y4 second link</a><tr><td>c</td></tr></table>"
+    )
+    blocks = _conv.extract_blocks_from_html(_doc(html), native_tables=True)
+    assert blocks[0]["text"] == "Y2 named wordsY4 second link"
+    assert blocks[0]["anchor_ids"] == ["y2"]
+    assert blocks[1]["type"] == "table"
+
+
+@pytest.mark.unit
+def test_an_anchor_in_a_row_is_moved_before_the_table():
+    html = "<table><tr><td>a</td><a href='#x'>W2 in row</a><td>b</td></tr></table>"
+    blocks = _conv.extract_blocks_from_html(_doc(html), native_tables=True)
+    assert blocks[0]["text"] == "W2 in row"
+    assert _cells(blocks[1]) == [["a", "b"]]
 
 
 @pytest.mark.unit
