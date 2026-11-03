@@ -3209,8 +3209,19 @@ def test_an_anchor_with_no_id_or_content_keeps_the_table_native(html):
 
 
 @pytest.mark.unit
-def test_an_anchor_with_content_still_stops_a_native_table():
-    html = "<table><tr><td>a</td></tr><a>loose words</a><tr><td>c</td></tr></table>"
+@pytest.mark.parametrize(
+    "inside",
+    ["loose words", "<span>words</span>", '<img src="p.jpg"/>'],
+    ids=["text", "element", "picture"],
+)
+def test_an_anchor_with_content_still_stops_a_native_table(inside):
+    """An `<a>` holding words or a picture isn't skipped: a native table
+    would drop them (QA on #703: with child elements counted as no content,
+    a span's words and a picture vanished)."""
+    html = (
+        f'<table><tr><td>a</td></tr><a href="#x">{inside}</a>'
+        "<tr><td>c</td></tr></table>"
+    )
     assert not _conv._table_is_native(_first_table(html))
 
 
