@@ -7966,18 +7966,20 @@ def _shape(blocks):
     [
         # Kindle Previewer's two probe shapes (#263): the row's text before and
         # after the inner table stays a row paragraph; the table is its own.
+        # Each cell's text is a paragraph of its own, not run into the next
+        # cell's (#681).
         (
             f"<table><tr><td>A</td><td>{_INNER}</td></tr><tr><td>c</td><td>d</td></tr></table>",
             ["A", ("TABLE", [["in1", "in2"], ["in3", "in4"]]), "c d"],
         ),
         (
             f"<table><tr><td>B</td><td><p>Before.</p>{_INNER}<p>After.</p></td></tr></table>",
-            ["B Before.", ("TABLE", [["in1", "in2"], ["in3", "in4"]]), "After."],
+            ["B", "Before.", ("TABLE", [["in1", "in2"], ["in3", "in4"]]), "After."],
         ),
         # The inner table further down inside its cell.
         (
             f"<table><tr><td>A</td><td><div><span>s</span>{_INNER}</div></td></tr></table>",
-            ["A s", ("TABLE", [["in1", "in2"], ["in3", "in4"]])],
+            ["A", "s", ("TABLE", [["in1", "in2"], ["in3", "in4"]])],
         ),
         # A box inside a box: one table.
         (

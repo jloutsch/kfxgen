@@ -4740,58 +4740,40 @@ def extract_blocks_from_html(
         return out
 
     def _walk_split_row(row):
-        """A row holding a table, on the rows path (#263). The row's text
-        before and after each table is a row paragraph, styled as the row;
-        each table is walked as a block of its own, so it can be native.
-        Nesting a table in a table cell is never tried on a device; nothing
-        is nested here."""
-        bstyle = None
+        """A row holding a table, on the rows path (#263). Each cell is
+        walked as the body is: its paragraphs with their margins, its own
+        text a paragraph of its own, each table a block of its own, so it can
+        be native, as Kindle Previewer 4.0.3 splits the outer table round the
+        inner one (#681: its cell paragraphs keep 0.833 above and below).
+        Before, the row's text was run together, cell into cell, as lines
+        with no space. Nesting a table in a table cell is never tried on a
+        device; nothing is nested here."""
+        align = None
         if style_resolver is not None:
             css = style_resolver(row)
             if css is not None:
-                bstyle = compute_block_style(css)
-            if bstyle is not None:
-                bstyle["align"] = _row_align(row, bstyle["align"], style_resolver)
-        preformatted = _is_preformatted(row, style_resolver)
-        segment = []
-
-        def flush():
-            text, spans, mark_offsets = normalize_runs_with_anchors(segment)
-            segment.clear()
-            ids = pending_ids[:]
-            pending_ids.clear()
-            ids.extend(mark_offsets)
-            if not text.strip():
-                # Ids with no text of their own name what follows: the next
-                # piece, or the table's start.
-                pending_ids.extend(ids)
-                return
-            text, spans, mark_offsets = _take_marker(text, spans, mark_offsets)
-            block_ids = _dedupe_keep_order(ids)
-            blocks.append(
-                {
-                    "text": text,
-                    "spans": spans,
-                    "block_style": dict(bstyle) if bstyle else bstyle,
-                    "preformatted": preformatted,
-                    "anchor_ids": block_ids,
-                    "heading": False,
-                    "row": True,
-                    "anchor_offsets": {
-                        aid: mark_offsets.get(aid, 0) for aid in block_ids
-                    },
-                }
-            )
-
-        for part in _walk_inline(
-            row, style_resolver=style_resolver, base_href=base_href, split_tables=True
-        ):
-            if part[0] is _TABLE_SPLIT:
-                flush()
-                _walk(part[1])
-            else:
-                segment.append(part)
-        flush()
+                align = _row_align(
+                    row, compute_block_style(css)["align"], style_resolver
+                )
+        # The row's own ids name its first piece.
+        pending_ids.extend(_own_anchor_ids(row))
+        start = len(blocks)
+        for cell in row:
+            if not isinstance(cell.tag, str) or _local_tag(cell.tag) not in (
+                "td",
+                "th",
+            ):
+                continue
+            pending_ids.extend(_own_anchor_ids(cell))
+            _walk_container(cell)
+        for b in blocks[start:]:
+            if b.get("type") is not None:
+                continue
+            # A table's rows written as paragraphs keep their space (#219),
+            # and the row's alignment where they set none of their own.
+            b["row"] = True
+            if align and not (b.get("block_style") or {}).get("align"):
+                b["block_style"] = {**(b.get("block_style") or {}), "align": align}
 
     def _is_block_at_body(child):
         if not isinstance(child.tag, str):
