@@ -106,13 +106,17 @@ def _inline_float_style(side, m, width_px, height_px):
     """The style key of a floated picture inside a paragraph's words, as
     Kindle Previewer 4.0.3 writes it (#565, probed): ("float", side, `$56`
     as a % of its 512 px column, whether `$65` 100% caps it, whether the
-    markup sizes it). A % width as written, an em one at 16px with the cap,
-    px and pt as pixels; a height alone gives the width its shape gives
-    (QA on #697: 3em high, 12.784%); with neither, its own pixels."""
+    markup sizes it, a % height or None). A % width as written, an em one
+    at 16px with the cap, px and pt as pixels. A height alone gives the
+    width its shape gives, px at 0.45pt as #541 measured (QA on #697: 3em
+    high is 12.784%, 40px 6.392%); a % height stays a %, with no width.
+    With neither, its own pixels."""
     pct, fill = width_px / 512 * 100, False
-    if m and m.group(1) == "h" and (m.group(3) or "px") != "%":
+    if m and m.group(1) == "h" and m.group(3) == "%":
+        return ("float", side, None, False, True, f"{float(m.group(2)):g}")
+    if m and m.group(1) == "h":
         number, unit = float(m.group(2)), m.group(3) or "px"
-        h = number * {"em": 16.0, "pt": 4 / 3}.get(unit, 1.0)
+        h = number * {"em": 16.0, "pt": 4 / 3}.get(unit, 0.6)
         pct = h * width_px / height_px / 512 * 100
     elif m and m.group(1) == "w":
         number, unit = float(m.group(2)), m.group(3) or "px"
@@ -122,7 +126,7 @@ def _inline_float_style(side, m, width_px, height_px):
             pct, fill = number * 16 / 512 * 100, True
         else:
             pct = number * (4 / 3 if unit == "pt" else 1.0) / 512 * 100
-    return ("float", side, f"{round(pct, 5):g}", fill, bool(m))
+    return ("float", side, f"{round(pct, 5):g}", fill, bool(m), None)
 
 
 def _inline_length_em(m, font_size):
@@ -1863,13 +1867,13 @@ class NativeKFXGenerator:
             if size not in self._inline_picture_styles:
                 name = f"s_ipic{len(self._inline_picture_styles)}"
                 self.symtab.create_local_symbol(name)
-                side, pct, fill, sized = size[1:]
-                value = IonStruct(
-                    IS("$140"),
-                    IS("$59" if side == "left" else "$61"),
-                    IS("$56"),
-                    IonStruct(IS("$307"), IonDecimal(pct), IS("$306"), IS("$314")),
-                )
+                side, pct, fill, sized, pct_h = size[1:]
+                value = IonStruct(IS("$140"), IS("$59" if side == "left" else "$61"))
+                for key, v in (("$56", pct), ("$57", pct_h)):
+                    if v is not None:
+                        value[IS(key)] = IonStruct(
+                            IS("$307"), IonDecimal(v), IS("$306"), IS("$314")
+                        )
                 if fill:
                     value[IS("$65")] = IonStruct(
                         IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")
@@ -5226,7 +5230,15 @@ class NativeKFXGenerator:
                             if para.get("type") == "box":
                                 # A bordered or filled block: a box in the
                                 # cell, as Kindle Previewer draws it (#645).
-                                unplaced += _emit_box_chunks(para)
+                                unplaced += _emit_box_chunks(
+                                    {
+                                        **para,
+                                        "blocks": [
+                                            {**kid, "in_cell_paragraph": True}
+                                            for kid in para["blocks"]
+                                        ],
+                                    }
+                                )
                                 continue
                             if IMG_TOKEN_RE.search(para["text"]):
                                 # A picture alone, or alone on its line, is

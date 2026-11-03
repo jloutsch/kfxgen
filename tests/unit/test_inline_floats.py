@@ -271,3 +271,43 @@ def test_a_height_alone_gives_a_float_its_width(tmp_path):
     (wrapper,) = [n for n in story if n[0] == "box"]
     ((_m, parts),) = wrapper[3]
     assert parts[1][1]["$56"] == "12.7841$314"
+
+
+@pytest.mark.parametrize(
+    ("height", "expected"),
+    [
+        ("40px", {"$56": "6.39205$314"}),
+        ("30pt", {"$56": "10.6534$314"}),
+        ("50%", {"$57": "50$314"}),
+    ],
+    ids=["px", "pt", "percent"],
+)
+def test_a_floats_height_as_previewer_reads_it(tmp_path, height, expected):
+    """Previewer (QA on #697): px at 0.45pt as #541 measured (40px high is
+    6.392%), pt with 1em = 12pt, and a % height kept as a %, no width."""
+    story, _ = _story(
+        tmp_path,
+        f"<h1>One</h1><p>H words <img src='b.jpg' alt='a' "
+        f"style='float:left;height:{height}'/> more.</p>",
+    )
+    (wrapper,) = [n for n in story if n[0] == "box"]
+    ((_m, parts),) = wrapper[3]
+    pic = parts[1][1]
+    assert {k: pic.get(k) for k in ("$56", "$57")} == {
+        "$56": expected.get("$56"),
+        "$57": expected.get("$57"),
+    }
+
+
+def test_a_linked_float_first_keeps_the_next_float_in_the_words(tmp_path):
+    """A linked float first ends the run of floats taken out ahead: the
+    float after it stays in the one entry (QA on #697: dropping the link
+    check gave the picture an entry of its own, 1.833lh above it)."""
+    story, _ = _story(
+        tmp_path,
+        "<h1>One</h1><p><a href='c.xhtml'><img src='b.jpg' alt='l' "
+        "style='float:left;width:10%'/></a><img src='b.jpg' alt='f' "
+        "style='float:right;width:10%'/>W words after.</p>",
+    )
+    (wrapper,) = [n for n in story if n[0] == "box" and set(n[2]) <= {"$47", "$49"}]
+    assert [k[0] for k in wrapper[3]] == ["mixed"]
