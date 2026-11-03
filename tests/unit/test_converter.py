@@ -3274,6 +3274,104 @@ def test_a_hidden_anchor_between_rows_writes_nothing():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("html", "moved"),
+    [
+        ("<table><tr>LOOSE<td>a</td></tr></table>", ["LOOSE"]),
+        ("<table><tr><td>a</td>between<td>b</td></tr></table>", ["between"]),
+        ("<table><tbody>stray<tr><td>a</td></tr></tbody></table>", ["stray"]),
+        ("<table>loose<tr><td>a</td></tr></table>", ["loose"]),
+        (
+            "<table><tr><td>a</td></tr>after a row<tr><td>b</td></tr></table>",
+            ["after a row"],
+        ),
+        (
+            '<table><tr><td>a</td></tr><a id="x"></a>after an anchor<tr><td>b</td>'
+            "</tr></table>",
+            ["after an anchor"],
+        ),
+        ("<table><p>x</p><tr><td>a</td></tr></table>", ["x"]),
+        ("<table><tbody><p>x</p><tr><td>a</td></tr></tbody></table>", ["x"]),
+        ("<table><div>x</div><tr><td>a</td></tr></table>", ["x"]),
+        ("<table><tr><p>kept</p><td>a</td></tr></table>", ["kept"]),
+        ("<table><tr><span>kept</span><td>a</td></tr></table>", ["kept"]),
+        (
+            "<table><tr><td>a</td></tr><span>M2 span</span><p>M3 para</p>"
+            "<b>M4 bold</b> tail<tr><td>b</td></tr></table>",
+            ["M2 span", "M3 para", "M4 bold tail"],
+        ),
+    ],
+    ids=[
+        "text-in-tr",
+        "text-between-cells",
+        "stray-text-in-tbody",
+        "text-in-table",
+        "text-after-a-row",
+        "text-after-an-anchor",
+        "p-in-table",
+        "p-in-tbody",
+        "div-in-table",
+        "p-in-tr",
+        "span-in-tr",
+        "inline-block-inline",
+    ],
+)
+def test_content_outside_the_cells_is_moved_before_the_table(html, moved):
+    """Kindle Previewer 4.0.3 moves loose text and any element outside a
+    table's cells in front of the table, as HTML's parser does, and keeps the
+    table: inline pieces run together, a block is its own paragraph (#704).
+    These used to make kfxgen write the whole table as paragraphs (#219), so
+    nothing is lost either way."""
+    assert _conv._table_is_native(_first_table(html))
+    blocks = _conv.extract_blocks_from_html(_doc(html), native_tables=True)
+    *before, table = blocks
+    assert table["type"] == "table"
+    assert [b["text"].strip() for b in before] == moved
+
+
+@pytest.mark.unit
+def test_a_picture_outside_the_cells_runs_with_the_moved_words():
+    """Previewer writes `<b>S2 bold</b><img/>` from between rows as one entry,
+    words then picture; the picture isn't lost (#704)."""
+    html = (
+        "<table><tr><td>a</td></tr><b>S2 bold</b><img src='p.jpg' alt='x'/>"
+        "<tr><td>b</td></tr></table>"
+    )
+    blocks = _conv.extract_blocks_from_html(_doc(html), native_tables=True)
+    assert [b.get("type") for b in blocks] == [None, "table"]
+    assert blocks[0]["text"].startswith("S2 bold\x00IMG\x01p.jpg")
+
+
+@pytest.mark.unit
+def test_ids_before_a_table_name_the_moved_words():
+    """A link to an id just before the table lands on the words moved in front
+    of it, as in Previewer's file (QA on #705)."""
+    html = (
+        '<div><a id="pre1"></a><table><tr><td>a</td></tr><a href="#x">moved</a>'
+        "<tr><td>b</td></tr></table></div>"
+    )
+    blocks = _conv.extract_blocks_from_html(
+        _doc(html), native_tables=True, base_href="c.xhtml"
+    )
+    assert blocks[0]["text"] == "moved" and "pre1" in blocks[0]["anchor_ids"]
+    assert "pre1" not in blocks[1]["table"]["anchor_ids"]
+
+
+@pytest.mark.unit
+def test_moved_words_go_before_the_caption():
+    """Previewer writes the moved words, then the table with its caption
+    (QA on #705)."""
+    html = (
+        "<table><caption>Cap</caption><tr><td>a</td></tr><a href='#x'>moved</a>"
+        "<tr><td>b</td></tr></table>"
+    )
+    blocks = _conv.extract_blocks_from_html(
+        _doc(html), native_tables=True, base_href="c.xhtml"
+    )
+    assert [b["text"] for b in blocks[:2]] == ["moved", "Cap"]
+
+
+@pytest.mark.unit
 def test_an_anchor_in_a_row_is_moved_before_the_table():
     html = "<table><tr><td>a</td><a href='#x'>W2 in row</a><td>b</td></tr></table>"
     blocks = _conv.extract_blocks_from_html(_doc(html), native_tables=True)
@@ -5104,14 +5202,7 @@ def test_a_caption_without_a_resolver_has_no_block_style():
         '<table><tr><td>a</td><td hidden="hidden">SECRET</td></tr></table>',
         '<table><tr epub:type="page-list"><td>1</td></tr><tr><td>a</td></tr></table>',
         '<table><tr><td>a</td></tr><tr class="toc"><td>Listing</td></tr></table>',
-        "<table><tr>LOOSE<td>a</td></tr></table>",
-        "<table><tr><td>a</td>between<td>b</td></tr></table>",
         "<table><form><tr><td>a</td></tr></form><tr><td>b</td></tr></table>",
-        "<table><tbody>stray<tr><td>a</td></tr></tbody></table>",
-        "<table>loose<tr><td>a</td></tr></table>",
-        "<table><tr><td>a</td></tr>after a row<tr><td>b</td></tr></table>",
-        '<table><tr><td>a</td></tr><a id="x"></a>after an anchor<tr><td>b</td></tr>'
-        "</table>",
     ],
     ids=[
         "hidden-tr",
@@ -5119,13 +5210,7 @@ def test_a_caption_without_a_resolver_has_no_block_style():
         "hidden-td",
         "page-list-tr",
         "toc-class-tr",
-        "text-in-tr",
-        "text-between-cells",
         "tr-under-form",
-        "stray-text-in-tbody",
-        "text-in-table",
-        "text-after-a-row",
-        "text-after-an-anchor",
     ],
 )
 def test_markup_only_the_row_path_honours_falls_back(html):
@@ -5240,17 +5325,15 @@ def test_links_to_a_table_its_preceding_anchor_or_its_file_target_a_row(tmp_path
 @pytest.mark.parametrize(
     "html, native",
     [
-        ("<table><p>x</p><tr><td>a</td></tr></table>", False),
-        ("<table><tbody><p>x</p><tr><td>a</td></tr></tbody></table>", False),
-        ("<table><div>x</div><tr><td>a</td></tr></table>", False),
         ("<table><colgroup><col/></colgroup><tr><td>a</td></tr></table>", True),
         ("<table><!-- note --><tr><td>a</td></tr></table>", True),
     ],
-    ids=["p-in-table", "p-in-tbody", "div-in-table", "colgroup", "comment"],
+    ids=["colgroup", "comment"],
 )
 def test_a_non_row_element_in_a_table_or_row_group_falls_back(html, native):
     # The native walk reads only rows, row groups, the caption and empty
-    # anchors there; anything else would lose its text. (#219)
+    # anchors there. Other content is moved in front of the table since #704
+    # (`test_content_outside_the_cells_is_moved_before_the_table`). (#219)
     assert _conv._table_is_native(_first_table(html)) is native
 
 
@@ -5258,18 +5341,16 @@ def test_a_non_row_element_in_a_table_or_row_group_falls_back(html, native):
 @pytest.mark.parametrize(
     "html",
     [
-        "<table><tr><p>lost</p><td>a</td></tr></table>",
-        "<table><tr><span>lost</span><td>a</td></tr></table>",
         '<table><caption hidden="hidden">SECRET</caption><tr><td>a</td></tr></table>',
         "<table><caption>One</caption><caption>Two</caption><tr><td>a</td></tr>"
         "</table>",
     ],
-    ids=["p-in-tr", "span-in-tr", "hidden-caption", "two-captions"],
+    ids=["hidden-caption", "two-captions"],
 )
 def test_row_children_and_captions_the_native_walk_misreads_fall_back(html):
-    # A non-cell element in a row loses its text natively; a hidden caption
-    # would be shown; only the first caption is kept. The row path handles
-    # all three. (#219)
+    # A hidden caption would be shown; only the first caption is kept. The
+    # row path handles both. (#219) A non-cell element in a row is moved in
+    # front of the table since #704.
     assert not _conv._table_is_native(_first_table(html))
 
 
