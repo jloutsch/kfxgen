@@ -3914,6 +3914,42 @@ def test_a_cells_pictures_and_text_are_entries_in_order(tmp_path, paragraphs, ex
     assert shapes == expected
 
 
+def _float_pic(href="a.png"):
+    return f"\x00IMG\x01{href}\x01x\x01\x01left\x00"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "paragraphs, expected",
+    [
+        (
+            [_para(f"{_float_pic()}C1 words in a cell.")],
+            [("picture", False, True), ("text", "C1 words in a cell.")],
+        ),
+        (
+            [_para(f"C2 words {_float_pic()} more.")],
+            [("text", "C2 words"), ("picture", False, True), ("text", "more.")],
+        ),
+    ],
+    ids=["lead", "middle"],
+)
+def test_a_cells_floated_pictures_are_not_wrapped(tmp_path, paragraphs, expected):
+    """Previewer writes no container round a cell's paragraph (QA on #697):
+    a cell keeps its floated pictures as it did before #565's floats."""
+    _, _, shapes = _picture_book(tmp_path, [_picture_table(paragraphs)])
+    assert shapes == expected
+
+
+@pytest.mark.unit
+def test_a_box_in_a_cell_keeps_its_floats_unwrapped(tmp_path):
+    """A bordered box in a cell: its paragraphs aren't wrapped either (QA on
+    #697)."""
+    box = _box_block([_para(f"{_float_pic()}B1 words in a boxed cell.")])
+    _, cell, _ = _picture_book(tmp_path, [_picture_table([box])])
+    (inner,) = [e for e in cell["$146"] if str(e["$159"]) == "$270"]
+    assert [str(k["$159"]) for k in inner["$146"]] == ["$271", "$269"]
+
+
 @pytest.mark.unit
 def test_pictures_only_in_cells_allocate_no_picture_width_style(tmp_path):
     # A cell's picture has no style; allocating the width style the body
