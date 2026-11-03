@@ -9005,6 +9005,36 @@ def test_a_header_cell_split_round_a_table_keeps_its_bold():
 
 
 @pytest.mark.unit
+def test_a_split_cells_weight_and_ids_stay_its_own():
+    """A row split round a table (#681), QA's three rows on #692: a normal
+    paragraph in a bold header cell stays normal; a cell bold by a numeric
+    weight is bold; an id on the cell itself names its first piece."""
+    body = (
+        f"<table><tr><th><p class='n'>Plain</p>{_INNER}</th>"
+        f"<td class='w' id='cid'>Heavy{_INNER}</td></tr></table>"
+    )
+
+    def resolver(elem):
+        if elem.tag.endswith("th"):
+            return {"font-weight": "bold"}
+        if elem.get("class") == "w":
+            return {"font-weight": "700"}
+        if elem.get("class") == "n":
+            return {"font-weight": "normal"}
+        return {}
+
+    blocks = extract_blocks_from_html(
+        _doc(body), native_tables=True, style_resolver=resolver, base_href="c.xhtml"
+    )
+    texts = {b["text"]: b for b in blocks if b.get("type") is None}
+    assert not texts["Plain"]["block_style"]["bold"]
+    assert texts["Heavy"]["block_style"]["bold"] is True
+    assert "cid" in texts["Heavy"]["anchor_ids"] or "c.xhtml#cid" in (
+        texts["Heavy"].get("anchor_keys") or texts["Heavy"]["anchor_ids"]
+    )
+
+
+@pytest.mark.unit
 def test_rows_split_around_a_nested_table_are_not_tight_lines():
     """Two rows that each hold a nested table (#263): the text after the
     first table and before the second are rows too."""
