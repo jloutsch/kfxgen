@@ -456,3 +456,50 @@ def test_a_spacer_after_a_padded_paragraph_meets_its_outer_margin(calibre):  # n
     wrong = {k: got[k][0] for k, w in wanted.items() if not _near(got[k][0], w)}
     assert not wrong, f"calibre {version}: {wrong}, Previewer {wanted}"
     assert _near(got["B1"][1], 0.417), f"calibre {version}: B1 = {got['B1']}"
+
+
+def _table_spaces_below(kfx):
+    """Each table's $49, in reading order."""
+    frags = load_fragments(kfx)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    out = []
+
+    def walk(e):
+        e = getattr(e, "value", e)
+        if not hasattr(e, "get"):
+            return
+        if str(e.get("$159")) == "$278":
+            below = styles.get(str(e.get("$157")), {}).get("$49")
+            out.append(None if below is None else round(float(below["$307"]), 3))
+        for k in e.get("$146") or ():
+            walk(k)
+
+    for st in by_type(frags, "$259"):
+        for e in val(st)["$146"]:
+            walk(e)
+    return out
+
+
+def test_a_spacer_after_a_table_that_ends_a_file_keeps_its_space(calibre):  # noqa: F811
+    """A file ending in a table, then spacers: Kindle Previewer 4.0.3 writes
+    their space as the table's $49, 1.594 lh for one spacer, 2.688 for two
+    (my probe, 2026-11-02). kfxgen dropped it: nothing comes after the
+    spacers in the file to take it (#680)."""
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "t680.epub", tmp / "t680.kfx"
+    table = "<table><tr><td>Tc cell</td></tr></table>"
+    _build(
+        epub,
+        {
+            "a.xhtml": _p("A0") + table + SP,
+            "b.xhtml": _p("B0") + table + SP + SP,
+            "c.xhtml": _p("C0"),
+        },
+        [("A", "a.xhtml"), ("B", "b.xhtml"), ("C", "c.xhtml")],
+        "t680",
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    got = _table_spaces_below(kfx)
+    assert len(got) == 2 and _near(got[0], 1.594) and _near(got[1], 2.688), (
+        f"calibre {version}: tables' $49 {got}, Previewer [1.594, 2.688]"
+    )
