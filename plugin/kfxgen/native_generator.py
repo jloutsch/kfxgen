@@ -80,6 +80,28 @@ _INLINE_VALIGN_SYMBOLS = {
 }
 
 
+#: A vertical-align length on a picture in a paragraph's words (#565).
+_VALIGN_LENGTH_RE = re.compile(r"^([-+]?(?:\d+(?:\.\d+)?|\.\d+))(px|pt|em|rem|%)?$")
+_SHIFT_UNITS = {"pt": "$318", "em": "$308", "rem": "$505", "%": "$314"}
+
+
+def _valign_shift(text):
+    """(number, unit symbol) of a vertical-align length, as Kindle Previewer
+    4.0.3 writes it in `$31` (#565, probed): in its own unit, px at 0.45pt
+    and a bare 0 as 0pt. None for anything else."""
+    m = _VALIGN_LENGTH_RE.match(text or "")
+    if not m:
+        return None
+    number, unit = float(m.group(1)), m.group(2)
+    if unit is None:
+        if number:
+            return None
+        unit = "pt"
+    if unit == "px":
+        number, unit = number * 0.45, "pt"
+    return f"{round(number, 5):g}", _SHIFT_UNITS[unit]
+
+
 def _inline_length_em(m, font_size):
     """A size hint's length (`_SIZE_HINT_RE` match, not %) in the
     paragraph's em: em as written, px at 0.45pt and pt with 1em = 12pt."""
@@ -1748,8 +1770,9 @@ class NativeKFXGenerator:
         written, px at 0.45pt and pt with 1em = 12pt (as #541 measured
         margins); its height follows the picture's shape. A height given
         alone is kept the same way, the width following it; a height given
-        with a width is kept too, its shape aside, as is a vertical-align
-        (#565). A picture the markup sizes is marked `$546: $377`, as
+        with a width is kept too, its shape aside, as is a vertical-align,
+        a keyword in `$44` or a length in `$31` (#565). A % height stays a
+        %, with a width only if one is given. A picture the markup sizes is marked `$546: $377`, as
         Previewer marks it."""
         _kind, resource, alt, hint, font_size, extra = item
         extras = dict(e.split("=", 1) for e in (extra or "").split(";") if "=" in e)
@@ -1765,7 +1788,23 @@ class NativeKFXGenerator:
         w_em, h_em, fill = width / scale, height / scale, False
         m = _SIZE_HINT_RE.match(hint or "")
         number, unit = (float(m.group(2)), m.group(3) or "px") if m else (0, "")
-        if m and m.group(1) == "w":
+        given = _SIZE_HINT_RE.match(f"h={extras.get('h', '')}")
+        # A % height stays a %, as Previewer writes it, and so does the
+        # width beside it: an em or % one as written, a px or pt one as a %
+        # of 384pt, the scale #541 measured; none when none is given.
+        pct_h = w_text = None
+        if m and m.group(1) == "h" and unit == "%":
+            pct_h = number
+        elif m and m.group(1) == "w" and given and given.group(3) == "%":
+            pct_h = float(given.group(2))
+            if unit == "em":
+                w_text, fill = f"{round(number, 5):g}", True
+            elif unit == "%":
+                w_text = f"{round(number, 5):g}%"
+            else:
+                pt = number * (0.45 if unit == "px" else 1.0)
+                w_text = f"{round(pt / 384 * 100, 5):g}%"
+        if pct_h is None and m and m.group(1) == "w":
             if unit == "em":
                 w_em, fill = number, True
             elif unit == "%":
@@ -1774,24 +1813,35 @@ class NativeKFXGenerator:
                 pt = number * (0.45 if unit == "px" else 1.0)
                 w_em = pt / 12 / (font_size or 1)
             h_em = w_em * height / width
-            given = _SIZE_HINT_RE.match(f"h={extras.get('h', '')}")
             if given and (given.group(3) or "px") != "%":
                 h_em = _inline_length_em(given, font_size)
-        elif m and unit != "%":
+        elif pct_h is None and m:
             # A height alone, the same rule on the other axis (QA on #564:
             # 2em stays 2em, height="30" is 1.125em).
             h_em = _inline_length_em(m, font_size)
             w_em = h_em * width / height
         valign = _INLINE_VALIGN_SYMBOLS.get(extras.get("va"))
-        size = (f"{round(w_em, 5):g}", f"{round(h_em, 5):g}", fill, bool(m), valign)
+        shift = None if valign else _valign_shift(extras.get("va"))
+        if pct_h is not None:
+            h_text = f"{round(pct_h, 5):g}%"
+        else:
+            w_text, h_text = f"{round(w_em, 5):g}", f"{round(h_em, 5):g}"
+        size = (w_text, h_text, fill, bool(m), valign, shift)
         if size not in self._inline_picture_styles:
             name = f"s_ipic{len(self._inline_picture_styles)}"
             self.symtab.create_local_symbol(name)
 
             def em(v):
+                if v.endswith("%"):
+                    return IonStruct(
+                        IS("$307"), IonDecimal(v[:-1]), IS("$306"), IS("$314")
+                    )
                 return IonStruct(IS("$307"), IonDecimal(v), IS("$306"), IS("$308"))
 
-            value = IonStruct(IS("$56"), em(size[0]), IS("$57"), em(size[1]))
+            value = IonStruct()
+            if size[0] is not None:
+                value[IS("$56")] = em(size[0])
+            value[IS("$57")] = em(size[1])
             if fill:
                 # Never past the column, as Previewer writes an em width.
                 value[IS("$65")] = IonStruct(
@@ -1801,6 +1851,10 @@ class NativeKFXGenerator:
                 value[IS("$546")] = IS("$377")
             if valign:
                 value[IS("$44")] = IS(valign)
+            if shift:
+                value[IS("$31")] = IonStruct(
+                    IS("$307"), IonDecimal(shift[0]), IS("$306"), IS(shift[1])
+                )
             value[IS("$173")] = IS(name)
             self._inline_picture_styles[size] = (name, value)
         return IonStruct(

@@ -765,20 +765,25 @@ def _img_size_hint(elem, style_resolver=None):
 _INLINE_VALIGNS = frozenset(
     {"middle", "top", "bottom", "text-top", "text-bottom", "baseline", "super", "sub"}
 )
+#: A vertical-align length, which Previewer writes as a baseline shift
+#: (#565): a signed number with a unit, or 0.
+_INLINE_VALIGN_LENGTH_RE = re.compile(
+    r"^[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:px|pt|em|rem|%)$|^[-+]?0(?:\.0+)?$"
+)
 
 
 def _img_inline_extras(elem, style_resolver=None):
     """What a picture inside a paragraph's words keeps besides its
     `_img_size_hint`, as ``h=1em;va=middle``, or None (#565): its height,
     which Previewer stretches it to when a width is also given, and its
-    vertical-align."""
+    vertical-align, a keyword or a length."""
     css = (style_resolver(elem) if style_resolver is not None else None) or {}
     out = []
     raw = str(css.get("height") or elem.get("height") or "").strip()
     if _IMG_SIZE_RE.match(raw):
         out.append(f"h={raw}")
     valign = str(css.get("vertical-align") or "").strip().lower()
-    if valign in _INLINE_VALIGNS:
+    if valign in _INLINE_VALIGNS or _INLINE_VALIGN_LENGTH_RE.match(valign):
         out.append(f"va={valign}")
     return ";".join(out) or None
 
