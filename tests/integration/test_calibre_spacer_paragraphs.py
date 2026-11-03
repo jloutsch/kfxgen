@@ -429,6 +429,12 @@ def test_a_spacer_after_a_padded_paragraph_meets_its_outer_margin(calibre):  # n
         + _p("V0")
         + "<div style='font-size:1.5em;padding-bottom:1em;margin-bottom:2em'>"
         + _p("V1", "margin:1em 0;font-size:0.6667em") + "</div>" + SP + _p("V2")
+        # Before a margin-less spacer nothing collapses: no reading in its size
+        # (3.302); a wrapper's smaller em margin doesn't win the margin outside
+        # the padding (2.885) (QA on #689).
+        + _p("X0") + _p("X1", pad + ";font-size:1.5em") + _sp("margin:0") + _p("X2")
+        + _p("Y0") + "<div style='margin-bottom:0.5em'>"
+        + _p("Y1", pad + ";font-size:1.5em") + "</div>" + SP + _p("Y2")
     )  # fmt: skip
     _build(epub, {"p.xhtml": body}, [("P", "p.xhtml")], "p685")
     _ebook_convert(calibre, epub, kfx, True)
@@ -444,6 +450,8 @@ def test_a_spacer_after_a_padded_paragraph_meets_its_outer_margin(calibre):  # n
         "T2": 3.771,
         "U2": 5.177,
         "V2": 5.177,
+        "X2": 3.302,
+        "Y2": 2.885,
     }
     wrong = {k: got[k][0] for k, w in wanted.items() if not _near(got[k][0], w)}
     assert not wrong, f"calibre {version}: {wrong}, Previewer {wanted}"
