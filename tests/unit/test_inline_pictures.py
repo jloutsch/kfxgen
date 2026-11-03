@@ -59,11 +59,12 @@ def _book(tmp_path, body):
                     if hasattr(part, "get"):
                         st_ = styles[str(part["$157"])]
                         cap = st_.get("$65")
+                        w, h = st_.get("$56"), st_.get("$57")
                         parts.append(
                             (
                                 str(part["$175"]),
-                                str(st_["$56"]["$307"]) + str(st_["$56"]["$306"]),
-                                str(st_["$57"]["$307"]) + str(st_["$57"]["$306"]),
+                                str(w["$307"]) + str(w["$306"]) if w else None,
+                                str(h["$307"]) + str(h["$306"]) if h else None,
                             )
                             + ((str(cap["$307"]) + str(cap["$306"]),) if cap else ())
                         )
@@ -277,6 +278,73 @@ def test_vertical_align_is_kept(tmp_path, value, symbol):
     """As Previewer writes it, `$44` (#565, probed with all eight)."""
     style = _picture_style(tmp_path, f"style='vertical-align:{value}'")
     assert style.get("$44") == symbol
+
+
+@pytest.mark.parametrize(
+    ("img", "size"),
+    [
+        ("style='height:50%'", {"$57": "50$314"}),
+        ("height='20%'", {"$57": "20$314"}),
+        ("style='width:2em;height:50%'", {"$56": "2$308", "$57": "50$314"}),
+        ("style='width:10%;height:50%'", {"$56": "10$314", "$57": "50$314"}),
+        ("style='width:30px;height:50%'", {"$56": "3.51562$314", "$57": "50$314"}),
+        ("style='width:40px;height:50%'", {"$56": "4.6875$314", "$57": "50$314"}),
+    ],
+    ids=["alone", "attribute", "em-width", "percent-width", "px-width", "px-width-2"],
+)
+def test_a_percent_height_is_kept_as_a_percent(tmp_path, img, size):
+    """Kindle Previewer 4.0.3 (probed, #565): a % height stays a %, with no
+    width unless one is given. An em or % width beside it stays as written;
+    a px width becomes a % of 384pt (30px is 13.5pt, 3.516%), the scale #541
+    measured for margins."""
+    style = _picture_style(tmp_path, img)
+    assert {k: style.get(k) for k in ("$56", "$57")} == {
+        "$56": size.get("$56"),
+        "$57": size["$57"],
+    }
+    assert style.get("$546") == "$377"
+
+
+@pytest.mark.parametrize(
+    ("value", "shift"),
+    [
+        ("-2px", "-0.9$318"),
+        ("-0.3em", "-0.3$308"),
+        ("4pt", "4$318"),
+        ("-20%", "-20$314"),
+        ("1rem", "1$505"),
+        ("0", "0$318"),
+    ],
+)
+def test_a_vertical_align_length_is_a_baseline_shift(tmp_path, value, shift):
+    """Previewer writes a vertical-align length as `$31` in its own unit,
+    px at 0.45pt, and no `$44` (#565, probed)."""
+    style = _picture_style(tmp_path, f"style='height:1em;vertical-align:{value}'")
+    assert style.get("$31") == shift
+    assert "$44" not in style
+
+
+def test_two_pictures_with_different_shifts_keep_their_own(tmp_path):
+    """Pictures of one size share a style only when their shift is the same
+    too (QA on #695: with the shift out of the style key, every later
+    picture took the first one's)."""
+    _book(
+        tmp_path,
+        "<h1>One</h1><p>Q <img src='b.jpg' alt='x' style='height:1em;"
+        "vertical-align:-0.2em'/> and <img src='b.jpg' alt='y' style='height:1em;"
+        "vertical-align:3px'/> after.</p>",
+    )
+    frags = load_fragments(tmp_path / "i.kfx")
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    shifts = [
+        f"{s['$31']['$307']}{s['$31']['$306']}"
+        for st in by_type(frags, "$259")
+        for e in val(st)["$146"]
+        for part in (getattr(e, "value", e).get("$146") or ())
+        if hasattr(part, "get") and str(part.get("$159")) == "$271"
+        for s in [styles[str(part["$157"])]]
+    ]
+    assert shifts == ["-0.2$308", "1.35$318"]
 
 
 @pytest.mark.parametrize(
