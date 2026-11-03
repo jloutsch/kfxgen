@@ -3256,6 +3256,24 @@ def test_anchors_moved_from_a_table_join_into_one_paragraph_with_their_ids():
 
 
 @pytest.mark.unit
+def test_a_hidden_anchor_between_rows_writes_nothing():
+    """A hidden `<a>` is moved out as nothing, as Previewer writes it (QA on
+    #705: walked as a root, its words became visible)."""
+    html = (
+        "<table><tr><td>a</td></tr><a href='#x' class='h'>hidden words</a>"
+        "<tr><td>c</td></tr></table>"
+    )
+    blocks = _conv.extract_blocks_from_html(
+        _doc(html),
+        native_tables=True,
+        base_href="c.xhtml",
+        style_resolver=lambda e: {"display": "none"} if e.get("class") == "h" else {},
+    )
+    assert [b.get("type") for b in blocks] == ["table"]
+    assert "hidden" not in blocks[0]["text"]
+
+
+@pytest.mark.unit
 def test_an_anchor_in_a_row_is_moved_before_the_table():
     html = "<table><tr><td>a</td><a href='#x'>W2 in row</a><td>b</td></tr></table>"
     blocks = _conv.extract_blocks_from_html(_doc(html), native_tables=True)
