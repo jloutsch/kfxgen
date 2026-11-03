@@ -2210,6 +2210,18 @@ def _is_empty_anchor(elem):
     )
 
 
+def _is_contentless_anchor(elem):
+    """An <a> with no content, whatever its attributes: a table ignores it
+    between its rows and cells, as Kindle Previewer 4.0.3 does (#702). One
+    with an id still names a place; that is `_is_empty_anchor`'s."""
+    return (
+        isinstance(elem.tag, str)
+        and _local_tag(elem.tag) == "a"
+        and not (elem.text or "").strip()
+        and len(elem) == 0
+    )
+
+
 def _anchors_follow_rows(elem):
     """True when a table's link targets sit after the row each one names.
 
@@ -2495,7 +2507,7 @@ def _table_is_native(table, style_resolver=None):
         if tag in _ROW_GROUP_TAGS and any(
             isinstance(c.tag, str)
             and _local_tag(c.tag) not in _TABLE_PART_TAGS
-            and not _is_empty_anchor(c)
+            and not _is_contentless_anchor(c)
             for c in e
         ):
             return False
@@ -2509,11 +2521,12 @@ def _table_is_native(table, style_resolver=None):
         if tag == "tr":
             if _local_tag(e.getparent().tag) not in _ROW_GROUP_TAGS:
                 return False
-            # Only cells and empty anchors are read from a row.
+            # Only cells and empty anchors are read from a row; an anchor
+            # with no id is ignored there too (#702).
             if any(
                 isinstance(c.tag, str)
                 and _local_tag(c.tag) not in _CELL_TAGS
-                and not _is_empty_anchor(c)
+                and not _is_contentless_anchor(c)
                 for c in e
             ):
                 return False

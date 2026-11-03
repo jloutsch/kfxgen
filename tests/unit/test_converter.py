@@ -3189,6 +3189,43 @@ def test_an_anchor_only_after_the_last_row_carries_past_the_table():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "html",
+    [
+        "<table><tr><td>a</td><td>b</td></tr><a/><tr><td>c</td><td>d</td></tr></table>",
+        '<table><tr><td>a</td></tr><a class="x"/><tr><td>c</td></tr></table>',
+        "<table><tbody><tr><td>a</td></tr><a/><tr><td>c</td></tr></tbody></table>",
+        "<table><tr><td>a</td><a/><td>b</td></tr></table>",
+    ],
+    ids=["in-table", "with-a-class", "in-tbody", "in-a-row"],
+)
+def test_an_anchor_with_no_id_or_content_keeps_the_table_native(html):
+    """Kindle Previewer 4.0.3 ignores a bare `<a/>` between a table's rows or
+    cells and writes the table; kfxgen dropped it to paragraphs, a library
+    book's picture tables with it (#702)."""
+    assert _conv._table_is_native(_first_table(html))
+    _, table, _ = _block(html)
+    assert all(r["cells"] for r in table["table"]["rows"])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "inside",
+    ["loose words", "<span>words</span>", '<img src="p.jpg"/>'],
+    ids=["text", "element", "picture"],
+)
+def test_an_anchor_with_content_still_stops_a_native_table(inside):
+    """An `<a>` holding words or a picture isn't skipped: a native table
+    would drop them (QA on #703: with child elements counted as no content,
+    a span's words and a picture vanished)."""
+    html = (
+        f'<table><tr><td>a</td></tr><a href="#x">{inside}</a>'
+        "<tr><td>c</td></tr></table>"
+    )
+    assert not _conv._table_is_native(_first_table(html))
+
+
+@pytest.mark.unit
 def test_caption_becomes_its_own_paragraph():
     captions, table = _caption_and_table(
         "<table><caption>Census</caption><tr><td>a</td></tr></table>"
