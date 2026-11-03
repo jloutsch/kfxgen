@@ -4283,9 +4283,14 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                 held = above + prev_pads[1]
                 above = prev_pads[3]
                 prev_pads[3] = 0.0
+                ratio = out[-1].get("outer_em_ratio")
+                if ratio and b["margin"]:
+                    # In the size of the element that set it (QA on #688).
+                    above /= ratio
             if (
                 b["margin"]
                 and not on_purpose
+                and not held
                 and out
                 and out[-1].get("bottom_in_em")
                 and out[-1].get("own_bottom_em")
@@ -5294,9 +5299,12 @@ def extract_blocks_from_html(
         if padded[1] or (paddings.get(id(mine[-1])) or (0.0,) * 2)[1]:
             outer = paddings[id(mine[-1])]
             if bottom and bottom >= outer[3]:
-                # Outside the padding too: a spacer after it reads it in the
-                # block's own size (#669, QA on #688).
-                mine[-1]["bottom_in_em"] = unit.endswith("em")
+                # Outside the padding, the margin is this element's own: a
+                # spacer after it reads it in this element's size if it is in
+                # em or rem (#669, QA on #688).
+                mine[-1]["outer_em_ratio"] = (
+                    _font_ratio(css) if unit.endswith("em") else None
+                )
             outer[3] = _collapse(outer[3], bottom)
         else:
             last = margins.setdefault(id(mine[-1]), [0.0, 0.0])
