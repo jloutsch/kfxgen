@@ -177,10 +177,77 @@ def test_a_picture_alone_still_floats_as_an_entry(tmp_path):
     assert any(n[0] == "picture" and n[1].get("$140") == "$59" for n in story)
 
 
-def test_a_cell_keeps_its_pictures_as_before(tmp_path):
+def _walk(nodes):
+    for n in nodes:
+        yield n
+        if n[0] == "box":
+            yield from _walk(n[3])
+
+
+def _texts(node):
+    if node[0] == "text":
+        return node[1]
+    if node[0] == "mixed":
+        return "".join(p for p in node[1] if isinstance(p, str))
+    if node[0] == "box":
+        return "".join(_texts(k) for k in node[3])
+    return ""
+
+
+def test_a_linked_float_first_stays_in_the_words(tmp_path):
+    """Previewer keeps a linked float in the one mixed entry, floated (QA on
+    #697): no picture entry of its own, and only the paragraph's space."""
     story, _ = _story(
         tmp_path,
-        "<h1>One</h1><table><tr><td>C words <img src='b.jpg' alt='a' "
-        "style='float:left'/> more.</td><td>x</td></tr></table>",
+        "<h1>One</h1><p><a href='c.xhtml'><img src='b.jpg' alt='a' "
+        "style='float:left;width:20%'/></a>L1 words after.</p>",
     )
-    assert not any(n[0] == "box" and n[1] == "$269" and n[2] for n in story)
+    (wrapper,) = [n for n in story if n[0] == "box"]
+    ((kind, parts),) = wrapper[3]
+    assert kind == "mixed"
+    assert parts[0][1]["$140"] == "$59" and parts[1:] == ["L1 words after."]
+
+
+def test_the_container_takes_the_paragraphs_clear(tmp_path):
+    story, _ = _story(
+        tmp_path,
+        "<h1>One</h1><p style='clear:both'>Q words <img src='b.jpg' alt='a' "
+        "style='float:left'/> more.</p>",
+    )
+    (wrapper,) = [n for n in story if n[0] == "box"]
+    assert "$628" in wrapper[2]
+
+
+def test_an_id_just_after_a_float_first_lands_on_the_words(tmp_path):
+    """An id at the cut is the words', not the picture's, as Previewer puts
+    it (QA on #697)."""
+    from tests.unit.test_link_landings import _landings
+
+    _story(
+        tmp_path,
+        "<h1>One</h1><p><img src='b.jpg' alt='a' style='float:left'/>"
+        "<span id='t'>Text</span> here.</p><p><a href='c.xhtml#t'>To text</a></p>",
+    )
+    assert _landings(tmp_path / "f.kfx")["To text"] == "Text here."
+
+
+def test_preformatted_text_is_not_wrapped(tmp_path):
+    story, _ = _story(
+        tmp_path,
+        "<h1>One</h1><pre>P words <img src='b.jpg' alt='a' style='float:left'/>"
+        " more.</pre>",
+    )
+    assert not [n for n in story if n[0] == "box"]
+
+
+def test_a_height_alone_gives_a_float_its_width(tmp_path):
+    """Previewer: 3em high, 300 x 220 px: 65.45 px of 512, 12.784% (QA on
+    #697)."""
+    story, _ = _story(
+        tmp_path,
+        "<h1>One</h1><p>H words <img src='b.jpg' alt='a' "
+        "style='float:left;height:3em'/> more.</p>",
+    )
+    (wrapper,) = [n for n in story if n[0] == "box"]
+    ((_m, parts),) = wrapper[3]
+    assert parts[1][1]["$56"] == "12.7841$314"

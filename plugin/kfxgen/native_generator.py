@@ -102,14 +102,19 @@ def _valign_shift(text):
     return f"{round(number, 5):g}", _SHIFT_UNITS[unit]
 
 
-def _inline_float_style(side, m, width_px):
+def _inline_float_style(side, m, width_px, height_px):
     """The style key of a floated picture inside a paragraph's words, as
     Kindle Previewer 4.0.3 writes it (#565, probed): ("float", side, `$56`
     as a % of its 512 px column, whether `$65` 100% caps it, whether the
     markup sizes it). A % width as written, an em one at 16px with the cap,
-    px and pt as pixels; with no width, its own pixels. No height."""
+    px and pt as pixels; a height alone gives the width its shape gives
+    (QA on #697: 3em high, 12.784%); with neither, its own pixels."""
     pct, fill = width_px / 512 * 100, False
-    if m and m.group(1) == "w":
+    if m and m.group(1) == "h" and (m.group(3) or "px") != "%":
+        number, unit = float(m.group(2)), m.group(3) or "px"
+        h = number * {"em": 16.0, "pt": 4 / 3}.get(unit, 1.0)
+        pct = h * width_px / height_px / 512 * 100
+    elif m and m.group(1) == "w":
         number, unit = float(m.group(2)), m.group(3) or "px"
         if unit == "%":
             pct = number
@@ -132,7 +137,13 @@ def _inline_length_em(m, font_size):
 def _floats_among_words(block):
     """Whether `block` is a paragraph holding words and a floated picture,
     which Kindle Previewer 4.0.3 wraps in a container (#565)."""
-    if block.get("float_wrapped") or block.get("preformatted"):
+    # Not in a table cell, which Previewer doesn't wrap (QA on #697), nor
+    # preformatted text, which stays as it was.
+    if (
+        block.get("float_wrapped")
+        or block.get("preformatted")
+        or block.get("in_cell_paragraph")
+    ):
         return False
     text = block.get("text") or ""
     tokens = list(IMG_TOKEN_RE.finditer(text))
@@ -1842,7 +1853,7 @@ class NativeKFXGenerator:
         m = _SIZE_HINT_RE.match(hint or "")
         number, unit = (float(m.group(2)), m.group(3) or "px") if m else (0, "")
         if extras.get("fl") in ("left", "right"):
-            size = _inline_float_style(extras["fl"], m, width)
+            size = _inline_float_style(extras["fl"], m, width, height)
             if size not in self._inline_picture_styles:
                 name = f"s_ipic{len(self._inline_picture_styles)}"
                 self.symtab.create_local_symbol(name)
@@ -4811,7 +4822,13 @@ class NativeKFXGenerator:
             text = block["text"]
             lead = 0
             for m in IMG_TOKEN_RE.finditer(text):
-                if not m.group(4) or text[lead : m.start()].strip(_ASCII_SPACE):
+                # A linked float stays in the words, floated, as Previewer
+                # keeps it (QA on #697).
+                if (
+                    not m.group(4)
+                    or text[lead : m.start()].strip(_ASCII_SPACE)
+                    or _picture_link(m.start(), block.get("spans") or ())
+                ):
                     break
                 lead = m.end()
             if block.get("tight"):
@@ -5209,7 +5226,9 @@ class NativeKFXGenerator:
                                 # stays in them (#565), as Kindle Previewer
                                 # writes both.
                                 first = len(all_chunks)
-                                unplaced += _emit_paragraph(para)
+                                unplaced += _emit_paragraph(
+                                    {**para, "in_cell_paragraph": True}
+                                )
                                 for ch in all_chunks[first:]:
                                     if (
                                         ch["type"] == "image"
