@@ -16,8 +16,8 @@ space below (#662). The Oasis was not checked for this release.
 about a line of space above every paragraph without a first-line indent, and
 drop the book's own margins. It now spaces paragraphs, headings, boxes and
 table cells by the book's CSS, as Previewer does. For the first and largest
-of these changes (#639, measured on its first commit, before two review
-fixes), before and after on the Gutenberg 90 and 200 library books: the
+of these changes (#639, measured on aca6cb8, before its last review
+fix), before and after on the Gutenberg 90 and 200 library books: the
 spacing changed in 90 and 199 books, no book's words changed, and the number
 of links didn't change. In the whole of The Adventures of Sherlock Holmes,
 paragraph spacing matched Previewer's in 21 of 2,603 paragraphs before #639
