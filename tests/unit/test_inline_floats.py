@@ -383,3 +383,17 @@ def test_a_picture_alone_in_a_list_item_is_unfloated(tmp_path):
     )
     pictures = [n for n in _walk(story) if n[0] == "picture"]
     assert pictures and all("$140" not in p[1] for p in pictures)
+
+
+def test_a_lead_float_containers_margin_below_and_clear(tmp_path):
+    """The container takes the paragraph's margin below and its clear as
+    well as its margin above, as Previewer writes them (QA on #701)."""
+    story, _ = _story(
+        tmp_path,
+        "<h1>One</h1><ul><li><p>L5 first.</p><p style='margin-bottom:2em;"
+        "clear:both'><img src='b.jpg' alt='a' style='float:left;width:20%'/>"
+        "L5 words.</p></li></ul>",
+    )
+    (box,) = [n for n in _walk(story) if n[0] == "box" and "$49" in n[2]]
+    assert box[2]["$49"] == "1.66667$310"
+    assert "$628" in box[2]
