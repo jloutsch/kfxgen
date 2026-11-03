@@ -1,5 +1,31 @@
 # Changelog
 
+## 5.23.0 — Pictures in words and table cells, floats, content outside table cells
+
+Five fixes since 5.22.0. Each was reviewed, converted through real calibre and compared with Kindle Previewer 4.0.3's output for the same book. The float and table-cell picture changes (#697, #701) were checked on a Kindle Paperwhite (5.19.2) and a Voyage (5.13.6). The other three (#695, #703, #705) were not checked on a Kindle: no book in the samples changes with #695 or #705, and #703 brings back tables in the native structure the devices already show. The Oasis was not checked for this release.
+
+### What readers will notice
+
+**Pictures in table cells**
+- A sized picture alone in a table cell keeps its size (#698, #701). It used to show at its own pixels. kfxgen writes Previewer's cap at the markup's width; Previewer's share of the cell comes from its own table layout, so kfxgen writes 100%. The two show the same width while the cell is at least the cap divided by Previewer's share (about 6em to 19em in the library books checked); in a narrower cell kfxgen's picture is wider. In QA's comparison of 35 library books, 66 of 81 changed pictures that could be compared equal Previewer's exactly, and the other 15 have its cap.
+- A table with a bare `<a/>` between its rows or cells stays a table (#702, #703). One library book lost two picture tables to it.
+- Text or elements sitting in a table outside its cells go in front of the table, as Previewer moves them, and the table stays a table (#704, #706, #705). These tables used to be written as paragraphs.
+
+**Floated pictures**
+- A floated picture among a paragraph's words stays in them, with the words wrapping round it, inside a container that carries the paragraph's spacing (#565, #697). kfxgen used to cut the paragraph at the picture.
+- A linked picture stays unfloated, its link kept, because the Voyage drops a floated picture's link (#378).
+- In a table cell or a list item, Previewer floats nothing, and neither does kfxgen now (#699, #701). A box inside a box in a cell is no longer wrapped (#700).
+
+**Pictures in a line of words**
+- A `%` height and a `vertical-align` length (`-2px`, `0.3em`) on a picture inside words are kept, as Previewer writes them (#695).
+
+### Known differences from Previewer
+- A picture's `width` attribute next to a CSS height: calibre itself writes `width: auto` there, which can't be told apart from a book's own (#694, closed).
+- A `%` width on a picture inside a table cell's words: Previewer sizes it against its own cell layout.
+- A floated picture first in a one-paragraph list item stays after kfxgen's text bullet; Previewer makes it a picture entry.
+- A table's caption is a paragraph before the table, as before this release; Previewer keeps it inside the table.
+- A floated picture sized only by its height, first in a paragraph: 58.594% wide where Previewer writes 12.784%, through the block-float path, as before this release.
+
 ## 5.22.0 — Spacing from the book's CSS, boxes, spacer lines, table cells
 
 Thirty-one changes since 5.21.0 (29 fixes, a test and a comment). Each fix
