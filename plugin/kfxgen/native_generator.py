@@ -3006,9 +3006,12 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
-    def build_table_style_157(self, entity_name, border=None, width=None, clear=None):
+    def build_table_style_157(
+        self, entity_name, border=None, width=None, clear=None, space_below=None
+    ):
         """$157 for a native table node, as Kindle Previewer writes it (#219),
-        with the table's own border (#264) and clear (#381)."""
+        with the table's own border (#264), clear (#381) and space below it in
+        ems, $49 (#680)."""
         self.symtab.create_local_symbol(entity_name)
         value = IonStruct(
             IS("$16"), IonStruct(IS("$307"), IonDecimal("1"), IS("$306"), IS("$505")),
@@ -3019,6 +3022,13 @@ class NativeKFXGenerator:
         )  # fmt: skip
         _apply_border(value, border, is_table=True)
         _write_clear(value, clear)
+        if space_below:
+            value[IS("$49")] = IonStruct(
+                IS("$307"),
+                IonDecimal(f"{space_below / _LINE_EM:.6g}"),
+                IS("$306"),
+                IS("$310"),
+            )
         if width is not None:
             # A percentage table width, as Previewer writes it (#264): a
             # min-width, and at 100% the width too.
@@ -4911,6 +4921,9 @@ class NativeKFXGenerator:
                 "column_widths": tbl.get("column_widths"),
                 "width": tbl.get("width"),
                 "clear": block.get("clear"),  # (#381)
+                # Spacers after it with nothing below them in the file: their
+                # space below it, as Previewer writes it (#680).
+                "space_below": block.get("trailing_space"),
             }
             all_chunks.append(table_open)
             group = None
@@ -6224,6 +6237,11 @@ class NativeKFXGenerator:
                                 **(
                                     {"clear": chunk["clear"]}
                                     if chunk.get("clear")
+                                    else {}
+                                ),
+                                **(
+                                    {"space_below": chunk["space_below"]}
+                                    if chunk.get("space_below")
                                     else {}
                                 ),
                             )
