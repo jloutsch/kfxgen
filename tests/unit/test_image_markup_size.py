@@ -66,6 +66,36 @@ class TestImageSizeHint:
         )
         assert _tokens(blocks) == [("p.jpg", "", None)]
 
+    @pytest.mark.parametrize(
+        ("attr", "height", "hint"),
+        [
+            ("200", "3em", "w=200"),
+            ("40", "50%", "w=40"),
+            ("50%", "3em", "w=50%"),
+            (None, "3em", "h=3em"),
+        ],
+        ids=["px", "percent-height", "percent-width", "no-attribute"],
+    )
+    def test_a_width_attribute_beats_calibres_auto(self, attr, height, hint):
+        # calibre reports width auto when CSS sets the height and keeps the
+        # attribute; Kindle Previewer 4.0.3 sizes by the attribute (#694:
+        # width="200" with height:3em is 39.06%, 200 / 512).
+        img = f'<img src="p.jpg" width="{attr}"/>' if attr else '<img src="p.jpg"/>'
+        blocks = extract_blocks_from_html(
+            _doc(f"<div>{img}</div>"),
+            style_resolver=lambda elem: {"width": "auto", "height": height},
+        )
+        assert _tokens(blocks) == [("p.jpg", "", hint)]
+
+    def test_a_height_attribute_does_not_beat_auto(self):
+        # The mirror case stays as it was: every one seen in the library
+        # sample writes `height: auto` itself (#694: 43 pictures, 2 books),
+        # and Previewer keeps a written auto.
+        img = _doc('<p>Q <img src="p.jpg" height="40"/> after.</p>')[0][0][0]
+        css = {"width": "2em", "height": "auto"}
+        assert _conv._img_size_hint(img, lambda e: css) == "w=2em"
+        assert _conv._img_inline_extras(img, lambda e: css) is None
+
     def test_natural_size_has_no_hint(self):
         blocks = extract_blocks_from_html(_doc('<p><img src="p.jpg"/></p>'))
         assert _tokens(blocks) == [("p.jpg", "", None)]

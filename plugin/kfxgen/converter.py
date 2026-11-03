@@ -754,6 +754,12 @@ def _img_size_hint(elem, style_resolver=None):
         raw = css.get(axis)
         if raw is None or raw == "":
             raw = elem.get(axis)
+        elif axis == "width" and str(raw).strip().lower() == "auto":
+            # calibre reports width auto when CSS sets only the height, and
+            # keeps the attribute, which Previewer sizes by (#694). Not the
+            # height: books write `width: X; height: auto` themselves, and
+            # Previewer keeps that auto.
+            raw = elem.get(axis) or raw
         raw = str(raw or "").strip()
         if raw and raw != "auto" and _IMG_SIZE_RE.match(raw):
             return f"{axis[0]}={raw}"
