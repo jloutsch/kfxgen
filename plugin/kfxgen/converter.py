@@ -34,6 +34,7 @@ from .image_optimize import (
 from .inline_style import (
     BIDI_FLAG,
     LANG_FLAG,
+    page_bidi,
     FLAG_BOLD,
     FLAG_ITALIC,
     FLAG_NOT_BOLD,
@@ -6297,14 +6298,26 @@ def _section_heads(coords, flat, spine_items, nav_flat, file_offset):
     when kfxgen rewrites the section: a page it replaces by title, and one
     holding a contents listing it rebuilds (#132). Text merged into those
     would be lost with them."""
+    # Only the first entry titled "Contents" is rebuilt; a later one is kept
+    # as the book has it, so nothing merged into it is lost (#714).
+    book_contents = next(
+        (k for k, c in enumerate(coords) if _normalize_title(c[2]) in _CONTENTS_TITLES),
+        None,
+    )
+
+    def rewritten(k):
+        if _normalize_title(coords[k][2]) in _CONTENTS_TITLES:
+            return k == book_contents
+        return _rewritten_page(coords[k][2])
+
     heads = []
     for k, (fi, si, title, _key, _level) in enumerate(coords):
         if (
             k == 0
             or coords[k - 1][1] != si
             or not spine_items[si].get("breaks_known")
-            or _rewritten_page(title)
-            or _rewritten_page(coords[k - 1][2])
+            or rewritten(k)
+            or rewritten(k - 1)
         ):
             heads.append(True)
             continue
@@ -7404,16 +7417,36 @@ def _replace_title_page(chapters, metadata, log, listings_kept=False):
     # (#132). Resolved before the loop so the "already has one" test sees
     # every chapter, not just those visited so far.
     nav_contents_ch = _nav_listing_contents_chapter(chapters)
+    # The rebuilt page's lines print in the direction and language of the
+    # page it replaces (#714), read before any of its text is split off.
+    rebuilt_bidi = {}
     if nav_contents_ch is not None:
+        rebuilt_bidi[id(nav_contents_ch)] = page_bidi(nav_contents_ch.get("blocks"))
         lead = _split_text_above_listing(nav_contents_ch)
         if lead is not None:
             chapters.insert(chapters.index(nav_contents_ch), lead)
             log.info(f"  Kept the text above the contents listing: {lead['title']}")
+    # Only the book's first page titled "Contents" is its contents page and
+    # rebuilt. Later ones are the contents of a part of it, as each play's in
+    # pg100, and are printed as the book has them, as Kindle Previewer 4.0.3
+    # prints them (#714): rebuilding each replaced a play's listing of its
+    # scenes with the whole book's.
+    book_contents = nav_contents_ch or next(
+        (
+            c
+            for c in chapters
+            if not c.get("_from_spine")
+            and _normalize_title(c["title"]) in _CONTENTS_TITLES
+        ),
+        None,
+    )
+    if book_contents is not None and id(book_contents) not in rebuilt_bidi:
+        rebuilt_bidi[id(book_contents)] = page_bidi(book_contents.get("blocks"))
     # Front matter after a listing about to be replaced is split off before
     # any rebuild, whose links name chapters by their place in the list
     # (#393). Only a chapter that dropped a listing has a place for it.
     for ch in list(chapters):
-        if ch is nav_contents_ch or _normalize_title(ch["title"]) in _CONTENTS_TITLES:
+        if ch is book_contents:
             later = _split_files_after_contents(ch)
             if later is not None:
                 chapters.insert(chapters.index(ch) + 1, later)
@@ -7424,6 +7457,7 @@ def _replace_title_page(chapters, metadata, log, listings_kept=False):
                 log.info("  Kept the front matter after the contents listing")
     for ch in chapters:
         if ch is nav_contents_ch:
+            ch["page_bidi"] = rebuilt_bidi[id(ch)]
             _rebuild_contents_page(ch, chapters, log)
             ch.pop("blocks", None)
             ch["font_size"] = SMALL_FONT_SIZE
@@ -7449,8 +7483,9 @@ def _replace_title_page(chapters, metadata, log, listings_kept=False):
             # whatever else its chapter held, such as a contents listing or a
             # page with no TOC entry of its own (#448).
             ch["_omit_title_heading"] = True
-        elif ch_title in _CONTENTS_TITLES and not listings_kept:
+        elif ch is book_contents and not listings_kept:
             # Rebuild contents page from actual chapter titles
+            ch["page_bidi"] = rebuilt_bidi[id(ch)]
             _rebuild_contents_page(ch, chapters, log)
             ch.pop("blocks", None)
             ch["font_size"] = SMALL_FONT_SIZE
@@ -7488,20 +7523,25 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
             # it ("Navigation"), which matches nothing. (#132)
             continue
         ch_lower = _normalize_title(ch["title"])
-        if ch_lower in CONTENTS_SKIP_TITLES or not ch["title"].strip():
+        skip_own = ch_lower in CONTENTS_SKIP_TITLES or not ch["title"].strip()
+        # A part's Contents page, kept as the book has it, isn't listed, but
+        # the places after it in its section are, as before it shared one
+        # with them (#714: pg5197's "Part I", "Part II", "ILLUSTRATIONS").
+        if skip_own and ch_lower not in _CONTENTS_TITLES:
             continue
         if ch.get("_omit_from_toc"):
             # Left out of the navigation pane (#143), so left off this page
             # too: its title is a label kfxgen made up, such as a file name.
             # (#284 review: 835 of pg22210's 992 entries.)
             continue
-        toc_links.append(
-            {
-                "text": ch["title"],
-                "target_chapter_idx": i,
-                "level": ch.get("toc_level", 0),
-            }
-        )
+        if not skip_own:
+            toc_links.append(
+                {
+                    "text": ch["title"],
+                    "target_chapter_idx": i,
+                    "level": ch.get("toc_level", 0),
+                }
+            )
         # Places in the section the contents name, after it (#363). One with
         # no words (#459) gets no line: an empty line had no offset of its
         # own, and the position map listed the next one's id without one

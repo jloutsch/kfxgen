@@ -17,6 +17,7 @@ from .inline_style import (
     EXTERNAL_LINK_PREFIX,
     flag_value,
     link_target,
+    page_bidi,
     NOTEREF_FLAG,
     TYPOGRAPHY_KEYS,
     VALIGN_MAP,
@@ -5687,10 +5688,16 @@ class NativeKFXGenerator:
                 or label_over_blocks
             )
             heading_chunk = None
+            # The page's direction and language, for kfxgen's lines with no
+            # block of the book's to take them from: its heading from the
+            # chapter's title, a rebuilt contents page's lines (#714).
+            own_bidi = chapter.get("page_bidi") or page_bidi(chapter.get("blocks"))
             if not omit_heading:
                 # First chunk: chapter title (heading)
                 heading_chunk_indices.add(len(all_chunks))
                 heading_chunk = {"type": "text", "text": title}
+                if own_bidi:
+                    heading_chunk["page_bidi"] = own_bidi
                 if chapter.get("heading_level"):
                     # A rebuilt contents page's own heading (#580).
                     heading_chunk["heading_level"] = chapter["heading_level"]
@@ -5717,6 +5724,8 @@ class NativeKFXGenerator:
                         )
                         continue
                     line = {"type": "text", "text": link["text"]}
+                    if own_bidi:
+                        line["block_style"] = {"bidi": own_bidi}
                     if link.get("heading_level"):
                         # A heading the TOC lists prints as the heading
                         # (#595), linked.
@@ -6928,7 +6937,9 @@ class NativeKFXGenerator:
                     typo = chunk.get("typography")
                     book = chunk.get("book_style")
                     # The book's heading's direction and language (#246).
-                    hb = _bidi_diff((book or {}).get("bidi"), around)
+                    hb = _bidi_diff(
+                        book.get("bidi") if book else chunk.get("page_bidi"), around
+                    )
                     if book:
                         # The book's own heading prints: its weight, size,
                         # alignment and side margins, as Kindle Previewer
@@ -6991,14 +7002,24 @@ class NativeKFXGenerator:
                     # inside the $142 span via entry_link_styles. Reference
                     # has entry $157 = body style, span $157 = link style.
                     level = toc_link_levels.get(chunk_idx, 0)
-                    if level:
+                    # The page's direction and language (#714).
+                    lb = _bidi_diff(
+                        (chunk.get("block_style") or {}).get("bidi"), around
+                    )
+                    if level or lb:
                         # Indented by depth, 6.25% a level: Kindle
                         # Previewer's width for a 2em margin (#238, #313).
+                        indent = (
+                            {"margin_left": (f"{6.25 * level:g}", "$314")}
+                            if level
+                            else {}
+                        )
                         entry_styles.append(
                             _allocate_style(
                                 "",
+                                bidi=lb,
                                 font_size=chapters[ch_idx].get("font_size", 1.0),
-                                margin_left=(f"{6.25 * level:g}", "$314"),
+                                **indent,
                             )
                         )
                     else:
