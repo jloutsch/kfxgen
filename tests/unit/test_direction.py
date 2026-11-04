@@ -289,6 +289,45 @@ def test_a_table_carries_the_keys_and_its_cells_only_differences(tmp_path):
     assert found["A19"][0] == RTL
 
 
+def _effective(entry):
+    """The keys that apply to an entry: its containers', outermost first,
+    overridden by the inner ones and then by its own."""
+    own, above = entry
+    out = {}
+    for _, keys in above:
+        out.update(keys)
+    return {**out, **own}
+
+
+@pytest.mark.unit
+def test_a_cell_container_carries_its_own_dir_and_the_innermost_wins(tmp_path):
+    # QA on #711: a cell of two paragraphs with its own dir, in a
+    # right-to-left table, the first paragraph turned back to right to left.
+    body = (
+        '<table><tr><td dir="ltr">'
+        f'<p dir="rtl">C01 {AR}</p><p>C02 English</p>'
+        "</td></tr></table>"
+    )
+    found = _entries(_convert(tmp_path, body, html_attrs=' dir="rtl" lang="ar"'))
+    # The cell's container (the innermost) carries its ltr; its plain
+    # paragraph repeats nothing.
+    own02, above02 = found["C02"]
+    assert above02[-1][1] == {"$682": "$376"}
+    assert own02 == {}
+    assert _effective(found["C02"])["$682"] == "$376"
+    # The rtl paragraph differs from the cell around it, not from the table.
+    assert _effective(found["C01"])["$682"] == "$375"
+    assert found["C01"][0].get("$682") == "$375"
+
+
+@pytest.mark.unit
+def test_a_cells_lang_differing_from_its_tables_is_written(tmp_path):
+    body = f'<table><tr><td>C03 {AR}</td><td lang="en">C04 English</td></tr></table>'
+    found = _entries(_convert(tmp_path, body, html_attrs=' dir="rtl" lang="ar"'))
+    assert _effective(found["C03"])["$10"] == "ar"
+    assert _effective(found["C04"])["$10"] == "en"
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("language", "feature"),

@@ -60,6 +60,7 @@ _BIDI_SYMBOLS = {
     "bidi-override": "$677",
     "isolate-override": "$678",
     "plaintext": "$679",
+    "normal": "$350",
 }
 
 

@@ -49,8 +49,11 @@ p.embed { unicode-bidi: embed; }
 p.plain { unicode-bidi: plaintext; }
 p.over { unicode-bidi: bidi-override; }
 p.iso-over { unicode-bidi: isolate-override; }
-p.start { text-align: start; }
-p.end { text-align: end; }
+p.start, td.start, th.start { text-align: start; }
+p.end, td.end { text-align: end; }
+div.over { unicode-bidi: bidi-override; }
+div.plain { unicode-bidi: plaintext; }
+p.norm, div.norm { unicode-bidi: normal; }
 div.css-rtl { direction: rtl; }
 div.box { border: 1px solid black; padding: 0.5em; }
 """
@@ -67,6 +70,10 @@ RTL_PAGE = "".join(
         f'<p class="start">A04 {AR} start</p>',
         f'<p class="end">A05 {AR} end</p>',
         f'<div class="box"><p>Q15 {AR} boxed</p></div>',
+        # Q96/Q97 (Previewer probe W246): an explicit normal is written, and
+        # is the nearest unicode-bidi, as a dir's isolate is.
+        f'<p class="norm">Q96 {AR} normal</p>',
+        f'<div class="norm"><p>Q97 {AR} in div normal</p></div>',
         f"<p>A99 {AR} last</p>",
     ]
 )
@@ -81,6 +88,18 @@ LTR_PAGE = "".join(
         f'<p dir="ltr" class="rtl">Q53 {AR}</p>',
         '<div class="css-rtl"><div dir="ltr"><p>Q54 words</p></div></div>',
         '<p class="start">B08 start</p>',
+        # QA's Q67/Q68: unicode-bidi from an ancestor's CSS reaches the paragraph.
+        '<div class="css-rtl over"><p>Q67 English in div bidi-override</p></div>',
+        f'<div class="plain"><p>Q68 {AR} in div plaintext</p></div>',
+        # Q82/Q91 (Previewer probes V246, W246): plaintext keeps a direction.
+        f'<p dir="rtl" class="plain">Q82 {AR} own dir plaintext</p>',
+        '<div dir="ltr"><p class="plain">Q91 English under div ltr</p></div>',
+        # QA's Q60/Q61: a cell's own start/end in a right-to-left table.
+        '<table dir="rtl"><tr>'
+        f'<td class="start">Q60 {AR} td start</td>'
+        f'<td class="end">Q61 {AR} td end</td>'
+        f'<th class="start">Q65 {AR} th start</th>'
+        "</tr></table>",
     ]
 )
 
@@ -211,11 +230,14 @@ def _bidi(keys):
         # A08: CSS direction on the paragraph beats the page's dir; the
         # isolate from that dir stays.
         ("A08", {"$10": "ar", "$682": "$376", "$674": "$676"}),
-        # U01-U04 (QA's Q17-Q19): the paragraph's own unicode-bidi; plaintext has no $682.
+        # U01-U04 (QA's Q17-Q19): the paragraph's own unicode-bidi. plaintext
+        # keeps the page's direction (Previewer probe W246, Q90).
         ("U01", {"$10": "ar", "$682": "$375", "$674": "$675"}),
-        ("U02", {"$10": "ar", "$674": "$679"}),
+        ("U02", {"$10": "ar", "$682": "$375", "$674": "$679"}),
         ("U03", {"$10": "ar", "$682": "$375", "$674": "$677"}),
         ("U04", {"$10": "ar", "$682": "$375", "$674": "$678"}),
+        ("Q96", {"$10": "ar", "$682": "$375", "$674": "$350"}),
+        ("Q97", {"$10": "ar", "$682": "$375", "$674": "$350"}),
         # Page 2, no dir: plain, and CSS direction alone (no $674).
         ("B01", {"$10": "en"}),
         ("B03", {"$10": "en", "$682": "$375"}),
@@ -225,6 +247,12 @@ def _bidi(keys):
         ("Q52", {"$10": "en", "$682": "$376", "$674": "$676"}),
         ("Q53", {"$10": "en", "$682": "$375", "$674": "$676"}),
         ("Q54", {"$10": "en", "$682": "$376", "$674": "$676"}),
+        # Q67/Q68: the nearest unicode-bidi, the paragraph's or an ancestor's.
+        ("Q67", {"$10": "en", "$682": "$375", "$674": "$677"}),
+        # Q68: no direction anywhere above it, so no $682.
+        ("Q68", {"$10": "en", "$674": "$679"}),
+        ("Q82", {"$10": "en", "$682": "$375", "$674": "$679"}),
+        ("Q91", {"$10": "en", "$682": "$376", "$674": "$679"}),
     ],
 )
 def test_direction_as_previewer_writes_it(entries, label, expected):
@@ -236,6 +264,25 @@ def test_text_align_start_and_end_follow_the_paragraphs_direction(entries):
     assert entries["A05"][0].get("$34") == "$59"
     # B08: start with no dir is left.
     assert entries["B08"][0].get("$34") == "$59"
+
+
+def _align(entry):
+    """The alignment that applies: the entry's own, else its nearest
+    container's."""
+    own, above = entry
+    for keys in (own, *reversed(above)):
+        if "$34" in keys:
+            return keys["$34"]
+    return None
+
+
+def test_a_cells_own_start_and_end_follow_the_tables_direction(entries):
+    # Q60/Q61, Previewer 4.0.3: start is right and end left in a
+    # right-to-left table (#515).
+    assert _align(entries["Q60"]) == "$61"
+    assert _align(entries["Q61"]) == "$59"
+    # A header cell's start stays centred (#616).
+    assert _align(entries["Q65"]) == "$320"
 
 
 def test_a_box_carries_the_keys_and_its_paragraph_none(entries):

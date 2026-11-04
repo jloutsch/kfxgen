@@ -388,6 +388,8 @@ _UNICODE_BIDI = {
     "bidi-override": "bidi-override",
     "isolate-override": "isolate-override",
     "plaintext": "plaintext",
+    # Written too, and nearer than an ancestor's dir (Previewer probe W246).
+    "normal": "normal",
 }
 
 
@@ -400,39 +402,40 @@ def _bidi(elem, style_resolver=None):
     element: walking up from `elem`, CSS `direction` set on an element beats
     that element's `dir`, and either beats an ancestor's (QA's Q50-Q54).
     `dir="auto"` is left to right: Previewer does not read it from the text.
-    unicode-bidi is the element's own CSS, else isolate when it or an
-    ancestor has a `dir`, as browsers' sheets give `[dir]`; plaintext writes
-    no direction. The language is the nearest `xml:lang` or `lang`,
-    lower-cased."""
+    unicode-bidi is the nearest element's, itself or an ancestor, that has
+    its own unicode-bidi CSS or a `dir` (isolate, as browsers' sheets give
+    `[dir]`); on one element the CSS beats the `dir` (QA's Q67, Q68; my
+    V246 Q81-Q83). plaintext keeps the direction (W246 Q90-Q94). The
+    language is the nearest `xml:lang` or `lang`, lower-cased."""
     out = {}
     direction = None
-    has_dir = False
+    bidi = None
     for e in (elem, *elem.iterancestors()):
         if not isinstance(e.tag, str):
             continue
         attr = (e.get("dir") or "").strip().lower()
-        if attr in ("rtl", "ltr", "auto"):
-            has_dir = True
-        if direction is None:
+        has_dir = attr in ("rtl", "ltr", "auto")
+        if direction is None or bidi is None:
             css = style_resolver(e) if style_resolver is not None else None
-            own = str((css or {}).get("own-direction") or "").strip().lower()
-            if own in ("rtl", "ltr"):
-                direction = own
-            elif attr in ("rtl", "ltr", "auto"):
-                direction = "rtl" if attr == "rtl" else "ltr"
+            if direction is None:
+                own = str((css or {}).get("own-direction") or "").strip().lower()
+                if own in ("rtl", "ltr"):
+                    direction = own
+                elif has_dir:
+                    direction = "rtl" if attr == "rtl" else "ltr"
+            if bidi is None:
+                bidi = _UNICODE_BIDI.get(
+                    str((css or {}).get("own-unicode-bidi") or "").strip().lower()
+                ) or ("isolate" if has_dir else None)
         if "lang" not in out:
             lang = e.get(_XML_LANG) or e.get("lang")
             if lang and lang.strip():
                 out["lang"] = lang.strip().lower()
-    css = style_resolver(elem) if style_resolver is not None else None
-    bidi = _UNICODE_BIDI.get(
-        str((css or {}).get("own-unicode-bidi") or "").strip().lower()
-    )
-    if bidi is None and has_dir:
-        bidi = "isolate"
+        if direction is not None and bidi is not None and "lang" in out:
+            break
     if bidi:
         out["unicode_bidi"] = bidi
-    if direction and bidi != "plaintext":
+    if direction:
         out["direction"] = direction
     return out
 
@@ -3260,6 +3263,15 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
     return {**(block_style or compute_block_style({})), "align": "right"}
 
 
+def _cell_start_end(block_style, cell, css):
+    """A data cell's `text-align: start/end` from its own direction, as a
+    paragraph's (QA's Q60, Q61; #515). A header cell's start stays centred
+    (#616)."""
+    if _local_tag(cell.tag) == "th":
+        return block_style
+    return _start_end_align(block_style, css)
+
+
 def _header_not_bold(cell, css):
     """A header cell whose weight comes to normal, as `<th style="font-weight:
     normal">`: not bold, as Kindle Previewer 4.0.3 writes it (#597)."""
@@ -3283,10 +3295,14 @@ def _table_cell(cell, style_resolver, base_href):
         "spans": spans,
         "anchor_ids": ids,
         "anchor_offsets": {aid: marks.get(aid, 0) for aid in ids},
-        "block_style": _with_bidi(
-            _cell_block_style(cell, css, style_resolver=style_resolver),
+        "block_style": _cell_start_end(
+            _with_bidi(
+                _cell_block_style(cell, css, style_resolver=style_resolver),
+                cell,
+                style_resolver,
+            ),
             cell,
-            style_resolver,
+            css,
         ),
         "header": _local_tag(cell.tag) == "th",
         "not_bold": _header_not_bold(cell, css),
@@ -3332,10 +3348,14 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
         "spans": [],
         "anchor_ids": [],
         "anchor_offsets": {},
-        "block_style": _with_bidi(
-            _cell_block_style(cell, css, style_resolver=style_resolver),
+        "block_style": _cell_start_end(
+            _with_bidi(
+                _cell_block_style(cell, css, style_resolver=style_resolver),
+                cell,
+                style_resolver,
+            ),
             cell,
-            style_resolver,
+            css,
         ),
         "header": _local_tag(cell.tag) == "th",
         "not_bold": _header_not_bold(cell, css),
