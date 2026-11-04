@@ -7,6 +7,7 @@ Uses NativeKFXGenerator to produce KFX with working TOC navigation.
 import bisect
 import collections
 import copy
+import itertools
 import logging
 import os
 import posixpath
@@ -31,6 +32,8 @@ from .image_optimize import (
     svg_to_png,
 )
 from .inline_style import (
+    BIDI_FLAG,
+    LANG_FLAG,
     FLAG_BOLD,
     FLAG_ITALIC,
     FLAG_NOT_BOLD,
@@ -61,6 +64,7 @@ from .inline_style import (
     is_transparent,
     is_monospace,
     make_anchor_mark,
+    make_bidi_flag,
     EXTERNAL_LINK_PREFIX,
     make_link_flag,
     make_mono_flag,
@@ -401,7 +405,8 @@ def _bidi(elem, style_resolver=None):
     Direction follows the CSS cascade with `dir` as a declaration on its own
     element: walking up from `elem`, CSS `direction` set on an element beats
     that element's `dir`, and either beats an ancestor's (QA's Q50-Q54).
-    `dir="auto"` is left to right: Previewer does not read it from the text.
+    `dir="auto"` takes the direction of the element's first letter that has
+    one, left to right when none does (#710's K19).
     unicode-bidi is the nearest element's, itself or an ancestor, that has
     its own unicode-bidi CSS or a `dir` (isolate, as browsers' sheets give
     `[dir]`); on one element the CSS beats the `dir` (QA's Q67, Q68; my
@@ -422,7 +427,7 @@ def _bidi(elem, style_resolver=None):
                 if own in ("rtl", "ltr"):
                     direction = own
                 elif has_dir:
-                    direction = "rtl" if attr == "rtl" else "ltr"
+                    direction = _first_strong(e) if attr == "auto" else attr
             if bidi is None:
                 bidi = _UNICODE_BIDI.get(
                     str((css or {}).get("own-unicode-bidi") or "").strip().lower()
@@ -438,6 +443,71 @@ def _bidi(elem, style_resolver=None):
     if direction:
         out["direction"] = direction
     return out
+
+
+def _first_strong(elem):
+    """`dir="auto"`'s direction: that of the first letter in `elem` that has
+    one, skipping a `<bdi>` and anything with its own `dir`, as HTML has it;
+    left to right when no letter has one. Kindle Previewer 4.0.3 reads it so
+    on blocks, spans and `<bdi>` (#710's K01, K06, K07, K19)."""
+
+    def texts(e):
+        yield e.text or ""
+        for child in e:
+            if isinstance(child.tag, str) and not (
+                _local_tag(child.tag) in ("bdi", "script", "style") or child.get("dir")
+            ):
+                yield from texts(child)
+            yield child.tail or ""
+
+    for text in texts(elem):
+        for ch in text:
+            kind = unicodedata.bidirectional(ch)
+            if kind == "L":
+                return "ltr"
+            if kind in ("R", "AL"):
+                return "rtl"
+    return "ltr"
+
+
+def _inline_bidi(elem, css):
+    """An inline element's own direction, unicode-bidi and language, as
+    Kindle Previewer 4.0.3 writes them on its run (#710): {"direction",
+    "unicode_bidi", "lang"}, each only when the element sets it, or {}.
+
+    Unlike a block's, nothing comes from its parent, and a value equal to
+    the paragraph's is written too (I10, I23). CSS `direction` beats `dir`
+    (K03, K32, K34) and gives no unicode-bidi of its own (I06). The CSS
+    unicode-bidi wins (I17, K30, K31); without it `<bdo>` is
+    isolate-override (I13), and a `dir` or a `<bdi>` isolate. `<bdi>` with
+    no `dir`, and `dir="auto"`, take the text's direction (K01, K04, K06)."""
+    local = _local_tag(elem.tag)
+    attr = (elem.get("dir") or "").strip().lower()
+    out = {}
+    own = str((css or {}).get("own-direction") or "").strip().lower()
+    if own in ("rtl", "ltr"):
+        out["direction"] = own
+    elif attr in ("rtl", "ltr"):
+        out["direction"] = attr
+    elif attr == "auto" or (local == "bdi" and not attr):
+        out["direction"] = _first_strong(elem)
+    bidi = _UNICODE_BIDI.get(
+        str((css or {}).get("own-unicode-bidi") or "").strip().lower()
+    )
+    if bidi is None and local == "bdo":
+        bidi = "isolate-override"
+    elif bidi is None and (attr in ("rtl", "ltr", "auto") or local == "bdi"):
+        bidi = "isolate"
+    if bidi:
+        out["unicode_bidi"] = bidi
+    lang = elem.get(_XML_LANG) or elem.get("lang")
+    if lang and lang.strip():
+        out["lang"] = lang.strip().lower()
+    return out
+
+
+#: Tells one inline element's direction run from another's (#710).
+_BIDI_SERIAL = itertools.count()
 
 
 def _with_bidi(block_style, elem, style_resolver):
@@ -1759,6 +1829,19 @@ def _walk_inline(
                 cur.add((kind, now if now is not None else unset))
     if local in _MONO_TAGS and "font-family" not in (own_css or {}):
         cur.add(make_mono_flag(("monospace",)))
+    if not is_root:
+        keys = _inline_bidi(elem, own_css)
+        if keys.keys() - {"lang"}:
+            # Its own direction: a run over its whole text, its language in
+            # it (#710's P02).
+            depth = 1 + sum(
+                1 for f in cur if isinstance(f, tuple) and f[0] == BIDI_FLAG
+            )
+            cur.add(make_bidi_flag(next(_BIDI_SERIAL), depth, keys))
+        elif keys:
+            # A language alone is a run style, as bold is (P01, P03).
+            cur = {f for f in cur if flag_value((f,), LANG_FLAG) is None}
+            cur.add((LANG_FLAG, keys["lang"]))
     cur = frozenset(_nest_shift(cur, flags, own_shifts))
     parts = []
     # A <span> drawn as a block, one per line of verse, an address, a
