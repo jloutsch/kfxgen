@@ -100,6 +100,11 @@ LTR_PAGE = "".join(
         f'<td class="end">Q61 {AR} td end</td>'
         f'<th class="start">Q65 {AR} th start</th>'
         "</tr></table>",
+        # QA's Q72-Q75: the same, in cells of two paragraphs.
+        '<table dir="rtl"><tr>'
+        f'<td class="start"><p>Q72 {AR} first</p><p>Q73 {AR} second</p></td>'
+        f'<td class="end"><p>Q74 {AR} first</p><p>Q75 {AR} second</p></td>'
+        "</tr></table>",
     ]
 )
 
@@ -283,6 +288,16 @@ def test_a_cells_own_start_and_end_follow_the_tables_direction(entries):
     assert _align(entries["Q61"]) == "$59"
     # A header cell's start stays centred (#616).
     assert _align(entries["Q65"]) == "$320"
+
+
+def test_a_cell_of_paragraphs_flips_its_own_start_and_end(entries):
+    # QA's Q72/Q74: the paragraphs are right/left, as Previewer's. The cell's
+    # container has no $34 in Previewer's file; where kfxgen writes one it
+    # must agree with its paragraphs.
+    for label, side in (("Q72", "$61"), ("Q74", "$59")):
+        own, above = entries[label]
+        assert own.get("$34") == side
+        assert above[-1].get("$34") in (None, side)
 
 
 def test_a_box_carries_the_keys_and_its_paragraph_none(entries):
