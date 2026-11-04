@@ -4471,6 +4471,30 @@ def _place_margin(
         prev["margin_below"] = (above + fixed) / _ems_own(prev)
 
 
+class _ById:
+    """A mapping keyed by object identity, for blocks, which are dicts and
+    can't be keys. It holds each key, so an address is never given to a new
+    block while the mapping is in use: keyed by `id()` alone, a freed
+    block's address went to a new one, which took its margins, and spacing
+    changed from one conversion to the next (#712)."""
+
+    def __init__(self):
+        self._d = {}
+
+    def get(self, key, default=None):
+        hit = self._d.get(id(key))
+        return default if hit is None else hit[1]
+
+    def setdefault(self, key, value):
+        return self._d.setdefault(id(key), (key, value))[1]
+
+    def __getitem__(self, key):
+        return self._d[id(key)][1]
+
+    def __setitem__(self, key, value):
+        self._d[id(key)] = (key, value)
+
+
 def _space_between(blocks, margins, measured=True, paddings=None):
     """`blocks` with the space a scene break puts above a paragraph, in ems,
     as "space_above" (#230, #326). The space blocks standing for spacers and
@@ -4507,7 +4531,7 @@ def _space_between(blocks, margins, measured=True, paddings=None):
     for b in blocks:
         kind = b.get("type")
         if kind == "space":
-            prev_pads = (paddings or {}).get(id(out[-1])) if out else None
+            prev_pads = (paddings or _ById()).get(out[-1]) if out else None
             if measured and not on_purpose and prev_pads and prev_pads[1]:
                 # After a padded block the spacer meets the margin outside
                 # its padding; the padding, and the margin inside it, stay
@@ -4543,11 +4567,11 @@ def _space_between(blocks, margins, measured=True, paddings=None):
             lines += b["line"]
             on_purpose = True
             continue
-        top, bottom = margins.get(id(b), (0.0, 0.0))
+        top, bottom = margins.get(b, (0.0, 0.0))
         if measured:
-            pads = paddings or {}
-            up_pads = (pads.get(id(out[-1])) if out else None) or (0.0,) * 4
-            own_pads = pads.get(id(b)) or (0.0,) * 4
+            pads = paddings or _ById()
+            up_pads = (pads.get(out[-1]) if out else None) or (0.0,) * 4
+            own_pads = pads.get(b) or (0.0,) * 4
             _place_margin(
                 out[-1] if out else None,
                 b,
@@ -4594,7 +4618,7 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                     # It collapses with the box's margin below, where the run
                     # around the box meets it, the next block's or its own end
                     # (#680, QA on #682).
-                    mine = margins.setdefault(id(b), [0.0, 0.0])
+                    mine = margins.setdefault(b, [0.0, 0.0])
                     mine[1] = bottom = _collapse(mine[1], tail)
         if kind is None:
             if out:
@@ -4604,9 +4628,9 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                     # After a table, a box or a rule: a margin there is
                     # theirs to space.
                     how = how if how == "spacer" else None
-                pads = paddings or {}
-                padding = (pads.get(id(out[-1])) or (0.0,) * 4)[1] + (
-                    pads.get(id(b)) or (0.0,) * 4
+                pads = paddings or _ById()
+                padding = (pads.get(out[-1]) or (0.0,) * 4)[1] + (
+                    pads.get(b) or (0.0,) * 4
                 )[0]
                 gaps.append(
                     (b, round(_collapse(above, top) + fixed + lines + padding, 4), how)
@@ -4626,12 +4650,12 @@ def _space_between(blocks, margins, measured=True, paddings=None):
         # A file's or a box's last paragraph keeps its margin-bottom (#553),
         # met by the spacers and invisible <hr>s after it: their space stays
         # below it, inside the box, as Previewer writes it (#670).
-        last_pads = (paddings or {}).get(id(out[-1])) or (0.0,) * 4
+        last_pads = (paddings or _ById()).get(out[-1]) or (0.0,) * 4
         own = _ems_own(out[-1])
         if on_purpose:
             below = (fixed + above) / own + lines
         else:
-            below = margins.get(id(out[-1]), (0, 0))[1] / own
+            below = margins.get(out[-1], (0, 0))[1] / own
         out[-1]["margin_below"] = (
             max(out[-1].get("margin_below") or 0.0, below)
             + (last_pads[1] + last_pads[3]) / own
@@ -4811,8 +4835,8 @@ def extract_blocks_from_html(
     # -bottom, in ems, with its containers' added at its edges. A spacer
     # paragraph or an <hr> that draws nothing is a {"type": "space"} block
     # until the end, where the space goes above the next paragraph.
-    margins = {}  # id(block) -> [top, bottom]
-    paddings = {}  # id(block) -> [its wrappers' padding-top, -bottom] (#640)
+    margins = _ById()  # block -> [top, bottom]
+    paddings = _ById()  # block -> [its wrappers' padding-top, -bottom] (#640)
     # The index from which the next block shown follows a page break, set by
     # an element's `page-break-before` or the one before it's `-after` (#363).
     break_at = []
@@ -5487,11 +5511,11 @@ def extract_blocks_from_html(
         # An inner wrapper's margin waiting outside its padding is now inside
         # this one's: padding keeps it from collapsing with the margins
         # beyond (QA on #642).
-        first = paddings.setdefault(id(mine[0]), [0.0] * 4)
+        first = paddings.setdefault(mine[0], [0.0] * 4)
         if top:
             first[0] += first[2] + top
             first[2] = 0.0
-        last = paddings.setdefault(id(mine[-1]), [0.0] * 4)
+        last = paddings.setdefault(mine[-1], [0.0] * 4)
         if bottom:
             last[1] += last[3] + bottom
             last[3] = 0.0
@@ -5599,14 +5623,14 @@ def extract_blocks_from_html(
             return
         # A padded wrapper inside, here or deeper, keeps the paragraph's
         # margin apart: this one meets that wrapper's margin (#643).
-        if padded[0] or (paddings.get(id(mine[0])) or (0.0,))[0]:
-            outer = paddings[id(mine[0])]
+        if padded[0] or (paddings.get(mine[0]) or (0.0,))[0]:
+            outer = paddings[mine[0]]
             outer[2] = _collapse(outer[2], top)
         else:
-            first = margins.setdefault(id(mine[0]), [0.0, 0.0])
+            first = margins.setdefault(mine[0], [0.0, 0.0])
             first[0] = _collapse(first[0], top)
-        if padded[1] or (paddings.get(id(mine[-1])) or (0.0,) * 2)[1]:
-            outer = paddings[id(mine[-1])]
+        if padded[1] or (paddings.get(mine[-1]) or (0.0,) * 2)[1]:
+            outer = paddings[mine[-1]]
             if bottom and bottom >= outer[3]:
                 # Outside the padding, the margin is this element's own: a
                 # spacer after it reads it in this element's size if it is in
@@ -5616,7 +5640,7 @@ def extract_blocks_from_html(
                 )
             outer[3] = _collapse(outer[3], bottom)
         else:
-            last = margins.setdefault(id(mine[-1]), [0.0, 0.0])
+            last = margins.setdefault(mine[-1], [0.0, 0.0])
             if bottom and bottom >= last[1]:
                 # Whether the margin that wins is in em or rem: a spacer
                 # after the block reads it in the block's own size (#669).
@@ -5739,7 +5763,7 @@ def extract_blocks_from_html(
             "rule",
         )
         for side, i, end in (("top", 0, 0), ("bottom", -1, 1)):
-            inner = margins.get(id(mine[i])) if mine else None
+            inner = margins.get(mine[i]) if mine else None
             if inner is None or border.get(side) or padding.get(side):
                 continue
             if end and spaced_end:
@@ -5749,7 +5773,7 @@ def extract_blocks_from_html(
             else:
                 bottom = _collapse(bottom, inner[1])
             inner[end] = 0.0
-        margins[id(box)] = [top, bottom]
+        margins[box] = [top, bottom]
 
     def _carry_container_margins(elem, start):
         """Add a container's side margins to each text block it produced, as
