@@ -7255,8 +7255,15 @@ class NativeKFXGenerator:
                     readings = ruby_readings.setdefault(ch_idx, [])
                     readings.append((ruby_eids[chunk_idx, serial], reading))
                     ruby = (f"ruby{ch_idx}", len(readings))
+                    # After a longer run starting with it, such as a link
+                    # holding it (QA's G53 on #713).
                     at = next(
-                        (i for i, sp in enumerate(spans_out) if sp[0] >= r_start),
+                        (
+                            i
+                            for i, sp in enumerate(spans_out)
+                            if sp[0] > r_start
+                            or (sp[0] == r_start and sp[1] <= r_end - r_start)
+                        ),
                         len(spans_out),
                     )
                     span = spans_out[at] if at < len(spans_out) else None

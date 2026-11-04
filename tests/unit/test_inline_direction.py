@@ -338,9 +338,28 @@ def _shape(runs):
             f"{_A}LINKA <span lang='fr'>FRWORDS</span> LINKB</a>",
             [("LINKA FRWORDS LINKB", LINK), ("FRWORDS", {"$10": "fr"})],
         ),
+        # QA's G64: a run starting where the link starts comes after it.
+        (
+            f"<span lang='fr'>mot</span> {_A}<i>italic</i> first in link</a>",
+            [
+                ("mot", {"$10": "fr"}),
+                ("italic first in link", LINK),
+                ("italic", ITAL),
+            ],
+        ),
+        # QA's G53: so does a ruby's run.
+        (
+            f"<span lang='ja'>{_A}<ruby>漢<rt>かん</rt></ruby>字</a></span>",
+            [("漢字", {"$10": "ja", **LINK}), ("漢", {})],
+        ),
+        # M17: and after a direction run starting with it.
+        (
+            "<span dir='rtl'><ruby>漢<rt>かん</rt></ruby>字 RUBYDIR</span>",
+            [("漢字 RUBYDIR", ISO_RTL), ("漢", {})],
+        ),
     ],
     ids=[f"M{n:02}" for n in (1, 2, 3, 4, 5, 6, 10, 11)]
-    + ["G10", "M12", "M13", "M14", "M15", "M16", "M08"],
+    + ["G10", "M12", "M13", "M14", "M15", "M16", "M08", "G64", "G53", "M17"],
 )
 def test_a_link_around_a_direction_run_stays_one_run(tmp_path, markup, expected):
     # Previewer 4.0.3, probe M710 (2026-11-04): a link is one run over its
