@@ -235,6 +235,29 @@ def test_dir_auto_takes_the_direction_of_the_first_letter(tmp_path):
 
 
 @pytest.mark.unit
+def test_dir_auto_skips_a_child_with_its_own_dir(tmp_path):
+    # Previewer 4.0.3, QA's probe H713 (G41-G43, G45): the first letter is
+    # looked for outside children with a dir of their own and <bdi>, but not
+    # outside a plain span.
+    found = _entries(
+        _convert(
+            tmp_path,
+            f"<p dir='auto'><span dir='ltr'>English first</span> {AR} A01</p>"
+            f"<p dir='auto'><bdi>English first</bdi> {AR} A02</p>"
+            f"<p dir='auto'><span>English first</span> {AR} A03</p>"
+            f"<p dir='auto'><span dir='rtl'>{AR}</span> English after A04</p>",
+            html_attrs=' lang="en"',
+        )
+    )
+    assert [found[k][0]["$682"] for k in ("A01", "A02", "A03", "A04")] == [
+        "$375",
+        "$375",
+        "$376",
+        "$376",
+    ]
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("language", ["en", "ar"])
 def test_a_book_with_no_dir_or_lang_gets_none_of_the_keys(tmp_path, language):
     # dc:language alone gives no $10: Previewer 4.0.3 writes none for a page

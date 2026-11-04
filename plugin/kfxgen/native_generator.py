@@ -15,6 +15,8 @@ from .inline_style import (
     LANG_FLAG,
     bidi_of,
     EXTERNAL_LINK_PREFIX,
+    flag_value,
+    link_target,
     NOTEREF_FLAG,
     TYPOGRAPHY_KEYS,
     VALIGN_MAP,
@@ -254,9 +256,20 @@ def _direction_layers(spans):
     enclosing direction run already carries: `<b>x <span dir>y</span></b>`
     gives the span's run the bold too, and the bold is split around it
     (K08). Every other span keeps only the flags its direction runs don't
-    carry; the Kindle layers it on them (I21, K11, K12). With no direction
-    flag, `spans` unchanged, each with no keys."""
+    carry; the Kindle layers it on them (I21, K11, K12).
+
+    A link is one run over its whole text too, with what is inside it
+    layered on it: a direction run in it has no link of its own (QA on #713,
+    probe M710). A link holding only a direction element is one run with
+    both (M05): its own layer, inside that run, carries nothing that run
+    doesn't, so it writes no run. Links are layered so only in a paragraph
+    with a direction or language flag (M08); with neither, `spans`
+    unchanged, each with no keys, as kfxgen wrote them before #710."""
+    # Each layer: [start, end, level, keys, flags common to its text]. A
+    # direction element of depth d is at level 2d; a link is just above the
+    # direction elements around it; flat spans above the layers they're in.
     ranges = {}
+    links = []
     for s, n, flags in spans:
         plain = frozenset(f for f in flags if not _is_bidi_flag(f))
         for f in flags:
@@ -266,28 +279,53 @@ def _direction_layers(spans):
             serial, depth, keys = b
             r = ranges.get(serial)
             if r is None:
-                ranges[serial] = [s, s + n, depth, keys, plain]
+                ranges[serial] = [s, s + n, 2 * depth, keys, plain]
             else:
                 r[1] = max(r[1], s + n)
                 r[4] = r[4] & plain
-    if not ranges:
+        for f in plain:
+            if not link_target({f}):
+                continue
+            if links and links[-1][4] == f and links[-1][1] == s:
+                links[-1][1] = s + n
+            else:
+                links.append([s, s + n, None, None, f])
+    if not ranges and not any(flag_value(f, LANG_FLAG) for _, _, f in spans):
         return [(s, n, f, None) for s, n, f in spans]
 
-    def around(a, b, depth):
-        return [r for r in ranges.values() if r[2] < depth and r[0] <= a and b <= r[1]]
+    dirs = list(ranges.values())
+    layers = list(dirs)
+    for lk in links:
+        a, b = lk[0], lk[1]
+        outer = [r[2] for r in dirs if r[0] <= a and b <= r[1]]
+        lk[2] = max(outer, default=0) + 0.5
+        lk[4] = frozenset.intersection(
+            *(
+                frozenset(f for f in flags if not _is_bidi_flag(f))
+                for s, n, flags in spans
+                if a <= s and s + n <= b
+            )
+        )
+        layers.append(lk)
 
     carried = {}
-    for serial, r in sorted(ranges.items(), key=lambda kv: kv[1][2]):
-        above = frozenset().union(*(carried[id(o)] for o in around(r[0], r[1], r[2])))
+    for r in sorted(layers, key=lambda x: x[2]):
+        above = frozenset().union(
+            *(
+                carried[id(o)]
+                for o in layers
+                if o[2] < r[2] and o[0] <= r[0] and r[1] <= o[1]
+            )
+        )
         carried[id(r)] = r[4] - above
-    out = [(r[0], r[1] - r[0], carried[id(r)], r[3], 2 * r[2]) for r in ranges.values()]
+    out = [(r[0], r[1] - r[0], carried[id(r)], r[3], r[2]) for r in layers]
     for s, n, flags in spans:
-        inside = [r for r in ranges.values() if r[0] <= s and s + n <= r[1]]
+        inside = [r for r in layers if r[0] <= s and s + n <= r[1]]
         drop = frozenset().union(*(carried[id(r)] for r in inside))
         rest = frozenset(f for f in flags if not _is_bidi_flag(f)) - drop
         if rest:
             out.append(
-                (s, n, rest, None, 2 * max((r[2] for r in inside), default=0) + 1)
+                (s, n, rest, None, max((r[2] for r in inside), default=0) + 0.75)
             )
     out.sort(key=lambda x: (x[0], x[4]))
     return [x[:4] for x in out]

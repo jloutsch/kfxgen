@@ -209,6 +209,151 @@ def test_links_and_direction(tmp_path):
     assert found["R02"][1][0] == "LINKITAL" and "link" not in found["R02"][1][1]
 
 
+LINK = {"link": True}
+ITAL = {"italic": True}
+BOLD = {"bold": True}
+_A = "<a href='#t'>"
+
+
+def _shape(runs):
+    """`runs` with italic and bold as flags, whatever their values: kfxgen
+    writes bold `$361` where Previewer writes `$362`, and gives italic runs
+    a `$13 $350`."""
+    out = []
+    for t, keys in runs:
+        k = {x: v for x, v in keys.items() if x not in ("$12", "$13")}
+        if "$12" in keys:
+            k["italic"] = True
+        if keys.get("$13", "$350") != "$350":
+            k["bold"] = True
+        out.append((t, k))
+    return out
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "markup, expected",
+    [
+        # M01 (QA's G01).
+        (
+            f"{_A}LINKA <span dir='rtl'>{AR3}</span> LINKB</a>",
+            [(f"LINKA {AR3} LINKB", LINK), (AR3, ISO_RTL)],
+        ),
+        # M02: what else is in the link is layered on it too.
+        (
+            f"{_A}<i>ITALINK</i> LINKA <span dir='rtl'>{AR3}</span> LINKB</a>",
+            [(f"ITALINK LINKA {AR3} LINKB", LINK), ("ITALINK", ITAL), (AR3, ISO_RTL)],
+        ),
+        # M03: italic around the link is split, and the link run carries it.
+        (
+            f"<i>ITALA {_A}LINKA <span dir='rtl'>{AR3}</span> LINKB</a> ITALB</i>",
+            [
+                ("ITALA ", ITAL),
+                (f"LINKA {AR3} LINKB", {**ITAL, **LINK}),
+                (AR3, ISO_RTL),
+                (" ITALB", ITAL),
+            ],
+        ),
+        # M04.
+        (
+            f"{_A}LINKA <span dir='rtl'>{AR3} <i>INITAL</i></span> LINKB</a>",
+            [
+                (f"LINKA {AR3} INITAL LINKB", LINK),
+                (f"{AR3} INITAL", ISO_RTL),
+                ("INITAL", ITAL),
+            ],
+        ),
+        # M05: a link holding only the span is one run with both.
+        (f"{_A}<span dir='rtl'>{AR3}</span></a>", [(AR3, {**ISO_RTL, **LINK})]),
+        # M06: the link ends with the span.
+        (
+            f"{_A}LINKA <span dir='rtl'>{AR3}</span></a>",
+            [(f"LINKA {AR3}", LINK), (AR3, ISO_RTL)],
+        ),
+        # M10: bold inside the link is split around the span, which carries it.
+        (
+            f"{_A}LINKA <b>BOLDIN <span dir='rtl'>{AR3}</span> BOLDOUT</b> LINKB</a>",
+            [
+                (f"LINKA BOLDIN {AR3} BOLDOUT LINKB", LINK),
+                ("BOLDIN ", BOLD),
+                (AR3, {**ISO_RTL, **BOLD}),
+                (" BOLDOUT", BOLD),
+            ],
+        ),
+        # M11: a second link right after it stays its own run.
+        (
+            f"{_A}LINKA <span dir='rtl'>{AR3}</span> LINKB</a><a href='#u'>OTHERLINK</a>",
+            [(f"LINKA {AR3} LINKB", LINK), (AR3, ISO_RTL), ("OTHERLINK", LINK)],
+        ),
+        # QA's G10: a <bdi> in a link.
+        (
+            f"{_A}LINKA <bdi>{AR3}</bdi> LINKB</a>",
+            [(f"LINKA {AR3} LINKB", LINK), (AR3, ISO_RTL)],
+        ),
+        # M12: inside a direction run starting with it, the link comes after.
+        (
+            f"<span dir='ltr'>{_A}LINKA <span dir='rtl'>{AR3}</span></a> tail</span>",
+            [
+                (f"LINKA {AR3} tail", ISO_LTR),
+                (f"LINKA {AR3}", LINK),
+                (AR3, ISO_RTL),
+            ],
+        ),
+        # M13: a link in the middle of a direction run.
+        (
+            f"<span dir='rtl'>{AR3} {_A}LINKA <span dir='ltr'>LTRIN</span> LINKB</a></span>",
+            [
+                (f"{AR3} LINKA LTRIN LINKB", ISO_RTL),
+                ("LINKA LTRIN LINKB", LINK),
+                ("LTRIN", ISO_LTR),
+            ],
+        ),
+        # M14: bold around both goes in the outer direction run only.
+        (
+            f"<b><span dir='ltr'>{_A}LINKA <span dir='rtl'>{AR3}</span> LINKB</a>"
+            " tail</span></b>",
+            [
+                (f"LINKA {AR3} LINKB tail", {**ISO_LTR, **BOLD}),
+                (f"LINKA {AR3} LINKB", LINK),
+                (AR3, ISO_RTL),
+            ],
+        ),
+        # M15: a link holding no direction run is one run too, when the
+        # paragraph has one: here inside it...
+        (
+            f"<span dir='rtl'>{AR3} {_A}LINKA <i>ITALIN</i> LINKB</a></span>",
+            [
+                (f"{AR3} LINKA ITALIN LINKB", ISO_RTL),
+                ("LINKA ITALIN LINKB", LINK),
+                ("ITALIN", ITAL),
+            ],
+        ),
+        # M16: ...and here beside it.
+        (
+            f"{_A}LINKA <i>ITALIN</i> LINKB</a> <span dir='rtl'>{AR3}</span>",
+            [("LINKA ITALIN LINKB", LINK), ("ITALIN", ITAL), (AR3, ISO_RTL)],
+        ),
+        # M08: a link holding a language alone, with no direction anywhere.
+        (
+            f"{_A}LINKA <span lang='fr'>FRWORDS</span> LINKB</a>",
+            [("LINKA FRWORDS LINKB", LINK), ("FRWORDS", {"$10": "fr"})],
+        ),
+    ],
+    ids=[f"M{n:02}" for n in (1, 2, 3, 4, 5, 6, 10, 11)]
+    + ["G10", "M12", "M13", "M14", "M15", "M16", "M08"],
+)
+def test_a_link_around_a_direction_run_stays_one_run(tmp_path, markup, expected):
+    # Previewer 4.0.3, probe M710 (2026-11-04): a link is one run over its
+    # whole text, and a direction or language run in it is layered on it
+    # with no link of its own (QA on #713).
+    found = _book(
+        tmp_path,
+        f"<p>M01 {markup} after.</p><p id='t'>T01 target</p><p id='u'>T02 other</p>",
+        rtl=False,
+    )
+    assert _shape(found["M01"]) == expected
+
+
 @pytest.mark.unit
 def test_adjacent_spans_stay_two_runs(tmp_path):
     # K14.
