@@ -45,6 +45,23 @@ _CSS_PX_PER_UNIT = {"px": 1.0, "em": 16.0, "pt": 4.0 / 3.0}
 #: Previewer 4.0.3 (#467, probed 1 to 400 px). It was 496, recovered from
 #: Previewer 3.106's output across seven books (#145).
 _IMAGE_COLUMN_PX = 512.0
+#: Book languages Kindle Previewer 4.0.3 declares `<lang>-reflow-language`
+#: for in `$585`: ar, fa and he (#246). It makes no KFX for ur, and refuses
+#: yi and ckb.
+_REFLOW_LANGUAGES = frozenset({"ar", "fa", "he"})
+#: A block's direction and language (#246): the converter's names to the
+#: `$157` keys Previewer writes, and their values' symbols.
+_BIDI_KEYS = (("lang", "$10"), ("unicode_bidi", "$674"), ("direction", "$682"))
+_BIDI_SYMBOLS = {
+    "rtl": "$375",
+    "ltr": "$376",
+    "embed": "$675",
+    "isolate": "$676",
+    "bidi-override": "$677",
+    "isolate-override": "$678",
+    "plaintext": "$679",
+    "normal": "$350",
+}
 
 
 def _size_in_box(hint, box):
@@ -2454,7 +2471,7 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS("$348"), ftype=IS("$258"), value=value)
 
-    def build_fragment_538(self, section_names):
+    def build_fragment_538(self, section_names, rtl=False):
         """
         Builds Fragment $538 (Document Data / Reading Order)
 
@@ -2472,7 +2489,8 @@ class NativeKFXGenerator:
             IS("$560"),
             IS("$557"),
             IS("$192"),
-            IS("$376"),
+            # Page direction: right to left when the spine says so (#246).
+            IS("$375" if rtl else "$376"),
             IS("$16"),
             IonStruct(IS("$307"), IonDecimal(1), IS("$306"), IS("$308")),
             IS("$112"),
@@ -3854,6 +3872,7 @@ class NativeKFXGenerator:
         output_path=None,
         cover_image=None,
         language="en",
+        rtl=False,
         publisher="kfxgen",
         issue_date=None,
         authors=None,
@@ -4267,7 +4286,7 @@ class NativeKFXGenerator:
 
         # 5. Build Fragment $538 (Document Data / Reading Order)
         # Lists ALL sections in reading order
-        self.fragments.append(self.build_fragment_538(section_names))
+        self.fragments.append(self.build_fragment_538(section_names, rtl=rtl))
 
         # 6. Build Fragment $389 (Navigation / TOC). Synthetic chapters
         # marked with `_omit_from_toc` (e.g. the cover-in-reading-flow
@@ -4456,6 +4475,11 @@ class NativeKFXGenerator:
             self._declare_ruby()
         if ch_data.get("math_names"):
             self._declare_feature("yj_mathml")
+        base = str(language or "").replace("_", "-").split("-")[0].lower()
+        if base in _REFLOW_LANGUAGES:
+            # As Kindle Previewer 4.0.3 declares an Arabic, Persian or Hebrew
+            # book, by its language, whatever its text (#246).
+            self._declare_feature(f"{base}-reflow-language")
         self._declare_content_features(pos_data["max_section_pids"])
 
         # 16. Build $ion_symbol_table fragment (REQUIRED for Kindle)
@@ -5283,6 +5307,7 @@ class NativeKFXGenerator:
                 "column_widths": tbl.get("column_widths"),
                 "width": tbl.get("width"),
                 "clear": block.get("clear"),  # (#381)
+                "bidi": tbl.get("bidi"),  # (#246)
                 # Spacers after it with nothing below them in the file: their
                 # space below it, as Previewer writes it (#680).
                 "space_below": block.get("trailing_space"),
@@ -6162,7 +6187,19 @@ class NativeKFXGenerator:
         #: kfxgen may not draw (a box in a flattened <aside>, #383).
         open_fills = []
 
-        def _allocate_style(kind, builder=None, **attrs):
+        def _bidi_diff(own, parent):
+            """`own` direction and language as `$157` key pairs, leaving out
+            those the container around it already sets the same: Kindle
+            Previewer 4.0.3 writes them on a table or box, and on a cell or
+            paragraph in it only where they differ (#246)."""
+            own, parent = own or {}, parent or {}
+            return tuple(
+                (sym, own[name])
+                for name, sym in _BIDI_KEYS
+                if own.get(name) and own.get(name) != parent.get(name)
+            )
+
+        def _allocate_style(kind, builder=None, bidi=(), **attrs):
             if (
                 attrs.get("colour") is not None
                 and not any(open_fills)
@@ -6171,16 +6208,19 @@ class NativeKFXGenerator:
                 # Text written on the page is measured against it: a colour
                 # already readable there is unchanged (#383).
                 attrs["colour"] = _on_page(attrs["colour"])
-            key = (kind, tuple(sorted(attrs.items())))
+            key = (kind, tuple(sorted(attrs.items())), bidi)
             if key in style_cache:
                 return style_cache[key]
             idx = kind_counts.get(kind, 0)
             kind_counts[kind] = idx + 1
             name = f"s{idx}{kind}"
             style_cache[key] = name
-            self.fragments.append(
-                (builder or self.build_fragment_157)(entity_name=name, **attrs)
-            )
+            frag = (builder or self.build_fragment_157)(entity_name=name, **attrs)
+            for sym, value in bidi:
+                frag.value[IS(sym)] = (
+                    value if sym == "$10" else IS(_BIDI_SYMBOLS[value])
+                )
+            self.fragments.append(frag)
             if kind == "_em" and name not in extra_style_names:
                 extra_style_names.append(name)
             return name
@@ -6525,7 +6565,7 @@ class NativeKFXGenerator:
                 attrs["no_align"] = True
             return _allocate_style("_em", **attrs)
 
-        def _cell_style(cell, bs, font_size):
+        def _cell_style(cell, bs, font_size, bidi=()):
             """A table cell's $157: a text cell's, or a cell container's (#261).
             It must declare the weight and style of the face it names, or the
             Kindle falls back from the embedded face (#50). A header is bold
@@ -6553,7 +6593,9 @@ class NativeKFXGenerator:
             }
             if cell_fam:
                 cattrs["font_family"] = cell_fam
-            return _allocate_style("_td", builder=self.build_cell_style_157, **cattrs)
+            return _allocate_style(
+                "_td", builder=self.build_cell_style_157, bidi=bidi, **cattrs
+            )
 
         # Build multi-entry $259 storylines (one entry per chunk per chapter)
         storyline_names = []
@@ -6574,9 +6616,24 @@ class NativeKFXGenerator:
             open_fills.clear()
             # Each open container's size when it is a cell, else None (#681).
             open_sizes = []
+            # Each open container's direction and language (#246).
+            open_bidi = []
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
+                around = open_bidi[-1] if open_bidi else {}
                 if chunk.get("type") == "open":
+                    node = chunk.get("node")
+                    own = (
+                        chunk.get("bidi")
+                        if node == "table"
+                        else (chunk.get("block_style") or {}).get("bidi")
+                        if node == "cell"
+                        else (chunk.get("box") or {}).get("bidi")
+                        if node == "box"
+                        else None
+                    )
+                    open_bidi.append(around if own is None else own)
+                    cont_bidi = _bidi_diff(own, around)
                     open_fills.append(
                         (chunk.get("box") or chunk.get("cell") or {}).get("background")
                     )
@@ -6589,6 +6646,8 @@ class NativeKFXGenerator:
                     open_fills.pop()
                     if open_sizes:
                         open_sizes.pop()
+                    if open_bidi:
+                        open_bidi.pop()
                 if chunk.get("type") in ("open", "close"):
                     node = chunk.get("node")
                     if node == "table":
@@ -6596,6 +6655,7 @@ class NativeKFXGenerator:
                             _allocate_style(
                                 "_tbl",
                                 builder=self.build_table_style_157,
+                                bidi=cont_bidi,
                                 border=_border_key(chunk.get("border")),
                                 width=chunk.get("width"),
                                 **(
@@ -6616,6 +6676,7 @@ class NativeKFXGenerator:
                                 chunk["cell"],
                                 chunk.get("block_style") or {},
                                 _block_font_size(ch_idx, chunk),
+                                bidi=cont_bidi,
                             )
                         )
                     else:
@@ -6680,6 +6741,7 @@ class NativeKFXGenerator:
                             _allocate_style(
                                 "_box",
                                 builder=self.build_box_style_157,
+                                bidi=cont_bidi,
                                 border=_border_key(box.get("border")),
                                 background=box.get("background"),
                                 padding=_border_key(padding),
@@ -6764,6 +6826,8 @@ class NativeKFXGenerator:
                     # and colour go on kfxgen's (#239).
                     typo = chunk.get("typography")
                     book = chunk.get("book_style")
+                    # The book's heading's direction and language (#246).
+                    hb = _bidi_diff((book or {}).get("bidi"), around)
                     if book:
                         # The book's own heading prints: its weight, size,
                         # alignment and side margins, as Kindle Previewer
@@ -6794,7 +6858,7 @@ class NativeKFXGenerator:
                             )
                             attrs["margin_top"] = None
                         entry_styles.append(
-                            _allocate_style("_h", **attrs, **(typo or {}))
+                            _allocate_style("_h", bidi=hb, **attrs, **(typo or {}))
                         )
                     elif chunk.get("space_below_px"):
                         attrs = heading_attrs[ch_idx]
@@ -6803,13 +6867,19 @@ class NativeKFXGenerator:
                         )
                         entry_styles.append(
                             _allocate_style(
-                                "_h", **attrs, **(typo or {}), space_below=below
+                                "_h",
+                                bidi=hb,
+                                **attrs,
+                                **(typo or {}),
+                                space_below=below,
                             )
                         )
                     else:
                         entry_styles.append(
-                            _allocate_style("_h", **heading_attrs[ch_idx], **typo)
-                            if typo
+                            _allocate_style(
+                                "_h", bidi=hb, **heading_attrs[ch_idx], **(typo or {})
+                            )
+                            if typo or hb
                             else heading_style_names[ch_idx]
                         )
                     entry_link_targets.append(None)
@@ -6881,13 +6951,16 @@ class NativeKFXGenerator:
                         attrs["italic"] = True
                     attrs.update(_typography(bs))
                     cell = chunk.get("cell")
+                    bidi = _bidi_diff(bs.get("bidi"), around)
                     if cell is not None:
-                        entry_styles.append(_cell_style(cell, bs, attrs["font_size"]))
+                        entry_styles.append(
+                            _cell_style(cell, bs, attrs["font_size"], bidi=bidi)
+                        )
                     else:
                         drop = _drop_cap(chunk)
                         if drop:
                             attrs["drop_cap"] = drop
-                        entry_styles.append(_allocate_style("", **attrs))
+                        entry_styles.append(_allocate_style("", bidi=bidi, **attrs))
                     if chunk_idx in chunk_anchor_map:
                         # A contents line printed as a heading (#595): its
                         # link in the heading's own style, not underlined.

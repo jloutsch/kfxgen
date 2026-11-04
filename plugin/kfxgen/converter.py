@@ -379,6 +379,88 @@ def _lang_of(elem):
     return None
 
 
+_XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
+
+#: CSS unicode-bidi as Kindle Previewer 4.0.3 writes it in `$674` (#246).
+_UNICODE_BIDI = {
+    "embed": "embed",
+    "isolate": "isolate",
+    "bidi-override": "bidi-override",
+    "isolate-override": "isolate-override",
+    "plaintext": "plaintext",
+    # Written too, and nearer than an ancestor's dir (Previewer probe W246).
+    "normal": "normal",
+}
+
+
+def _bidi(elem, style_resolver=None):
+    """An element's writing direction, unicode-bidi and language, as Kindle
+    Previewer 4.0.3 writes them (#246): {"direction", "unicode_bidi",
+    "lang"}, each only when set, or {} for none.
+
+    Direction follows the CSS cascade with `dir` as a declaration on its own
+    element: walking up from `elem`, CSS `direction` set on an element beats
+    that element's `dir`, and either beats an ancestor's (QA's Q50-Q54).
+    `dir="auto"` is left to right: Previewer does not read it from the text.
+    unicode-bidi is the nearest element's, itself or an ancestor, that has
+    its own unicode-bidi CSS or a `dir` (isolate, as browsers' sheets give
+    `[dir]`); on one element the CSS beats the `dir` (QA's Q67, Q68; my
+    V246 Q81-Q83). plaintext keeps the direction (W246 Q90-Q94). The
+    language is the nearest `xml:lang` or `lang`, lower-cased."""
+    out = {}
+    direction = None
+    bidi = None
+    for e in (elem, *elem.iterancestors()):
+        if not isinstance(e.tag, str):
+            continue
+        attr = (e.get("dir") or "").strip().lower()
+        has_dir = attr in ("rtl", "ltr", "auto")
+        if direction is None or bidi is None:
+            css = style_resolver(e) if style_resolver is not None else None
+            if direction is None:
+                own = str((css or {}).get("own-direction") or "").strip().lower()
+                if own in ("rtl", "ltr"):
+                    direction = own
+                elif has_dir:
+                    direction = "rtl" if attr == "rtl" else "ltr"
+            if bidi is None:
+                bidi = _UNICODE_BIDI.get(
+                    str((css or {}).get("own-unicode-bidi") or "").strip().lower()
+                ) or ("isolate" if has_dir else None)
+        if "lang" not in out:
+            lang = e.get(_XML_LANG) or e.get("lang")
+            if lang and lang.strip():
+                out["lang"] = lang.strip().lower()
+        if direction is not None and bidi is not None and "lang" in out:
+            break
+    if bidi:
+        out["unicode_bidi"] = bidi
+    if direction:
+        out["direction"] = direction
+    return out
+
+
+def _with_bidi(block_style, elem, style_resolver):
+    """`block_style` with `elem`'s direction and language in it (#246)."""
+    bidi = _bidi(elem, style_resolver)
+    if not bidi:
+        return block_style
+    return {**(block_style or {}), "bidi": bidi}
+
+
+def _start_end_align(block_style, css):
+    """`text-align: start` is right and `end` left in a right-to-left
+    paragraph, as Kindle Previewer 4.0.3 writes them; left to right they
+    stay left and right (#515, #246). The direction is the paragraph's own,
+    from `dir` or CSS, not the book's page direction."""
+    raw = str((css or {}).get("text-align") or "").strip().lower()
+    if raw not in ("start", "end") or not block_style:
+        return block_style
+    if (block_style.get("bidi") or {}).get("direction") != "rtl":
+        return block_style
+    return {**block_style, "align": "right" if raw == "start" else "left"}
+
+
 def _starts_a_language(elem):
     """Whether `elem` sets a lang its parent doesn't have: there a browser's
     own sheet gives that language's quotation marks (#503 QA). Compared as
@@ -544,6 +626,11 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # has no rule of its own. Read for inline runs (#52); the
                     # block path ignores it.
                     "vertical-align": st.get("vertical-align"),
+                    # Set on the element itself, not inherited: `dir` on an
+                    # element beats an ancestor's CSS direction (#246).
+                    # calibre's UA sheet sets neither.
+                    "own-direction": st.get("direction"),
+                    "own-unicode-bidi": st.get("unicode-bidi"),
                     # An <img>'s own size. Stylizer folds the width/height
                     # attributes into the element's CSS (and strips them),
                     # so this is the one place both spellings meet.
@@ -3176,6 +3263,15 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
     return {**(block_style or compute_block_style({})), "align": "right"}
 
 
+def _cell_start_end(block_style, cell, css):
+    """A data cell's `text-align: start/end` from its own direction, as a
+    paragraph's (QA's Q60, Q61; #515). A header cell's start stays centred
+    (#616)."""
+    if _local_tag(cell.tag) == "th":
+        return block_style
+    return _start_end_align(block_style, css)
+
+
 def _header_not_bold(cell, css):
     """A header cell whose weight comes to normal, as `<th style="font-weight:
     normal">`: not bold, as Kindle Previewer 4.0.3 writes it (#597)."""
@@ -3199,7 +3295,15 @@ def _table_cell(cell, style_resolver, base_href):
         "spans": spans,
         "anchor_ids": ids,
         "anchor_offsets": {aid: marks.get(aid, 0) for aid in ids},
-        "block_style": _cell_block_style(cell, css, style_resolver=style_resolver),
+        "block_style": _cell_start_end(
+            _with_bidi(
+                _cell_block_style(cell, css, style_resolver=style_resolver),
+                cell,
+                style_resolver,
+            ),
+            cell,
+            css,
+        ),
         "header": _local_tag(cell.tag) == "th",
         "not_bold": _header_not_bold(cell, css),
         # A heading written in a cell: the section's opening, as a heading
@@ -3244,7 +3348,15 @@ def _paragraph_cell(cell, style_resolver, walk_cell):
         "spans": [],
         "anchor_ids": [],
         "anchor_offsets": {},
-        "block_style": _cell_block_style(cell, css, style_resolver=style_resolver),
+        "block_style": _cell_start_end(
+            _with_bidi(
+                _cell_block_style(cell, css, style_resolver=style_resolver),
+                cell,
+                style_resolver,
+            ),
+            cell,
+            css,
+        ),
         "header": _local_tag(cell.tag) == "th",
         "not_bold": _header_not_bold(cell, css),
         "colspan": _span_attr(cell, "colspan"),
@@ -3458,6 +3570,9 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
             # A percentage table width: without it the Kindle sizes the
             # table to its content and narrow columns' widths don't show.
             "width": _width_pct(table, style_resolver),
+            # Its direction and language: its cells repeat only theirs that
+            # differ, as Kindle Previewer 4.0.3 writes them (#246).
+            "bidi": _bidi(table, style_resolver),
         },
     }
     return captions, block, carry
@@ -5125,6 +5240,8 @@ def extract_blocks_from_html(
                 if _local_tag(elem.tag) == "math" and elem.get("display") == "block":
                     # Centred, as Previewer sets a display equation (#235).
                     bstyle = {**(bstyle or compute_block_style({})), "align": "center"}
+                bstyle = _with_bidi(bstyle, elem, style_resolver)
+                bstyle = _start_end_align(bstyle, css if style_resolver else None)
                 block_ids = _dedupe_keep_order(ids)
                 blocks.append(
                     {
@@ -5504,6 +5621,10 @@ def extract_blocks_from_html(
                     "centred": width is not None
                     and str(css.get("margin-left")).strip() == "auto"
                     and str(css.get("margin-right")).strip() == "auto",
+                    # The box carries its direction and language; the
+                    # paragraphs in it repeat only theirs that differ (QA's
+                    # Q15, #246).
+                    "bidi": _bidi(elem, style_resolver),
                 },
             }
         ]
@@ -8115,6 +8236,12 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         display_dims=display_dims,
         footnote_keys=_footnote_keys(oeb_book, log),
         language=metadata["language"],
+        # The spine's page-progression-direction, as calibre read it: only
+        # "rtl" turns the pages right to left; the language doesn't (#246).
+        rtl=getattr(
+            getattr(oeb_book, "spine", None), "page_progression_direction", None
+        )
+        == "rtl",
         publisher=metadata["publisher"],
         issue_date=metadata.get("issue_date"),
         authors=metadata.get("authors"),
