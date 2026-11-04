@@ -411,6 +411,22 @@ def bidi_of(flag):
     return None
 
 
+def page_bidi(blocks):
+    """The direction and language of the first of `blocks` that has them,
+    else None: those of the page a line kfxgen prints in its place stands
+    for, such as a heading from a chapter's title or a rebuilt contents
+    page's lines (#714)."""
+    for b in blocks or ():
+        own = (
+            (b.get("block_style") or {}).get("bidi")
+            or (b.get("box") or {}).get("bidi")
+            or (b.get("table") or {}).get("bidi")
+        )
+        if own:
+            return own
+    return None
+
+
 MONO_FLAG = "mono"
 
 #: Monospace families a book names without the generic `monospace` after them.
