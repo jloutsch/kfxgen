@@ -92,3 +92,25 @@ def test_the_contents_page_lists_an_entry_after_a_kept_contents_page(calibre):  
     # The kept page and its part's listing print together.
     (kept,) = [s for s in sections if "CONTENTS" in s]
     assert "Childhood" in kept, f"calibre {version}: {sections}"
+
+
+def test_a_heading_over_a_page_that_is_one_box_has_its_language(calibre):  # noqa: F811
+    # QA's B716: a chapter whose only block is a box, with no heading of its
+    # own. kfxgen prints its title as a heading, in the box's direction and
+    # language.
+    tmp, _env, version = calibre
+    pages = {
+        "c0.xhtml": "<h1 id='w'>The Works</h1><p>Opening words.</p>",
+        "c1.xhtml": (
+            "<div id='b' dir='rtl' lang='ar' style='border: 1px solid black'>"
+            "<p>كلمات عربية في صندوق</p></div>"
+        ),
+    }
+    toc = [("The Works", "c0.xhtml#w", 0), ("Boxed Page", "c1.xhtml#b", 0)]
+    epub, kfx = tmp / "b714.epub", tmp / "b714.kfx"
+    write_epub(epub, html_attrs="", pages=pages, toc=toc)
+    _ebook_convert(calibre, epub, kfx, True)
+    found = dict(_texts(load_fragments(kfx)))
+    assert found["Boxed Page"] == {"$10": "ar", "$682": "$375"}, (
+        f"calibre {version}: {found}"
+    )

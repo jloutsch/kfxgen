@@ -282,3 +282,23 @@ def test_a_contents_page_that_is_only_a_table_gives_its_language(tmp_path):
         if keys != {"$10": "fr"}
     ]
     assert not missing, missing
+
+
+@pytest.mark.unit
+def test_a_page_named_after_its_file_is_not_the_contents_page(tmp_path):
+    # A TOC label that is only the file's name takes the page's first
+    # heading as its title (#285), but front-matter rules keyed on titles
+    # don't apply to it: a "Contents" heading there doesn't make it the book's
+    # contents page, and the Contents entry after it is still rebuilt.
+    pages = {
+        "c0.xhtml": PAGES["c0.xhtml"],
+        "split_001.xhtml": "<h1 id='s'>Contents</h1><p>A note before the list.</p>",
+        **{k: v for k, v in PAGES.items() if k != "c0.xhtml"},
+    }
+    toc = _toc()
+    toc.insert(1, ("split_001", "split_001.xhtml#s", 0))
+    lines = [t.strip() for t, _ in _texts(_convert(tmp_path, pages=pages, toc=toc))]
+    # The rebuilt page lists the book's title page; the book's own list of
+    # plays doesn't.
+    assert lines.count("The Works") == 2, lines
+    assert "A note before the list." in lines, lines
