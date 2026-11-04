@@ -54,6 +54,13 @@ p.end, td.end { text-align: end; }
 div.over { unicode-bidi: bidi-override; }
 div.plain { unicode-bidi: plaintext; }
 p.norm, div.norm { unicode-bidi: normal; }
+span.cltr { direction: ltr; }
+span.iso { unicode-bidi: isolate; }
+span.emb, bdo.emb { direction: ltr; unicode-bidi: embed; }
+span.plain { unicode-bidi: plaintext; }
+span.norm { unicode-bidi: normal; }
+span.over { direction: rtl; unicode-bidi: bidi-override; }
+span.isoov { direction: ltr; unicode-bidi: isolate-override; }
 div.css-rtl { direction: rtl; }
 div.box { border: 1px solid black; padding: 0.5em; }
 """
@@ -74,6 +81,23 @@ RTL_PAGE = "".join(
         # is the nearest unicode-bidi, as a dir's isolate is.
         f'<p class="norm">Q96 {AR} normal</p>',
         f'<div class="norm"><p>Q97 {AR} in div normal</p></div>',
+        # #710's I-probe: CSS direction and unicode-bidi on a span.
+        f'<p>I06 {AR} <span class="cltr">CSSLTR words</span> {AR}</p>',
+        f'<p>I07 {AR} <span class="iso">CSSISO words</span> {AR}</p>',
+        f'<p>I08 {AR} <span class="emb">CSSEMB words</span> {AR}</p>',
+        f'<p>I17 {AR} <span dir="ltr" class="plain">DIRPLAIN words</span> {AR}</p>',
+        f'<p>I18 {AR} <span class="norm">CSSNORM words</span> {AR}</p>',
+        f'<p>I19 {AR} <span class="over">CSSOVER words</span> {AR}</p>',
+        f'<p>I20 {AR} <span class="isoov">CSSISOOV words</span> {AR}</p>',
+        f'<p>K03 {AR} <span dir="rtl" class="cltr">DIRVSCSS words</span> {AR}</p>',
+        f'<p>K05 {AR} <bdo dir="rtl" class="emb">BDOCSS words</bdo> {AR}</p>',
+        f"<p>I01 {AR} <span dir='ltr'>LTRSPAN words</span> {AR}</p>",
+        # A size equal to the paragraph's writes no run of its own (#375);
+        # its direction still does.
+        f"<p>I40 {AR} <span dir='ltr' style='font-size:100%'>SIZEDIR words</span> {AR}</p>",
+        # K42: a paragraph wholly in a sized span takes its size (#375); the
+        # span's direction stays a run.
+        "<p><span dir='ltr' style='font-size:120%'>I41 WHOLESIZED words</span></p>",
         f"<p>A99 {AR} last</p>",
     ]
 )
@@ -317,3 +341,61 @@ def test_an_arabic_book_declares_ar_reflow_language(frags):
         for x in val(by_type(frags, "$585")[0])["$590"]
     ]
     assert "ar-reflow-language" in feats
+
+
+@pytest.fixture(scope="module")
+def runs(frags):
+    """{label: [(run text, its $10/$682/$674)]} for runs with any of them."""
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    found = {}
+
+    def visit(nodes):
+        for e in nodes:
+            e = getattr(e, "value", e)
+            if not hasattr(e, "get"):
+                continue
+            ref = e.get("$145")
+            if hasattr(ref, "get"):
+                text = str(texts[str(ref["name"])][int(ref["$403"])])
+                m = LAB.search(text)
+                if m:
+                    out = []
+                    for r in e.get("$142") or ():
+                        r = getattr(r, "value", r)
+                        st = dict(styles.get(str(r.get("$157")), {}))
+                        st.update(r)
+                        keys = _bidi(_keys(st))
+                        if keys:
+                            a, n = int(st["$143"]), int(st["$144"])
+                            out.append((text[a : a + n], keys))
+                    found[m.group(0)] = out
+            visit(e.get("$146") or ())
+
+    for sl in by_type(frags, "$259"):
+        visit(val(sl)["$146"])
+    return found
+
+
+@pytest.mark.parametrize(
+    ("label", "text", "expected"),
+    [
+        # Previewer 4.0.3, #710's probes: CSS direction alone gives no $674
+        # (I06); unicode-bidi alone no $682 (I07); CSS beats the dir on the
+        # same span (I17, K03) and on a <bdo> (K30); normal is written (I18).
+        ("I06", "CSSLTR words", {"$682": "$376"}),
+        ("I07", "CSSISO words", {"$674": "$676"}),
+        ("I08", "CSSEMB words", {"$682": "$376", "$674": "$675"}),
+        ("I17", "DIRPLAIN words", {"$682": "$376", "$674": "$679"}),
+        ("I18", "CSSNORM words", {"$674": "$350"}),
+        ("I19", "CSSOVER words", {"$682": "$375", "$674": "$677"}),
+        ("I20", "CSSISOOV words", {"$682": "$376", "$674": "$678"}),
+        ("K03", "DIRVSCSS words", {"$682": "$376", "$674": "$676"}),
+        ("K05", "BDOCSS words", {"$682": "$376", "$674": "$675"}),
+        ("I01", "LTRSPAN words", {"$682": "$376", "$674": "$676"}),
+        ("I40", "SIZEDIR words", {"$682": "$376", "$674": "$676"}),
+        ("I41", "I41 WHOLESIZED words", {"$682": "$376", "$674": "$676"}),
+    ],
+)
+def test_an_inline_elements_css_direction(runs, label, text, expected):
+    assert runs[label] == [(text, expected)]

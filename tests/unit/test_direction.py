@@ -7,7 +7,8 @@ probes (issue comments 6616979445 and 6617544327, and QA's Q246 probe):
   else `$376`. The book's language does not set it.
 - `$682` writing direction (`$375` rtl, `$376` ltr) and `$674` unicode-bidi
   (`$676` isolate, the default for a `dir` attribute) from `dir`, inherited
-  from any ancestor; `$10` from `lang` or `xml:lang`, lower-cased.
+  from any ancestor; `dir="auto"` from the first letter with a direction;
+  `$10` from `lang` or `xml:lang`, lower-cased.
 - The keys go on the outermost entry that holds them: a table carries them,
   and a cell repeats them only when its own differ.
 - `<lang>-reflow-language` in `$585` for a book in ar, fa or he.
@@ -215,12 +216,45 @@ def test_a_paragraphs_own_dir_beats_its_pages(tmp_path):
 
 
 @pytest.mark.unit
-def test_dir_auto_is_left_to_right(tmp_path):
-    # Previewer 4.0.3 does not resolve auto from the text (probe 1, B05).
+def test_dir_auto_takes_the_direction_of_the_first_letter(tmp_path):
+    # Previewer 4.0.3 (#710's probe, K18/K19; probe 1's B05): the first
+    # letter with a direction decides; the label here is Latin, so A01 is
+    # left to right and A02, starting in Arabic, right to left.
     found = _entries(
-        _convert(tmp_path, f'<p dir="auto">A01 {AR}</p>', html_attrs=' lang="en"')
+        _convert(
+            tmp_path,
+            f'<p dir="auto">A01 {AR}</p><p dir="auto">{AR} A02</p>'
+            f'<p dir="auto">1234 {AR} A03</p>',
+            html_attrs=' lang="en"',
+        )
     )
     assert found["A01"][0] == {"$10": "en", "$682": "$376", "$674": "$676"}
+    assert found["A02"][0] == {"$10": "en", "$682": "$375", "$674": "$676"}
+    # Digits have no direction of their own.
+    assert found["A03"][0]["$682"] == "$375"
+
+
+@pytest.mark.unit
+def test_dir_auto_skips_a_child_with_its_own_dir(tmp_path):
+    # Previewer 4.0.3, QA's probe H713 (G41-G43, G45): the first letter is
+    # looked for outside children with a dir of their own and <bdi>, but not
+    # outside a plain span.
+    found = _entries(
+        _convert(
+            tmp_path,
+            f"<p dir='auto'><span dir='ltr'>English first</span> {AR} A01</p>"
+            f"<p dir='auto'><bdi>English first</bdi> {AR} A02</p>"
+            f"<p dir='auto'><span>English first</span> {AR} A03</p>"
+            f"<p dir='auto'><span dir='rtl'>{AR}</span> English after A04</p>",
+            html_attrs=' lang="en"',
+        )
+    )
+    assert [found[k][0]["$682"] for k in ("A01", "A02", "A03", "A04")] == [
+        "$375",
+        "$375",
+        "$376",
+        "$376",
+    ]
 
 
 @pytest.mark.unit

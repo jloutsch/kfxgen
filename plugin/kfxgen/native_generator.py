@@ -11,7 +11,12 @@ from urllib.parse import unquote
 from ._img_tokens import IMG_TOKEN_RE
 from .inline_style import (
     ALIGN_MAP,
+    BIDI_FLAG,
+    LANG_FLAG,
+    bidi_of,
     EXTERNAL_LINK_PREFIX,
+    flag_value,
+    link_target,
     NOTEREF_FLAG,
     TYPOGRAPHY_KEYS,
     VALIGN_MAP,
@@ -236,6 +241,94 @@ def _cell_picture_style(size, dims):
     else:
         cap = (f"{round(number * (0.45 if unit == 'px' else 1.0), 4):g}", "$318")
     return (("$56", pct), ("$65", cap))
+
+
+def _is_bidi_flag(flag):
+    return isinstance(flag, tuple) and len(flag) == 2 and flag[0] == BIDI_FLAG
+
+
+def _direction_layers(spans):
+    """`spans` as Kindle Previewer 4.0.3 writes them with inline direction
+    (#710): [(start, length, flags, bidi keys)], outer runs first.
+
+    Each element with a direction flag becomes one run over its whole text,
+    carrying its own keys and the flags common to all of that text which no
+    enclosing direction run already carries: `<b>x <span dir>y</span></b>`
+    gives the span's run the bold too, and the bold is split around it
+    (K08). Every other span keeps only the flags its direction runs don't
+    carry; the Kindle layers it on them (I21, K11, K12).
+
+    A link is one run over its whole text too, with what is inside it
+    layered on it: a direction run in it has no link of its own (QA on #713,
+    probe M710). A link holding only a direction element is one run with
+    both (M05): its own layer, inside that run, carries nothing that run
+    doesn't, so it writes no run. Links are layered so only in a paragraph
+    with a direction or language flag (M08); with neither, `spans`
+    unchanged, each with no keys, as kfxgen wrote them before #710."""
+    # Each layer: [start, end, level, keys, flags common to its text]. A
+    # direction element of depth d is at level 2d; a link is just above the
+    # direction elements around it; flat spans above the layers they're in.
+    ranges = {}
+    links = []
+    for s, n, flags in spans:
+        plain = frozenset(f for f in flags if not _is_bidi_flag(f))
+        for f in flags:
+            b = bidi_of(f)
+            if b is None:
+                continue
+            serial, depth, keys = b
+            r = ranges.get(serial)
+            if r is None:
+                ranges[serial] = [s, s + n, 2 * depth, keys, plain]
+            else:
+                r[1] = max(r[1], s + n)
+                r[4] = r[4] & plain
+        for f in plain:
+            if not link_target({f}):
+                continue
+            if links and links[-1][4] == f and links[-1][1] == s:
+                links[-1][1] = s + n
+            else:
+                links.append([s, s + n, None, None, f])
+    if not ranges and not any(flag_value(f, LANG_FLAG) for _, _, f in spans):
+        return [(s, n, f, None) for s, n, f in spans]
+
+    dirs = list(ranges.values())
+    layers = list(dirs)
+    for lk in links:
+        a, b = lk[0], lk[1]
+        outer = [r[2] for r in dirs if r[0] <= a and b <= r[1]]
+        lk[2] = max(outer, default=0) + 0.5
+        lk[4] = frozenset.intersection(
+            *(
+                frozenset(f for f in flags if not _is_bidi_flag(f))
+                for s, n, flags in spans
+                if a <= s and s + n <= b
+            )
+        )
+        layers.append(lk)
+
+    carried = {}
+    for r in sorted(layers, key=lambda x: x[2]):
+        above = frozenset().union(
+            *(
+                carried[id(o)]
+                for o in layers
+                if o[2] < r[2] and o[0] <= r[0] and r[1] <= o[1]
+            )
+        )
+        carried[id(r)] = r[4] - above
+    out = [(r[0], r[1] - r[0], carried[id(r)], r[3], r[2]) for r in layers]
+    for s, n, flags in spans:
+        inside = [r for r in layers if r[0] <= s and s + n <= r[1]]
+        drop = frozenset().union(*(carried[id(r)] for r in inside))
+        rest = frozenset(f for f in flags if not _is_bidi_flag(f)) - drop
+        if rest:
+            out.append(
+                (s, n, rest, None, max((r[2] for r in inside), default=0) + 0.75)
+            )
+    out.sort(key=lambda x: (x[0], x[4]))
+    return [x[:4] for x in out]
 
 
 def _slice_block(block, a, b):
@@ -1845,6 +1938,13 @@ class NativeKFXGenerator:
                 IonStruct(IS("version"), IonStruct(IS("$587"), 1, IS("$588"), 0)),
             )
         )
+
+    def build_direction_style_157(self, entity_name):
+        """A run's style holding only an inline element's direction keys,
+        which `_allocate_style` adds (#710)."""
+        self.symtab.create_local_symbol(entity_name)
+        value = IonStruct(IS("$173"), IS(entity_name))
+        return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_ruby_style_157(self, entity_name):
         """A reading's style: half the base's size at a normal line height,
@@ -6506,6 +6606,7 @@ class NativeKFXGenerator:
             blk_fs=1.0,
             scale=1.0,
             keeps_size=False,
+            bidi=(),
         ):
             # Effective emphasis = inline run flags OR the block's CSS emphasis.
             # The applied $157 always carries the run's own weight/style ($13/$12)
@@ -6563,7 +6664,7 @@ class NativeKFXGenerator:
                     attrs[arg] = value
             if in_cell:
                 attrs["no_align"] = True
-            return _allocate_style("_em", **attrs)
+            return _allocate_style("_em", bidi=bidi, **attrs)
 
         def _cell_style(cell, bs, font_size, bidi=()):
             """A table cell's $157: a text cell's, or a cell container's (#261).
@@ -7025,9 +7126,27 @@ class NativeKFXGenerator:
                         chunk["text"],
                         maths,
                     )
-                for s, length, flags in chunk_spans:
-                    flags = without_math(without_ruby(flags))
-                    if not flags:
+                # An inline element's direction: a run over its whole text,
+                # the runs inside layered on it (#710).
+                layered = _direction_layers(
+                    [(s, n, without_math(without_ruby(f))) for s, n, f in chunk_spans]
+                )
+                for s, length, flags, bidi_keys in layered:
+                    # A language alone is a flag of the run's (#710's P01).
+                    lang = flag_value(flags, LANG_FLAG)
+                    flags = frozenset(
+                        f for f in flags if flag_value((f,), LANG_FLAG) is None
+                    )
+                    bidi_keys = {
+                        **({"lang": lang} if lang else {}),
+                        **(bidi_keys or {}),
+                    }
+                    bidi = tuple(
+                        (sym, bidi_keys[name])
+                        for name, sym in _BIDI_KEYS
+                        if bidi_keys.get(name)
+                    )
+                    if not flags and not bidi:
                         continue
                     if drop and s + length <= drop[1]:
                         # The Kindle sizes a drop cap to its lines: Previewer
@@ -7035,7 +7154,7 @@ class NativeKFXGenerator:
                         flags = frozenset(
                             f for f in flags if run_font_size((f,)) is None
                         )
-                        if not flags:
+                        if not flags and not bidi:
                             continue
                     target = _link_target(flags)
                     anchor = body_anchor_map.get(target) if target else None
@@ -7063,25 +7182,34 @@ class NativeKFXGenerator:
                         has_emphasis = True
                     elif (
                         not anchor
+                        and not bidi
                         and flags
                         and all(run_font_size((f,)) is not None for f in flags)
                     ):
                         # Only a size, and the paragraph's: no run, as a
                         # paragraph wholly in a sized span has none (#375).
                         continue
-                    style = (
-                        _emphasis_style(
-                            flags,
-                            chunk_fam,
-                            _blk_b,
-                            _blk_i,
-                            in_cell="cell" in chunk or "in_header_cell" in chunk,
-                            sized=sized,
-                            blk_fs=blk_fs,
+                    if bidi and not has_emphasis:
+                        # Only its direction: a style of those keys alone,
+                        # as Previewer writes it (#710).
+                        style = _allocate_style(
+                            "_dir", builder=self.build_direction_style_157, bidi=bidi
                         )
-                        if has_emphasis or not anchor
-                        else None
-                    )
+                    else:
+                        style = (
+                            _emphasis_style(
+                                flags,
+                                chunk_fam,
+                                _blk_b,
+                                _blk_i,
+                                in_cell="cell" in chunk or "in_header_cell" in chunk,
+                                sized=sized,
+                                blk_fs=blk_fs,
+                                bidi=bidi,
+                            )
+                            if has_emphasis or not anchor
+                            else None
+                        )
                     spans_out.append((s, length, style, anchor))
                     # A shift inside another: a run layered on this one, as
                     # Kindle Previewer 4.0.3 writes it (#536).
@@ -7127,8 +7255,15 @@ class NativeKFXGenerator:
                     readings = ruby_readings.setdefault(ch_idx, [])
                     readings.append((ruby_eids[chunk_idx, serial], reading))
                     ruby = (f"ruby{ch_idx}", len(readings))
+                    # After a longer run starting with it, such as a link
+                    # holding it (QA's G53 on #713).
                     at = next(
-                        (i for i, sp in enumerate(spans_out) if sp[0] >= r_start),
+                        (
+                            i
+                            for i, sp in enumerate(spans_out)
+                            if sp[0] > r_start
+                            or (sp[0] == r_start and sp[1] <= r_end - r_start)
+                        ),
                         len(spans_out),
                     )
                     span = spans_out[at] if at < len(spans_out) else None

@@ -387,6 +387,30 @@ def without_picture(flags):
     )
 
 
+#: An inline element's own writing direction, unicode-bidi and language
+#: (#710): (BIDI_FLAG, (serial, depth, ((key, value), ...))). Kindle
+#: Previewer 4.0.3 writes it as one run over the element's whole text, with
+#: the runs inside it layered on that run.
+BIDI_FLAG = "bidi"
+#: An inline element's language when it sets no direction: (LANG_FLAG,
+#: "fr"), a run style like bold, which the elements inside it take and an
+#: inner `lang` replaces (#710's P01, P03, P06).
+LANG_FLAG = "lang"
+
+
+def make_bidi_flag(serial, depth, keys):
+    """The flag for one inline element's direction keys (#710)."""
+    return (BIDI_FLAG, (serial, depth, tuple(sorted(keys.items()))))
+
+
+def bidi_of(flag):
+    """(serial, depth, {key: value}) of a direction flag, else None."""
+    if isinstance(flag, tuple) and len(flag) == 2 and flag[0] == BIDI_FLAG:
+        serial, depth, keys = flag[1]
+        return serial, depth, dict(keys)
+    return None
+
+
 MONO_FLAG = "mono"
 
 #: Monospace families a book names without the generic `monospace` after them.
