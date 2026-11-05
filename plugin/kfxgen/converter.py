@@ -4838,6 +4838,7 @@ def extract_blocks_from_html(
     notes_tables = set()  # ids of tables written as notes paragraphs (#268)
     native_made = set()  # ids of tables written as native tables
     pending_ids = []  # anchors awaiting the next leaf block (containers, standalone <a>)
+    rule_ids = set()  # an <hr>'s own ids: they name the rule (QA on #720)
     # List markers awaiting the next text block: an item's number belongs on
     # the first text it holds, which may sit in a nested <p> (#201). An entry
     # is (marker, ordinal or None).
@@ -5484,6 +5485,7 @@ def extract_blocks_from_html(
         """An <hr>: a rule, as Kindle Previewer writes it ($596), with its
         margins as space above and below, or just space when its CSS draws
         no border (#230). Its ids name the paragraph after it."""
+        rule_ids.update(_own_anchor_ids(elem))
         pending_ids.extend(_own_anchor_ids(elem))
         css = style_resolver(elem) if style_resolver is not None else None
         if css is not None and _css_border(css) is None:
@@ -5970,7 +5972,10 @@ def extract_blocks_from_html(
     # block instead of dropping them silently. Not onto a rule, which holds
     # no anchor (#230).
     if trailing_ids is not None and blocks:
-        trailing_ids.extend(pending_ids)
+        # Not a rule's own: it names the rule, in this file. A link to the
+        # <hr> under a title alone opened the next chapter, where Kindle
+        # Previewer 4.0.3 lands on the rule (QA on #720).
+        trailing_ids.extend(i for i in pending_ids if i not in rule_ids)
     if pending_ids and blocks:
         last_block = next(
             (b for b in reversed(blocks) if b.get("type") != "rule"), blocks[-1]

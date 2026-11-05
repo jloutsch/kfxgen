@@ -17,6 +17,7 @@ import pytest
 
 from tests._kfx_introspect import by_type, val
 from tests.unit.test_contents_pages import _convert
+from tests.unit.test_link_landings import _landings
 
 CSS = (
     "h1, h2, h3, h4, h5 { text-align: center; font-weight: normal; line-height: 1.5 }"
@@ -91,3 +92,32 @@ def section_of(frags, title):
 def test_the_rule_under_a_title_alone_is_kept(tmp_path, title, expected):
     frags = _convert(tmp_path, pages=PAGES, toc=TOC)
     assert section_of(frags, title) == expected
+
+
+@pytest.mark.unit
+def test_a_link_to_a_rule_at_its_files_end_stays_in_that_chapter(tmp_path):
+    # Ids at a file's end name the next chapter, as Gutenberg's
+    # <p><a id="link2HCH0001"></a></p> does (#338), but an <hr>'s own id names
+    # the rule. Previewer lands its link on the rule; kfxgen writes no anchor
+    # on a rule (#230), so it lands on the entry before it (QA on #720).
+    pages = {
+        "c0.xhtml": "<h1 id='w'>The Works</h1><p>Front words.</p>",
+        "t1.xhtml": "<div><h2 id='t1'>RULED TITLE</h2><hr id='r1'/></div>",
+        "s1.xhtml": "<h3 id='s1'>Scene one</h3><p>Words one.</p><hr id='r2'/>",
+        "s2.xhtml": "<h3 id='s2'>Scene two</h3><p>Words two.</p>",
+        "k.xhtml": (
+            "<h2 id='k'>Links</h2><p><a href='t1.xhtml#r1'>to rule one</a>, "
+            "<a href='s1.xhtml#r2'>to rule two</a>.</p>"
+        ),
+    }
+    toc = [
+        ("The Works", "c0.xhtml#w", 0),
+        ("RULED TITLE", "t1.xhtml#t1", 0),
+        ("Scene one", "s1.xhtml#s1", 1),
+        ("Scene two", "s2.xhtml#s2", 1),
+        ("Links", "k.xhtml#k", 0),
+    ]
+    _convert(tmp_path, pages=pages, toc=toc)
+    landings = _landings(tmp_path / "works.kfx")
+    assert landings["to rule one"] == "RULED TITLE"
+    assert landings["to rule two"] == "Words one."
