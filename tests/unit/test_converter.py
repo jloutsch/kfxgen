@@ -8756,7 +8756,8 @@ def _css_for_class(**rules):
 
 
 _NO_BORDER = {"border-sides": (("none", "0", "black"),) * 4}
-_RULE_BORDER = {"border-sides": (("inset", "0.75", "gray"),) * 4}
+#: calibre 9.17's own <hr> border, as its style resolver reports it (#722).
+_RULE_BORDER = {"border-sides": (("inset", 0.72, "currentColor"),) * 4}
 
 
 #: Two ordinary paragraphs: the file's usual spacing, against which a gap
