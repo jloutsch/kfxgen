@@ -116,6 +116,10 @@ CSS_720 = (
     " hr.pbk { margin: 2em auto }"
     " p.mb { margin-bottom: 2em }"
     " h2.mb3 { margin-bottom: 3em }"
+    " div.pad { padding: 1em 0 }"
+    " div.padm { padding: 1em 0; margin-bottom: 3em }"
+    " h2.small { font-size: 0.75em }"
+    " span.huge { font-size: 3em }"
 )
 PAGES_720 = {
     "e00.xhtml": "<h1 id='w'>Front</h1><p>Front words.</p>",
@@ -134,7 +138,18 @@ PAGES_720 = {
     ),
     "e10.xhtml": "<h2 class='mb3'>Wide Below</h2><hr/><p>Words ten.</p>",
     "e11.xhtml": "<h1>Act Cut</h1><hr/><p>Words eleven.</p>",
-    "e12.xhtml": "<p>Last words.</p>",
+    "e12.xhtml": (
+        "<h2>Padded</h2><div class='pad'><p>R03 in a padded div.</p></div><hr/>"
+        "<div class='padm'><p>R04 with a margin.</p></div><hr/><p>R09 last.</p>"
+    ),
+    "e13.xhtml": (
+        "<h2 class='small'><span class='big'>Mixed</span> "
+        "<span class='huge'>Sizes</span></h2>"
+    ),
+    "e14.xhtml": (
+        "<div class='box'><h2>Box Table</h2><table><tr><td></td></tr></table></div>"
+    ),
+    "e15.xhtml": "<p>Last words.</p>",
 }
 TOC_720 = [
     (label, page, 0)
@@ -152,6 +167,9 @@ TOC_720 = [
             "General",
             "Wide Below",
             "Act Cut",
+            "Padded",
+            "Mixed Sizes",
+            "Box Table",
             "End",
         ),
         PAGES_720,
@@ -238,3 +256,36 @@ def test_a_title_in_a_sized_span_prints_at_the_spans_size(frags720, title):
     frags, version = frags720
     (style,) = [s for t, s in _section(frags, title) if t == title]
     assert _num(style.get("$16")) == 1.5, f"calibre {version}: {style}"
+
+
+@pytest.mark.parametrize(
+    "line, above",
+    [
+        # The div's padding-bottom (1em) holds the paragraph's 0.4em margin
+        # inside it; the rule's 1em margin is outside: 2.4em, Previewer's
+        # total (its container's `$54`, the paragraph's `$49`, the rule's).
+        ("R03 in a padded div.", 2.0),
+        # The same with the div's 3em margin outside, met by the rule's 1em.
+        ("R04 with a margin.", 3.667),
+    ],
+)
+def test_the_margin_inside_a_padded_block_stays_above_the_rule(frags720, line, above):
+    frags, version = frags720
+    rule = _after(frags, line)[0]
+    assert (rule[0], _num(rule[1].get("$47"))) == ("$596", above), (
+        f"calibre {version}: {rule}"
+    )
+
+
+def test_a_title_in_spans_of_different_sizes_keeps_the_headings_size(frags720):
+    # 2em and 3em spans in a 0.75em heading: no one size, so the heading's
+    # own, as Previewer writes the heading.
+    frags, version = frags720
+    (style,) = [s for t, s in _section(frags, "Mixed Sizes") if t == "Mixed Sizes"]
+    assert _num(style.get("$16")) == 0.75, f"calibre {version}: {style}"
+
+
+def test_a_box_holding_the_title_and_more_than_rules_is_not_drawn(frags720):
+    frags, version = frags720
+    labels = [t for t, _ in _section(frags, "Box Table")]
+    assert labels[0] == "Box Table", f"calibre {version}: {labels}"
