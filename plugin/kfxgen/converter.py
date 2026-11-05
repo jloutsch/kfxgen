@@ -3102,6 +3102,83 @@ _HIDDEN_RULE_EM_PER_UNIT = {
 _HIDDEN_RULE_SHARE = 0.6
 
 
+#: calibre's own <hr> border: 1px inset on every side, in the text colour.
+#: Kindle Previewer writes no border for it, and the device draws its own
+#: rule (#722).
+_UA_RULE_SIDE = ("inset", 0.72, "currentcolor")
+
+
+def _rule_look(css):
+    """How an <hr> is drawn, as Kindle Previewer 4.0.3 writes it on its
+    `$596` (my probes, #722), or {} for calibre's plain rule:
+    - "width": (n, "%") from % or px (px at 0.45pt, 100% = 384pt), or
+      (n, "em");
+    - "align": "left" or "right" when it has a width and a margin that
+      isn't auto; "margin_left"/"margin_right": a margin as a share of the
+      page, when it isn't 0 or auto, only the aligned side's with a width;
+    - "border": {side: (style, width pt, ARGB or None)}, its drawn sides,
+      unless it is calibre's own;
+    - "fill" (ARGB) and "height" ((n, "pt") from px, or (n, "em")): a
+      borderless rule drawn as a filled bar.
+    Its `color` is not written: calibre gives every <hr> grey, and
+    Previewer wrote grey for `color: red` too."""
+    css = css or {}
+    look = {}
+    width = parse_css_length(str(css.get("width") or ""))
+    if width and width[1] in ("$314", "$319"):
+        look["width"] = (_page_share(width), "%")
+    elif width and width[1] == "$308":
+        look["width"] = (float(width[0]), "em")
+    margins = {}
+    for side in ("left", "right"):
+        value = str(css.get(f"margin-{side}") or "").strip().lower()
+        length = parse_css_length(value)
+        if length and float(length[0]) > 0 and length[1] in _UNIT_TO_PCT:
+            look[f"margin_{side}"] = _page_share(length)
+        margins[side] = value
+    if "width" in look:
+        # Placed from one side: only that side's margin is written. A
+        # right-placed rule's left margin is auto, so has none.
+        if margins["left"] not in ("", "auto"):
+            look["align"] = "left"
+            look.pop("margin_right", None)
+        elif margins["right"] not in ("", "auto"):
+            look["align"] = "right"
+    sides = css.get("border-sides") or ()
+    ua = len(sides) == 4 and all(
+        (str(k).lower(), _float_or_none(w), str(c).lower()) == _UA_RULE_SIDE
+        for k, w, c in sides
+    )
+    border = None if ua else _css_border(css)
+    if border:
+        # A black the book sets is written, as Previewer writes it; the
+        # text colour (`currentColor`) is not.
+        raw = dict(zip(_BORDER_SIDES, (c for _k, _w, c in sides)))
+        look["border"] = {
+            side: (kind, pt, 0xFF000000 if css_rgb(raw[side]) == 0 else colour)
+            for side, (kind, pt, colour) in border.items()
+        }
+    height = str(css.get("height") or "").strip()
+    length = parse_css_length(height)
+    if height == "0":
+        look["height"] = (0.0, "pt")
+    elif length and length[1] == "$319":
+        look["height"] = (round(float(length[0]) * 0.45, 4), "pt")
+    elif length and length[1] == "$308":
+        look["height"] = (float(length[0]), "em")
+    fill = _box_background(css)
+    if fill is not None and look.get("height", (0,))[0] > 0:
+        look["fill"] = fill
+    return look
+
+
+def _float_or_none(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _margin_em(css, side, share=1.0):
     """An element's declared margin-top or -bottom in the 16px root's ems
     (1px = 0.45pt, 12pt = 1em, as for padding; an em is the element's own,
@@ -5484,11 +5561,14 @@ def extract_blocks_from_html(
     def _emit_rule(elem):
         """An <hr>: a rule, as Kindle Previewer writes it ($596), with its
         margins as space above and below, or just space when its CSS draws
-        no border (#230). Its ids name the paragraph after it."""
+        no border or filled bar (#230). Its width, alignment, border and
+        fill as `_rule_look` reads them (#722). Its ids name the paragraph
+        after it."""
         rule_ids.update(_own_anchor_ids(elem))
         pending_ids.extend(_own_anchor_ids(elem))
         css = style_resolver(elem) if style_resolver is not None else None
-        if css is not None and _css_border(css) is None:
+        look = _rule_look(css)
+        if css is not None and _css_border(css) is None and "fill" not in look:
             top, height, bottom = _hidden_rule_em(css)
             _emit_space(margin=top, height=height, margin_after=bottom)
             return
@@ -5502,7 +5582,12 @@ def extract_blocks_from_html(
             {
                 **_EMPTY_BLOCK,
                 "type": "rule",
-                "rule": {"space_above": space("top"), "space_below": space("bottom")},
+                "rule": {
+                    "space_above": space("top"),
+                    "space_below": space("bottom"),
+                    # Its width, alignment, border and fill (#722).
+                    **look,
+                },
             }
         )
 

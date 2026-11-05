@@ -3457,6 +3457,69 @@ class NativeKFXGenerator:
         _write_clear(value, clear)
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
+    def build_rule_style_157(
+        self,
+        entity_name,
+        space_above=None,
+        space_below=None,
+        clear=None,
+        width=None,
+        align=None,
+        margin_left=None,
+        margin_right=None,
+        border=None,
+        fill=None,
+        height=None,
+    ):
+        """$157 for a rule (#230), as Kindle Previewer 4.0.3 writes an <hr>
+        (my probes, #722): its space above and below in line heights; a
+        width `$56` (% or em, an em one capped at the page, `$65` 100%) with
+        `$546: $377`, set `$580` left or right, side margins `$48`/`$50`
+        (%); a border on every side as `$93`/`$88`/`$83`, else each drawn
+        side's own and 0 for the others; only the width `$93` for an inset
+        border on every side in the text colour, the style calibre's own
+        rule has; and a filled bar's `$70` and height `$62`, with `$93` 0."""
+        self.symtab.create_local_symbol(entity_name)
+        value = IonStruct(IS("$173"), IS(entity_name))
+
+        def length(n, unit):
+            return IonStruct(IS("$307"), IonDecimal(f"{n:.6g}"), IS("$306"), IS(unit))
+
+        for key, em in (("$47", space_above), ("$49", space_below)):
+            if em:
+                value[IS(key)] = length(em / 1.2, "$310")
+        if width:
+            n, unit = width
+            value[IS("$56")] = length(n, "$314" if unit == "%" else "$308")
+            if unit == "em":
+                value[IS("$65")] = length(100, "$314")
+            value[IS("$546")] = IS("$377")
+        if align:
+            value[IS("$580")] = IS("$59" if align == "left" else "$61")
+        for key, pct in (("$48", margin_left), ("$50", margin_right)):
+            if pct:
+                value[IS(key)] = length(pct, "$314")
+        if border:
+            border = dict(border)
+            specs = set(border.values())
+            if len(border) == 4 and specs == {("inset", next(iter(specs))[1], None)}:
+                value[IS("$93")] = length(next(iter(specs))[1], "$318")
+            else:
+                _apply_border(value, border, is_table=False)
+            if not (len(border) == 4 and len(set(border.values())) == 1):
+                for side, (w, _st, _c) in _BORDER_SIDE_KEYS.items():
+                    if side not in border:
+                        value[IS(w)] = length(0, "$318")
+        if fill is not None:
+            value[IS("$70")] = fill
+            if not border:
+                value[IS("$93")] = length(0, "$318")
+        if height is not None:
+            n, unit = height
+            value[IS("$62")] = length(n, "$318" if unit == "pt" else "$308")
+        _write_clear(value, clear)
+        return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
+
     def build_cell_picture_style_157(self, entity_name, values):
         """$157 for a picture alone in a table cell the markup sizes (#698):
         `values` as `_cell_picture_style` gives them, marked `$546: $377`."""
@@ -6907,13 +6970,28 @@ class NativeKFXGenerator:
                 entry_extras.append(None)
                 if chunk.get("type") == "rule":
                     rule = chunk["rule"]
+                    look = {
+                        k: rule[k]
+                        for k in (
+                            "width",
+                            "align",
+                            "margin_left",
+                            "margin_right",
+                            "fill",
+                            "height",
+                        )
+                        if rule.get(k) is not None
+                    }
+                    if rule.get("border"):
+                        look["border"] = _border_key(rule["border"])
                     entry_styles.append(
                         _allocate_style(
                             "_r",
-                            builder=self.build_box_style_157,
+                            builder=self.build_rule_style_157,
                             space_above=rule["space_above"],
                             space_below=rule["space_below"],
                             **({"clear": rule["clear"]} if rule.get("clear") else {}),
+                            **look,
                         )
                     )
                     entry_link_targets.append(None)
