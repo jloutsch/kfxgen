@@ -752,6 +752,11 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                         st.get(f"padding-{side}") for side in _BORDER_SIDES
                     ),
                     "border-collapse": _computed_value(st, "border-collapse"),
+                    # Each side's border width as declared: calibre's computed
+                    # value turns an em into points (#722).
+                    "border-widths": tuple(
+                        st.get(f"border-{side}-width") for side in _BORDER_SIDES
+                    ),
                     "border-sides": tuple(
                         (
                             _computed_value(st, f"border-{side}-style"),
@@ -3114,10 +3119,10 @@ def _rule_look(css):
     - "width": (n, "%") from % or px (px at 0.45pt, 100% = 384pt), or
       (n, "em");
     - "align": "left" or "right" when it has a width and a margin that
-      isn't auto; "margin_left"/"margin_right": a margin as a share of the
+      isn't auto, else "centre"; "margin_left"/"margin_right": a margin as a share of the
       page, when it isn't 0 or auto, only the aligned side's with a width;
-    - "border": {side: (style, width pt, ARGB or None)}, its drawn sides,
-      unless it is calibre's own;
+    - "border": {side: (style, width pt or (n, "em"), ARGB or None)}, its
+      drawn sides, unless it is calibre's own;
     - "fill" (ARGB) and "height" ((n, "pt") from px, or (n, "em")): a
       borderless rule drawn as a filled bar.
     Its `color` is not written: calibre gives every <hr> grey, and
@@ -3144,6 +3149,12 @@ def _rule_look(css):
             look.pop("margin_right", None)
         elif margins["right"] not in ("", "auto"):
             look["align"] = "right"
+        else:
+            # Both auto: centred. Previewer writes it for `margin: auto`
+            # but not for calibre's own auto, which kfxgen can't tell apart;
+            # written for both, so it doesn't rest on the device's default
+            # (the user's choice, QA on #724).
+            look["align"] = "centre"
     sides = css.get("border-sides") or ()
     ua = len(sides) == 4 and all(
         (str(k).lower(), _float_or_none(w), str(c).lower()) == _UA_RULE_SIDE
@@ -3154,8 +3165,23 @@ def _rule_look(css):
         # A black the book sets is written, as Previewer writes it; the
         # text colour (`currentColor`) is not.
         raw = dict(zip(_BORDER_SIDES, (c for _k, _w, c in sides)))
+        # A width in em stays in em, in the rule's own size, as Previewer
+        # writes it (QA on #724: 0.1em was written 0.75pt).
+        declared = dict(zip(_BORDER_SIDES, css.get("border-widths") or ()))
+        ratio = _font_ratio(css)
+
+        def width(side, pt):
+            em = parse_css_length(str(declared.get(side) or ""))
+            if em and em[1] == "$308":
+                return (round(float(em[0]) * ratio, 4), "em")
+            return pt
+
         look["border"] = {
-            side: (kind, pt, 0xFF000000 if css_rgb(raw[side]) == 0 else colour)
+            side: (
+                kind,
+                width(side, pt),
+                0xFF000000 if css_rgb(raw[side]) == 0 else colour,
+            )
             for side, (kind, pt, colour) in border.items()
         }
     height = str(css.get("height") or "").strip()

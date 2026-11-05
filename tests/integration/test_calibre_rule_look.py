@@ -4,7 +4,10 @@ kfxgen wrote an <hr> with only its space above and below, so the Kindle drew
 every rule at its default width and weight. On the Paperwhite (5.19.2) a 40%
 1px rule and a 60% 3px one looked the same in kfxgen's file and different in
 Kindle Previewer 4.0.3's. Each case below is an <hr> of the probe P722 with
-the keys Previewer 4.0.3 wrote for it, space above and below aside.
+the keys Previewer 4.0.3 wrote for it, space above and below aside, but two:
+a rule with a width and auto side margins is written centred (`$580 $320`),
+which Previewer writes only when the book sets `margin: auto` (the user's
+choice, QA on #724); and V32.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found. CI has no calibre, so this is
@@ -33,11 +36,12 @@ BLACK = "4278190080"
 # (CSS for the rule, Previewer 4.0.3's keys for it.)
 CASES = {
     "V01": ("", {}),
-    "V02": ("width: 50%", {"$546": "$377", "$56": "50 $314"}),
+    "V02": ("width: 50%", {"$546": "$377", "$580": "$320", "$56": "50 $314"}),
     "V03": (
         "width: 40%; border: 0; border-top: 1px solid black",
         {
             "$546": "$377",
+            "$580": "$320",
             "$56": "40 $314",
             "$84": BLACK,
             "$89": "$328",
@@ -51,6 +55,7 @@ CASES = {
         "width: 60%; border: 0; border-top: 3px solid black",
         {
             "$546": "$377",
+            "$580": "$320",
             "$56": "60 $314",
             "$84": BLACK,
             "$89": "$328",
@@ -60,10 +65,10 @@ CASES = {
             "$97": "0 $318",
         },
     ),
-    "V05": ("width: 200px", {"$546": "$377", "$56": "23.4375 $314"}),
+    "V05": ("width: 200px", {"$546": "$377", "$580": "$320", "$56": "23.4375 $314"}),
     "V06": (
         "width: 10em",
-        {"$546": "$377", "$56": "10 $308", "$65": "100 $314"},
+        {"$546": "$377", "$580": "$320", "$56": "10 $308", "$65": "100 $314"},
     ),
     "V07": (
         "width: 30%; margin-left: 0",
@@ -77,6 +82,7 @@ CASES = {
         "width: 50%; border: 2px dashed red",
         {
             "$546": "$377",
+            "$580": "$320",
             "$56": "50 $314",
             "$83": "4294901760",
             "$88": "$330",
@@ -98,25 +104,27 @@ CASES = {
         "width: 50%; height: 4px; background-color: #888; border: 0",
         {
             "$546": "$377",
+            "$580": "$320",
             "$56": "50 $314",
             "$62": "1.8 $318",
             "$70": "4287137928",
             "$93": "0 $318",
         },
     ),
-    "V13": ("width: 100%", {"$546": "$377", "$56": "100 $314"}),
+    "V13": ("width: 100%", {"$546": "$377", "$580": "$320", "$56": "100 $314"}),
     "V15": (
         "width: 45%; margin-left: 27.5%",
         {"$48": "27.5 $314", "$546": "$377", "$56": "45 $314", "$580": "$59"},
     ),
     "V16": (
         "border-width: 3px; width: 20%",
-        {"$546": "$377", "$56": "20 $314", "$93": "1.35 $318"},
+        {"$546": "$377", "$580": "$320", "$56": "20 $314", "$93": "1.35 $318"},
     ),
     "V17": (
         "width: 50%; height: 0.5em; background-color: #888; border: 0",
         {
             "$546": "$377",
+            "$580": "$320",
             "$56": "50 $314",
             "$62": "0.5 $308",
             "$70": "4287137928",
@@ -128,6 +136,7 @@ CASES = {
         " width: 35%",
         {
             "$546": "$377",
+            "$580": "$320",
             "$56": "35 $314",
             "$84": BLACK,
             "$86": BLACK,
@@ -148,6 +157,7 @@ CASES = {
         "width: 50%; height: 1px; background-color: black; border: 0",
         {
             "$546": "$377",
+            "$580": "$320",
             "$56": "50 $314",
             "$62": "0.45 $318",
             "$70": BLACK,
@@ -158,6 +168,7 @@ CASES = {
         "border: 0; height: 1px; background: #444; width: 30%",
         {
             "$546": "$377",
+            "$580": "$320",
             "$56": "30 $314",
             "$62": "0.45 $318",
             "$70": "4282664004",
@@ -169,6 +180,7 @@ CASES = {
         " border-right: 0",
         {
             "$546": "$377",
+            "$580": "$320",
             "$56": "6 $308",
             "$65": "100 $314",
             "$89": "$328",
@@ -199,6 +211,74 @@ CASES = {
     "V29": (
         "width: 30%; margin-left: auto; margin-right: 10%",
         {"$50": "10 $314", "$546": "$377", "$56": "30 $314", "$580": "$61"},
+    ),
+    # Border widths in em stay in em (QA on #724).
+    "V30": (
+        "width: 50%; border: 0; border-top: 0.1em solid black",
+        {
+            "$546": "$377",
+            "$56": "50 $314",
+            "$580": "$320",
+            "$84": BLACK,
+            "$89": "$328",
+            "$94": "0.1 $308",
+            "$95": "0 $318",
+            "$96": "0 $318",
+            "$97": "0 $318",
+        },
+    ),
+    "V31": (
+        "border: 0; border-top: 0.3em double black",
+        {
+            "$84": BLACK,
+            "$89": "$329",
+            "$94": "0.3 $308",
+            "$95": "0 $318",
+            "$96": "0 $318",
+            "$97": "0 $318",
+        },
+    ),
+    # Previewer writes 0.1em and the rule's `$16` 2em; kfxgen 0.2em, in
+    # the main size.
+    "V32": (
+        "font-size: 2em; border: 0; border-top: 0.1em solid black; width: 40%",
+        {
+            "$546": "$377",
+            "$56": "40 $314",
+            "$580": "$320",
+            "$84": BLACK,
+            "$89": "$328",
+            "$94": "0.2 $308",
+            "$95": "0 $318",
+            "$96": "0 $318",
+            "$97": "0 $318",
+        },
+    ),
+    "V33": (
+        "border: 0.2em solid red; width: 30%",
+        {
+            "$546": "$377",
+            "$56": "30 $314",
+            "$580": "$320",
+            "$83": "4294901760",
+            "$88": "$328",
+            "$93": "0.2 $308",
+        },
+    ),
+    "V34": (
+        "border: 0; border-bottom: 0.15em dashed; border-top: 1px solid",
+        {
+            "$89": "$328",
+            "$91": "$330",
+            "$94": "0.45 $318",
+            "$95": "0 $318",
+            "$96": "0.15 $308",
+            "$97": "0 $318",
+        },
+    ),
+    "V35": (
+        "width: 50%; margin: 1em auto",
+        {"$546": "$377", "$56": "50 $314", "$580": "$320"},
     ),
 }
 CSS = "p { margin: 0.4em 0 }" + "".join(

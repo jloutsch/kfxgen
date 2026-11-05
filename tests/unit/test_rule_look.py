@@ -41,9 +41,9 @@ def _css(**kw):
     [
         # calibre's own rule: Previewer writes nothing, the device its own.
         (_css(), {}),
-        (_css(width="50%"), {"width": (50.0, "%")}),
-        (_css(width="200px"), {"width": (23.4375, "%")}),
-        (_css(width="10em"), {"width": (10.0, "em")}),
+        (_css(width="50%"), {"width": (50.0, "%"), "align": "centre"}),
+        (_css(width="200px"), {"width": (23.4375, "%"), "align": "centre"}),
+        (_css(width="10em"), {"width": (10.0, "em"), "align": "centre"}),
         (_css(width="30%", margin_left="0"), {"width": (30.0, "%"), "align": "left"}),
         (
             _css(width="30%", margin_right="0"),
@@ -66,6 +66,15 @@ def _css(**kw):
         (
             _css(margin_left="10%", margin_right="10%"),
             {"margin_left": 10.0, "margin_right": 10.0},
+        ),
+        # An em border width stays em, in the rule's own size.
+        (
+            _css(
+                border_sides=(("solid", 2.4, "black"), NONE, NONE, NONE),
+                border_widths=("0.1em", "0", "0", "0"),
+                font_size=32.0,
+            ),
+            {"border": {"top": ("solid", (0.2, "em"), 0xFF000000)}},
         ),
         # A black the book sets is written; the text colour isn't.
         (
@@ -145,6 +154,15 @@ def test_a_filled_bar_has_no_border():
         "$70": str(0xFF888888),
         "$93": "0 $318",
     }
+
+
+def test_an_em_border_width_is_written_in_em():
+    sides = (("top", ("solid", (0.1, "em"), None)),)
+    assert _style(border=sides)["$94"] == "0.1 $308"
+
+
+def test_a_centred_rule_is_marked_centred():
+    assert _style(width=(50.0, "%"), align="centre")["$580"] == "$320"
 
 
 def test_an_em_width_is_capped_at_the_page():

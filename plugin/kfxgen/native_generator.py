@@ -3474,7 +3474,7 @@ class NativeKFXGenerator:
         """$157 for a rule (#230), as Kindle Previewer 4.0.3 writes an <hr>
         (my probes, #722): its space above and below in line heights; a
         width `$56` (% or em, an em one capped at the page, `$65` 100%) with
-        `$546: $377`, set `$580` left or right, side margins `$48`/`$50`
+        `$546: $377`, `$580` left, right or centred, side margins `$48`/`$50`
         (%); a border on every side as `$93`/`$88`/`$83`, else each drawn
         side's own and 0 for the others; only the width `$93` for an inset
         border on every side in the text colour, the style calibre's own
@@ -3495,21 +3495,38 @@ class NativeKFXGenerator:
                 value[IS("$65")] = length(100, "$314")
             value[IS("$546")] = IS("$377")
         if align:
-            value[IS("$580")] = IS("$59" if align == "left" else "$61")
+            value[IS("$580")] = IS({"left": "$59", "right": "$61"}.get(align, "$320"))
         for key, pct in (("$48", margin_left), ("$50", margin_right)):
             if pct:
                 value[IS(key)] = length(pct, "$314")
-        if border:
-            border = dict(border)
-            specs = set(border.values())
-            if len(border) == 4 and specs == {("inset", next(iter(specs))[1], None)}:
-                value[IS("$93")] = length(next(iter(specs))[1], "$318")
-            else:
-                _apply_border(value, border, is_table=False)
-            if not (len(border) == 4 and len(set(border.values())) == 1):
-                for side, (w, _st, _c) in _BORDER_SIDE_KEYS.items():
-                    if side not in border:
-                        value[IS(w)] = length(0, "$318")
+
+        def border_width(w):
+            # Points, or (n, "em") kept in em (QA on #724).
+            return length(w[0], "$308") if isinstance(w, tuple) else length(w, "$318")
+
+        sides = {
+            side: spec
+            for side, spec in dict(border or ()).items()
+            if spec[0] in _BORDER_STYLE_SYMBOLS
+        }
+        specs = set(sides.values())
+        if len(sides) == 4 and len(specs) == 1:
+            kind, w, colour = specs.pop()
+            value[IS("$93")] = border_width(w)
+            if not (kind == "inset" and colour is None):
+                value[IS("$88")] = IS(_BORDER_STYLE_SYMBOLS[kind])
+            if colour:
+                value[IS("$83")] = colour
+        elif sides:
+            for side, (w_key, st_key, c_key) in _BORDER_SIDE_KEYS.items():
+                if side not in sides:
+                    value[IS(w_key)] = length(0, "$318")
+                    continue
+                kind, w, colour = sides[side]
+                value[IS(w_key)] = border_width(w)
+                value[IS(st_key)] = IS(_BORDER_STYLE_SYMBOLS[kind])
+                if colour:
+                    value[IS(c_key)] = colour
         if fill is not None:
             value[IS("$70")] = fill
             if not border:
