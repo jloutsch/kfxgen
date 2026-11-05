@@ -7228,8 +7228,16 @@ class NativeKFXGenerator:
                         and not chunk["cell"].get("not_bold")
                     )
                     or bool(chunk.get("in_header_cell"))
-                    # kfxgen's chapter heading is bold (#366).
-                    or chunk_idx in heading_chunk_indices
+                    # kfxgen's chapter heading is bold (#366); one printing
+                    # the book's heading has that heading's weight (#490), and
+                    # its runs take it, as Previewer writes them (QA on #725).
+                    or (
+                        chunk_idx in heading_chunk_indices
+                        and (
+                            not chunk.get("book_style")
+                            or bool(chunk["book_style"].get("bold"))
+                        )
+                    )
                 )
                 _blk_i = bool(_cbs.get("italic"))
                 # A run may be emphasis, a link, or both. Its visual style is
@@ -7249,7 +7257,7 @@ class NativeKFXGenerator:
                     if chunk_idx in heading_chunk_indices
                     else None
                 )
-                if heading_book is not None:
+                if heading_book:
                     blk_fs = _rem(heading_book.get("font_size"))
                 # A ruby's event covers its whole base, which may be several
                 # runs; its reading is an entry in the book's ruby fragment
@@ -7328,10 +7336,7 @@ class NativeKFXGenerator:
                         )
                     ) or any(flag_value(flags, k) is not None for k in TYPOGRAPHY_FLAGS)
                     has_emphasis = has_emphasis or bool(mono_families(flags))
-                    sized = (
-                        chunk_idx not in heading_chunk_indices
-                        or heading_book is not None
-                    )
+                    sized = chunk_idx not in heading_chunk_indices or bool(heading_book)
                     run_px = run_font_size(flags)
                     if sized and run_px is not None and _rem(run_px) != blk_fs:
                         has_emphasis = True

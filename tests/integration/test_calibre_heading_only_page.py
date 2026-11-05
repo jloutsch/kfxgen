@@ -120,6 +120,10 @@ CSS_720 = (
     " div.padm { padding: 1em 0; margin-bottom: 3em }"
     " h2.small { font-size: 0.75em }"
     " span.huge { font-size: 3em }"
+    " h2.light { font-weight: normal }"
+    " h2.slant { font-weight: normal; font-style: italic }"
+    " span.dbl { font-size: 2em }"
+    " span.half { font-size: 0.5em }"
 )
 PAGES_720 = {
     "e00.xhtml": "<h1 id='w'>Front</h1><p>Front words.</p>",
@@ -155,6 +159,12 @@ PAGES_720 = {
         "<h2 class='small'>Partial <span class='big'>Cut</span></h2>"
         "<p>Words seventeen.</p>"
     ),
+    "e18.xhtml": (
+        "<h2 class='light'>Light <span class='dbl'>Big</span> "
+        "<span class='half'>Small</span></h2>"
+    ),
+    "e19.xhtml": "<h2 class='slant'>Slant <span class='dbl'>Wide</span></h2>",
+    "e20.xhtml": "<h2 class='light'>Plain <i>Leaning</i></h2>",
 }
 TOC_720 = [
     (label, page, 0)
@@ -178,6 +188,9 @@ TOC_720 = [
             "End",
             "Partial Span",
             "Partial Cut",
+            "Light Big Small",
+            "Slant Wide",
+            "Plain Leaning",
         ),
         PAGES_720,
     )
@@ -334,3 +347,43 @@ def test_a_title_wholly_in_one_size_has_no_size_run(frags720, title):
     assert all(size is None for *_, size in _runs(frags, title)), (
         f"calibre {version}: {_runs(frags, title)}"
     )
+
+
+def _run_faces(frags, title):
+    """The heading's runs as (offset, length, `$13`, `$12`)."""
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    (style,) = [s for t, s in _section(frags, title) if t == title]
+    out = []
+    for run in style.get("$142") or ():
+        run = getattr(run, "value", run)
+        rs = styles.get(str(run.get("$157")), {})
+        out.append(
+            (
+                int(run["$143"]),
+                int(run["$144"]),
+                _sym(rs.get("$13")),
+                _sym(rs.get("$12")),
+            )
+        )
+    return out
+
+
+# QA on #725 (probe P725b): in a heading the book sets normal weight, or
+# italic, a run takes the heading's weight and slant, as Kindle Previewer
+# 4.0.3 writes it: no bold `$13` on a sized or italic word, and a sized
+# word in an italic heading stays italic.
+@pytest.mark.parametrize(
+    "title, faces",
+    [
+        ("Light Big Small", [(6, 3, None, None), (10, 5, None, None)]),
+        ("Slant Wide", [(6, 4, None, None)]),
+        ("Plain Leaning", [(6, 7, None, "$382")]),
+    ],
+)
+def test_a_run_takes_the_weight_and_slant_of_its_heading(frags720, title, faces):
+    frags, version = frags720
+    got = [
+        (s, n, None if w in (None, "$350") else w, None if i in (None, "$350") else i)
+        for s, n, w, i in _run_faces(frags, title)
+    ]
+    assert got == faces, f"calibre {version}: {_run_faces(frags, title)}"
