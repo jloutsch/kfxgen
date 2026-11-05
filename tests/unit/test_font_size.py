@@ -381,9 +381,10 @@ def test_the_books_heading_keeps_its_own_size(tmp_path):
     body = '<h2>The <span class="big">Harbour</span></h2>' + FILLER
     style, runs = _found(_book(tmp_path, body, title="The Harbour"))["The Harbour"]
     assert _fs(style) == pytest.approx(1.5)  # an h2's own 1.5em
-    # The word's run is carried onto the heading (#366), without its size.
+    # The word's run is carried onto the heading (#366) with its own size,
+    # 32px against the main 16px, as Previewer writes it (#721).
     assert [t for t, _ in runs] == ["Harbour"]
-    assert all(_fs(s) is None for _, s in runs)
+    assert [_fs(s) for _, s in runs] == [pytest.approx(2.0)]
 
 
 @pytest.mark.unit

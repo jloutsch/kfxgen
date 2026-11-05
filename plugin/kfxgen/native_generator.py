@@ -7240,6 +7240,17 @@ class NativeKFXGenerator:
                 # link spans unstyled and lets the reader render them. (#53)
                 spans_out = []
                 blk_fs = _block_font_size(ch_idx, chunk)
+                # The book's heading printing as kfxgen's: its words in sized
+                # spans print at their size against its own, as Kindle
+                # Previewer 4.0.3 writes them (#721). kfxgen's own heading
+                # keeps its size (#241).
+                heading_book = (
+                    chunk.get("book_style")
+                    if chunk_idx in heading_chunk_indices
+                    else None
+                )
+                if heading_book is not None:
+                    blk_fs = _rem(heading_book.get("font_size"))
                 # A ruby's event covers its whole base, which may be several
                 # runs; its reading is an entry in the book's ruby fragment
                 # (#236). {serial: [start, end, reading]}, in reading order.
@@ -7317,9 +7328,10 @@ class NativeKFXGenerator:
                         )
                     ) or any(flag_value(flags, k) is not None for k in TYPOGRAPHY_FLAGS)
                     has_emphasis = has_emphasis or bool(mono_families(flags))
-                    # kfxgen's chapter heading has its own size: a sized run
-                    # in the book's heading doesn't change it (#241).
-                    sized = chunk_idx not in heading_chunk_indices
+                    sized = (
+                        chunk_idx not in heading_chunk_indices
+                        or heading_book is not None
+                    )
                     run_px = run_font_size(flags)
                     if sized and run_px is not None and _rem(run_px) != blk_fs:
                         has_emphasis = True
