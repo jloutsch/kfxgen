@@ -1174,6 +1174,23 @@ def _table_opens_with_title(block, title):
     return j is not None and _opens_with_title(_row_text(rows[j]).lstrip(), title)
 
 
+def _print_book_heading(heading_chunk, block, title):
+    """kfxgen's heading for a chapter's title takes the place of `block`, the
+    book's own heading printing that title: its italic or bold words (#366),
+    small caps, transform, spacing and colour (#239), the rest of its style
+    (#490), the space above and below it (#665) and its level (#461)."""
+    heading_chunk["spans"] = _title_spans(block, len(title))
+    bs = block.get("block_style") or {}
+    heading_chunk["typography"] = {
+        k: bs[k] for k in TYPOGRAPHY_KEYS if bs.get(k) is not None
+    }
+    heading_chunk["book_style"] = bs
+    _keep_space_below(heading_chunk, block)
+    _keep_space_above(heading_chunk, block)
+    if block.get("heading_level"):
+        heading_chunk["heading_level"] = block["heading_level"]
+
+
 def _keep_space_above(heading_chunk, block):
     """Put the space above `block`, the book's heading printing as kfxgen's
     chapter title, on that title, in px: its margin-top, and a spacer's or a
@@ -5829,29 +5846,7 @@ class NativeKFXGenerator:
                                     # heading that prints it (#366).
                                     if heading_chunk is not None:
                                         heading_offsets = _heading_offsets(first, title)
-                                        heading_chunk["spans"] = _title_spans(
-                                            first, len(title)
-                                        )
-                                        # And its small caps, transform,
-                                        # spacing and colour (#239).
-                                        bs = first.get("block_style") or {}
-                                        heading_chunk["typography"] = {
-                                            k: bs[k]
-                                            for k in TYPOGRAPHY_KEYS
-                                            if bs.get(k) is not None
-                                        }
-                                        # And the rest of its style (#490).
-                                        heading_chunk["book_style"] = bs
-                                        # And its margin below, kept for
-                                        # a margin-less paragraph (QA on
-                                        # #665).
-                                        _keep_space_below(heading_chunk, first)
-                                        _keep_space_above(heading_chunk, first)
-                                        # And its level (#461).
-                                        if first.get("heading_level"):
-                                            heading_chunk["heading_level"] = first[
-                                                "heading_level"
-                                            ]
+                                        _print_book_heading(heading_chunk, first, title)
                             else:
                                 # Publishers routinely split the opener across
                                 # elements — the numeral in one, the title in
@@ -5948,6 +5943,33 @@ class NativeKFXGenerator:
                         and (first.get("text") or "").strip() == title
                     ):
                         heading_offsets = _heading_offsets(first, title)
+                        # The book's heading prints, in its style, and the
+                        # rule under it with it, as Kindle Previewer 4.0.3
+                        # has a play's title page in pg100 (#717).
+                        # A box holding only the heading: the heading's
+                        # style, the box drawn round it (#646).
+                        own = first
+                        if (
+                            first.get("type") == "box"
+                            and len(first["blocks"]) == 1
+                            and first["blocks"][0].get("type") != "box"
+                        ):
+                            own = first["blocks"][0]
+                        _print_book_heading(heading_chunk, own, title)
+                        if own is not first and all_chunks[-1] is heading_chunk:
+                            _box_heading(first)
+                        blocks = chapter["blocks"]
+                        after = blocks[blocks.index(first) + 1 :]
+                        if after and after[0].get("type") == "rule":
+                            all_chunks.append(
+                                {
+                                    "type": "rule",
+                                    "rule": {
+                                        **after[0]["rule"],
+                                        "clear": after[0].get("clear"),
+                                    },
+                                }
+                            )
 
             # Illustrations the source printed in a contents section that was
             # replaced. They arrive as their own key rather than inside

@@ -25,11 +25,12 @@ from tests.fixtures.oeb_shim import EpubAsOeb
 from tests.unit.test_direction import NullLog
 
 
-def _page(body, html_attrs):
+def _page(body, html_attrs, css=""):
+    style = f"<style>{css}</style>" if css else ""
     return (
         '<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html>'
         f'<html xmlns="http://www.w3.org/1999/xhtml"{html_attrs}>'
-        f"<head><title>t</title></head><body>{body}</body></html>"
+        f"<head><title>t</title>{style}</head><body>{body}</body></html>"
     )
 
 
@@ -93,8 +94,11 @@ def _ncx(toc):
     )
 
 
-def write_epub(path, html_attrs=' xml:lang="en"', pages=PAGES, toc=None):
-    """An EPUB of `pages` with an NCX of `toc` [(label, src, level)]."""
+def write_epub(
+    path, html_attrs=' xml:lang="en"', pages=PAGES, toc=None, css="", ident="works"
+):
+    """An EPUB of `pages` with an NCX of `toc` [(label, src, level)], each
+    page styled by `css`."""
     items = "".join(
         f'<item id="x{i}" href="{h}" media-type="application/xhtml+xml"/>'
         for i, h in enumerate(pages)
@@ -104,7 +108,7 @@ def write_epub(path, html_attrs=' xml:lang="en"', pages=PAGES, toc=None):
         '<?xml version="1.0" encoding="utf-8"?>'
         '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="u">'
         '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
-        '<dc:identifier id="u">works</dc:identifier><dc:title>The Works</dc:title>'
+        f'<dc:identifier id="u">{ident}</dc:identifier><dc:title>The Works</dc:title>'
         "<dc:creator>A</dc:creator><dc:language>en</dc:language></metadata>"
         f'<manifest>{items}<item id="ncx" href="toc.ncx" '
         'media-type="application/x-dtbncx+xml"/></manifest>'
@@ -122,7 +126,7 @@ def write_epub(path, html_attrs=' xml:lang="en"', pages=PAGES, toc=None):
         z.writestr("content.opf", opf)
         z.writestr("toc.ncx", _ncx(toc or _toc()))
         for h, body in pages.items():
-            z.writestr(h, _page(body, html_attrs))
+            z.writestr(h, _page(body, html_attrs, css))
     return path
 
 

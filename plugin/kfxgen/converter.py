@@ -4868,7 +4868,9 @@ def extract_blocks_from_html(
                 {
                     "text": text,
                     "spans": spans,
-                    "block_style": None,
+                    # The table's language and direction, as for a line in
+                    # it (#718).
+                    "block_style": _with_bidi(None, table, style_resolver),
                     "anchor_ids": ids,
                     "anchor_offsets": {aid: mark_offsets.get(aid, 0) for aid in ids},
                 }
@@ -4967,7 +4969,7 @@ def extract_blocks_from_html(
                 {
                     "text": text,
                     "spans": [],
-                    "block_style": None,
+                    "block_style": _with_bidi(None, node, style_resolver),
                     "anchor_ids": ids,
                     "anchor_offsets": dict.fromkeys(ids, 0),
                 }
@@ -5854,7 +5856,11 @@ def extract_blocks_from_html(
                 {
                     "text": text,
                     "spans": spans,
-                    "block_style": None,
+                    # The container's language and direction: a line number
+                    # between two paragraphs, or a list item's own line before
+                    # its nested list, is in its page's language, as Kindle
+                    # Previewer 4.0.3 writes it (#718).
+                    "block_style": _with_bidi(None, elem, style_resolver),
                     "anchor_ids": block_ids,
                     # Cells fuse into one block (#128), so an offset is what
                     # makes a link land on the right cell rather than at the
