@@ -4435,6 +4435,18 @@ def _place_margin(
             b["margin_above"] = (space + fixed) / _ems_own(b) + lines
         return
     up, own = above, top
+    if _spaces_itself(b):
+        # The margin waiting above meets the rule's own, as Kindle Previewer
+        # 4.0.3 writes the rule's `$47`; a padding below the block before
+        # stays inside it, as for a paragraph. The block before keeps none
+        # (QA on #639), and the rule had only its own (QA on #720).
+        rule = b["rule"]
+        if pad_up:
+            gap = _collapse(outer_up, rule["space_above"]) + up + pad_up
+        else:
+            gap = _collapse(up, rule["space_above"])
+        rule["space_above"] = gap + fixed
+        return
     if pad_up or pad_own:
         outside = _collapse(outer_up if pad_up else up, outer_own if pad_own else own)
         inside_up = up + pad_up if pad_up else 0.0
@@ -4868,9 +4880,14 @@ def extract_blocks_from_html(
                 {
                     "text": text,
                     "spans": spans,
-                    # The table's language and direction, as for a line in
-                    # it (#718).
-                    "block_style": _with_bidi(None, table, style_resolver),
+                    # The language and direction around the table, not the
+                    # table's own, as Kindle Previewer 4.0.3 writes it (#718,
+                    # QA on #720).
+                    "block_style": _with_bidi(
+                        None,
+                        table if table.getparent() is None else table.getparent(),
+                        style_resolver,
+                    ),
                     "anchor_ids": ids,
                     "anchor_offsets": {aid: mark_offsets.get(aid, 0) for aid in ids},
                 }

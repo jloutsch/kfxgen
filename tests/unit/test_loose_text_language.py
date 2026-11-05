@@ -74,3 +74,35 @@ def test_a_loose_line_in_an_element_with_its_own_language_takes_that(tmp_path):
         )
     )
     assert lines["Ligne libre"] == {"$10": "fr"}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html_attrs, table_attrs, expected",
+    [
+        (' xml:lang="de"', " lang='fr'", {"$10": "de"}),
+        (' xml:lang="en"', " lang='ar' dir='rtl'", {"$10": "en"}),
+        (
+            ' xml:lang="ar" dir="rtl"',
+            " lang='en' dir='ltr'",
+            {"$10": "ar", "$682": "$375"},
+        ),
+    ],
+)
+def test_text_loose_in_a_table_takes_the_language_around_the_table(
+    tmp_path, html_attrs, table_attrs, expected
+):
+    # Kindle Previewer 4.0.3 gives it the page's language, not the table's
+    # (QA on #720: probes F01, F04, L10).
+    body = (
+        f"<h1 id='a'>Kapitel</h1><p>Vorher.</p>"
+        f"<table{table_attrs}>Vor der Zeile<tr><td>Zelle</td></tr></table>"
+    )
+    lines = dict(
+        _texts(
+            _convert(
+                tmp_path, html_attrs, {"a.xhtml": body}, [("Kapitel", "a.xhtml#a", 0)]
+            )
+        )
+    )
+    assert lines["Vor der Zeile"] == expected

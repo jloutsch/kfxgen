@@ -24,6 +24,7 @@ from .inline_style import (
     css_text_colour,
     math_of,
     ruby_of,
+    run_font_size,
     without_math,
     without_ruby,
 )
@@ -814,6 +815,11 @@ def _drop_edge_rules(blocks):
     return blocks
 
 
+def _rule_chunk(block):
+    """The chunk writing the rule `block` (#230), with its clear (#381)."""
+    return {"type": "rule", "rule": {**block["rule"], "clear": block.get("clear")}}
+
+
 def _block_keys(block):
     """Every anchor key a block holds, inside a box or a table included."""
     keys = list(block.get("anchor_keys") or ())
@@ -1179,11 +1185,19 @@ def _print_book_heading(heading_chunk, block, title):
     book's own heading printing that title: its italic or bold words (#366),
     small caps, transform, spacing and colour (#239), the rest of its style
     (#490), the space above and below it (#665) and its level (#461)."""
-    heading_chunk["spans"] = _title_spans(block, len(title))
+    spans = heading_chunk["spans"] = _title_spans(block, len(title))
     bs = block.get("block_style") or {}
     heading_chunk["typography"] = {
         k: bs[k] for k in TYPOGRAPHY_KEYS if bs.get(k) is not None
     }
+    # Words all in runs of one size print at that size, as Kindle Previewer
+    # 4.0.3 writes a 0.75em heading holding a 2em span: 1.5em (QA on #720).
+    sizes = [None] * len(title)
+    for start, n, flags in spans:
+        sizes[start : start + n] = [run_font_size(flags)] * n
+    printed = {px for px, c in zip(sizes, title) if not c.isspace()}
+    if len(printed) == 1 and None not in printed:
+        bs = {**bs, "font_size": printed.pop()}
     heading_chunk["book_style"] = bs
     _keep_space_below(heading_chunk, block)
     _keep_space_above(heading_chunk, block)
@@ -5889,15 +5903,7 @@ class NativeKFXGenerator:
                             _emit_table_chunks(block)
                             unplaced = []
                         elif block.get("type") == "rule":
-                            all_chunks.append(
-                                {
-                                    "type": "rule",
-                                    "rule": {
-                                        **block["rule"],
-                                        "clear": block.get("clear"),
-                                    },
-                                }
-                            )
+                            all_chunks.append(_rule_chunk(block))
                             unplaced = list(block.get("anchor_keys") or ())
                         elif block.get("type") == "box":
                             unplaced = _emit_box_chunks(block)
@@ -5944,32 +5950,31 @@ class NativeKFXGenerator:
                     ):
                         heading_offsets = _heading_offsets(first, title)
                         # The book's heading prints, in its style, and the
-                        # rule under it with it, as Kindle Previewer 4.0.3
-                        # has a play's title page in pg100 (#717).
-                        # A box holding only the heading: the heading's
-                        # style, the box drawn round it (#646).
-                        own = first
+                        # rules under it with it, as Kindle Previewer 4.0.3
+                        # has a play's title page in pg100 (#717, QA on
+                        # #720). A box holding the heading and only rules:
+                        # the heading's style, the box drawn round it and
+                        # the rules (#646).
+                        own, inside = first, []
                         if (
                             first.get("type") == "box"
-                            and len(first["blocks"]) == 1
                             and first["blocks"][0].get("type") != "box"
-                        ):
-                            own = first["blocks"][0]
-                        _print_book_heading(heading_chunk, own, title)
-                        if own is not first and all_chunks[-1] is heading_chunk:
-                            _box_heading(first)
-                        blocks = chapter["blocks"]
-                        after = blocks[blocks.index(first) + 1 :]
-                        if after and after[0].get("type") == "rule":
-                            all_chunks.append(
-                                {
-                                    "type": "rule",
-                                    "rule": {
-                                        **after[0]["rule"],
-                                        "clear": after[0].get("clear"),
-                                    },
-                                }
+                            and all(
+                                b.get("type") == "rule" for b in first["blocks"][1:]
                             )
+                        ):
+                            own, *inside = first["blocks"]
+                        _print_book_heading(heading_chunk, own, title)
+                        if own is not first:
+                            _box_heading(first, close=False)
+                            all_chunks.extend(_rule_chunk(b) for b in inside)
+                            all_chunks.append({"type": "close"})
+                        blocks = chapter["blocks"]
+                        all_chunks.extend(
+                            _rule_chunk(b)
+                            for b in blocks[blocks.index(first) + 1 :]
+                            if b.get("type") == "rule"
+                        )
 
             # Illustrations the source printed in a contents section that was
             # replaced. They arrive as their own key rather than inside

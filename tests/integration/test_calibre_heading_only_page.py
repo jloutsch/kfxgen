@@ -98,3 +98,143 @@ def test_a_box_holding_only_the_title_is_drawn_round_it(frags):
     frags, version = frags
     labels = [t for t, _ in _section(frags, "BOXED TITLE")]
     assert labels[:2] == ["$270", "BOXED TITLE"], f"calibre {version}: {labels}"
+
+
+# QA on #720: the probe E720, with Kindle Previewer 4.0.3's values for it.
+CSS_720 = (
+    "h1, h2 { text-align: center; font-weight: bold; }"
+    " h1 { font-size: 1.6em; margin: 2em 0 1em; }"
+    " h2 { font-size: 1.3em; margin: 1.5em 0 0.5em; }"
+    " p { margin: 0.4em 0; text-indent: 1em; }"
+    " div.box { border: 2px solid black; padding: 0.5em; margin: 1em 2em; }"
+    " hr { width: 40%; margin: 1em auto; border: 0; border-top: 1px solid black; }"
+    " hr.thick { width: 60%; border-top: 3px solid black; }"
+    " h1.small { font-size: 0.75em; font-weight: normal }"
+    " span.big { font-size: 2em; font-weight: bold }"
+    " h1.pad { font-size: 1em; font-style: italic; font-weight: normal;"
+    " padding-top: 10em; padding-bottom: 10em; margin: 0 }"
+    " hr.pbk { margin: 2em auto }"
+    " p.mb { margin-bottom: 2em }"
+    " h2.mb3 { margin-bottom: 3em }"
+)
+PAGES_720 = {
+    "e00.xhtml": "<h1 id='w'>Front</h1><p>Front words.</p>",
+    "e01.xhtml": "<h1 id='h1'>Act One</h1><hr id='r1'/>",
+    "e02.xhtml": "<h2>Scene Two</h2><hr/><p>&#160;</p><hr class='thick'/>",
+    "e03.xhtml": "<h2>Scene Four</h2><hr/><hr class='thick'/>",
+    "e04.xhtml": "<div class='box'><h2>Boxed Two</h2><hr/></div>",
+    "e05.xhtml": "<h2>Cleared</h2><hr style='clear: both'/>",
+    "e06.xhtml": "<h1 class='small'><span class='big'>SIZED TITLE</span></h1>",
+    "e07.xhtml": (
+        "<h1 class='small'><span class='big'>SIZED CUT</span></h1><p>Words after.</p>"
+    ),
+    "e08.xhtml": "<div><h1 class='pad'>BOOK II</h1></div><hr class='pbk'/>",
+    "e09.xhtml": (
+        "<h2>General</h2><p class='mb'>Before rule.</p><hr/><p>After rule.</p>"
+    ),
+    "e10.xhtml": "<h2 class='mb3'>Wide Below</h2><hr/><p>Words ten.</p>",
+    "e11.xhtml": "<h1>Act Cut</h1><hr/><p>Words eleven.</p>",
+    "e12.xhtml": "<p>Last words.</p>",
+}
+TOC_720 = [
+    (label, page, 0)
+    for label, page in zip(
+        (
+            "Front",
+            "Act One",
+            "Scene Two",
+            "Scene Four",
+            "Boxed Two",
+            "Cleared",
+            "SIZED TITLE",
+            "SIZED CUT",
+            "BOOK II",
+            "General",
+            "Wide Below",
+            "Act Cut",
+            "End",
+        ),
+        PAGES_720,
+    )
+]
+
+
+@pytest.fixture(scope="module")
+def frags720(calibre):  # noqa: F811
+    tmp, _env, version = calibre
+    epub, kfx = tmp / "e720.epub", tmp / "e720.kfx"
+    write_epub(epub, pages=PAGES_720, toc=TOC_720, css=CSS_720, ident="e720")
+    _ebook_convert(calibre, epub, kfx, True)
+    return load_fragments(kfx), version
+
+
+def _after(frags, title):
+    """The entries after `title` in its section, as (label, style)."""
+    section = _section(frags, title)
+    return section[[t for t, _ in section].index(title) + 1 :]
+
+
+@pytest.mark.parametrize(
+    "title, above",
+    [
+        # The heading's margin-bottom (1em of 1.6em) meets the rule's 1em.
+        ("Act One", 1.333),
+        ("Act Cut", 1.333),
+        ("Wide Below", 3.25),
+        # A paragraph's 2em margin-bottom meets the rule's 1em.
+        ("Before rule.", 1.667),
+    ],
+)
+def test_the_margin_above_a_rule_is_the_larger_of_the_two(frags720, title, above):
+    frags, version = frags720
+    rule = _after(frags, title)[0]
+    assert rule[0] == "$596", f"calibre {version}: {rule}"
+    assert _num(rule[1].get("$47")) == above, f"calibre {version}: {rule}"
+
+
+def test_a_headings_padding_below_stays_above_the_rule(frags720):
+    # Previewer: the heading's padding-bottom 8.333 lh, then the rule's 1.667.
+    frags, version = frags720
+    (rule,) = _after(frags, "BOOK II")
+    assert _num(rule[1].get("$47")) == 10.0, f"calibre {version}: {rule}"
+
+
+@pytest.mark.parametrize("title", ["Scene Two", "Scene Four"])
+def test_every_rule_under_a_title_alone_is_kept(frags720, title):
+    frags, version = frags720
+    labels = [t for t, _ in _after(frags, title)]
+    assert labels == ["$596", "$596"], f"calibre {version}: {labels}"
+
+
+def test_a_spacer_between_two_rules_adds_to_the_space_above_the_second(frags720):
+    # Previewer writes 2.26 lh above the second rule of Scene Two, against
+    # 0.8333 above the first. kfxgen adds the spacer's space to it: 1.627.
+    frags, version = frags720
+    first, second = (_num(s.get("$47")) for _, s in _after(frags, "Scene Two"))
+    assert second > first, f"calibre {version}: {first}, {second}"
+
+
+def test_a_rule_under_a_title_alone_keeps_its_clear(frags720):
+    frags, version = frags720
+    (rule,) = _after(frags, "Cleared")
+    assert _sym(rule[1].get("$628")) == "$421", f"calibre {version}: {rule}"
+
+
+def test_a_box_holding_the_title_and_a_rule_is_drawn_round_both(frags720):
+    frags, version = frags720
+    section = _section(frags, "Boxed Two")
+    assert [t for t, _ in section] == ["$270", "Boxed Two", "$596"], (
+        f"calibre {version}: {section}"
+    )
+    style = section[1][1]
+    assert (_sym(style.get("$34")), _num(style.get("$16"))) == ("$320", 1.3), (
+        f"calibre {version}: {style}"
+    )
+
+
+@pytest.mark.parametrize("title", ["SIZED TITLE", "SIZED CUT"])
+def test_a_title_in_a_sized_span_prints_at_the_spans_size(frags720, title):
+    # The heading is 0.75em and its words a 2em span: 1.5em, as Previewer.
+    frags, version = frags720
+    (style,) = [s for t, s in _section(frags, title) if t == title]
+    assert _num(style.get("$16")) == 1.5, f"calibre {version}: {style}"
