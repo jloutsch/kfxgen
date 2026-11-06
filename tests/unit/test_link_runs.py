@@ -17,7 +17,7 @@ tests/integration/test_calibre_link_runs.py.
 
 import pytest
 
-from tests.unit.test_direction import _convert
+from tests.unit.test_direction import AR, _convert
 from tests.unit.test_inline_direction import BOLD, ITAL, LINK, _runs, _shape
 
 _A = "<a href='#t'>"
@@ -75,13 +75,16 @@ def _book(tmp_path, body):
             f"{_A}a <i>b <b>c</b></i></a>",
             [("a b c", LINK), ("b ", ITAL), ("c", {**ITAL, **BOLD})],
         ),
-        # L20: italic around the link, bold inside it.
+        # L20: italic around the link, bold inside it. Previewer's "c" run
+        # is bold only; kfxgen's also says italic, the slant of the link run
+        # under it, as every kfxgen run names its face's weight and slant
+        # (#50).
         (
             f"<i>a {_A}b <b>c</b></a> d</i>",
             [
                 ("a ", ITAL),
                 ("b c", {**ITAL, **LINK}),
-                ("c", BOLD),
+                ("c", {**ITAL, **BOLD}),
                 (" d", ITAL),
             ],
         ),
@@ -92,6 +95,42 @@ def _book(tmp_path, body):
 def test_a_link_is_one_run_with_its_styles_layered_on_it(tmp_path, markup, expected):
     found = _book(tmp_path, f"<p>P01 {markup} after.</p>")
     assert _shape(found["P01"]) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "markup, expected",
+    [
+        # pg8492's contents page: a bold link's inner run kept the bold. It
+        # was written normal weight, measured against the paragraph.
+        (
+            f"<b>{_A}x <i>y</i></a></b>",
+            [("x y", {**BOLD, **LINK}), ("y", {**ITAL, **BOLD})],
+        ),
+        (
+            f"<i>{_A}x <b>y</b></a></i>",
+            [("x y", {**ITAL, **LINK}), ("y", {**ITAL, **BOLD})],
+        ),
+    ],
+    ids=["bold-link", "italic-link"],
+)
+def test_a_run_in_a_link_keeps_the_links_weight_and_slant(tmp_path, markup, expected):
+    found = _book(tmp_path, f"<p>P01 {markup} after.</p>")
+    assert _shape(found["P01"]) == expected
+
+
+@pytest.mark.unit
+def test_a_run_in_a_bold_direction_run_stays_bold(tmp_path):
+    # The same for a direction run (#713): the italic word inside a bold
+    # direction span was written normal weight.
+    found = _runs(
+        _convert(
+            tmp_path,
+            f"<p>P01 {AR} <b>BO <span dir='ltr'>XOUT <i>YIN</i></span></b> {AR}</p>",
+            html_attrs=' dir="rtl" lang="ar"',
+        )
+    )
+    assert ("YIN", {"italic": True, "bold": True}) in _shape(found["P01"])
 
 
 @pytest.mark.unit

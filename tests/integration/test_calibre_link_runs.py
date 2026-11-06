@@ -32,6 +32,8 @@ CSS = (
     "span.big { font-size: 2em }"
     " span.u { text-decoration: underline }"
     " span.it { font-style: italic }"
+    " a.b { font-weight: bold }"
+    " span.sc { font-size: 0.7em }"
 )
 _A = "<a href='#t'>"
 BODY = (
@@ -39,6 +41,9 @@ BODY = (
     f"<p>L12 {_A}small <span class='big'>big</span></a> after.</p>"
     f"<p>L18 {_A}u <span class='u'>under</span></a> after.</p>"
     f"<p>L21 {_A}one <span class='it'>slant</span> two</a> after.</p>"
+    "<p>L22 <a href='#t' class='b'>T<span class='sc'>HE</span> "
+    "R<span class='sc'>EST</span></a> after.</p>"
+    f"<p>L23 {_A}<code>mono <i>slant</i></code></a> after.</p>"
     "<p id='t'>T99 target.</p>"
 )
 
@@ -58,7 +63,7 @@ def runs(calibre):  # noqa: F811
     frags = load_fragments(kfx)
     styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
     texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
-    found = {}
+    found, faces = {}, {}
     for sl in by_type(frags, "$259"):
         for e in val(sl)["$146"]:
             ref = e.get("$145") if hasattr(e, "get") else None
@@ -79,8 +84,11 @@ def runs(calibre):  # noqa: F811
                         "$12" in s,
                     )
                 )
+                faces.setdefault(text[:3], []).append(
+                    (text[a : a + n], str(s.get("$13")), str(s.get("$11")))
+                )
             found[text[:3]] = out
-    return found
+    return found, faces
 
 
 # (run text, links, $16, $23, italic), as Previewer writes them.
@@ -108,4 +116,15 @@ def runs(calibre):  # noqa: F811
     ],
 )
 def test_a_styled_part_of_a_link_is_layered_on_one_link_run(runs, label, expected):
-    assert runs[label] == expected
+    assert runs[0][label] == expected
+
+
+def test_a_run_in_a_link_keeps_the_links_weight_and_font(runs):
+    # pg8492's contents page: small capitals in a bold link. Each sized
+    # part is layered on the bold link run and stays bold; it was written
+    # normal weight, measured against the paragraph.
+    faces = runs[1]
+    assert [w for t, w, _f in faces["L22"] if t in ("HE", "EST")] == ["$361"] * 2
+    # A slanted word in a code link keeps the code's font.
+    ((_t, _w, family),) = [x for x in faces["L23"] if x[0] == "slant"]
+    assert family == [f for t, _w, f in faces["L23"] if t == "mono slant"][0]
