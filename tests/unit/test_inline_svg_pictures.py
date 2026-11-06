@@ -104,6 +104,24 @@ def test_a_display_formula_is_a_picture_block(tmp_path, drawn):
 
 
 @pytest.mark.unit
+def test_a_formula_directly_in_the_body_is_a_picture_block(tmp_path, drawn):
+    frags = _book(tmp_path, "<p>V02 before.</p>" + _svg(2) + "<p>V03 after.</p>")
+    assert len(_pictures(frags)) == 1
+    assert drawn == ["96pt"]
+
+
+@pytest.mark.unit
+def test_a_formula_with_no_width_shows_at_its_own_size(tmp_path, drawn):
+    # No width or height: shown at its own size, its pixels drawn at 4
+    # times it (96 by 32 here) divided back by 4: 24 px, 1.5em (#529).
+    frags = _book(
+        tmp_path, f"<p>V01 words {_svg(1, 'viewBox="0 0 12 4.4"')} after.</p>"
+    )
+    ((style, _res),) = _pictures(frags)
+    assert _em(style["$56"]) == (1.5, "$308")
+
+
+@pytest.mark.unit
 def test_two_copies_of_one_formula_share_one_picture(tmp_path, drawn):
     frags = _book(tmp_path, f"<p>V01 {_svg()} and {_svg()} again.</p>")
     pics = _pictures(frags)
@@ -129,10 +147,11 @@ def test_a_formula_in_a_table_cell_is_drawn_at_its_own_size(tmp_path, drawn):
         # Pictures and words keep their own handling (#154, #231).
         "<image xlink:href='p.png' width='10' height='10'/><path d='M0 0 L1 1 Z'/>",
         "<text x='0' y='10'>SVGWORDS</text><path d='M0 0 L1 1 Z'/>",
-        # Nothing drawn: shapes only in <defs>.
+        # Nothing drawn: shapes only in <defs>, or an empty group.
         "<defs><path id='p' d='M0 0 L1 1 Z'/></defs>",
+        "<title>a title</title><g></g>",
     ],
-    ids=["image", "text", "defs-only"],
+    ids=["image", "text", "defs-only", "empty-group"],
 )
 def test_other_svgs_are_not_drawn_as_a_picture(tmp_path, drawn, inner):
     _book(tmp_path, f"<p>V01 <svg {NS} width='20' height='20'>{inner}</svg> after.</p>")
