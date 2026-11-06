@@ -20,9 +20,20 @@ from collections import namedtuple
 from . import _vendor
 
 MathDrawing = namedtuple("MathDrawing", "width height depth paths")
+#: Characters the maths font has no glyph for, drawn as text inside the
+#: drawing by the Kindle's own font, as Kindle Previewer 4.0.3 draws Arabic
+#: letters and digits (#708): the text and the matrix placing its origin
+#: on the baseline.
+MathText = namedtuple("MathText", "text matrix")
+#: Previewer's text in a drawing: `$16` 16, scaled 51.978 in an equation
+#: drawn 1000 units to the em, 0.83 of the maths font's size (probe P708).
+TEXT_SIZE = 16
+_TEXT_SCALE = 51.978 / 1000
 
 #: ziamath's size: one unit is a thousandth of an em, as in Previewer's.
 _EM = 1000
+#: MathML's token elements: the text in each is one run of letters (#708).
+_TOKENS = frozenset({"mi", "mn", "mo", "mtext", "ms"})
 #: A glyph's path is kept in hundredths of its own units, in whole numbers.
 _GLYPH = 100
 _IDENTITY = (1, 0, 0, 1, 0, 0)
@@ -74,7 +85,16 @@ def _ziamath():
             if _budget.left <= 0:
                 raise _OverBudget
             _budget.left -= 1
-            return layout(cls, element, parent, **kwargs)
+            if _local(element.tag) not in _TOKENS:
+                return layout(cls, element, parent, **kwargs)
+            # The glyphs laid out here belong to this token (#708).
+            tokens = _budget.__dict__.setdefault("tokens", [])
+            _budget.serial = getattr(_budget, "serial", 0) + 1
+            tokens.append(_budget.serial)
+            try:
+                return layout(cls, element, parent, **kwargs)
+            finally:
+                tokens.pop()
 
         fromelement._budgeted = True
         Mnode.fromelement = classmethod(fromelement)
@@ -86,13 +106,132 @@ def _ziamath():
             return build(self, reqsize, minoverlap)
 
         MathAssembly.assemble = assemble
+    from ziamath.drawable import Glyph
+
+    if not getattr(Glyph.draw, "_tagged", False):
+        place, made = Glyph.draw, Glyph.__init__
+
+        def init_glyph(self, *args, **kwargs):
+            made(self, *args, **kwargs)
+            tokens = getattr(_budget, "tokens", None)
+            self.kfxgen_token = tokens[-1] if tokens else None
+
+        def draw_glyph(self, x, y, svg):
+            # The font's missing-glyph box: note the character it stands
+            # for, to draw as text (#708).
+            n = len(svg)
+            out = place(self, x, y, svg)
+            if self.glyph.index == 0 and len(svg) > n and svg[-1].tag == "use":
+                svg[-1].set("data-char", self.char)
+                # Its token, and where its pen starts and ends, to join
+                # a token's letters into words.
+                svg[-1].set("data-token", repr(getattr(self, "kfxgen_token", None)))
+                svg[-1].set("data-x", repr(x))
+                svg[-1].set("data-end", repr(out[0]))
+            return out
+
+        draw_glyph._tagged = True
+        Glyph.draw = draw_glyph
+        Glyph.__init__ = init_glyph
     return ziamath
+
+
+#: Elements whose children read along a line: a right-to-left equation
+#: has them reversed (#708). Kindle Previewer 4.0.3 reverses `<math>`,
+#: `<mrow>` and a table row's cells (probe P708); the others are rows too
+#: in MathML.
+_ROWS = frozenset(
+    {
+        "math",
+        "mrow",
+        "mstyle",
+        "mpadded",
+        "mphantom",
+        "merror",
+        "menclose",
+        "msqrt",
+        "mtd",
+        "mtr",
+    }
+)
+#: Each character and its mirror image, by Unicode's Bidi_Mirroring_Glyph,
+#: for an operator in a right-to-left equation. Previewer 4.0.3 swaps ( ),
+#: { } and < > but leaves [ ], ⟨ ⟩ and ≤, so `[x]` reads `]x[` and ≤
+#: changes its meaning; kfxgen mirrors them all (#708).
+_PAIRS = (
+    "()",
+    "[]",
+    "{}",
+    "<>",
+    "⟨⟩",
+    "⟦⟧",
+    "⟪⟫",
+    "⌈⌉",
+    "⌊⌋",
+    "«»",
+    "‹›",
+    "≤≥",
+    "≪≫",
+    "≮≯",
+    "≰≱",
+    "⊂⊃",
+    "⊆⊇",
+    "⊄⊅",
+    "∈∋",
+    "∉∌",
+    "⁅⁆",
+    "⦃⦄",
+    "⦅⦆",
+)
+_MIRROR = {a: b for a, b in _PAIRS} | {b: a for a, b in _PAIRS}
+_SCRIPTS = {"msub": ("sub",), "msup": ("sup",), "msubsup": ("sub", "sup")}
+
+
+def _right_to_left(math):
+    """`math`, a right-to-left equation, laid out left to right as Kindle
+    Previewer 4.0.3 does (#708): each row's children reversed, its
+    operators mirrored, a script written before its base and a square root
+    as an enclosure open on the left. Previewer keeps only a root's first
+    child; kfxgen keeps them all. Text in a token keeps its own order."""
+    ns = math.tag[: -len(_local(math.tag))]
+
+    def element(tag, kids=(), **attrs):
+        e = math.makeelement(ns + tag, attrs)
+        e.extend(kids)
+        return e
+
+    for e in list(math.iter()):
+        tag = _local(e.tag)
+        if tag in _SCRIPTS and len(e) == 1 + len(_SCRIPTS[tag]):
+            base, *scripts = list(e)
+            sub = scripts[0] if "sub" in _SCRIPTS[tag] else element("none")
+            sup = scripts[-1] if "sup" in _SCRIPTS[tag] else element("none")
+            e.tag = ns + "mmultiscripts"
+            e[:] = [base, element("mprescripts"), sub, sup]
+        elif tag == "msqrt":
+            e.tag = ns + "menclose"
+            e.set("notation", "top right")
+    # Listed first: reordering a row while walking the tree skipped some
+    # of its children.
+    for e in list(math.iter()):
+        tag = _local(e.tag)
+        if tag in _ROWS and len(e) > 1:
+            kids = list(e)
+            for kid in kids:
+                kid.tail = None
+            e[:] = kids[::-1]
+        elif tag == "mo" and e.text:
+            e.text = "".join(_MIRROR.get(c, c) for c in e.text)
+        if e.get("dir") is not None:
+            e.set("dir", "ltr")
+    return math
 
 
 def _source(math):
     """The equation as ziamath reads it: annotations out, `<semantics>`
-    unwrapped, an `<maction>` replaced by its selected child, and a
-    hyphen-minus operator written as a minus sign, which keeps it clear of
+    unwrapped, an `<maction>` replaced by its selected child, a
+    right-to-left one laid out left to right (#708), and a hyphen-minus
+    operator written as a minus sign, which keeps it clear of
     ziamath's rewrite of `<mo>-</mo>`, a regex that swallows the markup
     between two of them. None for an equation holding an `<mglyph>`, a
     picture ziamath doesn't draw, or more than `_LONGEST` characters."""
@@ -129,6 +268,8 @@ def _source(math):
             parent.remove(e)
     if len("".join(math.itertext())) > _LONGEST:
         return None
+    if (math.get("dir") or "").strip().lower() == "rtl":
+        math = _right_to_left(math)
     return etree.tostring(math, encoding="unicode")
 
 
@@ -200,7 +341,7 @@ def _placements(svg, x0, y0):
                         return None
                     path += part
             symbols[e.get("id")] = ([float(v) for v in e.get("viewBox").split()], path)
-    placed = []
+    placed, ends, last_token = [], float("nan"), None
     for e in svg.iter():
         local = _local(e.tag)
         if local in ("svg", "g", "symbol") or id(e) in inside:
@@ -208,13 +349,36 @@ def _placements(svg, x0, y0):
         if local == "use":
             href = e.get("href") or e.get("{http://www.w3.org/1999/xlink}href", "")
             (vx, vy, _vw, vh), path = symbols[href.lstrip("#")]
-            if not path:
-                continue  # a space or an invisible operator: no width, no outline
             # ziamath scales a glyph's width and height alike; a symbol's
             # height is the font's line, never 0.
             scale = float(e.get("height")) / vh
             x = float(e.get("x", 0)) - vx * scale - x0
             y = float(e.get("y", 0)) - vy * scale - y0
+            char = e.get("data-char")
+            if char:
+                # A character the font lacks: text, a token's letters one
+                # word while each starts where the last ended, so the
+                # Kindle joins them (#708). Two tokens are two texts, as
+                # two variables side by side (QA on #730). A symbol is 12
+                # of its units to the em.
+                k = round(scale * 12 * _TEXT_SCALE, 3)
+                last = placed[-1] if placed else None
+                token = e.get("data-token")
+                if (
+                    isinstance(last, MathText)
+                    and token not in (None, "None")
+                    and token == last_token
+                    and abs(float(e.get("data-x", "nan")) - ends) < 0.5
+                ):
+                    placed[-1] = MathText(last.text + char, last.matrix)
+                else:
+                    placed.append(
+                        MathText(char, (k, 0, 0, k, round(x, 1), round(y, 1)))
+                    )
+                ends, last_token = float(e.get("data-end", "nan")), token
+                continue
+            if not path:
+                continue  # a space or an invisible operator: no width, no outline
             s = round(scale / _GLYPH, 6)
             placed.append(
                 (href.lstrip("#"), tuple(path), (s, 0, 0, s, round(x, 1), round(y, 1)))
@@ -228,7 +392,7 @@ def _placements(svg, x0, y0):
             placed.append((None, tuple(path), _IDENTITY))
         else:
             return None
-    if any(not path for _key, path, _m in placed):
+    if any(not p[1] for p in placed if not isinstance(p, MathText)):
         return None
     return placed
 
