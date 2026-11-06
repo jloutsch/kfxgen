@@ -1131,6 +1131,233 @@ def _svg_text_paragraphs(svg):
     return out
 
 
+#: SVG elements that draw a shape. A <use> draws what it references.
+_SVG_SHAPES = frozenset(
+    {"path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "use"}
+)
+_SVG_LENGTH_RE = re.compile(r"^\s*(\d+(?:\.\d+)?|\.\d+)\s*([a-z%]*)\s*$")
+
+
+def _svg_own_style(svg):
+    """{property: value} of an <svg>'s own `style` attribute."""
+    out = {}
+    for decl in (svg.get("style") or "").split(";"):
+        key, _sep, value = decl.partition(":")
+        if key.strip() and value.strip():
+            out[key.strip().lower()] = value.strip().lower()
+    return out
+
+
+def _svg_draws_shapes_only(svg):
+    """Whether an <svg> draws shapes and nothing kfxgen already takes from
+    it: no <image> (#154) and no <text> (#231). Formulas set as glyph
+    outlines are drawn so, and were dropped (#709). One its own style or
+    attributes hide is not drawn: calibre computes nothing for an <svg>,
+    so `_is_hidden` doesn't see it (QA on #727). Shapes in an <svg> inside
+    it don't count: Qt doesn't draw a nested <svg>."""
+    if _svg_image_refs(svg) or _svg_text_paragraphs(svg):
+        return False
+    style = _svg_own_style(svg)
+    display = style.get("display") or (svg.get("display") or "").strip().lower()
+    visibility = style.get("visibility") or (svg.get("visibility") or "").lower()
+    if display == "none" or visibility.strip() in ("hidden", "collapse"):
+        return False
+
+    def shapes(node):
+        for child in node:
+            local = _local_tag(child.tag)
+            if not local or local.lower() in _SVG_NON_RENDERED_CONTAINERS:
+                continue
+            if local == "svg":
+                continue
+            if local in _SVG_SHAPES or shapes(child):
+                return True
+        return False
+
+    return shapes(svg)
+
+
+#: An <svg> length in ems for kfxgen's size hint: Qt and the hint read em
+#: but not ex or rem. An ex is half an em, CSS's own fallback; a rem the
+#: root's 16 px, an em in the book's main text.
+_SVG_EM_UNITS = {"ex": 0.5, "rem": 1.0}
+
+
+def _svg_hint_length(value):
+    """`value` with an ex or rem length written in em (QA on #727: MathJax
+    sizes its formulas in ex), else as it is."""
+    m = _SVG_SIGNED_LENGTH_RE.match(value or "")
+    if m and m.group(2) in _SVG_EM_UNITS:
+        return f"{float(m.group(1)) * _SVG_EM_UNITS[m.group(2)]:g}em"
+    return value
+
+
+def _svg_box_css(svg):
+    """An <svg>'s width, height and vertical-align, from its own `style`
+    and then its width and height attributes, an ex or rem in em. calibre's
+    Stylizer computes an <svg> as width auto with no vertical-align, so a
+    formula lost the size and shift its markup gives it (#709)."""
+    style = _svg_own_style(svg)
+    out = {k: style[k] for k in ("width", "height", "vertical-align") if k in style}
+    for axis in ("width", "height"):
+        if axis not in out and (svg.get(axis) or "").strip():
+            out[axis] = svg.get(axis).strip().lower()
+    return {k: _svg_hint_length(v) for k, v in out.items()}
+
+
+_SVG_SIGNED_LENGTH_RE = re.compile(
+    r"^\s*([-+]?(?:\d+(?:\.\d+)?|\.\d+))\s*([a-z%]*)\s*$"
+)
+#: CSS px in one of each unit, to draw an <svg> at: Qt reads a pt as a px
+#: and no em, ex or rem at all (QA on #727).
+_SVG_UNIT_PX = {
+    "": 1.0,
+    "px": 1.0,
+    "pt": 96 / 72,
+    "pc": 16.0,
+    "in": 96.0,
+    "cm": 96 / 2.54,
+    "mm": 96 / 25.4,
+    "em": 16.0,
+    "rem": 16.0,
+    "ex": 8.0,
+}
+
+
+def _svg_length_px(value):
+    """An <svg> width or height in CSS px, or None for a % or an unknown
+    unit."""
+    m = _SVG_LENGTH_RE.match(value or "")
+    if not m or m.group(2) not in _SVG_UNIT_PX:
+        return None
+    return float(m.group(1)) * _SVG_UNIT_PX[m.group(2)]
+
+
+def _svg_used_elsewhere(svg):
+    """The elements outside `svg` that its <use>s draw, and those theirs
+    draw. MathJax keeps every glyph in one hidden <svg> of its own, and a
+    sprite sheet does the same; the copy drawn alone had none of them and
+    came out blank (QA on #727)."""
+    inside = {e.get("id") for e in svg.iter() if isinstance(e.tag, str)}
+    found, seen, todo = [], set(), [svg]
+    by_id = None
+    while todo:
+        for e in todo.pop().iter():
+            if not (isinstance(e.tag, str) and _local_tag(e.tag) == "use"):
+                continue
+            ref = e.get(_XLINK_HREF) or e.get("href") or ""
+            key = ref[1:] if ref.startswith("#") else None
+            if not key or key in inside or key in seen:
+                continue
+            seen.add(key)
+            if by_id is None:
+                by_id = {
+                    x.get("id"): x
+                    for x in svg.getroottree().iter()
+                    if isinstance(x.tag, str) and x.get("id")
+                }
+            target = by_id.get(key)
+            if target is not None:
+                found.append(target)
+                todo.append(target)
+    return found
+
+
+def _svg_picture(svg, scale=1):
+    """The <svg> element as an SVG file of its own, to rasterise (#709).
+
+    - What its <use>s draw from outside it is copied into its <defs>.
+    - Its width and height go in CSS px, as Qt reads neither em, ex nor
+      rem, and reads a pt as a px. A width with no height gets the height
+      its viewBox gives, and the other way round; a viewBox alone gives
+      both.
+    - One with no viewBox gets one of its own size: its shapes are in px.
+    - `scale` multiplies its size. Qt reads a size as whole pixels, so a
+      formula 8.8pt high drawn at 8 px and scaled up came out 9% too
+      short; the viewBox keeps its drawing filling it (QA on #727).
+
+    Returns (bytes, the scale drawn at): 1 when its size can't be told."""
+    from lxml import etree
+
+    own = copy.deepcopy(svg)
+    own.tail = None
+    used = _svg_used_elsewhere(svg)
+    if used:
+        ns = etree.QName(own).namespace
+        defs = etree.Element(f"{{{ns}}}defs" if ns else "defs")
+        defs.extend(copy.deepcopy(u) for u in used)
+        for u in defs:
+            u.tail = None
+        own.insert(0, defs)
+    try:
+        # Numbers apart by spaces, commas or both (QA on #727).
+        box = re.split(r"[\s,]+", (own.get("viewBox") or "").strip())
+        _x, _y, vw, vh = (float(v) for v in box)
+    except ValueError:
+        vw = vh = 0
+    has_box = vw > 0 and vh > 0
+    w, h = _svg_length_px(own.get("width")), _svg_length_px(own.get("height"))
+    if has_box:
+        if w and not h:
+            h = w * vh / vw
+        elif h and not w:
+            w = h * vw / vh
+        elif not w and not h and not own.get("width") and not own.get("height"):
+            w, h = vw, vh
+    elif w and h:
+        own.set("viewBox", f"0 0 {w:g} {h:g}")
+    if not (w and h):
+        return etree.tostring(own, with_tail=False), 1
+    own.set("width", f"{w * scale:g}")
+    own.set("height", f"{h * scale:g}")
+    return etree.tostring(own, with_tail=False), scale
+
+
+def _svg_picture_href(svg):
+    """The href kfxgen gives an <svg> drawn as a picture of its own (#709):
+    named by its markup, so the picture extraction and the text walk reach
+    the same name from the same element, and two copies of one formula
+    share one picture."""
+    import hashlib
+
+    digest = hashlib.sha1(_svg_picture(svg)[0]).hexdigest()[:16]
+    return f"{_INLINE_SVG_DIR}/{digest}.svg"
+
+
+#: The folder name of kfxgen's pictures of inline <svg>s. No book file is
+#: there.
+_INLINE_SVG_DIR = "kfxgen-inline-svg"
+#: How many times its own size an inline <svg> is drawn. Qt reads a
+#: formula's 24pt as 24 px, so at twice that a 2em formula had 24 px to
+#: an em, where a Paperwhite shows an em at about 40-50 (#709). Its shown
+#: size comes from its markup, so this only adds sharpness.
+_INLINE_SVG_SCALE = 4
+
+
+def _inline_svg_pictures(oeb_book):
+    """{href: <svg> element} for every <svg> in the spine's pages drawn as
+    a picture of its own (#709)."""
+    found = {}
+    for item in oeb_book.spine:
+        try:
+            data = item.data
+        except Exception:
+            continue
+        if data is None or not hasattr(data, "iter"):
+            continue
+        if isinstance(data.tag, str) and _local_tag(data.tag) == "svg":
+            continue  # a page that is an SVG file, not one inside a page
+        for svg in data.iter():
+            if not (isinstance(svg.tag, str) and _local_tag(svg.tag) == "svg"):
+                continue
+            parent = svg.getparent()
+            if parent is not None and _local_tag(parent.tag) == "svg":
+                continue
+            if _svg_draws_shapes_only(svg):
+                found.setdefault(_svg_picture_href(svg), svg)
+    return found
+
+
 _URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:")
 
 
@@ -1925,6 +2152,19 @@ def _walk_inline(
         elif clocal == "svg":
             for aid in _own_anchor_ids(child):
                 parts.append(make_anchor_mark(aid))
+            if _svg_draws_shapes_only(child):
+                # Drawn only with shapes, a formula as glyph outlines: a
+                # picture of its own, sized and aligned as an <img> (#709).
+                link = frozenset(f for f in cur if _is_link_flag(f))
+                box = _svg_box_css(child)
+                token = _make_img_token(
+                    _svg_picture_href(child),
+                    "",
+                    _img_size_hint(child, lambda _e: box),
+                    None,
+                    _img_inline_extras(child, lambda _e: box),
+                )
+                parts.append((token, link))
             for href, alt in _svg_image_refs(child):
                 token = _make_img_token(href, alt, SVG_IMAGE_SIZE)
                 parts.append((token, frozenset()))
@@ -2551,6 +2791,12 @@ def _pictures_in_table_cells(oeb_book):
             for img in cell.iter():
                 if isinstance(img.tag, str) and _local_tag(img.tag) == "img":
                     found.add(_resolve_img_src(base, img.get("src", "") or ""))
+                elif (
+                    isinstance(img.tag, str)
+                    and _local_tag(img.tag) == "svg"
+                    and _svg_draws_shapes_only(img)
+                ):
+                    found.add(_svg_picture_href(img))
     return found
 
 
@@ -5074,6 +5320,17 @@ def extract_blocks_from_html(
         """Each <image> an <svg> draws becomes an image block of its own, and
         the words it draws as <text> follow as paragraphs: their place on the
         picture is lost, their reading order is not (#231)."""
+        if elem.getparent() is not None and _svg_draws_shapes_only(elem):
+            # Drawn only with shapes: a picture of its own (#709). A page
+            # that is an SVG file is left as #231 leaves it.
+            box = _svg_box_css(elem)
+            _emit_image_block(
+                elem,
+                _svg_picture_href(elem),
+                "",
+                _img_size_hint(elem, lambda _e: box),
+            )
+            return
         for href, alt in _svg_image_refs(elem):
             _emit_image_block(elem, href, alt, SVG_IMAGE_SIZE)
         drew_picture = bool(_svg_image_refs(elem))
@@ -8241,6 +8498,26 @@ def extract_images_from_oeb(oeb_book, log, display_dims=None, own_size=()):
             images[href] = bytes(data)
     except Exception as e:
         log.warn(f"Error walking manifest for images: {e}")
+    try:
+        inline = _inline_svg_pictures(oeb_book)
+    except Exception as e:  # noqa: BLE001 - never fail a conversion over a picture
+        log.warn(f"Error reading inline SVG pictures: {e}")
+        inline = {}
+    for href, svg in inline.items():
+        # An <svg> in a page drawn only with shapes: a formula set as glyph
+        # outlines (#709). Previewer 4.0.3 refuses Enhanced Typesetting for
+        # it, as for an <img> of an SVG file, so it is drawn the same way,
+        # its size multiplied in its markup rather than by `svg_to_png`.
+        raw, scale = _svg_picture(svg, 1 if href in own_size else _INLINE_SVG_SCALE)
+        drawn = svg_to_png(raw, log, 1)
+        if drawn is None:
+            skipped_unsupported += 1
+            log.warn(f"  Skipping an inline SVG ({href!r}): not rasterised")
+            continue
+        converted_svgs += 1
+        images[href], own = drawn
+        if own and display_dims is not None:
+            display_dims[href] = (own[0] / scale, own[1] / scale)
     summary = f"  Extracted {len(images)} body image(s) from manifest"
     if converted_gifs:
         summary += f" ({converted_gifs} GIF converted to PNG)"
