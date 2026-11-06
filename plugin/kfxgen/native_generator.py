@@ -15,7 +15,6 @@ from .inline_style import (
     LANG_FLAG,
     bidi_of,
     EXTERNAL_LINK_PREFIX,
-    flag_value,
     link_target,
     page_bidi,
     NOTEREF_FLAG,
@@ -251,7 +250,9 @@ def _is_bidi_flag(flag):
 
 def _direction_layers(spans):
     """`spans` as Kindle Previewer 4.0.3 writes them with inline direction
-    (#710): [(start, length, flags, bidi keys)], outer runs first.
+    (#710): [(start, length, flags, bidi keys, under)], outer runs first.
+    `under` is the flags each run it is layered on carries, outermost
+    first: its weight, slant and font start from them (#715).
 
     Each element with a direction flag becomes one run over its whole text,
     carrying its own keys and the flags common to all of that text which no
@@ -264,9 +265,14 @@ def _direction_layers(spans):
     layered on it: a direction run in it has no link of its own (QA on #713,
     probe M710). A link holding only a direction element is one run with
     both (M05): its own layer, inside that run, carries nothing that run
-    doesn't, so it writes no run. Links are layered so only in a paragraph
-    with a direction or language flag (M08); with neither, `spans`
-    unchanged, each with no keys, as kfxgen wrote them before #710."""
+    doesn't, so it writes no run. Links are layered so in every paragraph,
+    as Previewer writes them in plain ones too (#715, probe P715). With no
+    direction element and no link, `spans` unchanged, each with no keys.
+
+    Adjacent links to the same target are one layer: `<i>a <a>b</a></i><a>
+    c</a>` gives "b c" one link run with the italic layered on "b", where
+    Previewer writes two link runs, the first italic (P715's L14). The
+    words, styles and target are the same."""
     # Each layer: [start, end, level, keys, flags common to its text]. A
     # direction element of depth d is at level 2d; a link is just above the
     # direction elements around it; flat spans above the layers they're in.
@@ -292,8 +298,8 @@ def _direction_layers(spans):
                 links[-1][1] = s + n
             else:
                 links.append([s, s + n, None, None, f])
-    if not ranges and not any(flag_value(f, LANG_FLAG) for _, _, f in spans):
-        return [(s, n, f, None) for s, n, f in spans]
+    if not ranges and not links:
+        return [(s, n, f, None, ()) for s, n, f in spans]
 
     dirs = list(ranges.values())
     layers = list(dirs)
@@ -320,17 +326,38 @@ def _direction_layers(spans):
             )
         )
         carried[id(r)] = r[4] - above
-    out = [(r[0], r[1] - r[0], carried[id(r)], r[3], r[2]) for r in layers]
+
+    def under(inside):
+        return tuple(carried[id(r)] for r in sorted(inside, key=lambda x: x[2]))
+
+    out = [
+        (
+            r[0],
+            r[1] - r[0],
+            carried[id(r)],
+            r[3],
+            under(o for o in layers if o[2] < r[2] and o[0] <= r[0] and r[1] <= o[1]),
+            r[2],
+        )
+        for r in layers
+    ]
     for s, n, flags in spans:
         inside = [r for r in layers if r[0] <= s and s + n <= r[1]]
         drop = frozenset().union(*(carried[id(r)] for r in inside))
         rest = frozenset(f for f in flags if not _is_bidi_flag(f)) - drop
         if rest:
             out.append(
-                (s, n, rest, None, max((r[2] for r in inside), default=0) + 0.75)
+                (
+                    s,
+                    n,
+                    rest,
+                    None,
+                    under(inside),
+                    max((r[2] for r in inside), default=0) + 0.75,
+                )
             )
-    out.sort(key=lambda x: (x[0], x[4]))
-    return [x[:4] for x in out]
+    out.sort(key=lambda x: (x[0], x[5]))
+    return [x[:5] for x in out]
 
 
 def _slice_block(block, a, b):
@@ -7293,7 +7320,23 @@ class NativeKFXGenerator:
                 layered = _direction_layers(
                     [(s, n, without_math(without_ruby(f))) for s, n, f in chunk_spans]
                 )
-                for s, length, flags, bidi_keys in layered:
+                for s, length, flags, bidi_keys, under in layered:
+                    # A run layered on others starts from their weight, slant
+                    # and font, not the paragraph's, or its style writes them
+                    # back: a sized word in a bold link turned normal weight
+                    # (pg8492, #715).
+                    run_b, run_i, run_fam = _blk_b, _blk_i, chunk_fam
+                    for u in under:
+                        if FLAG_BOLD in u:
+                            run_b = True
+                        elif FLAG_NOT_BOLD in u:
+                            run_b = False
+                        if FLAG_ITALIC in u:
+                            run_i = True
+                        elif FLAG_NOT_ITALIC in u:
+                            run_i = False
+                        if mono_families(u):
+                            run_fam = list(mono_families(u))
                     # A language alone is a flag of the run's (#710's P01).
                     lang = flag_value(flags, LANG_FLAG)
                     flags = frozenset(
@@ -7359,9 +7402,9 @@ class NativeKFXGenerator:
                         style = (
                             _emphasis_style(
                                 flags,
-                                chunk_fam,
-                                _blk_b,
-                                _blk_i,
+                                run_fam,
+                                run_b,
+                                run_i,
                                 in_cell="cell" in chunk or "in_header_cell" in chunk,
                                 sized=sized,
                                 blk_fs=blk_fs,
@@ -7398,9 +7441,9 @@ class NativeKFXGenerator:
                                 length,
                                 _emphasis_style(
                                     rest | {inner},
-                                    chunk_fam,
-                                    _blk_b,
-                                    _blk_i,
+                                    run_fam,
+                                    run_b,
+                                    run_i,
                                     in_cell="cell" in chunk
                                     or "in_header_cell" in chunk,
                                     sized=sized,
