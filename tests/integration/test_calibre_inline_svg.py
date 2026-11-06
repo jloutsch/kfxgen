@@ -6,19 +6,22 @@ an <svg> of plain paths. Each becomes a PNG picture, drawn at 4 times its
 own size, shown at the width its markup gives.
 
 calibre computes an <svg> as width auto, and folds its `style` into a
-class with no vertical-align, so its width comes from its attribute and a
-`vertical-align` on it is lost (kfxgen keeps one the shim passes on:
+class with no vertical-align and no display, so its width comes from its
+attribute, and a `vertical-align` or `display: none` on it is lost (kfxgen
+keeps them when the shim passes them on:
 tests/unit/test_inline_svg_pictures.py).
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found.
 """
 
+import io
 import struct
 import sys
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "plugin"))
@@ -60,6 +63,15 @@ BODY = (
     f"<p>V04 plain <svg {NS} width='20pt' height='10pt' viewBox='0 0 20 10'>"
     "<path d='M 2 8 L 10 2 L 18 8 Z' fill='black'/></svg> after.</p>"
     f"<p>V05 em <span>{_glyphs(5, '3em')}</span> after.</p>"
+    # No viewBox: its shapes in px fill it (QA on #727).
+    f"<p>V06 no box <svg {NS} width='40' height='20'>"
+    "<rect width='40' height='20' fill='black'/></svg> after.</p>"
+    # MathJax: sized in ex, its glyph in a hidden <svg> of its own.
+    f"<svg {NS} style='display: none;'><defs id='MathJax_SVG_glyphs'>"
+    "<path id='MJX-1' d='M 0 -442 L 572 -442 L 572 11 L 0 11 Z'/></defs></svg>"
+    f"<p>V07 mathjax <svg {NS} width='1.294ex' height='1.025ex' "
+    "viewBox='0 -442 572 453' style='vertical-align: -0.025ex;'>"
+    "<use xlink:href='#MJX-1' x='0' y='0'/></svg> after.</p>"
 )
 CSS = "div.equation { text-align: center }"
 
@@ -112,6 +124,8 @@ def test_each_formula_is_one_png_picture(pictures):
         "V03",
         "V04",
         "V05",
+        "V06",
+        "V07",
     ]
     for _label, _s, png in pictures:
         assert png[:8] == b"\x89PNG\r\n\x1a\n"
@@ -119,10 +133,18 @@ def test_each_formula_is_one_png_picture(pictures):
 
 @pytest.mark.parametrize(
     "label, width",
-    [("V01", 2.0), ("V03", 1.0), ("V04", 1.66667), ("V05", 3.0)],
+    [
+        ("V01", 2.0),
+        ("V03", 1.0),
+        ("V04", 1.66667),
+        ("V05", 3.0),
+        ("V06", 1.5),
+        ("V07", 0.647),
+    ],
 )
 def test_an_inline_formula_is_as_wide_as_its_markup_says(pictures, label, width):
-    # 24pt, 12pt and 20pt at 1em = 12pt (#541), 3em as written.
+    # 24pt, 12pt and 20pt at 1em = 12pt (#541), 3em as written, 40 px at
+    # 0.45pt (18pt), and 1.294ex at half an em.
     (s,) = [s for lab, s, _png in pictures if lab == label]
     assert (round(float(s["$56"]["$307"]), 5), str(s["$56"]["$306"])) == (
         width,
@@ -130,7 +152,25 @@ def test_an_inline_formula_is_as_wide_as_its_markup_says(pictures, label, width)
     )
 
 
-def test_a_formula_is_drawn_at_four_times_its_own_size(pictures):
-    # Qt reads 24pt as 24 px; drawn at 4 times that (#709).
-    (png,) = [png for lab, _s, png in pictures if lab == "V01"]
-    assert struct.unpack(">II", png[16:24]) == (96, 35)
+@pytest.mark.parametrize(
+    "label, size",
+    [("V01", (128, 46)), ("V05", (192, 70)), ("V06", (160, 80)), ("V07", (41, 32))],
+)
+def test_a_formula_is_drawn_at_four_times_its_own_size(pictures, label, size):
+    # In CSS px: 24pt is 32, 3em 48, 1.294ex 10.35; drawn at 4 times
+    # that (#709, QA on #727: Qt reads no em or ex, and a pt as a px).
+    (png,) = [png for lab, _s, png in pictures if lab == label]
+    assert struct.unpack(">II", png[16:24]) == size
+
+
+@pytest.mark.parametrize("label", ["V06", "V07"])
+def test_a_picture_is_drawn_filling_it(pictures, label):
+    # V06 with no viewBox filled a quarter of it; V07's glyph, from
+    # another <svg>, drew blank (QA on #727). Each shape fills its box.
+    (png,) = [png for lab, _s, png in pictures if lab == label]
+    image = Image.open(io.BytesIO(png)).convert("RGBA")
+    # Over white, as the page shows it: the share of dark pixels.
+    page = Image.new("RGBA", image.size, "white")
+    page.alpha_composite(image)
+    histogram = page.convert("L").histogram()
+    assert sum(histogram[:128]) / sum(histogram) > 0.9
