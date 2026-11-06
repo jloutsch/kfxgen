@@ -102,3 +102,14 @@ def test_an_authors_rem_under_a_10px_root_is_its_own(calibre):  # noqa: F811
     )
     sizes = _sizes(calibre, "k729root", body=body, css=css)
     assert sizes[-2:] == [0.6875, 1.0625]
+
+
+def test_an_initials_rem_under_a_10px_root_is_its_own(calibre):  # noqa: F811
+    # QA on #731, probe P731d: the first letter's 1.7rem under a 10 px root
+    # is 17 px in Previewer 4.0.3 (1.0625), not xx-large's 2.
+    body = "<h1>Root</h1><p class='raised'>Raised initial R02 in the words.</p>"
+    css = (
+        ":root { font-size: 62.5% } p { font-size: 1.6rem }"
+        " p.raised::first-letter { font-size: 1.7rem }"
+    )
+    assert _sizes(calibre, "k729fl", body=body, css=css)[-1:] == [1.0625]
