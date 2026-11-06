@@ -64,7 +64,7 @@ def _stylizer(profile):
     ],
 )
 def test_the_default_profiles_keywords_read_at_previewers_sizes(value, px):
-    assert _calibre_keyword_px(_stylizer(DEFAULT), value) == px
+    assert _calibre_keyword_px(_stylizer(DEFAULT), value, lambda: 16.0) == px
 
 
 @pytest.mark.unit
@@ -80,9 +80,17 @@ def test_the_default_profiles_keywords_read_at_previewers_sizes(value, px):
     ],
 )
 def test_the_kindle_profiles_keywords_read_unless_two_share_a_value(value, px):
-    assert _calibre_keyword_px(_stylizer(KINDLE), value) == px
+    assert _calibre_keyword_px(_stylizer(KINDLE), value, lambda: 16.0) == px
 
 
 @pytest.mark.unit
 def test_without_a_profile_nothing_is_read_as_a_keyword():
-    assert _calibre_keyword_px(SimpleNamespace(), "0.8rem") is None
+    assert _calibre_keyword_px(SimpleNamespace(), "0.8rem", lambda: 16.0) is None
+
+
+@pytest.mark.unit
+def test_under_a_root_of_another_size_nothing_is_read_as_a_keyword():
+    # QA on #731: html { font-size: 62.5% } makes the root 10 px, and an
+    # author's own 1.1rem there is 11 px in Previewer, not large's 18.
+    assert _calibre_keyword_px(_stylizer(DEFAULT), "1.1rem", lambda: 10.0) is None
+    assert _calibre_keyword_px(_stylizer(DEFAULT), "1.1rem", lambda: 16.0) == 18.0

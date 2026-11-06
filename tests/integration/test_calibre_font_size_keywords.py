@@ -41,14 +41,14 @@ BODY += "<p class='raised'>Raised initial K10 in the words of a line.</p>"
 PREVIEWER = [0.5625, 0.625, 0.8125, 1.125, 1.5, 2.0, 2.0]
 
 
-def _sizes(calibre, name, *args):  # noqa: F811
+def _sizes(calibre, name, *args, body=BODY, css=CSS):  # noqa: F811
     tmp, env, _version = calibre
     epub, kfx = tmp / f"{name}.epub", tmp / f"{name}.kfx"
     write_epub(
         epub,
-        pages={"c.xhtml": BODY},
+        pages={"c.xhtml": body},
         toc=[("Sizes", "c.xhtml", 1)],
-        css=CSS,
+        css=css,
         ident=name,
     )
     run = subprocess.run(
@@ -86,3 +86,19 @@ def test_the_kindle_input_profiles_shared_value_is_left(calibre):  # noqa: F811
         0.8,
         *PREVIEWER[2:],
     ]
+
+
+def test_an_authors_rem_under_a_10px_root_is_its_own(calibre):  # noqa: F811
+    # QA on #731, probe P731b: under html { font-size: 62.5% } an author's
+    # 1.1rem and 1.7rem, calibre's strings for large and xx-large, are 11
+    # and 17 px in Previewer 4.0.3 (0.6875, 1.0625), not the keywords' sizes.
+    body = (
+        "<h1>Root</h1><p>R01 <span class='a'>ONE</span> and"
+        " <span class='b'>TWO</span> after.</p>"
+    )
+    css = (
+        "html { font-size: 62.5% } p { font-size: 1.6rem }"
+        " span.a { font-size: 1.1rem } span.b { font-size: 1.7rem }"
+    )
+    sizes = _sizes(calibre, "k729root", body=body, css=css)
+    assert sizes[-2:] == [0.6875, 1.0625]

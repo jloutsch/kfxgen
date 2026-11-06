@@ -277,7 +277,9 @@ def _font_size_px(stylizer, elem, cache):
         return cache[elem]
     inherited = _font_size_px(stylizer, elem.getparent(), cache)
     value = stylizer.style(elem).get("font-size")
-    size = _calibre_keyword_px(stylizer, value)
+    size = _calibre_keyword_px(
+        stylizer, value, lambda: _root_size_px(stylizer, elem, cache)
+    )
     if size is None:
         size = _css_size_px(
             value, inherited, lambda: _root_size_px(stylizer, elem, cache)
@@ -286,7 +288,7 @@ def _font_size_px(stylizer, elem, cache):
     return size
 
 
-def _calibre_keyword_px(stylizer, value):
+def _calibre_keyword_px(stylizer, value, root_px):
     """The CSS px of the font-size keyword calibre turned into `value`, as
     Kindle Previewer 4.0.3 sizes it, or None (#729).
 
@@ -296,10 +298,18 @@ def _calibre_keyword_px(stylizer, value):
     writes 13 px; `xx-large` came to 1.7rem, 27.2 px, for Previewer's 32.
     A value two keywords share (xx-small and x-small are both 0.8rem on the
     Kindle profiles) and `medium` (1rem, as authors write it) are left as
-    they are."""
+    they are.
+
+    Only where the root is 16 px, `root_px()`: under a root of another size
+    (`html { font-size: 62.5% }`) an author's own 1.1rem is 11 px in
+    Previewer, and in QA's library 12 books had such a root and a rem of
+    calibre's form against 1 with such a root and a keyword (QA on #731).
+    A keyword there keeps calibre's rem."""
     table = _calibre_keyword_table(stylizer)
     text = str(value or "").strip().lower()
-    return table.get(text)
+    if text not in table or abs(root_px() - _FONT_PX) > 0.01:
+        return None
+    return table[text]
 
 
 def _calibre_keyword_table(stylizer):
@@ -606,7 +616,9 @@ def _first_letter_css(stylizer, elem, cache):
         return None
     css = dict(rule)
     if css.get("font-size"):
-        size = _calibre_keyword_px(stylizer, css["font-size"])
+        size = _calibre_keyword_px(
+            stylizer, css["font-size"], lambda: _root_size_px(stylizer, elem, cache)
+        )
         if size is None:
             size = _css_size_px(
                 css["font-size"],
