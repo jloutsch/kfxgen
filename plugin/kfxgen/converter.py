@@ -1290,7 +1290,9 @@ def _svg_picture(svg, scale=1):
             u.tail = None
         own.insert(0, defs)
     try:
-        _x, _y, vw, vh = (float(v) for v in (own.get("viewBox") or "").split())
+        # Numbers apart by spaces, commas or both (QA on #727).
+        box = re.split(r"[\s,]+", (own.get("viewBox") or "").strip())
+        _x, _y, vw, vh = (float(v) for v in box)
     except ValueError:
         vw = vh = 0
     has_box = vw > 0 and vh > 0

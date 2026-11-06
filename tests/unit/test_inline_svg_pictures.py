@@ -13,6 +13,7 @@ for real.
 """
 
 import io
+import threading
 
 import pytest
 from lxml import etree
@@ -200,6 +201,54 @@ def test_an_svg_with_no_viewbox_gets_one_of_its_own_size():
         "80",
     )
     assert scale == 4
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("box", ["0,0,20,10", "0, 0, 20, 10", " 0 0,20 10 "])
+def test_a_viewbox_with_commas_is_kept(box):
+    # QA on #727: commas are valid in a viewBox; read as none, it was
+    # replaced by one of the drawn size, and the drawing shrank.
+    from kfxgen.converter import _svg_picture
+
+    svg = etree.fromstring(
+        f"<svg {NS} width='32' height='16' viewBox='{box}'><rect width='20' height='10'/></svg>"
+    )
+    own = etree.fromstring(_svg_picture(svg, 4)[0])
+    assert (own.get("viewBox"), own.get("width"), own.get("height")) == (
+        box,
+        "128",
+        "64",
+    )
+
+
+@pytest.mark.unit
+def test_glyphs_that_use_each_other_are_copied_once(tmp_path):
+    # QA on #727: a symbol using a symbol that uses it hung the copy.
+    from kfxgen.converter import _svg_picture
+
+    root = etree.fromstring(
+        "<div xmlns='http://www.w3.org/1999/xhtml'>"
+        f"<svg {NS} style='display:none'><defs>"
+        "<symbol id='a'><use xlink:href='#b'/><path d='M0 0 L1 1 Z'/></symbol>"
+        "<symbol id='b'><use xlink:href='#a'/><path d='M1 1 L2 2 Z'/></symbol>"
+        "</defs></svg>"
+        f"<svg {NS} width='10' height='10' viewBox='0 0 10 10'><use xlink:href='#a'/></svg>"
+        "</div>"
+    )
+    formula = [
+        e for e in root.iter("{http://www.w3.org/2000/svg}svg") if e.get("width")
+    ][0]
+    # In a thread, so a loop fails the test rather than hanging it.
+    done = []
+    worker = threading.Thread(
+        target=lambda: done.append(_svg_picture(formula)[0]), daemon=True
+    )
+    worker.start()
+    worker.join(10)
+    assert done, "copying the glyphs did not finish"
+    own = etree.fromstring(done[0])
+    copied = [e.get("id") for e in own.iter("{http://www.w3.org/2000/svg}symbol")]
+    assert sorted(copied) == ["a", "b"]
 
 
 @pytest.mark.unit
