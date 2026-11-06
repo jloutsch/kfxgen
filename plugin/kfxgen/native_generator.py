@@ -28,6 +28,8 @@ from .inline_style import (
     without_ruby,
 )
 from .kfxlib_minimal.ion import IS, IonAnnotation, IonBLOB, IonDecimal, IonStruct
+from .math_draw import TEXT_SIZE as MATH_TEXT_SIZE
+from .math_draw import MathText
 from .kfxlib_minimal.kfx_container import KfxContainer
 from .kfxlib_minimal.standard_symbols import StandardSymbolTable
 from .kfxlib_minimal.yj_container import (
@@ -1324,6 +1326,18 @@ MAX_CONTENT_FRAGMENT_SIZE = 8192
 POSITIONS_PER_LOCATION = 110
 
 
+def _item_widths(item, eids):
+    """The positions each id of an item in a paragraph's words takes: one,
+    or a character each for a text in a drawn equation, as kfxlib counts
+    its content (#708)."""
+    if item[0] == "picture":
+        return [1] * len(eids)
+    texts = [p for p in item[1].paths if isinstance(p, MathText)]
+    if not texts:
+        return [1] * len(eids)
+    return [1, 1, 1] + [len(t.text) for t in texts]
+
+
 def place_locations(sections):
     """[(eid, offset)] for `$550`: a location every POSITIONS_PER_LOCATION
     positions, counted again from each section's start, with the offset into
@@ -2213,7 +2227,7 @@ class NativeKFXGenerator:
         """A drawn equation as Kindle Previewer writes it (#235): a container
         holding a container holding one shape of glyph paths."""
         _serial, drawing, alt, source = item
-        e1, e2, e3 = eids
+        e1, e2, e3, *text_eids = eids
 
         def em(v):
             return IonStruct(
@@ -2257,8 +2271,40 @@ class NativeKFXGenerator:
             # 32-bit number, so 4474.5 as 4474.500000 wraps round to 179.5.
             return v if isinstance(v, int) else IonDecimal(str(v))
 
-        paths = []
-        for glyph, path, matrix in drawing.paths:
+        paths, texts = [], []
+        text_eids = iter(text_eids)
+        for placed in drawing.paths:
+            if isinstance(placed, MathText):
+                # A character the maths font lacks: text in the shape, in
+                # the Kindle's own font, placed as Previewer places it
+                # (#708).
+                eid = next(text_eids)
+                paths.append(
+                    IonStruct(
+                        IS("$474"),
+                        eid,
+                        IS("$98"),
+                        [number(v) for v in placed.matrix],
+                        IS("$76"),
+                        0,
+                        IS("$159"),
+                        IS("$270"),
+                    )
+                )
+                texts.append(
+                    IonStruct(
+                        IS("$155"),
+                        eid,
+                        IS("$16"),
+                        MATH_TEXT_SIZE,
+                        IS("$159"),
+                        IS("$269"),
+                        IS("$145"),
+                        self._math_note(placed.text),
+                    )
+                )
+                continue
+            glyph, path, matrix = placed
             # A glyph's path is stored once in the book, as Previewer does.
             index = self._math_glyphs.get(glyph) if glyph else None
             if index is None:
@@ -2300,6 +2346,8 @@ class NativeKFXGenerator:
             IS("$159"),
             IS("$272"),
         )
+        if texts:
+            shape[IS("$146")] = texts
         inner = IonStruct(
             IS("$155"),
             e2,
@@ -2997,7 +3045,7 @@ class NativeKFXGenerator:
                     text, items = maths
                     pos = chunk_positions[chunk_idx]
                     done = extra = 0
-                    for k, _item, eids in items:
+                    for k, item, eids in items:
                         base = char_offset + k + extra
                         located.append((pos, k - done, done))
                         if k > done:
@@ -3005,15 +3053,17 @@ class NativeKFXGenerator:
                             # after another, where that one's resumes it.
                             entries_265_raw.append((base, pos, k))
                             math_positions.add((base, pos))
-                        for n, e in enumerate(eids):
-                            entries_265_raw.append((base + n, e))
+                        at = base
+                        for e, width in zip(eids, _item_widths(item, eids)):
+                            entries_265_raw.append((at, e))
                             math_positions.add(e)
-                            located.append((e, 1))
+                            located.append((e, width))
+                            at += width
                         done = k + 1
                         if done < len(text):
-                            entries_265_raw.append((base + len(eids), pos, done))
-                            math_positions.add((base + len(eids), pos))
-                        extra += len(eids) - 1
+                            entries_265_raw.append((at, pos, done))
+                            math_positions.add((at, pos))
+                        extra += at - base - 1
                     if done < len(text):
                         located.append((pos, len(text) - done, done))
                     char_offset += len(text) + extra
@@ -6186,10 +6236,13 @@ class NativeKFXGenerator:
             for _s, _length, flags in chunk.get("spans") or ():
                 m = math_of(flags)
                 if m and (chunk_idx, m[0]) not in math_eids:
+                    # And an id for each text in it (#708), as Previewer
+                    # gives one, each taking a position after the shape.
+                    count = 3 + sum(isinstance(p, MathText) for p in m[1].paths)
                     math_eids[chunk_idx, m[0]] = tuple(
-                        content_pos_id + n * self.CONTENT_POS_STEP for n in range(3)
+                        content_pos_id + n * self.CONTENT_POS_STEP for n in range(count)
                     )
-                    content_pos_id += 3 * self.CONTENT_POS_STEP
+                    content_pos_id += count * self.CONTENT_POS_STEP
         # A picture inside a paragraph's words (#529): an id of its own.
         picture_eids = {}
         for chunk_idx, chunk in enumerate(all_chunks):
