@@ -15,7 +15,6 @@ from .inline_style import (
     LANG_FLAG,
     bidi_of,
     EXTERNAL_LINK_PREFIX,
-    flag_value,
     link_target,
     page_bidi,
     NOTEREF_FLAG,
@@ -264,9 +263,14 @@ def _direction_layers(spans):
     layered on it: a direction run in it has no link of its own (QA on #713,
     probe M710). A link holding only a direction element is one run with
     both (M05): its own layer, inside that run, carries nothing that run
-    doesn't, so it writes no run. Links are layered so only in a paragraph
-    with a direction or language flag (M08); with neither, `spans`
-    unchanged, each with no keys, as kfxgen wrote them before #710."""
+    doesn't, so it writes no run. Links are layered so in every paragraph,
+    as Previewer writes them in plain ones too (#715, probe P715). With no
+    direction element and no link, `spans` unchanged, each with no keys.
+
+    Adjacent links to the same target are one layer: `<i>a <a>b</a></i><a>
+    c</a>` gives "b c" one link run with the italic layered on "b", where
+    Previewer writes two link runs, the first italic (P715's L14). The
+    words, styles and target are the same."""
     # Each layer: [start, end, level, keys, flags common to its text]. A
     # direction element of depth d is at level 2d; a link is just above the
     # direction elements around it; flat spans above the layers they're in.
@@ -292,7 +296,7 @@ def _direction_layers(spans):
                 links[-1][1] = s + n
             else:
                 links.append([s, s + n, None, None, f])
-    if not ranges and not any(flag_value(f, LANG_FLAG) for _, _, f in spans):
+    if not ranges and not links:
         return [(s, n, f, None) for s, n, f in spans]
 
     dirs = list(ranges.values())
