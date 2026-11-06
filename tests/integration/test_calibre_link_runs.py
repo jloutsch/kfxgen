@@ -34,6 +34,10 @@ CSS = (
     " span.it { font-style: italic }"
     " a.b { font-weight: bold }"
     " span.sc { font-size: 0.7em }"
+    " p.b { font-weight: bold }"
+    " a.n { font-weight: normal }"
+    " p.i { font-style: italic }"
+    " a.up { font-style: normal }"
 )
 _A = "<a href='#t'>"
 BODY = (
@@ -44,6 +48,9 @@ BODY = (
     "<p>L22 <a href='#t' class='b'>T<span class='sc'>HE</span> "
     "R<span class='sc'>EST</span></a> after.</p>"
     f"<p>L23 {_A}<code>mono <i>slant</i></code></a> after.</p>"
+    "<p class='b'>L24 <a href='#t' class='n'>light <i>it</i> l</a> after.</p>"
+    "<p class='i'>L25 <a href='#t' class='up'>up <b>bd</b> <i>it</i></a> after.</p>"
+    "<p class='i'>L26 <a href='#t' class='up'>x<sup>a<sup>b</sup></sup> y</a> after.</p>"
     "<p id='t'>T99 target.</p>"
 )
 
@@ -85,7 +92,12 @@ def runs(calibre):  # noqa: F811
                     )
                 )
                 faces.setdefault(text[:3], []).append(
-                    (text[a : a + n], str(s.get("$13")), str(s.get("$11")))
+                    (
+                        text[a : a + n],
+                        str(s.get("$13")),
+                        str(s.get("$11")),
+                        str(s.get("$12")),
+                    )
                 )
             found[text[:3]] = out
     return found, faces
@@ -124,7 +136,23 @@ def test_a_run_in_a_link_keeps_the_links_weight_and_font(runs):
     # part is layered on the bold link run and stays bold; it was written
     # normal weight, measured against the paragraph.
     faces = runs[1]
-    assert [w for t, w, _f in faces["L22"] if t in ("HE", "EST")] == ["$361"] * 2
+    assert [w for t, w, *_ in faces["L22"] if t in ("HE", "EST")] == ["$361"] * 2
     # A slanted word in a code link keeps the code's font.
-    ((_t, _w, family),) = [x for x in faces["L23"] if x[0] == "slant"]
-    assert family == [f for t, _w, f in faces["L23"] if t == "mono slant"][0]
+    ((_t, _w, family, _s),) = [x for x in faces["L23"] if x[0] == "slant"]
+    assert family == [f for t, _w, f, _s in faces["L23"] if t == "mono slant"][0]
+
+
+def test_a_run_in_a_link_set_back_to_normal_stays_normal(runs):
+    # QA on #726. A normal-weight link in a bold paragraph: its italic word
+    # stays normal weight, not the paragraph's bold.
+    faces = runs[1]
+    assert [w for t, w, *_ in faces["L24"] if t == "it"] == ["$350"]
+    # An upright link in an italic paragraph: the link run says upright,
+    # and its bold word stays upright; its italic word is italic.
+    slant = {t: s for t, _w, _f, s in faces["L25"]}
+    assert slant["up bd it"] == "$350"
+    assert slant["bd"] != "$382"
+    assert slant["it"] == "$382"
+    # A superscript in it, and one inside that, stay upright too.
+    assert [s for t, _w, _f, s in faces["L26"] if t in ("a", "ab", "b")]
+    assert all(s != "$382" for t, _w, _f, s in faces["L26"] if t in ("a", "ab", "b"))

@@ -134,6 +134,27 @@ def test_a_run_in_a_bold_direction_run_stays_bold(tmp_path):
 
 
 @pytest.mark.unit
+def test_words_between_two_links_to_one_target_are_not_linked(tmp_path):
+    # QA on #726: two links to one target with words between them are two
+    # link runs; the words between link nowhere.
+    found = _book(
+        tmp_path, f"<p>P01 {_A}one</a> mid words {_A}two <i>i</i></a> after.</p>"
+    )
+    assert _shape(found["P01"]) == [("one", LINK), ("two i", LINK), ("i", ITAL)]
+
+
+@pytest.mark.unit
+def test_a_superscript_in_a_superscript_in_a_bold_link_stays_bold(tmp_path):
+    # QA on #726: the inner superscript is a run layered on the outer one,
+    # and it keeps the bold of the link under both.
+    found = _book(
+        tmp_path, f"<p>P01 <b>{_A}x<sup>a<sup>b</sup></sup> y</a></b> after.</p>"
+    )
+    inner = [k for t, k in _shape(found["P01"]) if t == "b"]
+    assert inner and all(k.get("bold") for k in inner)
+
+
+@pytest.mark.unit
 def test_adjacent_links_to_one_target_are_one_layer(tmp_path):
     # L14: Previewer writes "both" (italic) and " plain" as two link runs,
     # one per <a>. kfxgen can't tell two adjacent links to one target from
