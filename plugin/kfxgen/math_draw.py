@@ -32,6 +32,8 @@ _TEXT_SCALE = 51.978 / 1000
 
 #: ziamath's size: one unit is a thousandth of an em, as in Previewer's.
 _EM = 1000
+#: MathML's token elements: the text in each is one run of letters (#708).
+_TOKENS = frozenset({"mi", "mn", "mo", "mtext", "ms"})
 #: A glyph's path is kept in hundredths of its own units, in whole numbers.
 _GLYPH = 100
 _IDENTITY = (1, 0, 0, 1, 0, 0)
@@ -83,7 +85,16 @@ def _ziamath():
             if _budget.left <= 0:
                 raise _OverBudget
             _budget.left -= 1
-            return layout(cls, element, parent, **kwargs)
+            if _local(element.tag) not in _TOKENS:
+                return layout(cls, element, parent, **kwargs)
+            # The glyphs laid out here belong to this token (#708).
+            tokens = _budget.__dict__.setdefault("tokens", [])
+            _budget.serial = getattr(_budget, "serial", 0) + 1
+            tokens.append(_budget.serial)
+            try:
+                return layout(cls, element, parent, **kwargs)
+            finally:
+                tokens.pop()
 
         fromelement._budgeted = True
         Mnode.fromelement = classmethod(fromelement)
@@ -98,7 +109,12 @@ def _ziamath():
     from ziamath.drawable import Glyph
 
     if not getattr(Glyph.draw, "_tagged", False):
-        place = Glyph.draw
+        place, made = Glyph.draw, Glyph.__init__
+
+        def init_glyph(self, *args, **kwargs):
+            made(self, *args, **kwargs)
+            tokens = getattr(_budget, "tokens", None)
+            self.kfxgen_token = tokens[-1] if tokens else None
 
         def draw_glyph(self, x, y, svg):
             # The font's missing-glyph box: note the character it stands
@@ -107,13 +123,16 @@ def _ziamath():
             out = place(self, x, y, svg)
             if self.glyph.index == 0 and len(svg) > n and svg[-1].tag == "use":
                 svg[-1].set("data-char", self.char)
-                # Where its pen starts and ends, to join letters into words.
+                # Its token, and where its pen starts and ends, to join
+                # a token's letters into words.
+                svg[-1].set("data-token", repr(getattr(self, "kfxgen_token", None)))
                 svg[-1].set("data-x", repr(x))
                 svg[-1].set("data-end", repr(out[0]))
             return out
 
         draw_glyph._tagged = True
         Glyph.draw = draw_glyph
+        Glyph.__init__ = init_glyph
     return ziamath
 
 
@@ -322,7 +341,7 @@ def _placements(svg, x0, y0):
                         return None
                     path += part
             symbols[e.get("id")] = ([float(v) for v in e.get("viewBox").split()], path)
-    placed, ends = [], float("nan")
+    placed, ends, last_token = [], float("nan"), None
     for e in svg.iter():
         local = _local(e.tag)
         if local in ("svg", "g", "symbol") or id(e) in inside:
@@ -337,15 +356,18 @@ def _placements(svg, x0, y0):
             y = float(e.get("y", 0)) - vy * scale - y0
             char = e.get("data-char")
             if char:
-                # A character the font lacks: text, its letters one word
-                # while each starts where the last ended, so the Kindle
-                # joins them (#708). A symbol is 12 of its units to the em.
+                # A character the font lacks: text, a token's letters one
+                # word while each starts where the last ended, so the
+                # Kindle joins them (#708). Two tokens are two texts, as
+                # two variables side by side (QA on #730). A symbol is 12
+                # of its units to the em.
                 k = round(scale * 12 * _TEXT_SCALE, 3)
                 last = placed[-1] if placed else None
+                token = e.get("data-token")
                 if (
                     isinstance(last, MathText)
-                    and last.matrix[0] == k
-                    and last.matrix[5] == round(y, 1)
+                    and token not in (None, "None")
+                    and token == last_token
                     and abs(float(e.get("data-x", "nan")) - ends) < 0.5
                 ):
                     placed[-1] = MathText(last.text + char, last.matrix)
@@ -353,7 +375,7 @@ def _placements(svg, x0, y0):
                     placed.append(
                         MathText(char, (k, 0, 0, k, round(x, 1), round(y, 1)))
                     )
-                ends = float(e.get("data-end", "nan"))
+                ends, last_token = float(e.get("data-end", "nan")), token
                 continue
             if not path:
                 continue  # a space or an invisible operator: no width, no outline

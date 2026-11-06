@@ -106,6 +106,19 @@ def test_a_script_goes_before_its_base_and_a_root_opens_on_the_left():
 
 
 @pytest.mark.unit
+def test_both_scripts_go_before_the_base():
+    # QA on #730: msubsup too, its subscript and superscript prescripts.
+    m = _rtl("<msubsup><mi>س</mi><mn>١</mn><mn>٢</mn></msubsup>")
+    assert _shape_of(m)[2] == [
+        (
+            "mmultiscripts",
+            "",
+            [("mi", "س"), ("mprescripts", ""), ("mn", "١"), ("mn", "٢")],
+        )
+    ]
+
+
+@pytest.mark.unit
 def test_a_table_rows_cells_are_reversed():
     # M12.
     m = _rtl("<mtable><mtr><mtd><mi>س</mi></mtd><mtd><mn>١</mn></mtd></mtr></mtable>")
@@ -143,6 +156,14 @@ def test_arabic_letters_and_digits_are_text_in_the_drawing():
 def test_a_word_is_one_text_and_neighbours_apart_are_two():
     # M04's <mtext>دالة</mtext> is one word; M12's two cells are two.
     assert _texts(f"<math {M}><mtext>دالة</mtext></math>") == ["دالة"]
+    # A space between two words: two texts.
+    assert _texts(f"<math {M}><mtext>دالة ثابتة</mtext></math>") == ["دالة", "ثابتة"]
+    # Two variables side by side are two, not one word (QA on #730).
+    assert _texts(f"<math {M}><mi>س</mi><mi>ص</mi><mo>+</mo><mi>سص</mi></math>") == [
+        "س",
+        "ص",
+        "سص",
+    ]
     assert _texts(
         f"<math {M}><mtable><mtr><mtd><mn>١</mn></mtd><mtd><mi>س</mi></mtd></mtr>"
         "</mtable></math>"
@@ -217,3 +238,24 @@ def test_a_text_takes_a_position_for_each_character(tmp_path):
     (sections,) = by_type(frags, "$264")
     listed = {int(x) for s in val(sections) for x in s["$181"]}
     assert {int(k["$155"]) for k in kids} <= listed
+
+
+@pytest.mark.unit
+def test_the_paragraph_resumes_after_each_equation_at_its_own_offset(tmp_path):
+    # QA on #730: with a text one position wide in the count, every later
+    # part of the paragraph started too early.
+    frags = _book(tmp_path, [_chapter(f"<p>P01 {WORD} mid {WORD} end.</p>")])
+    (pmap,) = by_type(frags, "$265")
+    rows = [(int(r["$184"]), int(r["$185"]), r.get("$143")) for r in val(pmap)]
+    (para,) = {eid for _o, eid, start in rows if start is not None}
+    parts = [(off, int(start)) for off, eid, start in rows if eid == para and start]
+    # Where the paragraph reaches each equation and resumes after it,
+    # counted from its first position: "P01 " is 4; an equation is 3 ids
+    # and texts of 4 and 1, 8 positions; " mid " is 5.
+    first = next(off for off, eid, start in rows if eid == para)
+    assert [(off - first, start) for off, start in parts] == [
+        (4, 4),
+        (12, 5),
+        (17, 10),
+        (25, 11),
+    ]
