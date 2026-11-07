@@ -9,8 +9,12 @@ each `{$19: ARGB}`, and no `$19`. kfxgen dropped it:
   a yellow link on a dark box stays 0xFFFFFF00.
 - A link inside coloured text, with no colour of its own: `$19`, the text's
   colour, as before (#377).
-- Black is no link colour: a black link in a grey paragraph gets the grey,
-  as `$19`.
+- On the page, black and near-black (every channel up to 0x1A) are no link
+  colour: the link is drawn in its paragraph's colour, a span's around it
+  dropped (QA on #732, P732 B05, P732d). In a box, every colour is written,
+  black included.
+- A link whose target isn't found is written as text, its colour as `$19`
+  (P732b).
 - A translucent colour: Previewer writes its alpha (0x7FFF0000). kfxgen
   blends it onto the page, as it does a text colour (#383).
 
@@ -95,13 +99,65 @@ def test_a_link_in_coloured_text_has_no_link_colour():
 
 
 @pytest.mark.unit
-def test_a_black_link_in_a_grey_paragraph_is_grey():
-    """P728c Q12: Previewer writes the paragraph's grey on the link, and no
-    link colour."""
+def test_a_black_link_in_a_grey_paragraph_is_the_paragraphs():
+    """P728c Q12: drawn in the paragraph's grey, which its entry carries."""
     css = {"gp": {"color": "#333333"}, "k": {"color": "black"}}
     b = _one('<p class="gp" id="x">grey <a class="k" href="#x">link</a></p>', css)
     assert _run(b, "link", LINK_COLOUR_FLAG) is None
-    assert _run(b, "link", COLOUR_FLAG) == 0xFF333333
+    assert _run(b, "link", COLOUR_FLAG) is None
+    assert b["block_style"]["colour"] == 0xFF333333
+
+
+@pytest.mark.unit
+def test_a_black_link_in_a_red_span_drops_the_red():
+    """QA on #732, P732 B05: Previewer draws it black, as main did."""
+    css = {"r": {"color": "#cc0000"}, "k": {"color": "black"}}
+    b = _one(
+        '<p id="x">a <span class="r">red <a class="k" href="#x">link</a></span></p>',
+        css,
+    )
+    assert _run(b, "link", LINK_COLOUR_FLAG) is None
+    assert _run(b, "link", COLOUR_FLAG) is None
+    assert _run(b, "red", COLOUR_FLAG) == 0xFFCC0000
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "colour, argb",
+    [
+        # P732d: none up to 0x1A in every channel, written from 0x20.
+        ("#1a1a1a", None),
+        ("#100000", None),
+        ("#00001a", None),
+        ("#202020", 0xFF202020),
+        ("#200000", 0xFF200000),
+        ("#003000", 0xFF003000),
+    ],
+)
+def test_a_near_black_link_on_the_page_has_no_link_colour(colour, argb):
+    css = {"gp": {"color": "#666666"}, "k": {"color": colour}}
+    b = _one('<p class="gp" id="x">grey <a class="k" href="#x">link</a></p>', css)
+    assert _run(b, "link", LINK_COLOUR_FLAG) == argb
+    assert _run(b, "link", COLOUR_FLAG) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "colour, argb", [("black", 0xFF000000), ("#1a1a1a", 0xFF1A1A1A)]
+)
+def test_in_a_box_a_black_link_has_its_link_colour(colour, argb):
+    """QA on #732, P732 B01-B04: Previewer writes every link colour in a box,
+    black too, where the box's light text would draw it otherwise."""
+    css = {
+        "box": {"background-color": "#333333", "color": "#eeeeee"},
+        "k": {"color": colour},
+    }
+    box = _one(
+        '<div class="box"><p id="x">box <a class="k" href="#x">link</a></p></div>', css
+    )
+    (b,) = box["blocks"]
+    assert _run(b, "link", LINK_COLOUR_FLAG) == argb
+    assert _run(b, "link", COLOUR_FLAG) is None
 
 
 @pytest.mark.unit
@@ -136,3 +192,41 @@ def test_a_plain_link_writes_no_link_colour(tmp_path):
     body = FILLER + '<p id="t">See <a href="#t">Here</a> now.</p>'
     found = _found(_book(tmp_path, body))["See Here now."]
     assert not any("$576" in s for s in found[1].values())
+
+
+@pytest.mark.unit
+def test_a_link_whose_target_isnt_found_has_its_colour_as_text(tmp_path):
+    """QA on #732, P732b: the link is dropped, and Previewer writes its colour
+    as the text's."""
+    css = {"g": {"color": "#333333"}}
+    body = FILLER + '<p>See <a class="g" href="#nowhere">Here</a> now.</p>'
+    style = _found(_book(tmp_path, body, css))["See Here now."][1]["Here"]
+    assert "$576" not in style
+    assert style["$19"] == 0xFF333333
+
+
+@pytest.mark.unit
+def test_a_coloured_link_in_a_table_cell_has_its_link_colour(tmp_path):
+    """QA on #732, P732 T01: the cell's runs take the link colour too."""
+    css = {"g": {"color": "#999999"}}
+    body = FILLER + (
+        '<p id="t">Target.</p><table><tr><td>A <a class="g" href="#t">Here</a> b</td>'
+        "<td>Other</td></tr></table>"
+    )
+    found = _found(_book(tmp_path, body, css))
+    (runs,) = [r for t, (_s, r) in found.items() if t.startswith("A Here")]
+    assert runs["Here"]["$576"] == {"$19": GREY}
+
+
+@pytest.mark.unit
+def test_words_inside_a_link_whose_target_isnt_found_have_no_link_colour(tmp_path):
+    """Runs inside a link are layered on its run (#715) and carry no target
+    of their own: whether the link was found is read from the run they're
+    layered on. A word coloured inside it is such a run."""
+    css = {"g": {"color": "#333333"}, "r": {"color": "#cc0000"}}
+    body = FILLER + (
+        '<p>See <a class="g" href="#nowhere">Here <span class="r">red</span> x</a> now.</p>'
+    )
+    runs = _found(_book(tmp_path, body, css))["See Here red x now."][1]
+    assert not any("$576" in s for s in runs.values())
+    assert runs["red"]["$19"] == 0xFFCC0000

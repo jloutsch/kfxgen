@@ -1738,6 +1738,20 @@ def _is_link_flag(flag):
     return isinstance(flag, tuple) and flag[:1] == make_link_flag("")[:1]
 
 
+#: The brightest channel of a link colour Previewer 4.0.3 writes none for on
+#: the page: up to #1a1a1a none, from #202020 on written, any channel
+#: (QA on #732, P732d; 0x1B-0x1F not probed).
+_NEAR_BLACK = 0x1A
+
+
+def _near_black(argb):
+    """Whether an ARGB colour is black or near enough for Previewer to write
+    no link colour for it on the page."""
+    return argb is not None and all(
+        (argb >> shift) & 0xFF <= _NEAR_BLACK for shift in (16, 8, 0)
+    )
+
+
 #: `display` values that draw an element as a block of its own (#233).
 _BLOCK_DISPLAYS = frozenset(
     {"block", "list-item", "table", "table-row", "table-caption", "flex", "grid"}
@@ -2123,18 +2137,19 @@ def _walk_inline(
                     continue
                 if kind == COLOUR_FLAG and any(_is_link_flag(f) for f in cur):
                     link_colour = css_link_colour(str(own_css.get("color") or "black"))
-                    if link_colour == BLACK:
-                        # Black is no link colour: the link keeps the colour
-                        # around it, a grey paragraph's too (P728c Q12).
-                        if starts_link and before is not None:
-                            cur = {f for f in cur if flag_value((f,), kind) is None}
-                            cur.add((kind, before))
-                        continue
+                    if own_css.get("background-behind") is None and _near_black(
+                        link_colour
+                    ):
+                        # On the page, black and near-black are no link
+                        # colour: the link is drawn in its paragraph's (QA on
+                        # #732, P732 B05, P732d). In a box, every colour is.
+                        link_colour = None
                     if starts_link:
                         cur = {f for f in cur if flag_value((f,), kind) is None}
+                    if link_colour is None:
+                        continue
                     cur = {f for f in cur if flag_value((f,), LINK_COLOUR_FLAG) is None}
-                    if link_colour is not None:
-                        cur.add((LINK_COLOUR_FLAG, link_colour))
+                    cur.add((LINK_COLOUR_FLAG, link_colour))
                     continue
                 cur = {f for f in cur if flag_value((f,), kind) is None}
                 cur.add((kind, now if now is not None else unset))

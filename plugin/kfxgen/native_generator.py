@@ -6810,6 +6810,7 @@ class NativeKFXGenerator:
             scale=1.0,
             keeps_size=False,
             bidi=(),
+            link_found=True,
         ):
             # Effective emphasis = inline run flags OR the block's CSS emphasis.
             # The applied $157 always carries the run's own weight/style ($13/$12)
@@ -6865,8 +6866,15 @@ class NativeKFXGenerator:
                 value = flag_value(flags, kind)
                 if value is not None:
                     attrs[arg] = value
-            if flag_value(flags, LINK_COLOUR_FLAG) is not None:
-                attrs["link_colour"] = flag_value(flags, LINK_COLOUR_FLAG)
+            link_colour = flag_value(flags, LINK_COLOUR_FLAG)
+            if link_colour is not None:
+                if link_found:
+                    attrs["link_colour"] = link_colour
+                elif attrs.get("colour") is None:
+                    # A link whose target isn't found is written as text:
+                    # Previewer writes its colour as the text's (QA on #732,
+                    # P732b).
+                    attrs["colour"] = link_colour
             if in_cell:
                 attrs["no_align"] = True
             return _allocate_style("_em", bidi=bidi, **attrs)
@@ -7425,6 +7433,13 @@ class NativeKFXGenerator:
                             continue
                     target = _link_target(flags)
                     anchor = body_anchor_map.get(target) if target else None
+                    # The link this run is in, its own or one it's layered
+                    # on, has a target in the book (#728).
+                    link_found = all(
+                        body_anchor_map.get(t)
+                        for t in (_link_target(f) for f in (flags, *under))
+                        if t
+                    )
                     has_emphasis = any(
                         f in flags
                         for f in (
@@ -7474,6 +7489,7 @@ class NativeKFXGenerator:
                                 sized=sized,
                                 blk_fs=blk_fs,
                                 bidi=bidi,
+                                link_found=link_found,
                             )
                             if has_emphasis or not anchor
                             else None
@@ -7515,6 +7531,7 @@ class NativeKFXGenerator:
                                     blk_fs=blk_fs,
                                     scale=scale,
                                     keeps_size=keeps,
+                                    link_found=link_found,
                                 ),
                                 None,
                             )

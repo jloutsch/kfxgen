@@ -3,7 +3,9 @@
 Probes P728b and P728c, Previewer 4.0.3's values: a link's own colour, and
 a colour set inside a link, are `$576`/`$577` `{$19: ARGB}` on the link's
 runs, as the book gives it; a link inside coloured text keeps that text's
-`$19`; a black link takes the colour around it. kfxgen layers a link's
+`$19`; a black or near-black link on the page has no colour of its own,
+and is drawn in its paragraph's (QA on #732, P732 B05, P732d); in a box a
+black link is written as the link's colour. kfxgen layers a link's
 inner runs on its run (#715), so the inner run may hold the colour where
 Previewer's link run does: the tests read the colour each word is drawn in.
 
@@ -34,7 +36,8 @@ CSS = (
     ".grey { color: #999999 } .red { color: #ff0000 } a.grey { color: #999999 }"
     " p.gp { color: #999999 } .blk { color: black }"
     " .box { background-color: #333333; color: white; padding: 0.5em }"
-    " .box a { color: #ffff00 }"
+    " .box a { color: #ffff00 } .box a.blk { color: black } .nb { color: #1a1a1a }"
+    " .dg { color: #202020 }"
 )
 BODY = (
     "<h1>Links</h1>"
@@ -47,6 +50,10 @@ BODY = (
     "<p>Q07 note<a class='grey' href='#t'><sup>1</sup></a> after.</p>"
     "<div class='box'><p>Q09 box <a href='#t'>yellowlink</a> end.</p></div>"
     "<p class='gp'>Q12 grey para <a class='blk' href='#t'>blackinlink</a> end.</p>"
+    "<p>B05 <span class='red'>red <a class='blk' href='#t'>blackinred</a></span>.</p>"
+    "<p class='gp'>D01 <a class='nb' href='#t'>nearblack</a> and"
+    " <a class='dg' href='#t'>darkgrey</a>.</p>"
+    "<div class='box'><p>X01 box <a class='blk' href='#t'>blackinbox</a> end.</p></div>"
     + "<p>Filler.</p>" * 5
     + "<p id='t'>T1 target.</p>"
 )
@@ -55,7 +62,8 @@ GREY, RED = 0xFF999999, 0xFFFF0000
 
 @pytest.fixture(scope="module")
 def drawn(calibre):  # noqa: F811
-    """{paragraph text: [(start, end, run $157)]}, outer runs first."""
+    """{paragraph text: (entry $157, [(start, end, run $157)])}, outer runs
+    first."""
     tmp, env, _version = calibre
     epub, kfx = tmp / "lc728.epub", tmp / "lc728.kfx"
     write_epub(
@@ -79,24 +87,28 @@ def drawn(calibre):  # noqa: F811
             if not ref:
                 continue
             text = str(texts[str(ref["name"])][ref["$403"]])
-            out[text] = [
-                (
-                    int(r["$143"]),
-                    int(r["$143"]) + int(r["$144"]),
-                    styles.get(str(r.get("$157")), {}),
-                )
-                for r in e.get("$142") or ()
-            ]
+            out[text] = (
+                styles.get(str(e.get("$157")), {}),
+                [
+                    (
+                        int(r["$143"]),
+                        int(r["$143"]) + int(r["$144"]),
+                        styles.get(str(r.get("$157")), {}),
+                    )
+                    for r in e.get("$142") or ()
+                ],
+            )
     return out
 
 
 def _at(drawn, line, word):
     """(link colour, `$19`) `word` is drawn in, in the paragraph starting
     `line`: from the innermost run over it with each, kfxgen's inner runs
-    layered on the link's."""
+    layered on the link's, else the paragraph's own `$19`."""
     (text,) = [t for t in drawn if t.startswith(line + " ")]
     at = text.index(word, len(line))
-    over = [s for a, b, s in drawn[text] if a <= at and at + len(word) <= b]
+    entry, runs = drawn[text]
+    over = [entry] + [s for a, b, s in runs if a <= at and at + len(word) <= b]
     link = next((s["$576"]["$19"] for s in reversed(over) if "$576" in s), None)
     colour = next((s["$19"] for s in reversed(over) if "$19" in s), None)
     return link, colour
@@ -109,6 +121,8 @@ def test_a_coloured_link_in_red_text_has_only_its_link_colour(drawn):
 
 def test_a_plain_link_has_no_link_colour(drawn):
     assert _at(drawn, "Q03", "plainlink") == (None, None)
+    # In a grey paragraph: its grey, darkened as text (#239).
+    assert _at(drawn, "Q04", "paralink")[1] in (0xFF757575, 0xFF767676)
     assert _at(drawn, "Q04", "paralink")[0] is None
 
 
@@ -124,6 +138,24 @@ def test_a_footnote_marker_takes_its_links_colour(drawn):
 def test_the_colour_is_not_measured_against_a_box(drawn):
     # Previewer writes the yellow as given on the #333333 box.
     assert _at(drawn, "Q09", "yellowlink")[0] == 0xFFFFFF00
+
+
+def test_a_black_link_in_red_text_is_black(drawn):
+    # QA on #732, P732 B05: Previewer draws it black, the red dropped.
+    assert _at(drawn, "B05", "blackinred") == (None, None)
+    assert _at(drawn, "B05", "red")[1] == 0xFFEE0000
+
+
+def test_a_near_black_link_has_none_and_a_dark_grey_one_has_its_own(drawn):
+    # P732d: none up to 0x1A in every channel, written from 0x20.
+    assert _at(drawn, "D01", "nearblack")[0] is None
+    assert _at(drawn, "D01", "darkgrey")[0] == 0xFF202020
+
+
+def test_a_black_link_in_a_box_is_written_black(drawn):
+    # P732 B01-B04: Previewer writes $576 black in a box; the box's white
+    # text would draw it white otherwise.
+    assert _at(drawn, "X01", "blackinbox")[0] == 0xFF000000
 
 
 def test_a_black_link_in_a_grey_paragraph_is_grey(drawn):
