@@ -312,3 +312,55 @@ def test_an_unfound_black_link_with_its_own_direction_is_black(tmp_path):
     )
     style = _found(_book(tmp_path, body, css))["See Here now."][1]["Here"]
     assert style["$19"] == 0xFF000000
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("inner", ["black", "#1a1a1a"])
+def test_a_black_word_inside_a_coloured_link_takes_the_links_colour(inner):
+    """QA on #732, P732 B09, P732k K10-K13: Previewer writes the red link's
+    `$576` over the whole link, its black word too."""
+    css = {"r": {"color": "#cc0000"}, "k": {"color": inner}}
+    b = _one(
+        '<p id="x"><a class="r" href="#x">pre <span class="k">word</span> post</a></p>',
+        css,
+    )
+    assert [_link(b, w) for w in ("pre", "word", "post")] == [0xFFCC0000] * 3
+
+
+@pytest.mark.unit
+def test_a_black_word_inside_an_unfound_red_link_is_red(tmp_path):
+    """P732l L06: Previewer writes the word red, as text."""
+    css = {"r": {"color": "#cc0000"}, "k": {"color": "black"}}
+    body = FILLER + (
+        '<p>See <a class="r" href="#nowhere">pre <span class="k">word</span></a> now.</p>'
+    )
+    runs = _found(_book(tmp_path, body, css))["See pre word now."][1]
+    drawn = [s.get("$19") for t, s in runs.items() if "word" in t]
+    assert drawn and all(c == 0xFFCC0000 for c in drawn if c is not None)
+    assert not any("$576" in s for s in runs.values())
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "inner, argb",
+    [
+        # P728e: WordDumb's links inside links (#317). Previewer gives the
+        # inner link its own colour, or none: not the outer link's red.
+        ("k", None),
+        ("", None),
+        ("g", GREY),
+    ],
+)
+def test_a_link_inside_a_red_link_has_only_its_own_colour(inner, argb):
+    css = {
+        "r": {"color": "#cc0000"},
+        "k": {"color": "black"},
+        "g": {"color": "#999999"},
+    }
+    b = _one(
+        f'<p id="x"><a class="r" href="#x">outer <a class="{inner}" href="#y">in</a></a>'
+        '<span id="y">y</span></p>',
+        css,
+    )
+    assert _link(b, "outer") == 0xFFCC0000
+    assert _link(b, "in") == argb

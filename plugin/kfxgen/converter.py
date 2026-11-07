@@ -2047,6 +2047,9 @@ def _walk_inline(
             # element. Keeping both left the run's target to the frozenset's
             # hash order, so it changed between runs (#317).
             cur = {f for f in cur if not _is_link_flag(f) and f != NOTEREF_FLAG}
+            # Nor the outer link's colour: Previewer gives an inner link
+            # none of its own (P728e E02, #728).
+            cur = {f for f in cur if flag_value((f,), LINK_COLOUR_FLAG) is None}
             cur.add(make_link_flag(target))
             if "noteref" in _epub_types(elem):
                 cur.add(NOTEREF_FLAG)
@@ -2150,6 +2153,12 @@ def _walk_inline(
                         # colour: the link is drawn in its paragraph's (QA on
                         # #732, P732 B05, P732d). In a box, every colour is.
                         link_colour = None
+                        if any(
+                            flag_value((f,), LINK_COLOUR_FLAG) is not None for f in cur
+                        ):
+                            # A black word inside a coloured link takes the
+                            # link's colour (QA on #732, P732 B09, P732k K10).
+                            continue
                     if starts_link:
                         cur = {f for f in cur if flag_value((f,), kind) is None}
                     # With the colour as text, for a link whose target isn't
