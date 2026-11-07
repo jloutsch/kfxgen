@@ -364,3 +364,27 @@ def test_a_link_inside_a_red_link_has_only_its_own_colour(inner, argb):
     )
     assert _link(b, "outer") == 0xFFCC0000
     assert _link(b, "in") == argb
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("inner", ["black", "#000000", "#101010"])
+def test_a_black_element_holding_all_of_a_links_text_has_no_link_colour(
+    tmp_path, inner
+):
+    """QA on #732, P732p X05: Previewer draws `<a red><b black>word</b></a>`
+    black, with no link colour; a library book's contents entries are this
+    shape. Holding part of it, the word is red (X04, K10)."""
+    css = {"r": {"color": "#cc0000"}, "k": {"color": inner}}
+    whole = '<p id="t">A <a class="r" href="#t"> <b class="k">Word</b> </a> b.</p>'
+    b = _one(whole, css)
+    assert _link(b, "Word") is None
+    # The library book's shape: `<li><a><span class="black">…</span></a></li>`.
+    body = FILLER + (
+        '<ul><li id="u"><a class="r" href="#u"><span class="k">Word</span></a></li></ul>'
+    )
+    (runs,) = [
+        r
+        for t, (_e, r) in _found(_book(tmp_path, body, css)).items()
+        if t.endswith("Word")
+    ]
+    assert runs and not any("$576" in s for s in runs.values())

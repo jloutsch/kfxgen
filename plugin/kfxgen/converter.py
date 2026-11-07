@@ -1755,6 +1755,16 @@ def _near_black(argb):
     )
 
 
+def _holds_its_links_text(elem):
+    """Whether `elem` holds all the text of the nearest link around it.
+    Previewer then gives the link the element's colour, not its own: `<a
+    red><b black>word</b></a>` is drawn black (QA on #732, P732p X05)."""
+    for up in elem.iterancestors():
+        if isinstance(up.tag, str) and _local_tag(up.tag) == "a":
+            return "".join(up.itertext()).strip() == "".join(elem.itertext()).strip()
+    return False
+
+
 #: `display` values that draw an element as a block of its own (#233).
 _BLOCK_DISPLAYS = frozenset(
     {"block", "list-item", "table", "table-row", "table-caption", "flex", "grid"}
@@ -2153,11 +2163,13 @@ def _walk_inline(
                         # colour: the link is drawn in its paragraph's (QA on
                         # #732, P732 B05, P732d). In a box, every colour is.
                         link_colour = None
-                        if any(
+                        if not _holds_its_links_text(elem) and any(
                             flag_value((f,), LINK_COLOUR_FLAG) is not None for f in cur
                         ):
                             # A black word inside a coloured link takes the
                             # link's colour (QA on #732, P732 B09, P732k K10).
+                            # Holding all of the link's text, it takes the
+                            # link's colour away (P732p X05).
                             continue
                     if starts_link:
                         cur = {f for f in cur if flag_value((f,), kind) is None}

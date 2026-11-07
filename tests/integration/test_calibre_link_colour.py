@@ -58,6 +58,7 @@ BODY = (
     "<div class='box'><p>X01 box <a class='blk' href='#t'>blackinbox</a> end.</p></div>"
     "<div class='dbox'><p>X02 dark <a class='blk' href='#t'>blackindark</a> end.</p></div>"
     "<p class='gp'>U01 grey <a class='blk' href='#nowhere'>unfoundblack</a> end.</p>"
+    "<p>X05 <a class='red' href='#t'><b class='blk'>wholeblack</b></a> end.</p>"
     + "<p>Filler.</p>" * 5
     + "<p id='t'>T1 target.</p>"
 )
@@ -179,3 +180,8 @@ def test_a_black_link_on_a_dark_box_is_written_black(drawn):
 def test_a_black_link_whose_target_isnt_found_is_black_text(drawn):
     # P732b B01-B04: written as text, $19 black, in a grey paragraph.
     assert _at(drawn, "U01", "unfoundblack") == (None, 0xFF000000)
+
+
+def test_a_black_element_holding_all_of_a_link_takes_its_colour_away(drawn):
+    # QA on #732, P732p X05: Previewer draws it black, no link colour.
+    assert _at(drawn, "X05", "wholeblack") == (None, None)
