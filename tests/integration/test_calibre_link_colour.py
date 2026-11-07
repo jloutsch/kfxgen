@@ -62,6 +62,8 @@ BODY = (
     "<h2>T02 <a class='red' href='#t'><span class='hid'>Chapter</span>"
     " <span class='blk'>hiddenbeside</span></a></h2>"
     "<p>T05 <a class='red' href='#t'><b class='blk'>spacestays</b> </a> end.</p>"
+    "<p>U03 A<br/><a class='red' href='#t'> <b class='blk'>afterbreak</b></a> b.</p>"
+    "<p>U10 A <a class='red' href='#t'><b class='blk'>atblockend</b> </a></p>"
     + "<p>Filler.</p>" * 5
     + "<p id='t'>T1 target.</p>"
 )
@@ -198,3 +200,13 @@ def test_a_hidden_element_beside_it_is_not_counted(drawn):
 def test_a_space_that_stays_keeps_the_links_colour(drawn):
     # P732t T05: the link's trailing space stays, and Previewer keeps red.
     assert _at(drawn, "T05", "spacestays")[0] == RED
+
+
+def test_a_leading_space_after_a_break_collapses(drawn):
+    # P732u U03: a line starts after the <br>, so the space goes; black.
+    assert _at(drawn, "U03", "afterbreak")[0] is None
+
+
+def test_a_trailing_space_at_the_blocks_end_keeps_the_colour(drawn):
+    # P732u U10: Previewer keeps the link's red.
+    assert _at(drawn, "U10", "atblockend")[0] == RED

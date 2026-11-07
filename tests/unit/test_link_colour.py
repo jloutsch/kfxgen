@@ -374,7 +374,7 @@ def test_a_link_inside_a_red_link_has_only_its_own_colour(inner, argb):
     assert _link(b, "in") == argb
 
 
-#: QA on #732 (P732p, P732q, P732t) and P728f: a red link holding a black
+#: QA on #732 (P732p, P732q, P732t, P732u), P728f and P728g: a red link holding a black
 #: element, and whether Previewer drops the link's colour (True: drawn black).
 _ALL_IT_SHOWS = [
     ("X05", '<p>A <a class="r" href="#t"><b class="k">W</b></a> b.</p>', True),
@@ -411,6 +411,18 @@ _ALL_IT_SHOWS = [
         '<p>A <a class="r" href="#t">pre <b class="k">W</b> post</a> b.</p>',
         False,
     ),
+    # P732u: a leading no-break space stays, a leading space after a <br>
+    # goes, after a picture stays; a trailing space at the block's end stays.
+    ("U01", '<p>A <a class="r" href="#t">&#160;<b class="k">W</b></a> b.</p>', False),
+    ("U03", '<p>A<br/><a class="r" href="#t"> <b class="k">W</b></a> b.</p>', True),
+    (
+        "U04",
+        '<p>A <img src="x.png"/><a class="r" href="#t"> <b class="k">W</b></a> b.</p>',
+        False,
+    ),
+    ("U10", '<p>A <a class="r" href="#t"><b class="k">W</b> </a></p>', False),
+    # P728g: a leading space after a no-break space stays.
+    ("N01", '<p>A&#160;<a class="r" href="#t"> <b class="k">W</b></a> b.</p>', False),
     # P728f: a leading space stays after a letter, also with the link the
     # first thing in a span, and goes after a space or at the block's start.
     ("L01", '<p>A<a class="r" href="#t"> <b class="k">W</b></a> b.</p>', False),

@@ -1763,24 +1763,35 @@ _LINK_INLINE_TAGS = frozenset(
 )
 
 
-def _text_beside(node, before, style_resolver):
-    """The nearest text before (or after) `node` in its block, as written:
-    "" at the block's edge. Hidden elements are skipped."""
+#: The whitespace CSS collapses: a no-break space is not (#728, P732u U01).
+_COLLAPSING = " \t\n\r\f"
+#: Inline elements that show something with no text: a link's leading space
+#: after one stays (P732u U04).
+_LINK_PICTURE_TAGS = frozenset({"img", "svg", "math", "object", "video"})
+
+
+def _text_before(node, style_resolver):
+    """The nearest text before `node` in its block, as written: "" at the
+    block's start, a space after a <br>, where a line starts, and an object
+    mark after a picture. Hidden elements are skipped."""
     while True:
-        if not before and node.tail:
-            return node.tail
-        sib = node.getprevious() if before else node.getnext()
+        sib = node.getprevious()
         if sib is not None:
-            if before and sib.tail:
+            if sib.tail:
                 return sib.tail
             if isinstance(sib.tag, str) and not _is_hidden(sib, style_resolver):
+                local = _local_tag(sib.tag)
+                if local == "br":
+                    return " "
+                if local in _LINK_PICTURE_TAGS:
+                    return "\ufffc"
                 text = "".join(sib.itertext())
                 if text:
                     return text
             node = sib
             continue
         parent = node.getparent()
-        if before and parent is not None and parent.text:
+        if parent is not None and parent.text:
             return parent.text
         if parent is None or _local_tag(parent.tag) not in _LINK_INLINE_TAGS:
             return ""
@@ -1790,15 +1801,16 @@ def _text_beside(node, before, style_resolver):
 def _is_all_its_link_shows(elem, style_resolver):
     """Whether `elem` is all the link around it shows. Previewer then gives
     the link no colour of its own when `elem` is black (QA on #732, P732p,
-    P732q, P732t): `<a red><b black>12</b></a>` is drawn black, and so is
-    `<a red><span hidden>Chapter</span> <span black>12</span></a>`.
+    P732q, P732t, P732u; P728f): `<a red><b black>12</b></a>` is drawn
+    black, and so is `<a red><span hidden>Chapter</span> <span
+    black>12</span></a>`.
 
-    From the link down to `elem`, each element shows one element: hidden
-    ones are skipped, and so is whitespace that collapses away, that is
-    leading whitespace after a space or the block's start, and trailing
-    whitespace after a space or before the block's end. `elem` shows only
-    text. A picture beside it, a space that stays, or an element inside it
-    keeps the link's colour (T05, Q02, Q05, Q10)."""
+    From the link down to `elem`, each element shows one element, hidden
+    ones left out, and no text but leading whitespace that collapses: after
+    an ordinary space, a <br>, or the block's start. A no-break space, a
+    space after a letter or a picture, and any trailing whitespace keep the
+    link's colour (T05, Q05, U01, U04, U10), and so do a picture beside
+    `elem` or an element inside it (Q02, Q10)."""
     link = next(
         (
             up
@@ -1811,13 +1823,10 @@ def _is_all_its_link_shows(elem, style_resolver):
         return False
     if any(isinstance(k.tag, str) and not _is_hidden(k, style_resolver) for k in elem):
         return False
-    shown = (elem.text or "") + "".join(k.tail or "" for k in elem)
-    if not shown.strip():
+    if not ((elem.text or "") + "".join(k.tail or "" for k in elem)).strip():
         return False
-    ahead = _text_beside(link, True, style_resolver)
-    lead_goes = not ahead or ahead[-1].isspace()
-    behind = _text_beside(link, False, style_resolver)
-    trail_goes = shown[-1].isspace() or not behind.strip()
+    ahead = _text_before(link, style_resolver)
+    lead_goes = not ahead or ahead[-1] in _COLLAPSING
     node = link
     while node is not elem:
         shows = [
@@ -1836,9 +1845,7 @@ def _is_all_its_link_shows(elem, style_resolver):
             after = after or k is child
             texts.append((k.tail, not after))
         for text, leading in texts:
-            if not text:
-                continue
-            if text.strip() or not (lead_goes if leading else trail_goes):
+            if text and (text.strip(_COLLAPSING) or not (leading and lead_goes)):
                 return False
         node = child
     return True
