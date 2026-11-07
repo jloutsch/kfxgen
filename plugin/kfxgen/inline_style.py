@@ -519,7 +519,9 @@ TYPOGRAPHY_FLAGS = (SMALL_CAPS_FLAG, TRANSFORM_FLAG, SPACING_FLAG, COLOUR_FLAG)
 TYPOGRAPHY_KEYS = ("small_caps", "text_transform", "letter_spacing", "colour")
 SPACING_NORMAL = ("0", "$308")
 #: A link's own colour (#728): Previewer writes it in the link's styles,
-#: `$576` and `$577`, and no `$19`. The value is the ARGB integer.
+#: `$576` and `$577`, and no `$19`. The value is (its ARGB as given, or None
+#: when Previewer writes none; its ARGB as text, for a link whose target
+#: isn't found).
 LINK_COLOUR_FLAG = "link-colour"
 _TRANSFORMS = frozenset({"uppercase", "lowercase", "capitalize"})
 

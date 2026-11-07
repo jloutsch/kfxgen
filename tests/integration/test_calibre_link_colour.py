@@ -38,6 +38,8 @@ CSS = (
     " .box { background-color: #333333; color: white; padding: 0.5em }"
     " .box a { color: #ffff00 } .box a.blk { color: black } .nb { color: #1a1a1a }"
     " .dg { color: #202020 }"
+    " .dbox { background-color: #222222; color: #333333; padding: 0.5em }"
+    " .dbox a.blk { color: black }"
 )
 BODY = (
     "<h1>Links</h1>"
@@ -54,6 +56,8 @@ BODY = (
     "<p class='gp'>D01 <a class='nb' href='#t'>nearblack</a> and"
     " <a class='dg' href='#t'>darkgrey</a>.</p>"
     "<div class='box'><p>X01 box <a class='blk' href='#t'>blackinbox</a> end.</p></div>"
+    "<div class='dbox'><p>X02 dark <a class='blk' href='#t'>blackindark</a> end.</p></div>"
+    "<p class='gp'>U01 grey <a class='blk' href='#nowhere'>unfoundblack</a> end.</p>"
     + "<p>Filler.</p>" * 5
     + "<p id='t'>T1 target.</p>"
 )
@@ -164,3 +168,14 @@ def test_a_black_link_in_a_grey_paragraph_is_grey(drawn):
     # #999999 on the page, darkened to 4.5:1 as text (#239); Previewer
     # writes 0xFF757575, kfxgen 0xFF767676.
     assert colour in (0xFF757575, 0xFF767676)
+
+
+def test_a_black_link_on_a_dark_box_is_written_black(drawn):
+    # QA on #732, P732 B03: the box's #333333 text and black both darken to
+    # the same colour; Previewer writes the link's black as given.
+    assert _at(drawn, "X02", "blackindark")[0] == 0xFF000000
+
+
+def test_a_black_link_whose_target_isnt_found_is_black_text(drawn):
+    # P732b B01-B04: written as text, $19 black, in a grey paragraph.
+    assert _at(drawn, "U01", "unfoundblack") == (None, 0xFF000000)

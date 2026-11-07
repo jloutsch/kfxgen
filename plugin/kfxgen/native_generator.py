@@ -6866,15 +6866,16 @@ class NativeKFXGenerator:
                 value = flag_value(flags, kind)
                 if value is not None:
                     attrs[arg] = value
-            link_colour = flag_value(flags, LINK_COLOUR_FLAG)
-            if link_colour is not None:
+            link = flag_value(flags, LINK_COLOUR_FLAG)
+            if link is not None:
                 if link_found:
-                    attrs["link_colour"] = link_colour
+                    if link[0] is not None:
+                        attrs["link_colour"] = link[0]
                 elif attrs.get("colour") is None:
                     # A link whose target isn't found is written as text:
                     # Previewer writes its colour as the text's (QA on #732,
                     # P732b).
-                    attrs["colour"] = link_colour
+                    attrs["colour"] = link[1]
             if in_cell:
                 attrs["no_align"] = True
             return _allocate_style("_em", bidi=bidi, **attrs)
@@ -7454,10 +7455,10 @@ class NativeKFXGenerator:
                             FLAG_UNDERLINE,
                             FLAG_STRIKE,
                         )
-                    ) or any(
-                        flag_value(flags, k) is not None
-                        for k in (*TYPOGRAPHY_FLAGS, LINK_COLOUR_FLAG)
-                    )
+                    ) or any(flag_value(flags, k) is not None for k in TYPOGRAPHY_FLAGS)
+                    link = flag_value(flags, LINK_COLOUR_FLAG)
+                    if link is not None and (link[0] is not None or not link_found):
+                        has_emphasis = True
                     has_emphasis = has_emphasis or bool(mono_families(flags))
                     sized = chunk_idx not in heading_chunk_indices or bool(heading_book)
                     run_px = run_font_size(flags)

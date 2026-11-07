@@ -1603,8 +1603,10 @@ def _is_preformatted(elem, style_resolver):
 
 def _css_emphasis(css):
     """(bold, italic, monospace families or None, font size or None,
-    typography) from an element's computed CSS, or None without it. The
-    typography is `css_typography`'s (#239).
+    typography, colour as given) from an element's computed CSS, or None
+    without it. The typography is `css_typography`'s (#239); the colour as
+    given, not darkened for contrast, is what a link's is compared by
+    (#728).
     `bolder` is relative, but from any weight a book uses it lands on bold
     (`lighter` reads as normal already)."""
     if not css:
@@ -1619,6 +1621,7 @@ def _css_emphasis(css):
         mono,
         css_font_size(css),
         css_typography(css),
+        css_link_colour(str(css.get("color") or "black")),
     )
 
 
@@ -1703,7 +1706,7 @@ def _initial(elem, css, text, spans, style_resolver):
         n = _first_letter_length(text)
         if not n:
             return spans, None
-        bold, italic, _mono, size, typography = _css_emphasis(first)
+        bold, italic, _mono, size, typography, _given = _css_emphasis(first)
         add = set()
         if size is not None:
             add.add(make_size_flag(size))
@@ -2133,10 +2136,13 @@ def _walk_inline(
                 parent_emphasis[4],
                 ("normal", "none", SPACING_NORMAL, None),
             ):
-                if now == before or (kind == COLOUR_FLAG and now is None):
-                    continue
                 if kind == COLOUR_FLAG and any(_is_link_flag(f) for f in cur):
-                    link_colour = css_link_colour(str(own_css.get("color") or "black"))
+                    # Compared as given: on a dark box black and #333333
+                    # darken to the box text's own colour (QA on #732, P732
+                    # B03, B04, B14).
+                    if now is None or emphasis[5] == parent_emphasis[5]:
+                        continue
+                    link_colour = emphasis[5]
                     if own_css.get("background-behind") is None and _near_black(
                         link_colour
                     ):
@@ -2146,10 +2152,13 @@ def _walk_inline(
                         link_colour = None
                     if starts_link:
                         cur = {f for f in cur if flag_value((f,), kind) is None}
-                    if link_colour is None:
-                        continue
+                    # With the colour as text, for a link whose target isn't
+                    # found: Previewer writes it as `$19`, darkened as text,
+                    # black too (P732b, P732j).
                     cur = {f for f in cur if flag_value((f,), LINK_COLOUR_FLAG) is None}
-                    cur.add((LINK_COLOUR_FLAG, link_colour))
+                    cur.add((LINK_COLOUR_FLAG, (link_colour, now)))
+                    continue
+                if now == before or (kind == COLOUR_FLAG and now is None):
                     continue
                 cur = {f for f in cur if flag_value((f,), kind) is None}
                 cur.add((kind, now if now is not None else unset))
