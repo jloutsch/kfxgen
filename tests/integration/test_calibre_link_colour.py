@@ -64,6 +64,10 @@ BODY = (
     "<p>T05 <a class='red' href='#t'><b class='blk'>spacestays</b> </a> end.</p>"
     "<p>U03 A<br/><a class='red' href='#t'> <b class='blk'>afterbreak</b></a> b.</p>"
     "<p>U10 A <a class='red' href='#t'><b class='blk'>atblockend</b> </a></p>"
+    "<p>V01 x <span>y<br/></span><a class='red' href='#t'> <b class='blk'>endbreak</b></a>"
+    " b.</p>"
+    "<p>V02 x <span>y <img src='x.png'/></span><a class='red' href='#t'>"
+    " <b class='blk'>endpicture</b></a> b.</p>"
     + "<p>Filler.</p>" * 5
     + "<p id='t'>T1 target.</p>"
 )
@@ -210,3 +214,10 @@ def test_a_leading_space_after_a_break_collapses(drawn):
 def test_a_trailing_space_at_the_blocks_end_keeps_the_colour(drawn):
     # P732u U10: Previewer keeps the link's red.
     assert _at(drawn, "U10", "atblockend")[0] == RED
+
+
+def test_a_break_or_picture_ending_the_element_before_counts(drawn):
+    # P732v: a <br> at the end of the span before starts a line (black); a
+    # picture there is no space (red).
+    assert _at(drawn, "V01", "endbreak")[0] is None
+    assert _at(drawn, "V02", "endpicture")[0] == RED

@@ -374,7 +374,7 @@ def test_a_link_inside_a_red_link_has_only_its_own_colour(inner, argb):
     assert _link(b, "in") == argb
 
 
-#: QA on #732 (P732p, P732q, P732t, P732u), P728f and P728g: a red link holding a black
+#: QA on #732 (P732p, P732q, P732t, P732u, P732v), P728f and P728g: a red link holding a black
 #: element, and whether Previewer drops the link's colour (True: drawn black).
 _ALL_IT_SHOWS = [
     ("X05", '<p>A <a class="r" href="#t"><b class="k">W</b></a> b.</p>', True),
@@ -421,6 +421,38 @@ _ALL_IT_SHOWS = [
         False,
     ),
     ("U10", '<p>A <a class="r" href="#t"><b class="k">W</b> </a></p>', False),
+    # P732v: a <br> at the end of the element before the link starts a line,
+    # deeper too; a picture there is not a space.
+    (
+        "V01",
+        '<p>x <span>y<br/></span><a class="r" href="#t"> <b class="k">W</b></a> b.</p>',
+        True,
+    ),
+    (
+        "V05",
+        '<p>x <span>y<i>z<br/></i></span><a class="r" href="#t"> <b class="k">W</b></a>'
+        " b.</p>",
+        True,
+    ),
+    (
+        "V02",
+        '<p>x <span>y <img src="x.png"/></span><a class="r" href="#t"> <b class="k">W</b>'
+        "</a> b.</p>",
+        False,
+    ),
+    # From L01 (a letter before the link keeps red) and V07/V08 (hidden
+    # elements skipped): a letter after the <br>, and a hidden end.
+    (
+        "V01z",
+        '<p>x <span>y<br/>z</span><a class="r" href="#t"> <b class="k">W</b></a> b.</p>',
+        False,
+    ),
+    (
+        "V07y",
+        '<p>x <span>y<b class="h">hid </b></span><a class="r" href="#t"> <b class="k">W</b>'
+        "</a> b.</p>",
+        False,
+    ),
     # P728g: a leading space after a no-break space stays.
     ("N01", '<p>A&#160;<a class="r" href="#t"> <b class="k">W</b></a> b.</p>', False),
     # P728f: a leading space stays after a letter, also with the link the

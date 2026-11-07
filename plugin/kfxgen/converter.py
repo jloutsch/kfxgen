@@ -1770,6 +1770,26 @@ _COLLAPSING = " \t\n\r\f"
 _LINK_PICTURE_TAGS = frozenset({"img", "svg", "math", "object", "video"})
 
 
+def _last_shown(elem, style_resolver):
+    """What `elem` shows last, as `_text_before` reads it: a space for a
+    <br>, an object mark for a picture, else its last text; "" for nothing.
+    A <br> or a picture at its end counts (QA on #732, P732v V01, V02)."""
+    if not isinstance(elem.tag, str) or _is_hidden(elem, style_resolver):
+        return ""
+    local = _local_tag(elem.tag)
+    if local == "br":
+        return " "
+    if local in _LINK_PICTURE_TAGS:
+        return "\ufffc"
+    for child in reversed(elem):
+        if child.tail:
+            return child.tail
+        text = _last_shown(child, style_resolver)
+        if text:
+            return text
+    return elem.text or ""
+
+
 def _text_before(node, style_resolver):
     """The nearest text before `node` in its block, as written: "" at the
     block's start, a space after a <br>, where a line starts, and an object
@@ -1779,15 +1799,9 @@ def _text_before(node, style_resolver):
         if sib is not None:
             if sib.tail:
                 return sib.tail
-            if isinstance(sib.tag, str) and not _is_hidden(sib, style_resolver):
-                local = _local_tag(sib.tag)
-                if local == "br":
-                    return " "
-                if local in _LINK_PICTURE_TAGS:
-                    return "\ufffc"
-                text = "".join(sib.itertext())
-                if text:
-                    return text
+            text = _last_shown(sib, style_resolver)
+            if text:
+                return text
             node = sib
             continue
         parent = node.getparent()
