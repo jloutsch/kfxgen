@@ -1755,14 +1755,93 @@ def _near_black(argb):
     )
 
 
-def _holds_its_links_text(elem):
-    """Whether `elem` holds all the text of the nearest link around it.
-    Previewer then gives the link the element's colour, not its own: `<a
-    red><b black>word</b></a>` is drawn black (QA on #732, P732p X05)."""
-    for up in elem.iterancestors():
-        if isinstance(up.tag, str) and _local_tag(up.tag) == "a":
-            return "".join(up.itertext()).strip() == "".join(elem.itertext()).strip()
-    return False
+#: Inline tags the text around a link is looked for through; any other is
+#: the edge of its block (#728).
+_LINK_INLINE_TAGS = frozenset(
+    "a abbr b bdi bdo big cite code del dfn em font i ins kbd label mark q s"
+    " samp small span strike strong sub sup time tt u var".split()
+)
+
+
+def _text_beside(node, before, style_resolver):
+    """The nearest text before (or after) `node` in its block, as written:
+    "" at the block's edge. Hidden elements are skipped."""
+    while True:
+        if not before and node.tail:
+            return node.tail
+        sib = node.getprevious() if before else node.getnext()
+        if sib is not None:
+            if before and sib.tail:
+                return sib.tail
+            if isinstance(sib.tag, str) and not _is_hidden(sib, style_resolver):
+                text = "".join(sib.itertext())
+                if text:
+                    return text
+            node = sib
+            continue
+        parent = node.getparent()
+        if before and parent is not None and parent.text:
+            return parent.text
+        if parent is None or _local_tag(parent.tag) not in _LINK_INLINE_TAGS:
+            return ""
+        node = parent
+
+
+def _is_all_its_link_shows(elem, style_resolver):
+    """Whether `elem` is all the link around it shows. Previewer then gives
+    the link no colour of its own when `elem` is black (QA on #732, P732p,
+    P732q, P732t): `<a red><b black>12</b></a>` is drawn black, and so is
+    `<a red><span hidden>Chapter</span> <span black>12</span></a>`.
+
+    From the link down to `elem`, each element shows one element: hidden
+    ones are skipped, and so is whitespace that collapses away, that is
+    leading whitespace after a space or the block's start, and trailing
+    whitespace after a space or before the block's end. `elem` shows only
+    text. A picture beside it, a space that stays, or an element inside it
+    keeps the link's colour (T05, Q02, Q05, Q10)."""
+    link = next(
+        (
+            up
+            for up in elem.iterancestors()
+            if isinstance(up.tag, str) and _local_tag(up.tag) == "a"
+        ),
+        None,
+    )
+    if link is None:
+        return False
+    if any(isinstance(k.tag, str) and not _is_hidden(k, style_resolver) for k in elem):
+        return False
+    shown = (elem.text or "") + "".join(k.tail or "" for k in elem)
+    if not shown.strip():
+        return False
+    ahead = _text_beside(link, True, style_resolver)
+    lead_goes = not ahead or ahead[-1].isspace()
+    behind = _text_beside(link, False, style_resolver)
+    trail_goes = shown[-1].isspace() or not behind.strip()
+    node = link
+    while node is not elem:
+        shows = [
+            k
+            for k in node
+            if isinstance(k.tag, str) and not _is_hidden(k, style_resolver)
+        ]
+        if len(shows) != 1:
+            return False
+        (child,) = shows
+        if child is not elem and elem not in child.iterdescendants():
+            return False
+        texts = [(node.text, True)]
+        after = False
+        for k in node:
+            after = after or k is child
+            texts.append((k.tail, not after))
+        for text, leading in texts:
+            if not text:
+                continue
+            if text.strip() or not (lead_goes if leading else trail_goes):
+                return False
+        node = child
+    return True
 
 
 #: `display` values that draw an element as a block of its own (#233).
@@ -2163,7 +2242,7 @@ def _walk_inline(
                         # colour: the link is drawn in its paragraph's (QA on
                         # #732, P732 B05, P732d). In a box, every colour is.
                         link_colour = None
-                        if not _holds_its_links_text(elem) and any(
+                        if not _is_all_its_link_shows(elem, style_resolver) and any(
                             flag_value((f,), LINK_COLOUR_FLAG) is not None for f in cur
                         ):
                             # A black word inside a coloured link takes the

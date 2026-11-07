@@ -24,7 +24,15 @@ Through calibre: tests/integration/test_calibre_link_colour.py.
 import pytest
 
 from kfxgen.inline_style import COLOUR_FLAG, LINK_COLOUR_FLAG, css_link_colour
-from tests.unit.test_typography import FILLER, _book, _found, _one, _run
+from tests.unit.test_typography import (
+    FILLER,
+    _blocks,
+    _book,
+    _found,
+    _one,
+    _resolver,
+    _run,
+)
 
 GREY = 0xFF999999
 
@@ -366,25 +374,94 @@ def test_a_link_inside_a_red_link_has_only_its_own_colour(inner, argb):
     assert _link(b, "in") == argb
 
 
+#: QA on #732 (P732p, P732q, P732t) and P728f: a red link holding a black
+#: element, and whether Previewer drops the link's colour (True: drawn black).
+_ALL_IT_SHOWS = [
+    ("X05", '<p>A <a class="r" href="#t"><b class="k">W</b></a> b.</p>', True),
+    # A hidden sibling: the library book's chapter headings.
+    (
+        "T02",
+        '<h1><a class="r" href="#t"><span class="h">Chapter</span> <span class="k">W</span>'
+        "</a></h1>",
+        True,
+    ),
+    ("T04", '<p>A <a class="r" href="#t"> <b class="k">W</b></a> b.</p>', True),
+    (
+        "Q01",
+        '<p>A <a class="r" href="#t"><span><b class="k">W</b></span></a> b.</p>',
+        True,
+    ),
+    ("Q03", '<p>A<a class="r" href="#t"><sup class="k">W</sup></a> b.</p>', True),
+    # A trailing space that stays, spaces on both sides.
+    ("T05", '<p>A <a class="r" href="#t"><b class="k">W</b> </a> b.</p>', False),
+    ("Q05", '<p>A<a class="r" href="#t"> <b class="k">W</b> </a> b.</p>', False),
+    # A picture beside it; an element inside it.
+    (
+        "Q02",
+        '<p>A <a class="r" href="#t"><img src="x.png"/><b class="k">W</b></a> b.</p>',
+        False,
+    ),
+    (
+        "Q10",
+        '<p>A <a class="r" href="#t"><b class="k">W<span class="g">G</span></b></a> b.</p>',
+        False,
+    ),
+    (
+        "K10",
+        '<p>A <a class="r" href="#t">pre <b class="k">W</b> post</a> b.</p>',
+        False,
+    ),
+    # P728f: a leading space stays after a letter, also with the link the
+    # first thing in a span, and goes after a space or at the block's start.
+    ("L01", '<p>A<a class="r" href="#t"> <b class="k">W</b></a> b.</p>', False),
+    ("L03", '<p><a class="r" href="#t"> <b class="k">W</b></a> b.</p>', True),
+    (
+        "L04",
+        '<p>A<span><a class="r" href="#t"> <b class="k">W</b></a></span> b.</p>',
+        False,
+    ),
+    (
+        "L05",
+        '<p>A <span><a class="r" href="#t"> <b class="k">W</b></a></span> b.</p>',
+        True,
+    ),
+]
+
+
 @pytest.mark.unit
-@pytest.mark.parametrize("inner", ["black", "#000000", "#101010"])
-def test_a_black_element_holding_all_of_a_links_text_has_no_link_colour(
-    tmp_path, inner
+@pytest.mark.parametrize(
+    "case, html, dropped", _ALL_IT_SHOWS, ids=[c[0] for c in _ALL_IT_SHOWS]
+)
+@pytest.mark.parametrize("inner", ["black", "#101010"])
+def test_a_black_element_that_is_all_a_link_shows_takes_its_colour_away(
+    case, html, dropped, inner
 ):
-    """QA on #732, P732p X05: Previewer draws `<a red><b black>word</b></a>`
-    black, with no link colour; a library book's contents entries are this
-    shape. Holding part of it, the word is red (X04, K10)."""
-    css = {"r": {"color": "#cc0000"}, "k": {"color": inner}}
-    whole = '<p id="t">A <a class="r" href="#t"> <b class="k">Word</b> </a> b.</p>'
-    b = _one(whole, css)
-    assert _link(b, "Word") is None
-    # The library book's shape: `<li><a><span class="black">…</span></a></li>`.
+    css = {
+        "r": {"color": "#cc0000"},
+        "k": {"color": inner},
+        "g": {"color": "#999999"},
+        "h": {"display": "none"},
+    }
+    (b,) = _blocks(html.replace('href="#t"', 'href="#t" id="t"'), _resolver(css))
+    assert _link(b, "W") == (None if dropped else 0xFFCC0000)
+
+
+@pytest.mark.unit
+def test_the_library_books_chapter_heading_writes_no_link_colour(tmp_path):
+    """QA's library book: `<h1><a><span sr-only>Chapter</span> <span
+    black>12</span></a></h1>`, drawn black by Previewer."""
+    css = {
+        "r": {"color": "#6161ff"},
+        "k": {"color": "#000000"},
+        "h": {"display": "none"},
+    }
     body = FILLER + (
-        '<ul><li id="u"><a class="r" href="#u"><span class="k">Word</span></a></li></ul>'
+        '<h1 id="u"><a class="r" href="#u"><span class="h">Chapter</span> '
+        '<span class="k">12</span></a></h1><p>Words.</p>'
     )
     (runs,) = [
         r
         for t, (_e, r) in _found(_book(tmp_path, body, css)).items()
-        if t.endswith("Word")
+        if t.endswith("12")
     ]
-    assert runs and not any("$576" in s for s in runs.values())
+    assert not any("$576" in s for s in runs.values())

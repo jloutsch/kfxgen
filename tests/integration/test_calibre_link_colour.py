@@ -39,7 +39,7 @@ CSS = (
     " .box a { color: #ffff00 } .box a.blk { color: black } .nb { color: #1a1a1a }"
     " .dg { color: #202020 }"
     " .dbox { background-color: #222222; color: #333333; padding: 0.5em }"
-    " .dbox a.blk { color: black }"
+    " .dbox a.blk { color: black } .hid { display: none }"
 )
 BODY = (
     "<h1>Links</h1>"
@@ -59,6 +59,9 @@ BODY = (
     "<div class='dbox'><p>X02 dark <a class='blk' href='#t'>blackindark</a> end.</p></div>"
     "<p class='gp'>U01 grey <a class='blk' href='#nowhere'>unfoundblack</a> end.</p>"
     "<p>X05 <a class='red' href='#t'><b class='blk'>wholeblack</b></a> end.</p>"
+    "<h2>T02 <a class='red' href='#t'><span class='hid'>Chapter</span>"
+    " <span class='blk'>hiddenbeside</span></a></h2>"
+    "<p>T05 <a class='red' href='#t'><b class='blk'>spacestays</b> </a> end.</p>"
     + "<p>Filler.</p>" * 5
     + "<p id='t'>T1 target.</p>"
 )
@@ -185,3 +188,13 @@ def test_a_black_link_whose_target_isnt_found_is_black_text(drawn):
 def test_a_black_element_holding_all_of_a_link_takes_its_colour_away(drawn):
     # QA on #732, P732p X05: Previewer draws it black, no link colour.
     assert _at(drawn, "X05", "wholeblack") == (None, None)
+
+
+def test_a_hidden_element_beside_it_is_not_counted(drawn):
+    # P732t T02, the library book's chapter headings: drawn black.
+    assert _at(drawn, "T02", "hiddenbeside")[0] is None
+
+
+def test_a_space_that_stays_keeps_the_links_colour(drawn):
+    # P732t T05: the link's trailing space stays, and Previewer keeps red.
+    assert _at(drawn, "T05", "spacestays")[0] == RED
