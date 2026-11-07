@@ -276,13 +276,74 @@ def _font_size_px(stylizer, elem, cache):
     if elem in cache:
         return cache[elem]
     inherited = _font_size_px(stylizer, elem.getparent(), cache)
-    size = _css_size_px(
-        stylizer.style(elem).get("font-size"),
-        inherited,
-        lambda: _root_size_px(stylizer, elem, cache),
+    value = stylizer.style(elem).get("font-size")
+    size = _calibre_keyword_px(
+        stylizer, value, lambda: _root_size_px(stylizer, elem, cache)
     )
+    if size is None:
+        size = _css_size_px(
+            value, inherited, lambda: _root_size_px(stylizer, elem, cache)
+        )
     cache[elem] = size
     return size
+
+
+def _calibre_keyword_px(stylizer, value, root_px):
+    """The CSS px of the font-size keyword calibre turned into `value`, as
+    Kindle Previewer 4.0.3 sizes it, or None (#729).
+
+    calibre writes `small` as the input profile's size for it over the
+    profile's base size, in rem to one decimal: 9 / 12 is 0.8rem
+    on the default profile, which kfxgen read as 12.8 px where Previewer
+    writes 13 px; `xx-large` came to 1.7rem, 27.2 px, for Previewer's 32.
+    A value two keywords share (xx-small and x-small are both 0.8rem on the
+    Kindle profiles) and `medium` (1rem, as authors write it) are left as
+    they are.
+
+    Only where the root is 16 px, `root_px()`: under a root of another size
+    (`html { font-size: 62.5% }`) an author's own 1.1rem is 11 px in
+    Previewer, and in QA's library 12 books had such a root and a rem of
+    calibre's form against 1 with such a root and a keyword (QA on #731).
+    A keyword there keeps calibre's rem."""
+    table = _calibre_keyword_table(stylizer)
+    text = str(value or "").strip().lower()
+    if text not in table or abs(root_px() - _FONT_PX) > 0.01:
+        return None
+    return table[text]
+
+
+def _calibre_keyword_table(stylizer):
+    """{the rem value calibre writes for a keyword: Previewer's px}, for the
+    input profile calibre rewrote keywords with, cached on `stylizer`."""
+    table = getattr(stylizer, "_kfxgen_keyword_px", None)
+    if table is not None:
+        return table
+    # calibre rewrites the keywords with the input profile, before the
+    # output side reads the book: with --input-profile kindle the values
+    # were that profile's, whatever the output profile.
+    opts = getattr(stylizer, "opts", None)
+    profile = getattr(opts, "input_profile", None)
+    names = getattr(profile, "fnames", None) or {}
+    try:
+        base = float(getattr(profile, "fbase", 0) or 0)
+    except (TypeError, ValueError):
+        base = 0.0
+    seen = {}
+    for keyword, pt in names.items():
+        if keyword not in _FONT_KEYWORD_PX or keyword == "medium" or not base:
+            continue
+        written = f"{float(pt) / base:.1f}rem"
+        seen.setdefault(written, []).append(keyword)
+    table = {
+        written: _FONT_KEYWORD_PX[kws[0]]
+        for written, kws in seen.items()
+        if len(kws) == 1
+    }
+    try:
+        stylizer._kfxgen_keyword_px = table
+    except AttributeError:
+        pass
+    return table
 
 
 def _line_height_factor(stylizer, elem, cache):
@@ -555,11 +616,15 @@ def _first_letter_css(stylizer, elem, cache):
         return None
     css = dict(rule)
     if css.get("font-size"):
-        size = _css_size_px(
-            css["font-size"],
-            _font_size_px(stylizer, elem, cache),
-            lambda: _root_size_px(stylizer, elem, cache),
+        size = _calibre_keyword_px(
+            stylizer, css["font-size"], lambda: _root_size_px(stylizer, elem, cache)
         )
+        if size is None:
+            size = _css_size_px(
+                css["font-size"],
+                _font_size_px(stylizer, elem, cache),
+                lambda: _root_size_px(stylizer, elem, cache),
+            )
         css["font-size"] = round(size, 3)
     return css
 
