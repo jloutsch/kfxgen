@@ -1,0 +1,134 @@
+"""A link's colour through calibre, as Kindle Previewer writes it (#728).
+
+Probes P728b and P728c, Previewer 4.0.3's values: a link's own colour, and
+a colour set inside a link, are `$576`/`$577` `{$19: ARGB}` on the link's
+runs, as the book gives it; a link inside coloured text keeps that text's
+`$19`; a black link takes the colour around it. kfxgen layers a link's
+inner runs on its run (#715), so the inner run may hold the colour where
+Previewer's link run does: the tests read the colour each word is drawn in.
+
+It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
+skips when `ebook-convert` is not found.
+"""
+
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "plugin"))
+sys.path.insert(0, str(REPO))
+
+from tests._kfx_introspect import by_type, iter_entries, load_fragments, val  # noqa: E402
+from tests.integration.test_calibre_table_rows import (  # noqa: E402
+    EBOOK_CONVERT,
+    calibre,  # noqa: F401  (fixture)
+)
+from tests.unit.test_contents_pages import write_epub  # noqa: E402
+
+pytestmark = [pytest.mark.slow, pytest.mark.integration]
+
+CSS = (
+    ".grey { color: #999999 } .red { color: #ff0000 } a.grey { color: #999999 }"
+    " p.gp { color: #999999 } .blk { color: black }"
+    " .box { background-color: #333333; color: white; padding: 0.5em }"
+    " .box a { color: #ffff00 }"
+)
+BODY = (
+    "<h1>Links</h1>"
+    "<p>Q01 <span class='red'>around <a class='grey' href='#t'>innerlink</a>"
+    " it</span> end.</p>"
+    "<p>Q03 para <a href='#t'>plainlink</a> end.</p>"
+    "<p class='gp'>Q04 grey para <a href='#t'>paralink</a> end.</p>"
+    "<p>Q06 <a class='grey' href='#t'>grey <span class='red'>redword</span>"
+    " end</a> after.</p>"
+    "<p>Q07 note<a class='grey' href='#t'><sup>1</sup></a> after.</p>"
+    "<div class='box'><p>Q09 box <a href='#t'>yellowlink</a> end.</p></div>"
+    "<p class='gp'>Q12 grey para <a class='blk' href='#t'>blackinlink</a> end.</p>"
+    + "<p>Filler.</p>" * 5
+    + "<p id='t'>T1 target.</p>"
+)
+GREY, RED = 0xFF999999, 0xFFFF0000
+
+
+@pytest.fixture(scope="module")
+def drawn(calibre):  # noqa: F811
+    """{paragraph text: [(start, end, run $157)]}, outer runs first."""
+    tmp, env, _version = calibre
+    epub, kfx = tmp / "lc728.epub", tmp / "lc728.kfx"
+    write_epub(
+        epub,
+        pages={"c.xhtml": BODY},
+        toc=[("Links", "c.xhtml", 1)],
+        css=CSS,
+        ident="lc728",
+    )
+    run = subprocess.run(
+        [EBOOK_CONVERT, str(epub), str(kfx)], env=env, capture_output=True, text=True
+    )
+    assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
+    frags = load_fragments(kfx)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    out = {}
+    for st in by_type(frags, "$259"):
+        for e in iter_entries(val(st)["$146"]):
+            ref = e.get("$145") if hasattr(e, "get") else None
+            if not ref:
+                continue
+            text = str(texts[str(ref["name"])][ref["$403"]])
+            out[text] = [
+                (
+                    int(r["$143"]),
+                    int(r["$143"]) + int(r["$144"]),
+                    styles.get(str(r.get("$157")), {}),
+                )
+                for r in e.get("$142") or ()
+            ]
+    return out
+
+
+def _at(drawn, line, word):
+    """(link colour, `$19`) `word` is drawn in, in the paragraph starting
+    `line`: from the innermost run over it with each, kfxgen's inner runs
+    layered on the link's."""
+    (text,) = [t for t in drawn if t.startswith(line + " ")]
+    at = text.index(word, len(line))
+    over = [s for a, b, s in drawn[text] if a <= at and at + len(word) <= b]
+    link = next((s["$576"]["$19"] for s in reversed(over) if "$576" in s), None)
+    colour = next((s["$19"] for s in reversed(over) if "$19" in s), None)
+    return link, colour
+
+
+def test_a_coloured_link_in_red_text_has_only_its_link_colour(drawn):
+    assert _at(drawn, "Q01", "innerlink") == (GREY, None)
+    assert _at(drawn, "Q01", "around")[1] == 0xFFEE0000
+
+
+def test_a_plain_link_has_no_link_colour(drawn):
+    assert _at(drawn, "Q03", "plainlink") == (None, None)
+    assert _at(drawn, "Q04", "paralink")[0] is None
+
+
+def test_a_span_inside_a_coloured_link_is_its_own_link_colour(drawn):
+    assert _at(drawn, "Q06", "grey")[0] == GREY
+    assert _at(drawn, "Q06", "redword")[0] == RED
+
+
+def test_a_footnote_marker_takes_its_links_colour(drawn):
+    assert _at(drawn, "Q07", "1")[0] == GREY
+
+
+def test_the_colour_is_not_measured_against_a_box(drawn):
+    # Previewer writes the yellow as given on the #333333 box.
+    assert _at(drawn, "Q09", "yellowlink")[0] == 0xFFFFFF00
+
+
+def test_a_black_link_in_a_grey_paragraph_is_grey(drawn):
+    link, colour = _at(drawn, "Q12", "blackinlink")
+    assert link is None
+    # #999999 on the page, darkened to 4.5:1 as text (#239); Previewer
+    # writes 0xFF757575, kfxgen 0xFF767676.
+    assert colour in (0xFF757575, 0xFF767676)

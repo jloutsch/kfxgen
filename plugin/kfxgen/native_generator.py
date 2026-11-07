@@ -3252,6 +3252,7 @@ class NativeKFXGenerator:
         letter_spacing=None,
         colour=None,
         clear=None,
+        link_colour=None,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -3397,6 +3398,11 @@ class NativeKFXGenerator:
             value[IS("$125")], value[IS("$126")] = drop_cap
 
         _write_typography(value, small_caps, text_transform, letter_spacing, colour)
+        if link_colour is not None:
+            # A link's own colour, as Previewer writes it: the colour of the
+            # link and of a visited link (#728).
+            for sym in ("$576", "$577"):
+                value[IS(sym)] = IonStruct(IS("$19"), link_colour)
         # The paragraph starts below the floats on that side (#381).
         _write_clear(value, clear)
 
@@ -6678,6 +6684,7 @@ class NativeKFXGenerator:
             FLAG_TEXT_TOP,
             FLAG_UNDERLINE,
             BASELINE_SHIFT,
+            LINK_COLOUR_FLAG,
             SHIFT_FLAGS,
             TYPOGRAPHY_FLAGS,
             flag_value,
@@ -6858,6 +6865,8 @@ class NativeKFXGenerator:
                 value = flag_value(flags, kind)
                 if value is not None:
                     attrs[arg] = value
+            if flag_value(flags, LINK_COLOUR_FLAG) is not None:
+                attrs["link_colour"] = flag_value(flags, LINK_COLOUR_FLAG)
             if in_cell:
                 attrs["no_align"] = True
             return _allocate_style("_em", bidi=bidi, **attrs)
@@ -7430,7 +7439,10 @@ class NativeKFXGenerator:
                             FLAG_UNDERLINE,
                             FLAG_STRIKE,
                         )
-                    ) or any(flag_value(flags, k) is not None for k in TYPOGRAPHY_FLAGS)
+                    ) or any(
+                        flag_value(flags, k) is not None
+                        for k in (*TYPOGRAPHY_FLAGS, LINK_COLOUR_FLAG)
+                    )
                     has_emphasis = has_emphasis or bool(mono_families(flags))
                     sized = chunk_idx not in heading_chunk_indices or bool(heading_book)
                     run_px = run_font_size(flags)

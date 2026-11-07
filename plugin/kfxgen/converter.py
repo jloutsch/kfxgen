@@ -55,10 +55,12 @@ from .inline_style import (
     _parse_font_family,
     BLACK,
     COLOUR_FLAG,
+    LINK_COLOUR_FLAG,
     SPACING_NORMAL,
     TYPOGRAPHY_FLAGS,
     compute_block_style,
     css_font_size,
+    css_link_colour,
     css_rgb,
     css_typography,
     flag_value,
@@ -2107,10 +2109,10 @@ def _walk_inline(
             # Small caps, text-transform, letter-spacing and colour: its own
             # when they differ from its parent's, "normal", "none" or 0
             # inside a paragraph that sets them, as Previewer writes them
-            # (#239). A link's own colour is no run's: Previewer writes it
-            # in the link's styles, and none in the run, not even the
-            # colour of a span around it. Inside a link, a colour of its
-            # own changes nothing either (#377 re-check).
+            # (#239). A link's own colour is no run's `$19`: Previewer
+            # writes none in the run, not even the colour of a span around
+            # it (#377 re-check). It writes the link's colour, and a colour
+            # set inside the link, as the link's colour, `$576` (#728).
             for kind, now, before, unset in zip(
                 TYPOGRAPHY_FLAGS,
                 emphasis[4],
@@ -2120,8 +2122,19 @@ def _walk_inline(
                 if now == before or (kind == COLOUR_FLAG and now is None):
                     continue
                 if kind == COLOUR_FLAG and any(_is_link_flag(f) for f in cur):
+                    link_colour = css_link_colour(str(own_css.get("color") or "black"))
+                    if link_colour == BLACK:
+                        # Black is no link colour: the link keeps the colour
+                        # around it, a grey paragraph's too (P728c Q12).
+                        if starts_link and before is not None:
+                            cur = {f for f in cur if flag_value((f,), kind) is None}
+                            cur.add((kind, before))
+                        continue
                     if starts_link:
                         cur = {f for f in cur if flag_value((f,), kind) is None}
+                    cur = {f for f in cur if flag_value((f,), LINK_COLOUR_FLAG) is None}
+                    if link_colour is not None:
+                        cur.add((LINK_COLOUR_FLAG, link_colour))
                     continue
                 cur = {f for f in cur if flag_value((f,), kind) is None}
                 cur.add((kind, now if now is not None else unset))

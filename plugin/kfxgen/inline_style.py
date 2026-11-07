@@ -518,6 +518,9 @@ TYPOGRAPHY_FLAGS = (SMALL_CAPS_FLAG, TRANSFORM_FLAG, SPACING_FLAG, COLOUR_FLAG)
 #: Their block_style keys, in the same order.
 TYPOGRAPHY_KEYS = ("small_caps", "text_transform", "letter_spacing", "colour")
 SPACING_NORMAL = ("0", "$308")
+#: A link's own colour (#728): Previewer writes it in the link's styles,
+#: `$576` and `$577`, and no `$19`. The value is the ARGB integer.
+LINK_COLOUR_FLAG = "link-colour"
 _TRANSFORMS = frozenset({"uppercase", "lowercase", "capitalize"})
 
 
@@ -755,6 +758,19 @@ def css_text_colour(value, background=None):
             target = (lum + 0.05) / 4.5 - 0.05 if darken else 4.5 * (lum + 0.05) - 0.05
             ch = _scaled(ch, target, darken)
     return 0xFF000000 | (ch[0] << 16) | (ch[1] << 8) | ch[2]
+
+
+def css_link_colour(value):
+    """A link's own colour as the ARGB integer Previewer writes in `$576`, or
+    None when it draws nothing or can't be read (#728). Previewer writes it
+    as the book gives it, not measured against the page or a box behind it
+    (P728b: #999999 stays 0xFF999999, a yellow link on a dark box stays
+    0xFFFFFF00). A translucent colour is blended onto the page, as
+    css_rgb does for text."""
+    if is_transparent(value):
+        return None
+    rgb = css_rgb(value)
+    return None if rgb is None else 0xFF000000 | rgb
 
 
 def css_typography(css):
