@@ -3252,6 +3252,7 @@ class NativeKFXGenerator:
         letter_spacing=None,
         colour=None,
         clear=None,
+        link_colour=None,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -3397,6 +3398,11 @@ class NativeKFXGenerator:
             value[IS("$125")], value[IS("$126")] = drop_cap
 
         _write_typography(value, small_caps, text_transform, letter_spacing, colour)
+        if link_colour is not None:
+            # A link's own colour, as Previewer writes it: the colour of the
+            # link and of a visited link (#728).
+            for sym in ("$576", "$577"):
+                value[IS(sym)] = IonStruct(IS("$19"), link_colour)
         # The paragraph starts below the floats on that side (#381).
         _write_clear(value, clear)
 
@@ -6678,6 +6684,7 @@ class NativeKFXGenerator:
             FLAG_TEXT_TOP,
             FLAG_UNDERLINE,
             BASELINE_SHIFT,
+            LINK_COLOUR_FLAG,
             SHIFT_FLAGS,
             TYPOGRAPHY_FLAGS,
             flag_value,
@@ -6803,6 +6810,7 @@ class NativeKFXGenerator:
             scale=1.0,
             keeps_size=False,
             bidi=(),
+            link_found=True,
         ):
             # Effective emphasis = inline run flags OR the block's CSS emphasis.
             # The applied $157 always carries the run's own weight/style ($13/$12)
@@ -6858,6 +6866,16 @@ class NativeKFXGenerator:
                 value = flag_value(flags, kind)
                 if value is not None:
                     attrs[arg] = value
+            link = flag_value(flags, LINK_COLOUR_FLAG)
+            if link is not None:
+                if link_found:
+                    if link[0] is not None:
+                        attrs["link_colour"] = link[0]
+                elif attrs.get("colour") is None:
+                    # A link whose target isn't found is written as text:
+                    # Previewer writes its colour as the text's (QA on #732,
+                    # P732b).
+                    attrs["colour"] = link[1]
             if in_cell:
                 attrs["no_align"] = True
             return _allocate_style("_em", bidi=bidi, **attrs)
@@ -7416,6 +7434,13 @@ class NativeKFXGenerator:
                             continue
                     target = _link_target(flags)
                     anchor = body_anchor_map.get(target) if target else None
+                    # The link this run is in, its own or one it's layered
+                    # on, has a target in the book (#728).
+                    link_found = all(
+                        body_anchor_map.get(t)
+                        for t in (_link_target(f) for f in (flags, *under))
+                        if t
+                    )
                     has_emphasis = any(
                         f in flags
                         for f in (
@@ -7431,6 +7456,9 @@ class NativeKFXGenerator:
                             FLAG_STRIKE,
                         )
                     ) or any(flag_value(flags, k) is not None for k in TYPOGRAPHY_FLAGS)
+                    link = flag_value(flags, LINK_COLOUR_FLAG)
+                    if link is not None and (link[0] is not None or not link_found):
+                        has_emphasis = True
                     has_emphasis = has_emphasis or bool(mono_families(flags))
                     sized = chunk_idx not in heading_chunk_indices or bool(heading_book)
                     run_px = run_font_size(flags)
@@ -7462,6 +7490,7 @@ class NativeKFXGenerator:
                                 sized=sized,
                                 blk_fs=blk_fs,
                                 bidi=bidi,
+                                link_found=link_found,
                             )
                             if has_emphasis or not anchor
                             else None
@@ -7503,6 +7532,7 @@ class NativeKFXGenerator:
                                     blk_fs=blk_fs,
                                     scale=scale,
                                     keeps_size=keeps,
+                                    link_found=link_found,
                                 ),
                                 None,
                             )
