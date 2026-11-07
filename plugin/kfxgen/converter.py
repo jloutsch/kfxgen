@@ -55,10 +55,12 @@ from .inline_style import (
     _parse_font_family,
     BLACK,
     COLOUR_FLAG,
+    LINK_COLOUR_FLAG,
     SPACING_NORMAL,
     TYPOGRAPHY_FLAGS,
     compute_block_style,
     css_font_size,
+    css_link_colour,
     css_rgb,
     css_typography,
     flag_value,
@@ -1601,8 +1603,10 @@ def _is_preformatted(elem, style_resolver):
 
 def _css_emphasis(css):
     """(bold, italic, monospace families or None, font size or None,
-    typography) from an element's computed CSS, or None without it. The
-    typography is `css_typography`'s (#239).
+    typography, colour as given) from an element's computed CSS, or None
+    without it. The typography is `css_typography`'s (#239); the colour as
+    given, not darkened for contrast, is what a link's is compared by
+    (#728).
     `bolder` is relative, but from any weight a book uses it lands on bold
     (`lighter` reads as normal already)."""
     if not css:
@@ -1617,6 +1621,7 @@ def _css_emphasis(css):
         mono,
         css_font_size(css),
         css_typography(css),
+        css_link_colour(str(css.get("color") or "black")),
     )
 
 
@@ -1701,7 +1706,7 @@ def _initial(elem, css, text, spans, style_resolver):
         n = _first_letter_length(text)
         if not n:
             return spans, None
-        bold, italic, _mono, size, typography = _css_emphasis(first)
+        bold, italic, _mono, size, typography, _given = _css_emphasis(first)
         add = set()
         if size is not None:
             add.add(make_size_flag(size))
@@ -1734,6 +1739,130 @@ _TABLE_SPLIT = object()
 def _is_link_flag(flag):
     """Whether a run flag is a link target (`make_link_flag`)."""
     return isinstance(flag, tuple) and flag[:1] == make_link_flag("")[:1]
+
+
+#: The brightest channel of a link colour Previewer 4.0.3 writes none for on
+#: the page: up to #1a1a1a none, from #202020 on written, any channel
+#: (QA on #732, P732d; 0x1B-0x1F not probed).
+_NEAR_BLACK = 0x1A
+
+
+def _near_black(argb):
+    """Whether an ARGB colour is black or near enough for Previewer to write
+    no link colour for it on the page."""
+    return argb is not None and all(
+        (argb >> shift) & 0xFF <= _NEAR_BLACK for shift in (16, 8, 0)
+    )
+
+
+#: Inline tags the text around a link is looked for through; any other is
+#: the edge of its block (#728).
+_LINK_INLINE_TAGS = frozenset(
+    "a abbr b bdi bdo big cite code del dfn em font i ins kbd label mark q s"
+    " samp small span strike strong sub sup time tt u var".split()
+)
+
+
+#: The whitespace CSS collapses: a no-break space is not (#728, P732u U01).
+_COLLAPSING = " \t\n\r\f"
+#: Inline elements that show something with no text: a link's leading space
+#: after one stays (P732u U04).
+_LINK_PICTURE_TAGS = frozenset({"img", "svg", "math", "object", "video"})
+
+
+def _last_shown(elem, style_resolver):
+    """What `elem` shows last, as `_text_before` reads it: a space for a
+    <br>, an object mark for a picture, else its last text; "" for nothing.
+    A <br> or a picture at its end counts (QA on #732, P732v V01, V02)."""
+    if not isinstance(elem.tag, str) or _is_hidden(elem, style_resolver):
+        return ""
+    local = _local_tag(elem.tag)
+    if local == "br":
+        return " "
+    if local in _LINK_PICTURE_TAGS:
+        return "\ufffc"
+    for child in reversed(elem):
+        if child.tail:
+            return child.tail
+        text = _last_shown(child, style_resolver)
+        if text:
+            return text
+    return elem.text or ""
+
+
+def _text_before(node, style_resolver):
+    """The nearest text before `node` in its block, as written: "" at the
+    block's start, a space after a <br>, where a line starts, and an object
+    mark after a picture. Hidden elements are skipped."""
+    while True:
+        sib = node.getprevious()
+        if sib is not None:
+            if sib.tail:
+                return sib.tail
+            text = _last_shown(sib, style_resolver)
+            if text:
+                return text
+            node = sib
+            continue
+        parent = node.getparent()
+        if parent is not None and parent.text:
+            return parent.text
+        if parent is None or _local_tag(parent.tag) not in _LINK_INLINE_TAGS:
+            return ""
+        node = parent
+
+
+def _is_all_its_link_shows(elem, style_resolver):
+    """Whether `elem` is all the link around it shows. Previewer then gives
+    the link no colour of its own when `elem` is black (QA on #732, P732p,
+    P732q, P732t, P732u; P728f): `<a red><b black>12</b></a>` is drawn
+    black, and so is `<a red><span hidden>Chapter</span> <span
+    black>12</span></a>`.
+
+    From the link down to `elem`, each element shows one element, hidden
+    ones left out, and no text but leading whitespace that collapses: after
+    an ordinary space, a <br>, or the block's start. A no-break space, a
+    space after a letter or a picture, and any trailing whitespace keep the
+    link's colour (T05, Q05, U01, U04, U10), and so do a picture beside
+    `elem` or an element inside it (Q02, Q10)."""
+    link = next(
+        (
+            up
+            for up in elem.iterancestors()
+            if isinstance(up.tag, str) and _local_tag(up.tag) == "a"
+        ),
+        None,
+    )
+    if link is None:
+        return False
+    if any(isinstance(k.tag, str) and not _is_hidden(k, style_resolver) for k in elem):
+        return False
+    if not ((elem.text or "") + "".join(k.tail or "" for k in elem)).strip():
+        return False
+    ahead = _text_before(link, style_resolver)
+    lead_goes = not ahead or ahead[-1] in _COLLAPSING
+    node = link
+    while node is not elem:
+        shows = [
+            k
+            for k in node
+            if isinstance(k.tag, str) and not _is_hidden(k, style_resolver)
+        ]
+        if len(shows) != 1:
+            return False
+        (child,) = shows
+        if child is not elem and elem not in child.iterdescendants():
+            return False
+        texts = [(node.text, True)]
+        after = False
+        for k in node:
+            after = after or k is child
+            texts.append((k.tail, not after))
+        for text, leading in texts:
+            if text and (text.strip(_COLLAPSING) or not (leading and lead_goes)):
+                return False
+        node = child
+    return True
 
 
 #: `display` values that draw an element as a block of its own (#233).
@@ -2028,6 +2157,9 @@ def _walk_inline(
             # element. Keeping both left the run's target to the frozenset's
             # hash order, so it changed between runs (#317).
             cur = {f for f in cur if not _is_link_flag(f) and f != NOTEREF_FLAG}
+            # Nor the outer link's colour: Previewer gives an inner link
+            # none of its own (P728e E02, #728).
+            cur = {f for f in cur if flag_value((f,), LINK_COLOUR_FLAG) is None}
             cur.add(make_link_flag(target))
             if "noteref" in _epub_types(elem):
                 cur.add(NOTEREF_FLAG)
@@ -2107,21 +2239,47 @@ def _walk_inline(
             # Small caps, text-transform, letter-spacing and colour: its own
             # when they differ from its parent's, "normal", "none" or 0
             # inside a paragraph that sets them, as Previewer writes them
-            # (#239). A link's own colour is no run's: Previewer writes it
-            # in the link's styles, and none in the run, not even the
-            # colour of a span around it. Inside a link, a colour of its
-            # own changes nothing either (#377 re-check).
+            # (#239). A link's own colour is no run's `$19`: Previewer
+            # writes none in the run, not even the colour of a span around
+            # it (#377 re-check). It writes the link's colour, and a colour
+            # set inside the link, as the link's colour, `$576` (#728).
             for kind, now, before, unset in zip(
                 TYPOGRAPHY_FLAGS,
                 emphasis[4],
                 parent_emphasis[4],
                 ("normal", "none", SPACING_NORMAL, None),
             ):
-                if now == before or (kind == COLOUR_FLAG and now is None):
-                    continue
                 if kind == COLOUR_FLAG and any(_is_link_flag(f) for f in cur):
+                    # Compared as given: on a dark box black and #333333
+                    # darken to the box text's own colour (QA on #732, P732
+                    # B03, B04, B14).
+                    if now is None or emphasis[5] == parent_emphasis[5]:
+                        continue
+                    link_colour = emphasis[5]
+                    if own_css.get("background-behind") is None and _near_black(
+                        link_colour
+                    ):
+                        # On the page, black and near-black are no link
+                        # colour: the link is drawn in its paragraph's (QA on
+                        # #732, P732 B05, P732d). In a box, every colour is.
+                        link_colour = None
+                        if not _is_all_its_link_shows(elem, style_resolver) and any(
+                            flag_value((f,), LINK_COLOUR_FLAG) is not None for f in cur
+                        ):
+                            # A black word inside a coloured link takes the
+                            # link's colour (QA on #732, P732 B09, P732k K10).
+                            # Holding all of the link's text, it takes the
+                            # link's colour away (P732p X05).
+                            continue
                     if starts_link:
                         cur = {f for f in cur if flag_value((f,), kind) is None}
+                    # With the colour as text, for a link whose target isn't
+                    # found: Previewer writes it as `$19`, darkened as text,
+                    # black too (P732b, P732j).
+                    cur = {f for f in cur if flag_value((f,), LINK_COLOUR_FLAG) is None}
+                    cur.add((LINK_COLOUR_FLAG, (link_colour, now)))
+                    continue
+                if now == before or (kind == COLOUR_FLAG and now is None):
                     continue
                 cur = {f for f in cur if flag_value((f,), kind) is None}
                 cur.add((kind, now if now is not None else unset))
