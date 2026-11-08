@@ -6329,6 +6329,12 @@ def extract_blocks_from_html(
         if leaf:
             style = dict(kids[0].get("block_style") or {})
             style["margin_left"] = style["margin_right"] = None
+            if style.get("bidi"):
+                # The box's own `dir` and `lang`, set on the box: Previewer
+                # writes them on the box only (QA's P735b on #735).
+                style["bidi"] = {
+                    k: v for k, v in style["bidi"].items() if k != "set_here"
+                }
             kids[0]["block_style"] = style
         past_start = {aid for b in kids[1:] for aid in b.get("anchor_ids") or ()}
         if toc_targets and past_start & set(toc_targets):

@@ -66,6 +66,7 @@ div.box { border: 1px solid black; padding: 0.5em; }
 td.crtl { direction: rtl; }
 td.cltr { direction: ltr; }
 table.trtl { direction: rtl; }
+p.box { border: 1px solid black; padding: 0.5em; }
 """
 
 # Page 1: <html dir="rtl" lang="ar">.
@@ -136,6 +137,12 @@ LTR_PAGE = "".join(
         # right-to-left table.
         '<table class="trtl"><tr><td>T06 words</td></tr></table>',
         '<table dir="rtl"><tr><td class="cltr">T07 words</td></tr></table>',
+        # QA's P735b on #735: a box's own text, straight in it, with the
+        # box's own lang or dir.
+        '<div class="box" lang="fr">F01 words</div>',
+        f'<div class="box" dir="rtl">F02 {AR}</div>',
+        '<p class="box" lang="fr">F03 words</p>',
+        f'<p class="box" dir="rtl">F04 {AR}</p>',
         # QA's Q72-Q75: the same, in cells of two paragraphs.
         '<table dir="rtl"><tr>'
         f'<td class="start"><p>Q72 {AR} first</p><p>Q73 {AR} second</p></td>'
@@ -349,6 +356,24 @@ def test_a_direction_set_on_the_element_is_written_again(entries):
     assert _bidi(entries["E08"][0]) == {}
     assert _bidi(entries["E06"][0]) == {"$682": "$375", "$674": "$676"}
     assert _bidi(entries["E07"][0]) == {}
+
+
+@pytest.mark.parametrize(
+    ("label", "box"),
+    [
+        ("F01", {"$10": "fr"}),
+        ("F02", {"$10": "en", "$682": "$375", "$674": "$676"}),
+        ("F03", {"$10": "fr"}),
+        ("F04", {"$10": "en", "$682": "$375", "$674": "$676"}),
+    ],
+)
+def test_a_boxs_own_text_leaves_the_boxs_keys_on_the_box(entries, label, box):
+    # QA's P735b on #735, Previewer 4.0.3: the box carries them, its text
+    # entry nothing.
+    own, above = entries[label]
+    outer = next(k for k in above if k.get("$159") == "$270")
+    assert _bidi(outer) == box
+    assert _bidi(own) == {}
 
 
 def test_css_direction_on_a_table_and_on_a_cell(entries):
