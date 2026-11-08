@@ -251,18 +251,15 @@ def make_oversized_cover(out_dir: Path) -> tuple[Path, Outcome]:
 def _malformed_image_check(kfx_path: Path) -> None:
     """Pin that magic-byte gate accepts the malformed payload and the
     bytes flow into KFX output. Without this, a future regression that
-    silently rejects malformed-but-magic-valid JPEGs would flip output
-    back to the ~5KB sentinel band and the test stays green.
+    silently rejects malformed-but-magic-valid JPEGs would fall back to the
+    sentinel chapter and the test stays green.
 
-    Empirical observation (2026-05-04): _MALFORMED_JPEG (804 bytes) +
-    Ion BLOB framing → KFX ~6,800 bytes. The 6000-8000 band catches
-    drift in either direction."""
-    size = kfx_path.stat().st_size
-    assert 6000 < size < 8000, (
-        f"malformed_image KFX {size} bytes — expected 6000-8000 band "
-        f"(magic-byte gate accepts + _MALFORMED_JPEG flows through). "
-        f"Regression candidate: silent rejection (sentinel band) or "
-        f"unexpected wrapping overhead."
+    The bytes are looked for in the file: a size band (6000-8000, from
+    2026-05-04) counted 247 unused symbols that #456 removed."""
+    data = kfx_path.read_bytes()
+    assert _MALFORMED_JPEG in data, (
+        f"malformed_image KFX ({len(data)} bytes) lacks the {len(_MALFORMED_JPEG)}"
+        "-byte payload: the magic-byte gate rejected it or it was re-encoded"
     )
 
 
