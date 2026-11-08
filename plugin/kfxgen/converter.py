@@ -587,9 +587,14 @@ def _inline_bidi(elem, css):
 _BIDI_SERIAL = itertools.count()
 
 
-def _with_bidi(block_style, elem, style_resolver):
-    """`block_style` with `elem`'s direction and language in it (#246)."""
+def _with_bidi(block_style, elem, style_resolver, own=True):
+    """`block_style` with `elem`'s direction and language in it (#246).
+    `own=False` for text loose in `elem`, between or after its blocks: it
+    has none of its own to repeat, and Previewer writes them on the box
+    only (QA's P735b F03, F04)."""
     bidi = _bidi(elem, style_resolver)
+    if not own:
+        bidi.pop("set_here", None)
     if not bidi:
         return block_style
     return {**(block_style or {}), "bidi": bidi}
@@ -6503,7 +6508,7 @@ def extract_blocks_from_html(
                     # between two paragraphs, or a list item's own line before
                     # its nested list, is in its page's language, as Kindle
                     # Previewer 4.0.3 writes it (#718).
-                    "block_style": _with_bidi(None, elem, style_resolver),
+                    "block_style": _with_bidi(None, elem, style_resolver, own=False),
                     "anchor_ids": block_ids,
                     # Cells fuse into one block (#128), so an offset is what
                     # makes a link land on the right cell rather than at the

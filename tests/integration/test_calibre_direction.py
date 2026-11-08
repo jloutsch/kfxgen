@@ -66,7 +66,7 @@ div.box { border: 1px solid black; padding: 0.5em; }
 td.crtl { direction: rtl; }
 td.cltr { direction: ltr; }
 table.trtl { direction: rtl; }
-p.box { border: 1px solid black; padding: 0.5em; }
+p.box, blockquote.box { border: 1px solid black; padding: 0.5em; }
 """
 
 # Page 1: <html dir="rtl" lang="ar">.
@@ -143,6 +143,14 @@ LTR_PAGE = "".join(
         f'<div class="box" dir="rtl">F02 {AR}</div>',
         '<p class="box" lang="fr">F03 words</p>',
         f'<p class="box" dir="rtl">F04 {AR}</p>',
+        # QA's P735b F03-F15: text loose in a box beside a block, a quote, an
+        # inline only, dir="auto", a box in a box.
+        '<div class="box" lang="fr">F05 loose text<p>F06 para.</p></div>',
+        '<div class="box" lang="fr"><p>F07 para.</p>F08 tail text.</div>',
+        '<blockquote class="box" lang="fr">F09 direct text</blockquote>',
+        '<div class="box" lang="fr"><span>F10 inline only.</span></div>',
+        '<div class="box" dir="auto">F11 latin direct text</div>',
+        '<div class="box" lang="fr"><div class="box" lang="fr">F12 text</div></div>',
         # QA's Q72-Q75: the same, in cells of two paragraphs.
         '<table dir="rtl"><tr>'
         f'<td class="start"><p>Q72 {AR} first</p><p>Q73 {AR} second</p></td>'
@@ -365,14 +373,23 @@ def test_a_direction_set_on_the_element_is_written_again(entries):
         ("F02", {"$10": "en", "$682": "$375", "$674": "$676"}),
         ("F03", {"$10": "fr"}),
         ("F04", {"$10": "en", "$682": "$375", "$674": "$676"}),
+        ("F05", {"$10": "fr"}),
+        ("F06", {"$10": "fr"}),
+        ("F07", {"$10": "fr"}),
+        ("F08", {"$10": "fr"}),
+        ("F09", {"$10": "fr"}),
+        ("F10", {"$10": "fr"}),
+        ("F11", {"$10": "en", "$682": "$376", "$674": "$676"}),
+        ("F12", {"$10": "fr"}),
     ],
 )
 def test_a_boxs_own_text_leaves_the_boxs_keys_on_the_box(entries, label, box):
     # QA's P735b on #735, Previewer 4.0.3: the box carries them, its text
     # entry nothing.
     own, above = entries[label]
-    outer = next(k for k in above if k.get("$159") == "$270")
-    assert _bidi(outer) == box
+    boxes = [k for k in above if k.get("$159") == "$270"]
+    # F12: each box carries its own lang.
+    assert all(_bidi(b) == box for b in boxes) and boxes
     assert _bidi(own) == {}
 
 

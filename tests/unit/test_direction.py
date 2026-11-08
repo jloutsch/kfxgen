@@ -389,14 +389,38 @@ def test_a_cell_container_carries_its_own_dir_and_the_innermost_wins(tmp_path):
             "$279",
             {"$682": "$376", "$674": "$676"},
         ),
+        # QA's P735d C01: a tfoot after the tbody.
+        (
+            "<table><tbody><tr><td>R00 a</td></tr></tbody>"
+            '<tfoot dir="rtl"><tr><td>R01 a</td></tr></tfoot></table>',
+            "$455",
+            RTL_HERE,
+        ),
     ],
-    ids=["row", "tbody", "thead", "row-same", "row-ltr"],
+    ids=["row", "tbody", "thead", "row-same", "row-ltr", "tfoot"],
 )
 def test_a_row_or_row_group_carries_its_own_dir(tmp_path, table, part, keys):
     own, above = _entries(_convert(tmp_path, table, html_attrs=' lang="ar"'))["R01"]
     assert dict(above)[part] == keys
     assert own == {}
     assert all(k == {} for t, k in above if t in ("$270", "$269"))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("attrs", "table"),
+    [(' dir="rtl"', RTL_HERE), (' lang="fr"', {"$10": "fr"})],
+    ids=["dir", "lang"],
+)
+def test_a_row_straight_under_its_table_repeats_nothing(tmp_path, attrs, table):
+    # QA's P735d C03, C04: the table carries the keys; the group kfxgen
+    # writes around the row, its row and its cell nothing.
+    own, above = _entries(
+        _convert(tmp_path, f"<table{attrs}><tr><td>R01 a</td></tr></table>")
+    )["R01"]
+    assert table.items() <= dict(above)["$278"].items()
+    assert all(k == {} for t, k in above if t != "$278")
+    assert own == {}
 
 
 @pytest.mark.unit
