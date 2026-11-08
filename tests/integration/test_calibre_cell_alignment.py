@@ -1,9 +1,9 @@
 """Table cells aligned as Kindle Previewer 4.0.3 writes them, through
 calibre: no alignment unless the book gives one (#599). Each value is
 Previewer's own for the same markup in a page with a DOCTYPE (probed
-2026-10-28), except in right-to-left tables: Previewer writes no alignment
-there either, but marks the table's direction (`$682`), which kfxgen
-doesn't write, so kfxgen keeps those cells right-aligned (#479, #570).
+2026-10-28), right-to-left tables included: Previewer writes no alignment
+there either, only the table's direction (`$682`), and so does kfxgen
+(#605, which replaced #479's quirks-mode right).
 
 Not covered: `<td style="text-align: left" align="right">`, which Previewer
 writes left. calibre's CSS flattening has already made it right, with the
@@ -73,16 +73,16 @@ def test_cells_are_aligned_as_previewer_writes_them(calibre):  # noqa: F811
         "T2b": None,
         "T3 plain": None,
         "T3b": None,
-        "T4 rtl": "right",  # kfxgen's; Previewer: none, `$682` on the table
-        "T4b": "right",
+        "T4 rtl": None,
+        "T4b": None,
         # Previewer: none. kfxgen writes justify on any paragraph that sets
         # nothing, inside a table or not; a Paperwhite shows both justified.
         "T5 one": "justify",
         "T5 two": "justify",
         "T5b": None,
         "T6 p right": "right",
-        "T7 ltr cell": "right",  # kfxgen's, as T4
-        "T7b": "right",
+        "T7 ltr cell": None,
+        "T7b": None,
         "T8 rtl cell": None,
         "T8b": None,
         "T9 rtl row": None,

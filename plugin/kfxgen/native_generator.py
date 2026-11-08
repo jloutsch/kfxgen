@@ -5624,6 +5624,7 @@ class NativeKFXGenerator:
                             "type": "open",
                             "node": group,
                             "border": row.get("group_border"),
+                            "bidi": row.get("group_bidi"),  # (#605)
                         }
                     )
                 leading = own if last_row is None else []
@@ -5633,6 +5634,7 @@ class NativeKFXGenerator:
                     "type": "open",
                     "node": "row",
                     "border": row.get("border"),
+                    "bidi": row.get("bidi"),  # (#605)
                     "anchor_keys": keys,
                     "anchor_offsets": dict.fromkeys(keys, 0),
                 }
@@ -6493,12 +6495,14 @@ class NativeKFXGenerator:
             """`own` direction and language as `$157` key pairs, leaving out
             those the container around it already sets the same: Kindle
             Previewer 4.0.3 writes them on a table or box, and on a cell or
-            paragraph in it only where they differ (#246)."""
+            paragraph in it only where they differ (#246), or where it sets
+            them itself (#605's P605: E01, E04, E05, E06)."""
             own, parent = own or {}, parent or {}
+            here = own.get("set_here") or ()
             return tuple(
                 (sym, own[name])
                 for name, sym in _BIDI_KEYS
-                if own.get(name) and own.get(name) != parent.get(name)
+                if own.get(name) and (name in here or own.get(name) != parent.get(name))
             )
 
         def _allocate_style(kind, builder=None, bidi=(), **attrs):
@@ -6940,7 +6944,7 @@ class NativeKFXGenerator:
                     node = chunk.get("node")
                     own = (
                         chunk.get("bidi")
-                        if node == "table"
+                        if node in ("table", "row", "head", "body", "foot")
                         else (chunk.get("block_style") or {}).get("bidi")
                         if node == "cell"
                         else (chunk.get("box") or {}).get("bidi")
@@ -7070,13 +7074,17 @@ class NativeKFXGenerator:
                                 **({"clear": box["clear"]} if box.get("clear") else {}),
                             )
                         )
-                    if node in ("row", "head", "body", "foot") and chunk.get("border"):
-                        # A row's or group's own border under collapse (#264).
+                    if node in ("row", "head", "body", "foot") and (
+                        chunk.get("border") or cont_bidi
+                    ):
+                        # A row's or group's own border under collapse (#264),
+                        # and its own direction (#605).
                         extras["$157"] = IS(
                             _allocate_style(
                                 "_tp",
                                 builder=self.build_part_style_157,
-                                border=_border_key(chunk["border"]),
+                                bidi=cont_bidi,
+                                border=_border_key(chunk.get("border")),
                             )
                         )
                     entry_extras.append(extras or None)

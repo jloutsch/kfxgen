@@ -475,8 +475,13 @@ def _bidi(elem, style_resolver=None):
     its own unicode-bidi CSS or a `dir` (isolate, as browsers' sheets give
     `[dir]`); on one element the CSS beats the `dir` (QA's Q67, Q68; my
     V246 Q81-Q83). plaintext keeps the direction (W246 Q90-Q94). The
-    language is the nearest `xml:lang` or `lang`, lower-cased."""
+    language is the nearest `xml:lang` or `lang`, lower-cased.
+
+    "set_here" names those `elem` sets itself: Previewer writes them on its
+    entry even where the container around it has the same (P605, P605c:
+    E01, E02, E04, E05, E06)."""
     out = {}
+    here = []
     direction = None
     bidi = None
     for e in (elem, *elem.iterancestors()):
@@ -492,20 +497,28 @@ def _bidi(elem, style_resolver=None):
                     direction = own
                 elif has_dir:
                     direction = _first_strong(e) if attr == "auto" else attr
+                if direction is not None and e is elem:
+                    here.append("direction")
             if bidi is None:
                 bidi = _UNICODE_BIDI.get(
                     str((css or {}).get("own-unicode-bidi") or "").strip().lower()
                 ) or ("isolate" if has_dir else None)
+                if bidi is not None and e is elem:
+                    here.append("unicode_bidi")
         if "lang" not in out:
             lang = e.get(_XML_LANG) or e.get("lang")
             if lang and lang.strip():
                 out["lang"] = lang.strip().lower()
+                if e is elem:
+                    here.append("lang")
         if direction is not None and bidi is not None and "lang" in out:
             break
     if bidi:
         out["unicode_bidi"] = bidi
     if direction:
         out["direction"] = direction
+    if here:
+        out["set_here"] = tuple(here)
     return out
 
 
@@ -574,9 +587,14 @@ def _inline_bidi(elem, css):
 _BIDI_SERIAL = itertools.count()
 
 
-def _with_bidi(block_style, elem, style_resolver):
-    """`block_style` with `elem`'s direction and language in it (#246)."""
+def _with_bidi(block_style, elem, style_resolver, own=True):
+    """`block_style` with `elem`'s direction and language in it (#246).
+    `own=False` for text loose in `elem`, between or after its blocks: it
+    has none of its own to repeat, and Previewer writes them on the box
+    only (QA's P735b F03, F04)."""
     bidi = _bidi(elem, style_resolver)
+    if not own:
+        bidi.pop("set_here", None)
     if not bidi:
         return block_style
     return {**(block_style or {}), "bidi": bidi}
@@ -3849,7 +3867,9 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
     """A cell's, or a cell paragraph's, block style with its alignment: the
     book's, else none, as Kindle Previewer 4.0.3 writes a cell in a page with
     a DOCTYPE; a Paperwhite then shows it justified, as Previewer's (#599).
-    Right under a right-to-left `dir` (#479). A header cell is left unset,
+    In a right-to-left table too: Previewer writes the direction (`$682`)
+    and no alignment there (#605's P605, which replaced #479's quirks-mode
+    right). A header cell is left unset,
     so it stays centred, unless it sets its own alignment (#589)."""
     if block_style is None:
         block_style = compute_block_style(css) if css is not None else None
@@ -3914,9 +3934,7 @@ def _cell_block_style(cell, css, block_style=None, style_resolver=None):
         own = compute_block_style(style_resolver(inner) or {})["align"]
         if own:
             return {**(block_style or compute_block_style({})), "align": own}
-    if _table_dir(cell).lower() != "rtl":
-        return block_style
-    return {**(block_style or compute_block_style({})), "align": "right"}
+    return block_style
 
 
 def _cell_start_end(block_style, cell, css):
@@ -4138,6 +4156,12 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
             for cell in row["cells"]:
                 cell["rowspan"] = min(cell["rowspan"], len(written) - i)
 
+    def own_bidi(elem):
+        """`elem`'s direction and language when it sets one itself, else
+        None: a row or group that sets none passes its table's through."""
+        bidi = _bidi(elem, style_resolver)
+        return bidi if bidi.get("set_here") else None
+
     def take(container, group):
         nonlocal carry
         follow = _anchors_follow_rows(container)
@@ -4157,6 +4181,14 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
                 last = {
                     "group": group,
                     "border": part_border(child),
+                    # A row's or row group's own direction and language, on
+                    # its entry as Previewer writes them (P605 T04, T05).
+                    "bidi": own_bidi(child),
+                    "group_bidi": (
+                        own_bidi(container)
+                        if _local_tag(container.tag) in _ROW_GROUPS
+                        else None
+                    ),
                     # Consecutive row groups of one kind become one group in
                     # the KFX, which takes its first row's group border; a
                     # second <tbody>'s own border-top is dropped (#296
@@ -6302,6 +6334,12 @@ def extract_blocks_from_html(
         if leaf:
             style = dict(kids[0].get("block_style") or {})
             style["margin_left"] = style["margin_right"] = None
+            if style.get("bidi"):
+                # The box's own `dir` and `lang`, set on the box: Previewer
+                # writes them on the box only (QA's P735b on #735).
+                style["bidi"] = {
+                    k: v for k, v in style["bidi"].items() if k != "set_here"
+                }
             kids[0]["block_style"] = style
         past_start = {aid for b in kids[1:] for aid in b.get("anchor_ids") or ()}
         if toc_targets and past_start & set(toc_targets):
@@ -6470,7 +6508,7 @@ def extract_blocks_from_html(
                     # between two paragraphs, or a list item's own line before
                     # its nested list, is in its page's language, as Kindle
                     # Previewer 4.0.3 writes it (#718).
-                    "block_style": _with_bidi(None, elem, style_resolver),
+                    "block_style": _with_bidi(None, elem, style_resolver, own=False),
                     "anchor_ids": block_ids,
                     # Cells fuse into one block (#128), so an offset is what
                     # makes a link land on the right cell rather than at the
