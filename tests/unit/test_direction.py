@@ -10,7 +10,8 @@ probes (issue comments 6616979445 and 6617544327, and QA's Q246 probe):
   from any ancestor; `dir="auto"` from the first letter with a direction;
   `$10` from `lang` or `xml:lang`, lower-cased.
 - The keys go on the outermost entry that holds them: a table carries them,
-  and a cell repeats them only when its own differ.
+  and a row, row group, cell or paragraph in it repeats them where its own
+  differ or where it sets them itself (#605's P605 and P605c).
 - `<lang>-reflow-language` in `$585` for a book in ar, fa or he.
 
 These run through the test shim, which reads no CSS: CSS `direction`,
@@ -134,6 +135,8 @@ def _features(frags):
 
 
 RTL = {"$10": "ar", "$682": "$375", "$674": "$676"}
+#: A `dir="rtl"` on an element whose language is its container's.
+RTL_HERE = {"$682": "$375", "$674": "$676"}
 
 
 @pytest.mark.unit
@@ -315,10 +318,11 @@ def test_a_table_carries_the_keys_and_its_cells_only_differences(tmp_path):
     # Q20: a cell without its own dir repeats nothing.
     assert own17 == {}
     assert all(k == {} for t, k in above17 if t not in ("$278",))
-    # Q21: a cell whose dir differs writes it.
+    # Q21: a cell whose dir differs writes it, and its dir's isolate,
+    # though the table's is the same (P605c A18).
     own18, above18 = found["A18"]
     cell18 = {**own18, **next((k for t, k in above18 if t == "$270"), {})}
-    assert cell18 == {"$682": "$376"}
+    assert cell18 == {"$682": "$376", "$674": "$676"}
     # After the table, a paragraph has them again.
     assert found["A19"][0] == RTL
 
@@ -346,12 +350,66 @@ def test_a_cell_container_carries_its_own_dir_and_the_innermost_wins(tmp_path):
     # The cell's container (the innermost) carries its ltr; its plain
     # paragraph repeats nothing.
     own02, above02 = found["C02"]
-    assert above02[-1][1] == {"$682": "$376"}
+    assert above02[-1][1] == {"$682": "$376", "$674": "$676"}  # P605c C01
     assert own02 == {}
     assert _effective(found["C02"])["$682"] == "$376"
     # The rtl paragraph differs from the cell around it, not from the table.
     assert _effective(found["C01"])["$682"] == "$375"
-    assert found["C01"][0].get("$682") == "$375"
+    assert found["C01"][0] == {"$682": "$375", "$674": "$676"}  # P605c C01
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("table", "part", "keys"),
+    [
+        # P605 T04, T05, T22: on the row or group, not on each cell.
+        (
+            '<table><tr dir="rtl"><td>R01 a</td><td>b</td></tr></table>',
+            "$279",
+            RTL_HERE,
+        ),
+        (
+            '<table><tbody dir="rtl"><tr><td>R01 a</td><td>b</td></tr></tbody></table>',
+            "$454",
+            RTL_HERE,
+        ),
+        (
+            '<table><thead dir="rtl"><tr><th>R01 a</th><th>b</th></tr></thead></table>',
+            "$151",
+            RTL_HERE,
+        ),
+        # P605 T17, T18: in a right-to-left table, the same or the other way.
+        (
+            '<table dir="rtl"><tr dir="rtl"><td>R01 a</td></tr></table>',
+            "$279",
+            {"$682": "$375", "$674": "$676"},
+        ),
+        (
+            '<table dir="rtl"><tr dir="ltr"><td>R01 a</td></tr></table>',
+            "$279",
+            {"$682": "$376", "$674": "$676"},
+        ),
+    ],
+    ids=["row", "tbody", "thead", "row-same", "row-ltr"],
+)
+def test_a_row_or_row_group_carries_its_own_dir(tmp_path, table, part, keys):
+    own, above = _entries(_convert(tmp_path, table, html_attrs=' lang="ar"'))["R01"]
+    assert dict(above)[part] == keys
+    assert own == {}
+    assert all(k == {} for t, k in above if t in ("$270", "$269"))
+
+
+@pytest.mark.unit
+def test_a_dir_or_lang_an_element_sets_itself_is_written_again(tmp_path):
+    # P605c E01, E04: the same as the table's, and Previewer writes it.
+    body = (
+        f'<table><tr><td dir="rtl">E01 {AR}</td><td>E02 {AR}</td>'
+        f'<td lang="ar">E04 {AR}</td></tr></table>'
+    )
+    found = _entries(_convert(tmp_path, body, html_attrs=' dir="rtl" lang="ar"'))
+    assert found["E01"][0] == {"$682": "$375", "$674": "$676"}
+    assert found["E02"][0] == {}
+    assert found["E04"][0] == {"$10": "ar"}
 
 
 @pytest.mark.unit

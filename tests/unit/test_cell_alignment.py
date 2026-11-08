@@ -1,8 +1,8 @@
 """Table cells have no alignment unless the book gives one, as Kindle
 Previewer 4.0.3 writes them in a page with a DOCTYPE (#599, probed
 2026-10-28); on a Paperwhite an unset cell shows justified, as Previewer's
-does. Cells in a right-to-left table are right-aligned: Previewer marks
-the table's direction instead, which kfxgen doesn't write."""
+does. In a right-to-left table too: Previewer writes the table's direction
+(`$682`) and no alignment (#605's P605), and so does kfxgen."""
 
 import pytest
 from lxml import etree
@@ -31,11 +31,11 @@ def _align(cell):
     ("html", "aligns"),
     [
         ("<table><tr><td>a</td><td>b</td></tr></table>", [None, None]),
-        ('<table dir="rtl"><tr><td>a</td><td>b</td></tr></table>', ["right", "right"]),
-        ('<div dir="rtl"><table><tr><td>a</td></tr></table></div>', ["right"]),
-        # A cell's or a row's own dir doesn't count: Kindle Previewer 4.0.3
-        # takes it from the table and what holds it (#570, probed).
-        ('<table dir="rtl"><tr><td dir="ltr">a</td></tr></table>', ["right"]),
+        # Previewer 4.0.3 writes no alignment in a right-to-left table, nor
+        # for a cell's or row's own dir (P605 T01, T11, T02, T03, T04).
+        ('<table dir="rtl"><tr><td>a</td><td>b</td></tr></table>', [None, None]),
+        ('<div dir="rtl"><table><tr><td>a</td></tr></table></div>', [None]),
+        ('<table dir="rtl"><tr><td dir="ltr">a</td></tr></table>', [None]),
         ('<table><tr><td dir="rtl">a</td></tr></table>', [None]),
         ('<table><tr dir="rtl"><td>a</td></tr></table>', [None]),
     ],

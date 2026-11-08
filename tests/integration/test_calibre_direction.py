@@ -63,6 +63,9 @@ span.over { direction: rtl; unicode-bidi: bidi-override; }
 span.isoov { direction: ltr; unicode-bidi: isolate-override; }
 div.css-rtl { direction: rtl; }
 div.box { border: 1px solid black; padding: 0.5em; }
+td.crtl { direction: rtl; }
+td.cltr { direction: ltr; }
+table.trtl { direction: rtl; }
 """
 
 # Page 1: <html dir="rtl" lang="ar">.
@@ -98,6 +101,11 @@ RTL_PAGE = "".join(
         # K42: a paragraph wholly in a sized span takes its size (#375); the
         # span's direction stays a run.
         "<p><span dir='ltr' style='font-size:120%'>I41 WHOLESIZED words</span></p>",
+        # #605, P605c E05-E08: a cell's CSS direction equal to its table's
+        # is written, without an isolate; a paragraph's own dir equal to its
+        # box's is written with one.
+        f'<table><tr><td class="crtl">E05 {AR}</td><td>E08 {AR}</td></tr></table>',
+        f'<div class="box"><p dir="rtl">E06 {AR}</p><p>E07 {AR}</p></div>',
         f"<p>A99 {AR} last</p>",
     ]
 )
@@ -124,6 +132,10 @@ LTR_PAGE = "".join(
         f'<td class="end">Q61 {AR} td end</td>'
         f'<th class="start">Q65 {AR} th start</th>'
         "</tr></table>",
+        # #605, P605 T06, T07: CSS direction on a table, and on a cell in a
+        # right-to-left table.
+        '<table class="trtl"><tr><td>T06 words</td></tr></table>',
+        '<table dir="rtl"><tr><td class="cltr">T07 words</td></tr></table>',
         # QA's Q72-Q75: the same, in cells of two paragraphs.
         '<table dir="rtl"><tr>'
         f'<td class="start"><p>Q72 {AR} first</p><p>Q73 {AR} second</p></td>'
@@ -329,6 +341,26 @@ def test_a_box_carries_the_keys_and_its_paragraph_none(entries):
     box = next(k for k in above if k.get("$159") == "$270")
     assert _bidi(box) == {"$10": "ar", "$682": "$375", "$674": "$676"}
     assert _bidi(own) == {}
+
+
+def test_a_direction_set_on_the_element_is_written_again(entries):
+    # #605, Previewer 4.0.3 (P605c E05-E08): the same as the container's.
+    assert _bidi(entries["E05"][0]) == {"$682": "$375"}
+    assert _bidi(entries["E08"][0]) == {}
+    assert _bidi(entries["E06"][0]) == {"$682": "$375", "$674": "$676"}
+    assert _bidi(entries["E07"][0]) == {}
+
+
+def test_css_direction_on_a_table_and_on_a_cell(entries):
+    # #605, P605 T06, T07: `$682` alone, no isolate.
+    own, above = entries["T06"]
+    table = next(k for k in above if k.get("$159") == "$278")
+    assert _bidi(table) == {"$10": "en", "$682": "$375"}
+    assert _bidi(own) == {}
+    assert _bidi(entries["T07"][0]) == {"$682": "$376"}
+    # No alignment in either: Previewer writes none (P605 T06, T07).
+    assert _align(entries["T06"]) is None
+    assert _align(entries["T07"]) is None
 
 
 def test_the_spine_turns_the_pages_right_to_left(frags):
