@@ -243,6 +243,92 @@ def _specified_inherited(stylizer, elem, prop):
     return None
 
 
+#: A `:link` or `:visited` in a selector. Kindle Previewer 4.0.3 reads both
+#: as always true: such a rule sets a link's colour as the same rule without
+#: them would, by specificity and then order (P733, #733).
+_LINK_STATE = re.compile(r":(?:link|visited)(?![\w-])", re.I)
+#: The other states and pseudo-elements calibre's Stylizer keeps apart from
+#: an element's style. Previewer takes no colour from `:hover`, `:active` or
+#: `:focus`, alone or after a `:link` rule (P733 L05, L20, L26).
+_OTHER_STATE = re.compile(
+    r":{1,2}(?:active|after|before|checked|disabled|enabled|first-letter"
+    r"|first-line|focus|focus-visible|focus-within|hover|target|target-within)"
+    r"(?![\w-])",
+    re.I,
+)
+_INLINE_COLOUR = re.compile(r"(?:^|;)\s*color\s*:", re.I)
+_INHERITED_COLOUR = frozenset({"inherit", "currentcolor"})
+#: A link's colour from a `:link` or `:visited` rule, as written, set by
+#: `mark_link_state_colours` before calibre flattens the CSS (#733).
+_SOURCE_LINK_COLOUR = "data-kfxgen-link-colour"
+
+
+def mark_link_state_colours(root, stylizer, select=None):
+    """Record on each link the colour its `:link` or `:visited` rule gives
+    it, where that rule wins (#733).
+
+    calibre's Stylizer keeps those rules apart from the element's style, and
+    its flattened CSS keeps them as `:link` and `:visited` classes, without
+    their place in the cascade. Before flattening, its `rules` are the
+    book's, in cascade order: the last colour rule matching a link decides,
+    and only a `:link` or `:visited` one is recorded. A colour in the link's
+    `style` attribute wins over both (P733 L07, L17), and a link without an
+    href is no link (L21). calibre runs the output plugin's
+    `specialize_css_for_output` on each file just before flattening it,
+    which calls this. `select(selector)` lists the elements a selector
+    matches; calibre's own by default."""
+    rules = []
+    for rule in getattr(stylizer, "rules", None) or ():
+        cssdict, text = rule[2], str(rule[3])
+        if cssdict.get("color") and not _OTHER_STATE.search(text):
+            rules.append((text, str(cssdict["color"]), bool(_LINK_STATE.search(text))))
+    if not any(state for _, _, state in rules):
+        return
+    links = [
+        e
+        for e in root.iter()
+        if isinstance(e.tag, str)
+        and _local_tag(e.tag) == "a"
+        and e.get("href") is not None
+        and not _INLINE_COLOUR.search(e.get("style") or "")
+    ]
+    if not links:
+        return
+    if select is None:
+        # calibre's selector engine, as its Stylizer matches the rules.
+        from css_selectors import Select  # noqa: PLC0415
+
+        select = Select(root, ignore_inappropriate_pseudo_classes=True)
+    found = {}
+    wanted = set(links)
+    for text, value, state in rules:
+        try:
+            matched = wanted.intersection(select(text))
+        except Exception:
+            continue
+        for e in matched:
+            found[e] = value if state else None
+    for e, value in found.items():
+        if value is not None:
+            e.set(_SOURCE_LINK_COLOUR, value)
+
+
+def _specified_colour(stylizer, elem):
+    """`_specified_inherited`'s colour, with a link's `:link` or `:visited`
+    colour in place of calibre's where it wins (#733). `inherit` and
+    `currentColor` there take the colour around the link (P733 L14, L15)."""
+    while elem is not None:
+        value = elem.get(_SOURCE_LINK_COLOUR) if hasattr(elem, "get") else None
+        if value is None:
+            value = stylizer.style(elem).get("color")
+            if value and str(value).strip().lower() != "inherit":
+                return value
+        elif value.strip().lower() not in _INHERITED_COLOUR:
+            return value
+        elem = elem.getparent() if hasattr(elem, "getparent") else None
+    return None
+
+
 #: CSS px to the unit, for font-size. The em is 16px, as Kindle Previewer
 #: measures it (24px is 1.5em, #241).
 _FONT_PX = 16.0
@@ -775,7 +861,7 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     "text-transform": _specified_inherited(
                         stylizer, elem, "text-transform"
                     ),
-                    "color": _specified_inherited(stylizer, elem, "color"),
+                    "color": _specified_colour(stylizer, elem),
                     "font-style": _computed_value(st, "font-style"),
                     # vertical-align does NOT inherit, so .get() is right here:
                     # it returns the declared value, or None when the element

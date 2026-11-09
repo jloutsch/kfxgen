@@ -150,7 +150,8 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
     def specialize_css_for_output(self, log, opts, item, stylizer):
         """Called by calibre on each file just before it flattens the CSS
         and renames the classes: note which elements the book itself
-        classes `toc`, a printed contents listing (#329)."""
+        classes `toc`, a printed contents listing (#329), and the colour a
+        `:link` or `:visited` rule gives each link (#733)."""
         try:
             from .kfxgen.converter import mark_source_classes
 
@@ -158,6 +159,13 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
                 mark_source_classes(item.data)
         except Exception as e:
             log.warn("kfxgen: could not record the book's classes ({})".format(e))
+        try:
+            from .kfxgen.converter import mark_link_state_colours
+
+            if hasattr(item.data, "iter"):
+                mark_link_state_colours(item.data, stylizer)
+        except Exception as e:
+            log.warn("kfxgen: could not record link colours ({})".format(e))
 
     def convert(self, oeb_book, output_path, input_plugin, opts, log):
         """
