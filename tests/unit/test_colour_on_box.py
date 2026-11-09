@@ -11,8 +11,9 @@ drawn behind it, the nearest filled box, or the white page:
 - too little, it moves toward whichever of black or white contrasts more
   with the background, keeping its hue, until it has 4.5:1. #777 and black
   on #333 become about #9B9B9B; white on #DDD about #616161; white on #777
-  about #060606. A colour that can't get lighter without changing its hue
-  (pure red) is kept.
+  about #060606. A colour that can't reach 4.5:1 by getting lighter
+  without changing its hue (pure red, navy, dark red) is kept as written,
+  not brightened part of the way (P734, #734).
 
 A background kfxgen doesn't draw (a paragraph's or a span's own) is not the
 background: the text sits on the page. A box filled black is filled (it was
@@ -56,11 +57,43 @@ def _near(argb, previewer):
         ("#ffffff", 0x777777, 0xFF060606),  # C13: black contrasts more
         ("#ff0000", 0x333333, 0xFFFF0000),  # C12's run: can't get lighter
         ("#000000", 0x000000, 0xFF757575),  # C9's box colour
+        ("#008000", 0x333333, 0xFF00B400),  # P734 K004: green can reach it
+        ("#336699", 0x333333, 0xFF4F9FEE),  # P734 K009
+        ("#8b4513", 0x333333, 0xFFF27821),  # P734 K012: brown, on #333 not #555
+        ("#701880", 0x222222, 0xFFDE30FE),  # P739b B029: 4.52:1 at 254, brightened
     ],
 )
 def test_a_colour_is_measured_against_its_background(colour, background, previewer):
     got = css_text_colour(colour, background)
     assert _near(got, previewer), f"{got:08X} vs Previewer's {previewer:08X}"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("colour", "background"),
+    [
+        ("#000080", 0x333333),  # K001: navy
+        ("#800000", 0x333333),  # K002: dark red
+        ("#800080", 0x333333),  # K003: purple
+        ("#4040c0", 0x333333),  # K017
+        ("#202060", 0x222222),  # K036
+        ("#000080", 0x000000),  # K037: navy on black
+        ("#336699", 0x555555),  # K063
+        ("#8b4513", 0x555555),  # K066: saddle brown
+        ("#800000", 0x000080),  # K074: on a navy box
+        ("#800080", 0x600000),  # K093: on a dark red box
+        # QA's P739b, at the cut-off: 4.52:1 at its 255 form, but under
+        # 4.5:1 at its 254 form, which is the one Previewer measures.
+        ("#80247c", 0x333333),  # B006
+        ("#801050", 0x222222),  # B028
+    ],
+)
+def test_a_colour_that_cant_get_light_enough_is_kept(colour, background):
+    """Kindle Previewer 4.0.3 (P734, 124 cases on 8 boxes, #734): a colour
+    that would need more than its brightest form of the same hue to reach
+    4.5:1 on a dark box is written as the book gives it. kfxgen brightened
+    it as far as it went: navy became 0xFF0000FF, dark red 0xFFFF0000."""
+    assert css_text_colour(colour, background) == 0xFF000000 | int(colour[1:], 16)
 
 
 @pytest.mark.unit
