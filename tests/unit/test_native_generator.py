@@ -5892,3 +5892,52 @@ def test_a_location_on_a_link_container_is_the_containers(tmp_path):
     assert [str(e["$159"]) for e in entries] == ["$269", "$269", "$271", "$269"]
     assert entries[1].get("$142")
     assert locs[1] == (int(entries[1]["$155"]), 0)
+
+
+def test_entity_dependencies_list_every_picture_in_kfxlibs_order():
+    """`$253` (#456): a section lists every picture its storyline shows, and
+    each picture its raw data, sorted by fragment type then id as kfxlib
+    sorts them, whatever order the text uses them in. Six pictures, so an
+    unsorted list (a set's order) can't pass by chance; `img_10` pins the
+    plain string order kfxlib's `sort_key` uses."""
+    from kfxgen.kfxlib_minimal.ion import IonStruct
+    from kfxgen.kfxlib_minimal.yj_container import YJFragment
+    from kfxgen.native_generator import _entity_dependencies
+
+    pictures = ["img_4", "img_10", "img_0", "img_3", "img_1", "img_2"]
+    fragments = [
+        YJFragment(
+            ftype="$260",
+            fid="c0",
+            value=IonStruct(
+                IS("$174"), IS("c0"), IS("$141"), [IonStruct(IS("$176"), IS("l0"))]
+            ),
+        ),
+        YJFragment(
+            ftype="$259",
+            fid="l0",
+            value=IonStruct(
+                IS("$176"),
+                IS("l0"),
+                IS("$146"),
+                [IonStruct(IS("$175"), IS(p)) for p in pictures],
+            ),
+        ),
+    ]
+    for p in pictures:
+        fragments.append(
+            YJFragment(
+                ftype="$164",
+                fid=p,
+                value=IonStruct(IS("$175"), IS(p), IS("$165"), p + "_raw"),
+            )
+        )
+        fragments.append(YJFragment(ftype="$417", fid=p + "_raw", value=IonBLOB(b"x")))
+
+    got = [
+        (str(d["$155"]), [str(x) for x in d["$254"]])
+        for d in _entity_dependencies(fragments)
+    ]
+    ordered = sorted(pictures)
+    assert ordered[:2] == ["img_0", "img_1"] and "img_10" in ordered[2:3]
+    assert got == [("c0", ordered)] + [(p, [p + "_raw"]) for p in ordered]

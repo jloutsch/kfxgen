@@ -104,6 +104,87 @@ def _symbols_used(fragments):
     return used
 
 
+#: The entity dependencies kfxlib writes in `$419`'s `$253`: each fragment of
+#: the first type lists the fragments of the second type it reaches
+#: (`yj_structure.determine_entity_dependencies`).
+_DEPENDENCIES = (("$260", "$164"), ("$164", "$417"))
+
+
+def _entity_dependencies(fragments):
+    """`$419`'s `$253` (#456): each section lists the picture resources it
+    reaches, and each resource its raw media, by kfxlib's rule, as in the
+    KFX kfxlib makes from Kindle Previewer's KPF.
+
+    A fragment reaches another when it names it: a symbol value equal to its
+    id, or a string under `$165`/`$636`, which kfxlib reads as one. Reached
+    fragments are followed through, but a resource doesn't count the
+    resources it names itself.
+
+    Two parts of kfxlib's rule are left out, as kfxgen writes neither shape:
+    it follows nothing from a `$387` fragment, and a `$635` reference counts
+    as optional, listed under `$255` rather than `$254`."""
+    by_name = {}
+    for fragment in fragments:
+        if fragment.fid != fragment.ftype:
+            by_name.setdefault(str(fragment.fid), []).append(fragment.annotations)
+
+    def names(value, key=None, found=None):
+        found = set() if found is None else found
+        if isinstance(value, IonAnnotation):
+            names(value.value, key, found)
+        elif isinstance(value, IonStruct):
+            for k, item in value.items():
+                names(item, str(k), found)
+        elif isinstance(value, list):
+            for item in value:
+                names(item, key, found)
+        elif isinstance(value, IonSymbol) or (
+            isinstance(value, str) and key in ("$165", "$636")
+        ):
+            found.add(str(value))
+        return found
+
+    refs = {}
+    for fragment in fragments:
+        own = fragment.annotations
+        refs[own] = {
+            other
+            for name in names(fragment.value)
+            for other in by_name.get(name, ())
+            if other != own
+        }
+        if own.ftype == "$164":
+            refs[own] = {r for r in refs[own] if r.ftype != "$164"}
+
+    def reached(start):
+        seen, todo = set(), list(refs.get(start, ()))
+        while todo:
+            key = todo.pop()
+            if key not in seen:
+                seen.add(key)
+                todo.extend(refs.get(key, ()))
+        return seen
+
+    out = []
+    for key in sorted(refs, key=lambda k: k.sort_key()):
+        for depends, dependant in _DEPENDENCIES:
+            if key.ftype == depends:
+                found = sorted(
+                    (r for r in reached(key) if r.ftype == dependant),
+                    key=lambda k: k.sort_key(),
+                )
+                if found:
+                    out.append(
+                        IonStruct(
+                            IS("$155"),
+                            IS(key.fid),
+                            IS("$254"),
+                            [IS(r.fid) for r in found],
+                        )
+                    )
+    return out
+
+
 def _size_in_box(hint, box):
     """A picture's size hint inside a sized box (#382): none fills the box,
     a % is already a share of it, and a width in a length becomes one: of a
@@ -3212,7 +3293,7 @@ class NativeKFXGenerator:
 
         return YJFragment(ftype=IS("$270"), value=value)
 
-    def build_fragment_419(self, container_id, entity_names):
+    def build_fragment_419(self, container_id, entity_names, dependencies=()):
         """
         Builds Fragment $419 (Entity Index / Container Map)
 
@@ -3220,6 +3301,7 @@ class NativeKFXGenerator:
             container_id: String (e.g. "CR!...")
             entity_names: List of local symbol names (e.g. ["content_1", "s0", "l0", "c0"])
                          These are looked up via the symbol table to get proper IDs.
+            dependencies: `$253`'s entries (`_entity_dependencies`, #456).
         """
         # Use IS() with plain names so get_id does proper symbol table lookup
         entity_symbols = [IS(name) for name in entity_names]
@@ -3228,7 +3310,7 @@ class NativeKFXGenerator:
             IS("$252"),
             [IonStruct(IS("$155"), container_id, IS("$181"), entity_symbols)],
             IS("$253"),
-            [],
+            list(dependencies),
         )
 
         return YJFragment(fid=IS("$348"), ftype=IS("$419"), value=value)
@@ -4790,7 +4872,11 @@ class NativeKFXGenerator:
         # Each once, as Kindle Previewer writes it: the cover and a shared
         # style were listed again where the text used them (#520).
         self.fragments.append(
-            self.build_fragment_419(container_id, list(dict.fromkeys(all_entity_names)))
+            self.build_fragment_419(
+                container_id,
+                list(dict.fromkeys(all_entity_names)),
+                _entity_dependencies(self.fragments),
+            )
         )
 
         # 15. Build $270 container info fragment (REQUIRED)
