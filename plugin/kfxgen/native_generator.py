@@ -118,7 +118,11 @@ def _entity_dependencies(fragments):
     A fragment reaches another when it names it: a symbol value equal to its
     id, or a string under `$165`/`$636`, which kfxlib reads as one. Reached
     fragments are followed through, but a resource doesn't count the
-    resources it names itself."""
+    resources it names itself.
+
+    Two parts of kfxlib's rule are left out, as kfxgen writes neither shape:
+    it follows nothing from a `$387` fragment, and a `$635` reference counts
+    as optional, listed under `$255` rather than `$254`."""
     by_name = {}
     for fragment in fragments:
         if fragment.fid != fragment.ftype:
