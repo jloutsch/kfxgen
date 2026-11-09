@@ -5941,3 +5941,66 @@ def test_entity_dependencies_list_every_picture_in_kfxlibs_order():
     ordered = sorted(pictures)
     assert ordered[:2] == ["img_0", "img_1"] and "img_10" in ordered[2:3]
     assert got == [("c0", ordered)] + [(p, [p + "_raw"]) for p in ordered]
+
+
+@pytest.mark.parametrize(
+    "names,max_id",
+    [
+        # Local names of Kindle Previewer 4.0.3's KPFs (P456 probes, #456) and
+        # the `$538` max_id it wrote for each.
+        (
+            [
+                "c0",
+                "c0-ad",
+                "c0-spm",
+                "dE",
+                "i3",
+                "i5",
+                "i7",
+                "l4",
+                "n9",
+                "nB",
+                "s6",
+                "s8",
+            ],
+            15,
+        ),
+        (
+            [
+                "c0",
+                "c0-ad",
+                "c0-spm",
+                "dJ",
+                "i3",
+                "i5",
+                "i7",
+                "i9",
+                "iB",
+                "l4",
+                "nD",
+                "nF",
+            ]
+            + ["s6", "s8", "sA", "sC"],
+            19,
+        ),
+        (
+            ["c0", "c0-spm", "dM", "i3", "iB", "l4", "nD", "nF", "rsrcK", "s6", "sC"],
+            21,
+        ),
+        (["c0", "dT", "iJ", "l4", "nM", "nP", "sK"], 26),
+        (["c0", "d1J", "s1H"], 51),
+        (["c0", "d10", "sZ"], 33),
+    ],
+)
+def test_max_id_is_one_past_the_highest_short_id(names, max_id):
+    """`$538`'s max_id (#456): Kindle Previewer numbers its short ids (a
+    letter, then up to six digits of 0-9 and A-Z without I, L, O, Q) from
+    one counter, and writes the next number. Names outside Previewer's
+    digits don't count: `content_1`, `img_0`, and `nL` (kfxlib's SHORT
+    pattern accepts I, L, O and Q, so kfxlib calls `nL` short)."""
+    from kfxgen.native_generator import _max_id
+
+    assert (
+        _max_id(names + ["content_1", "img_0", "nL", "resource/img_0", "$ion"])
+        == max_id
+    )
