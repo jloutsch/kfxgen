@@ -104,6 +104,39 @@ def _symbols_used(fragments):
     return used
 
 
+#: The digits of Kindle Previewer's short ids: 0-9 and A-Z without I, L, O, Q.
+_ID_DIGITS = "0123456789ABCDEFGHJKMNPRSTUVWXYZ"
+
+#: A short id, as kfxlib classifies one (`yj_structure.classify_symbol`,
+#: SYM_TYPE.SHORT): a prefix, then up to six digits, then a known suffix.
+_SHORT_ID = re.compile(
+    r"^(?:resource/rsrc|resource/e|rsrc|[a-z])([0-9A-HJKMNPR-Z]{1,6})"
+    r"(?:(?:-hd|-first-frame|-thumb)?(?:-resized-[0-9]+-[0-9]+|-hd-tile-[0-9]+-[0-9]+)?|"
+    r"-ad|-spm|_thumbnail|-transcoded|(?:_thumb)?\.jpg|\.ttf|\.otf|\.woff|\.woff2|\.eot|"
+    r"\.dfont|\.bin)?$"
+)
+
+
+def _max_id(names):
+    """`$538`'s max_id (#456): one past the highest short id in `names`.
+
+    Kindle Previewer 4.0.3 numbers its short ids (`c0`, `dE`, `s1H`) from
+    one counter in base 32, digits `_ID_DIGITS`, and writes the next number:
+    in all 13 of the P456 probe KPFs, max_id was exactly one past their
+    highest id. kfxgen numbers each kind of name separately, in decimal, so
+    this reads its ids in Previewer's base and gives a number above all of
+    them. Names that aren't short ids don't count."""
+    top = -1
+    for name in names:
+        match = _SHORT_ID.match(str(name))
+        if match:
+            value = 0
+            for digit in match.group(1):
+                value = value * 32 + _ID_DIGITS.index(digit)
+            top = max(top, value)
+    return top + 1
+
+
 #: The entity dependencies kfxlib writes in `$419`'s `$253`: each fragment of
 #: the first type lists the fragments of the second type it reaches
 #: (`yj_structure.determine_entity_dependencies`).
@@ -2818,7 +2851,8 @@ class NativeKFXGenerator:
             IS("$436"),
             IS("$441"),
             IS("max_id"),
-            15000,
+            # Set once the book's ids are known: `_max_id` (#456).
+            0,
             IS("$42"),
             IonStruct(IS("$307"), IonDecimal("1.2"), IS("$306"), IS("$308")),
             IS("$477"),
@@ -4899,6 +4933,14 @@ class NativeKFXGenerator:
         # Must be added last so all symbols used by other fragments are registered
         # Only the symbols a fragment uses, as Previewer lists them (#456).
         self.symtab = self.symtab.keeping(_symbols_used(self.fragments))
+        # `$538`'s max_id: one past the highest short id, as Previewer
+        # writes it (#456); it was the constant 15000.
+        local = self.symtab.symbols[self.symtab.local_min_id - 1 :]
+        for fragment in self.fragments:
+            if fragment.ftype == "$538":
+                fragment.value[IS("max_id")] = _max_id(
+                    s for s in local if s is not None
+                )
         self.fragments.append(self.build_ion_symbol_table_fragment())
 
         # 17. Sort fragments to match PREFERED_FRAGMENT_TYPE_ORDER

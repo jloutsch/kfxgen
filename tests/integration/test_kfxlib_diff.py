@@ -311,6 +311,21 @@ def test_upstream_reports_no_unreferenced_fragments(
     assert not unreferenced, f"{name}: {unreferenced[0]}"
 
 
+@pytest.mark.tier2
+@pytest.mark.integration
+@pytest.mark.parametrize("name,builder", GOLDEN_INPUTS)
+def test_max_id_follows_the_books_own_ids(name, builder, built_kfx):
+    """`$538`'s max_id is one past the book's highest short id, as Kindle
+    Previewer writes it (#456), not the constant 15000 it was."""
+    from kfxgen.native_generator import _max_id
+
+    fragments = load_fragments(built_kfx(name, builder))
+    (document,) = [f.value for f in fragments if str(f.ftype) == "$538"]
+    (table,) = [f.value for f in fragments if str(f.ftype) == "$ion_symbol_table"]
+    local = [str(s) for s in table["symbols"]]
+    assert int(document["max_id"]) == _max_id(local) > 1
+
+
 def _dependencies(entity_map):
     """`$419`'s `$253` as plain strings: [(entity, key, [ids])]."""
     return [

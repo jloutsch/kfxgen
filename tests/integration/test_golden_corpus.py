@@ -225,7 +225,8 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     book's headings (#461): `$389`'s other containers are unchanged. The book
     has no <h1>-<h6>, so no `$798` and no `nH` (#575). The symbol table
     lists only the symbols a fragment uses (#456): v5.8.8's, in its order,
-    less the ones no fragment uses."""
+    less the ones no fragment uses. `$538`'s max_id is one past the book's
+    highest short id (#456), where v5.8.8 wrote 15000."""
     from types import SimpleNamespace
 
     from tests._kfx_introspect import load_fragments, val
@@ -247,8 +248,14 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     fresh_path.write_bytes(fresh)
 
     def fragments(path):
+        def value(f):
+            v = val(f)
+            if str(f.ftype) == "$538":
+                v = {k: x for k, x in v.items() if str(k) != "max_id"}
+            return repr(v)
+
         return {
-            (str(f.ftype), str(f.fid)): repr(val(f))
+            (str(f.ftype), str(f.fid)): value(f)
             for f in load_fragments(path)
             if str(f.ftype)
             not in ("$550", "$585", "$270", "$389", "$490", "$ion_symbol_table")
@@ -272,6 +279,10 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     fresh_symbols = list(by_type(fresh_path, "$ion_symbol_table")["symbols"])
     assert set(fresh_symbols) <= set(old_symbols) - {*features, "nL", "nH"}
     assert fresh_symbols == [x for x in old_symbols if x in set(fresh_symbols)]
+    from kfxgen.native_generator import _max_id
+
+    assert by_type(old_path, "$538")["max_id"] == 15000
+    assert by_type(fresh_path, "$538")["max_id"] == _max_id(fresh_symbols)
     assert [t for t, _ in by_type(fresh_path, "$270")["$181"]] == [
         t for t, _ in by_type(old_path, "$270")["$181"]
     ]
