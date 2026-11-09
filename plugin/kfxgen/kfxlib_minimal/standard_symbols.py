@@ -273,10 +273,21 @@ class StandardSymbolTable(LocalSymbolTable):
     2. Local STANDARD_SYMBOLS (content names, style names, etc.)
     """
 
-    def __init__(self):
+    def __init__(self, preload=True):
         super(StandardSymbolTable, self).__init__()
         # Import the YJ_SYMBOLS shared symbol table - CRITICAL for KFX format
         # This provides all the standard KFX symbols like $145, $157, $259, $260, etc.
         self.import_shared_symbol_table("YJ_symbols")
         # Import local symbols (content names, resource names, etc.)
-        self.import_symbols(STANDARD_SYMBOLS)
+        if preload:
+            self.import_symbols(STANDARD_SYMBOLS)
+
+    def keeping(self, used):
+        """A table with the same import and only those of this table's local
+        symbols in `used`, in their order: Kindle Previewer's books list no
+        symbol their fragments don't use, and kfxlib warns of any (#456)."""
+        table = StandardSymbolTable(preload=False)
+        for symbol in self.symbols[self.local_min_id - 1 :]:
+            if symbol is not None and symbol in used:
+                table.create_local_symbol(symbol)
+        return table

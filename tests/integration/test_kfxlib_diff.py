@@ -311,6 +311,40 @@ def test_upstream_reports_no_unreferenced_fragments(
     assert not unreferenced, f"{name}: {unreferenced[0]}"
 
 
+@pytest.mark.tier2
+@pytest.mark.integration
+@pytest.mark.parametrize("name,builder", GOLDEN_INPUTS)
+def test_upstream_reports_every_symbol_used_and_none_missing(
+    name, builder, upstream_kfxlib, built_kfx
+):
+    """The symbol table lists exactly the symbols the fragments use (#456).
+
+    Kindle Previewer's books list no unused symbol. kfxgen preloaded 247
+    names harvested from Previewer into every book, and upstream warned of
+    them in every file. Upstream's own rule decides: "unused" for a listed
+    symbol no fragment uses, "missing" for a used one the table lacks (which
+    kfxgen's writer would have written as id 0 without an error).
+    """
+    from kfxlib.message_logging import set_logger
+
+    messages: list[str] = []
+    set_logger(_MessageCollector(messages))
+    try:
+        book = upstream_kfxlib(str(built_kfx(name, builder)))
+        book.decode_book()
+    finally:
+        set_logger(None)
+
+    found = [
+        m
+        for m in messages
+        if "Symbol table contains" in m
+        or "Symbol table is missing" in m
+        or "Undefined Ion symbol" in m
+    ]
+    assert not found, f"{name}: {found}"
+
+
 class _LevelCollector:
     """Like `_MessageCollector`, but keeps the level each message came in on."""
 
@@ -330,7 +364,6 @@ _BASELINE_WARNINGS = (
     "yj_hdv-1 without HDV",
     "yj_jpg_rst_marker_present=1",
     "reflow-section-size is",
-    "Symbol table contains",
     # KFX Input drops approximate page numbers when it writes an EPUB, as it
     # does KFX Output's; kfxgen adds them to a book with none (#586).
     "Removing approximate page numbers previously produced by KFX Output",

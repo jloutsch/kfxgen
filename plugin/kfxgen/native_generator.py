@@ -27,7 +27,14 @@ from .inline_style import (
     without_math,
     without_ruby,
 )
-from .kfxlib_minimal.ion import IS, IonAnnotation, IonBLOB, IonDecimal, IonStruct
+from .kfxlib_minimal.ion import (
+    IS,
+    IonAnnotation,
+    IonBLOB,
+    IonDecimal,
+    IonStruct,
+    IonSymbol,
+)
 from .math_draw import TEXT_SIZE as MATH_TEXT_SIZE
 from .math_draw import MathText
 from .kfxlib_minimal.kfx_container import KfxContainer
@@ -70,6 +77,31 @@ _BIDI_SYMBOLS = {
     "plaintext": "$679",
     "normal": "$350",
 }
+
+
+def _symbols_used(fragments):
+    """Every symbol `fragments` refer to: their ids and types, struct keys,
+    annotations and symbol values, as kfxlib counts a symbol as used
+    (#456)."""
+    used = set()
+
+    def walk(value):
+        if isinstance(value, IonAnnotation):
+            used.update(value.annotations)
+            walk(value.value)
+        elif isinstance(value, IonStruct):
+            for key, item in value.items():
+                used.add(key)
+                walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+        elif isinstance(value, IonSymbol):
+            used.add(value)
+
+    for fragment in fragments:
+        walk(fragment)
+    return used
 
 
 def _size_in_box(hint, box):
@@ -4779,6 +4811,8 @@ class NativeKFXGenerator:
 
         # 16. Build $ion_symbol_table fragment (REQUIRED for Kindle)
         # Must be added last so all symbols used by other fragments are registered
+        # Only the symbols a fragment uses, as Previewer lists them (#456).
+        self.symtab = self.symtab.keeping(_symbols_used(self.fragments))
         self.fragments.append(self.build_ion_symbol_table_fragment())
 
         # 17. Sort fragments to match PREFERED_FRAGMENT_TYPE_ORDER

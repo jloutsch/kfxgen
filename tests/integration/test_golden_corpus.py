@@ -223,7 +223,9 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     and the symbol table no `nL` (#460); the metadata: no invented
     description or date (#454); and the heading navigation, built from the
     book's headings (#461): `$389`'s other containers are unchanged. The book
-    has no <h1>-<h6>, so no `$798` and no `nH` (#575)."""
+    has no <h1>-<h6>, so no `$798` and no `nH` (#575). The symbol table
+    lists only the symbols a fragment uses (#456): v5.8.8's, in its order,
+    less the ones no fragment uses."""
     from types import SimpleNamespace
 
     from tests._kfx_introspect import load_fragments, val
@@ -267,9 +269,9 @@ def test_native_tables_opt_out_matches_5_8_8(tmp_path):
     old_path = EXPECTED_DIR / "table_cells_rows.kfx"
     assert fragments(fresh_path) == fragments(old_path)
     old_symbols = list(by_type(old_path, "$ion_symbol_table")["symbols"])
-    assert list(by_type(fresh_path, "$ion_symbol_table")["symbols"]) == [
-        x for x in old_symbols if x not in (*features, "nL", "nH")
-    ]
+    fresh_symbols = list(by_type(fresh_path, "$ion_symbol_table")["symbols"])
+    assert set(fresh_symbols) <= set(old_symbols) - {*features, "nL", "nH"}
+    assert fresh_symbols == [x for x in old_symbols if x in set(fresh_symbols)]
     assert [t for t, _ in by_type(fresh_path, "$270")["$181"]] == [
         t for t, _ in by_type(old_path, "$270")["$181"]
     ]
