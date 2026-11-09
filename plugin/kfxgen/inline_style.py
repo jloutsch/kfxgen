@@ -704,8 +704,10 @@ _MAX_LUMINANCE = 1.05 / 4.5 - 0.05
 def _scaled(ch, target, darken):
     """`ch` scaled, keeping its hue, to the luminance `target`: down to it
     when `darken`, else up to it. Black lightens as grey. A colour whose
-    brightest form of the same hue is still below `target` is returned
-    unchanged, as Previewer keeps it (P734, #734)."""
+    same hue with its top channel at 254 is still below `target` is
+    returned unchanged, as Previewer keeps it (P734, P739b, #734). Previewer
+    measures that 254 form, not the 255 one: colours between the two are
+    kept, and none it brightens has a channel above 254."""
     if darken:
         lo, hi = 0.0, 1.0
         for _ in range(30):
@@ -717,7 +719,7 @@ def _scaled(ch, target, darken):
         return tuple(int(c * lo) for c in ch)
     base = ch if max(ch) else (1, 1, 1)
     lo, hi = (1.0 if max(ch) else 0.0), 255 / max(base)
-    if _luminance(tuple(c * hi for c in base)) < target:
+    if _luminance(tuple(c * 254 / max(base) for c in base)) < target:
         return ch
     for _ in range(30):
         mid = (lo + hi) / 2
@@ -740,8 +742,9 @@ def css_text_colour(value, background=None):
     4.5:1 (#383). On the page, white is written 0xFF767676 and yellow
     0xFF7A7A00; on a #333333 box white is kept and black becomes about
     0xFF9C9C9C. A colour that can't reach 4.5:1 by getting lighter without
-    changing its hue is kept as the book gives it: pure red, and navy and
-    dark red rather than their brightest forms (P734, 124 of 124, #734)."""
+    changing its hue (measured at its top channel 254) is kept as the book
+    gives it: pure red, and navy and dark red rather than their brightest
+    forms (P734 and P739b, 168 of 168, #734)."""
     if is_transparent(value):
         return None
     rgb = css_rgb(value)

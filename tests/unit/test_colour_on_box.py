@@ -60,6 +60,7 @@ def _near(argb, previewer):
         ("#008000", 0x333333, 0xFF00B400),  # P734 K004: green can reach it
         ("#336699", 0x333333, 0xFF4F9FEE),  # P734 K009
         ("#8b4513", 0x333333, 0xFFF27821),  # P734 K012: brown, on #333 not #555
+        ("#701880", 0x222222, 0xFFDE30FE),  # P739b B029: 4.52:1 at 254, brightened
     ],
 )
 def test_a_colour_is_measured_against_its_background(colour, background, previewer):
@@ -81,6 +82,10 @@ def test_a_colour_is_measured_against_its_background(colour, background, preview
         ("#8b4513", 0x555555),  # K066: saddle brown
         ("#800000", 0x000080),  # K074: on a navy box
         ("#800080", 0x600000),  # K093: on a dark red box
+        # QA's P739b, at the cut-off: 4.52:1 at its 255 form, but under
+        # 4.5:1 at its 254 form, which is the one Previewer measures.
+        ("#80247c", 0x333333),  # B006
+        ("#801050", 0x222222),  # B028
     ],
 )
 def test_a_colour_that_cant_get_light_enough_is_kept(colour, background):
