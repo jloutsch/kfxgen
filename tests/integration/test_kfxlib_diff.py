@@ -311,6 +311,36 @@ def test_upstream_reports_no_unreferenced_fragments(
     assert not unreferenced, f"{name}: {unreferenced[0]}"
 
 
+def _dependencies(entity_map):
+    """`$419`'s `$253` as plain strings: [(entity, key, [ids])]."""
+    return [
+        (str(d["$155"]), str(k), [str(x) for x in d[k]])
+        for d in entity_map.get("$253", [])
+        for k in d
+        if str(k) != "$155"
+    ]
+
+
+@pytest.mark.tier2
+@pytest.mark.integration
+@pytest.mark.parametrize("name,builder", GOLDEN_INPUTS)
+def test_entity_dependencies_are_upstreams(name, builder, upstream_kfxlib, built_kfx):
+    """`$419`'s `$253` lists what upstream lists for the same book (#456).
+
+    Upstream's `decode_book()` rebuilds `$419` by its own rule
+    (`yj_structure.determine_entity_dependencies`): each section lists the
+    picture resources (`$164`) it shows, and each resource its raw media
+    (`$417`). That is the `$253` in the Previewer books kfxlib turns from
+    KPF into KFX. kfxgen wrote `[]`.
+    """
+    path = built_kfx(name, builder)
+    (ours,) = [f.value for f in load_fragments(path) if str(f.ftype) == "$419"]
+    book = upstream_kfxlib(str(path))
+    book.decode_book()
+    theirs = book.fragments.get("$419", first=True).value
+    assert _dependencies(ours) == _dependencies(theirs)
+
+
 @pytest.mark.tier2
 @pytest.mark.integration
 @pytest.mark.parametrize("name,builder", GOLDEN_INPUTS)
