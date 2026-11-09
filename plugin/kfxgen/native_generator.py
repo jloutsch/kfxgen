@@ -107,8 +107,9 @@ def _symbols_used(fragments):
 #: The digits of Kindle Previewer's short ids: 0-9 and A-Z without I, L, O, Q.
 _ID_DIGITS = "0123456789ABCDEFGHJKMNPRSTUVWXYZ"
 
-#: A short id, as kfxlib classifies one (`yj_structure.classify_symbol`,
-#: SYM_TYPE.SHORT): a prefix, then up to six digits, then a known suffix.
+#: A short id: kfxlib's SHORT pattern (`yj_structure.classify_symbol`) with
+#: its digits restricted to Previewer's. kfxlib also accepts I, L, O and Q, so
+#: it calls kfxgen's `nL` short; Previewer never writes those digits.
 _SHORT_ID = re.compile(
     r"^(?:resource/rsrc|resource/e|rsrc|[a-z])([0-9A-HJKMNPR-Z]{1,6})"
     r"(?:(?:-hd|-first-frame|-thumb)?(?:-resized-[0-9]+-[0-9]+|-hd-tile-[0-9]+-[0-9]+)?|"

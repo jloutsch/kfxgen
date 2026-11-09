@@ -5995,8 +5995,9 @@ def test_entity_dependencies_list_every_picture_in_kfxlibs_order():
 def test_max_id_is_one_past_the_highest_short_id(names, max_id):
     """`$538`'s max_id (#456): Kindle Previewer numbers its short ids (a
     letter, then up to six digits of 0-9 and A-Z without I, L, O, Q) from
-    one counter, and writes the next number. Names that aren't short ids
-    (`content_1`, `img_0`, `nL`) don't count."""
+    one counter, and writes the next number. Names outside Previewer's
+    digits don't count: `content_1`, `img_0`, and `nL` (kfxlib's SHORT
+    pattern accepts I, L, O and Q, so kfxlib calls `nL` short)."""
     from kfxgen.native_generator import _max_id
 
     assert (
