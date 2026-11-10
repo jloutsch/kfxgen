@@ -215,3 +215,26 @@ def test_a_plain_span_inside_tcy_adds_no_run(tmp_path):
     )
     (story,) = by_type(frags, "$259")
     assert [r for e in val(story)["$146"] for r in e.get("$142") or ()] == []
+
+
+@pytest.mark.unit
+def test_an_inner_style_that_undoes_the_outer_one_is_the_placeholders(tmp_path):
+    # QA's P748d D1: `<b>太字<tcy><span class="nb">12</span></tcy>と</b>`:
+    # Previewer writes the container $13 $350: not bold.
+    css = dict(TCY, bb={"font-weight": "bold"}, nb={"font-weight": "normal"})
+    _blocks, frags = _book(
+        tmp_path,
+        '<p>前<span class="bb">太字<span class="t"><span class="nb">12</span></span>'
+        "と</span>後</p>",
+        css,
+    )
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    (story,) = by_type(frags, "$259")
+    weights = {
+        int(r["$143"]): str(styles[str(r["$157"])].get("$13"))
+        for e in val(story)["$146"]
+        for r in e.get("$142") or ()
+    }
+    # Not bold: kfxgen leaves normal weight unwritten where Previewer
+    # writes $350, as it does without the 縦中横; it draws the same.
+    assert weights.get(1) == "$361" and weights.get(3) in (None, "$350")

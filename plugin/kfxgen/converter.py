@@ -2702,10 +2702,11 @@ def _walk_inline(
     )
     if tcy:
         # Set across the line (#247): one placeholder carrying its text, an
-        # inline container of its own, as an equation is. A style inside it
-        # over all its text is the placeholder's: Previewer writes a bold
-        # run over the container of `<span class="tcy"><b>56</b></span>`
-        # (QA's P748 X06).
+        # inline container of its own, as an equation is. Its style is the
+        # one all its text shares: Previewer writes a bold run over the
+        # container of `<span class="tcy"><b>56</b></span>` (QA's P748 X06),
+        # and a normal-weight one where a span inside it undoes a bold
+        # around it (P748d D1).
         inner = [(elem.text, cur)]
         for child in elem:
             inner.extend(
@@ -2725,7 +2726,7 @@ def _walk_inline(
             for t, f in inner
             if isinstance(t, str) and t.strip() and isinstance(f, frozenset)
         ]
-        own = cur | (frozenset.intersection(*worded) if worded else cur)
+        own = frozenset.intersection(*worded) if worded else cur
         parts.extend(
             make_anchor_mark(aid)
             for d in elem.iterdescendants()
