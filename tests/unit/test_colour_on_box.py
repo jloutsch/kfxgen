@@ -117,6 +117,12 @@ CSS = {
     "grey": {"color": "#777777"},
     "red": {"color": "#ff0000"},
     "plight": {"background-color": "#eeeeee", "color": "#777777"},
+    "c222": {"background-color": "#222222"},
+    "c333": {"background-color": "#333333"},
+    "c000": {"background-color": "#000000"},
+    "purple": {"color": "#701880"},
+    "brown": {"color": "#8b4513"},
+    "blue": {"color": "#336699"},
 }
 
 
@@ -243,3 +249,66 @@ def test_inside_a_box_a_paragraphs_own_fill_is_the_background(tmp_path):
     body = '<div class="dark"><p class="plight">Inner fill.</p></div>'
     colour, _runs, fill = _texts(body, tmp_path)["Inner"]
     assert fill == 0xFFEEEEEE and _near(colour, 0xFF6C6C6C)
+
+
+# --- In a table cell (#740) ---------------------------------------------------
+
+
+def _cell(cell_class, para_class, paragraphs=1, tag="td"):
+    paras = "".join(
+        f'<p class="{para_class}">T{n} {para_class} cell.</p>'
+        for n in range(paragraphs)
+    )
+    return f'<table><tr><{tag} class="{cell_class}">{paras}</{tag}></tr></table>'
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("tag", ["td", "th"])
+@pytest.mark.parametrize("paragraphs", [1, 2], ids=["one-paragraph", "two-paragraphs"])
+@pytest.mark.parametrize(
+    ("cell_class", "para_class", "previewer"),
+    [
+        ("c222", "purple", 0xFFDE30FE),  # P739t T004
+        ("c333", "brown", 0xFFF27821),  # P739t T008
+        ("c000", "blue", 0xFF3C78B4),  # P739t T007: has 4.5:1 on white too
+    ],
+)
+def test_a_colour_lightened_for_a_cell_is_not_darkened_for_the_page(
+    tmp_path, cell_class, para_class, previewer, paragraphs, tag
+):
+    """P739t (Kindle Previewer 4.0.3): a colour in a cell is measured against
+    the cell's fill only. kfxgen measured a one-paragraph cell's text again
+    against the page and darkened #701880 on #222222 to 0xFFC129DD (#740)."""
+    found = _texts(_cell(cell_class, para_class, paragraphs, tag), tmp_path)
+    colour, runs, _fill = found["T0"]
+    drawn = next((c for c in [*runs, colour] if c is not None), None)
+    assert _near(drawn, previewer), f"{drawn:08X} vs Previewer's {previewer:08X}"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("tag", ["td", "th"])
+def test_a_span_in_a_one_paragraph_cell_is_measured_against_the_cell(tmp_path, tag):
+    # P740 P07, P08: Previewer 0xFFDE30FE; kfxgen main 0xFFC129DD.
+    body = (
+        f'<table><tr><{tag} class="c222"><p>S1 plain <span class="purple">'
+        f"purplespan</span> end.</p></{tag}></tr></table>"
+    )
+    _colour, runs, _fill = _texts(body, tmp_path)["S1"]
+    assert any(_near(r, 0xFFDE30FE) for r in runs if r is not None), runs
+
+
+@pytest.mark.unit
+def test_after_a_dark_cell_text_is_on_the_page_again(tmp_path):
+    """The cell's fill holds only while its own chunk is written. White text
+    in a box kfxgen doesn't draw (C16's flattened sidebar) after the table is
+    darkened for the page, as it is with no table before it."""
+    cells = '<td class="c222"><p class="purple">T0 dark.</p></td>' + "".join(
+        f"<td><p>X{n} plain.</p></td>" for n in range(4)
+    )
+    body = (
+        f"<table><tr>{cells}</tr></table>"
+        '<div><span><div class="dark"><p class="white">W1 after.</p></div></span></div>'
+    )
+    colour, runs, _fill = _texts(body, tmp_path)["W1"]
+    drawn = next(c for c in [*runs, colour] if c is not None)
+    assert _near(drawn, 0xFF767676), f"{drawn:08X}"
