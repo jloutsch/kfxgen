@@ -947,22 +947,37 @@ def _chapter_writing_mode(chapter):
 #: kfxgen's own left margin on a paragraph, 0.5% (build_fragment_157):
 #: none the book set.
 _DEFAULT_LEFT = IonStruct(IS("$307"), IonDecimal("0.5"), IS("$306"), IS("$314"))
+#: In vertical-rl text, the key each of kfxgen's margin and padding keys
+#: moves to (#247): its top and bottom, the space before and after a block,
+#: to the right and left; its left and right, the line's start and end, to
+#: the top and bottom. The converter has put each value in its slot.
+_VERTICAL_KEYS = {
+    "$47": "$50",
+    "$49": "$48",
+    "$48": "$47",
+    "$50": "$49",
+    "$52": "$55",
+    "$54": "$53",
+    "$53": "$52",
+    "$55": "$54",
+}
 
 
-def _rotate_margins(value, sides):
-    """Move a $157's top margin ($47) to the right ($50) and its bottom
-    ($49) to the left ($48), for each of `sides`, as Kindle Previewer
-    4.0.3 writes the reading system's margins in vertical-rl text (P247g:
-    G01's 1.11667lh above and 0.833333lh below become right and left;
-    #247). A margin the book set on the side it moves to stays; kfxgen's
-    own 0.5% left margin gives way."""
-    for side, old, new in (("top", "$47", "$50"), ("bottom", "$49", "$48")):
-        if side not in sides or IS(old) not in value:
-            continue
-        moved = value.pop(IS(old))
-        here = value.get(IS(new))
-        if here is None or (new == "$48" and here == _DEFAULT_LEFT):
-            value[IS(new)] = moved
+def _rotate_margins(value):
+    """A $157's margins and paddings moved for vertical-rl text, as Kindle
+    Previewer 4.0.3 writes them (QA's P747 and P247g, #247): G01's
+    1.11667lh above and 0.833333lh below are $50 and $48; a book's
+    margin-top 2em, in the left slot, is $47 2em. kfxgen's own 0.5% left
+    margin is dropped: Previewer writes none."""
+    if value.get(IS("$48")) == _DEFAULT_LEFT:
+        value.pop(IS("$48"))
+    moved = {
+        new: value.pop(IS(old))
+        for old, new in _VERTICAL_KEYS.items()
+        if IS(old) in value
+    }
+    for key, v in moved.items():
+        value[IS(key)] = v
 
 
 def _write_typography(
@@ -6772,10 +6787,8 @@ class NativeKFXGenerator:
         #: converter measures a text colour against the box around it, which
         #: kfxgen may not draw (a box in a flattened <aside>, #383).
         open_fills = []
-        #: In vertical text, the sides ("top", "bottom") whose margin in the
-        #: chunk being written is the reading system's own: Kindle Previewer
-        #: 4.0.3 writes them right ($50) and left ($48), between the lines
-        #: (P247g, #247).
+        #: ["vertical"] while a vertical-rl chapter is written: its styles'
+        #: margins and paddings move (#247), and are cached apart.
         rotation = []
 
         def _bidi_diff(own, parent):
@@ -6812,7 +6825,7 @@ class NativeKFXGenerator:
             style_cache[key] = name
             frag = (builder or self.build_fragment_157)(entity_name=name, **attrs)
             if rotation:
-                _rotate_margins(frag.value, rotation)
+                _rotate_margins(frag.value)
             for sym, value in bidi:
                 frag.value[IS(sym)] = (
                     value if sym == "$10" else IS(_BIDI_SYMBOLS[value])
@@ -7236,24 +7249,10 @@ class NativeKFXGenerator:
                 _chapter_writing_mode(chapters[ch_idx])
                 or getattr(self, "_book_writing_mode", None)
             ) == "vertical-rl"
+            rotation[:] = ["vertical"] if vertical else []
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
                 around = open_bidi[-1] if open_bidi else {}
-                own = next(
-                    (
-                        d["ua_margins"]
-                        for d in (
-                            chunk.get("block_style"),
-                            # kfxgen's heading printing the book's (#490).
-                            chunk.get("book_style"),
-                            chunk.get("box"),
-                            chunk.get("rule"),
-                        )
-                        if d and d.get("ua_margins") is not None
-                    ),
-                    None,
-                )
-                rotation[:] = str(own).split() if vertical and own else []
                 if cell_fill_open:
                     open_fills.pop()
                     cell_fill_open = False

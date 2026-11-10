@@ -1,11 +1,14 @@
-"""The reading system's margins in vertical text, through calibre (#247).
+"""Margins in vertical text, through calibre (#247).
 
-Probe P247g (Kindle Previewer 4.0.3, decoded): in a vertical-rl book the
-default margins of <p>, <h1>, <h2> and <hr> are written right (`$50`) and
-left (`$48`); the book's own margin-top and margin-bottom stay top and
-bottom, and a horizontal file keeps them top and bottom. calibre folds its
-user agent's margins into its own classes when it flattens the CSS, so
-kfxgen reads them first, in `specialize_css_for_output`, which only a real
+Kindle Previewer 4.0.3 (probes P247g and QA's P747, decoded) lays a
+vertical-rl book's margins out as a browser does: the user agent's default
+margins of <p>, <h1>, <h2> and <hr> are the space before and after, written
+right (`$50`) and left (`$48`); the book's own margin-top and margin-bottom
+are the top and bottom (`$47`, `$49`, in ems, not collapsed), added to the
+default space; its margin-right and margin-left are the space before and
+after. A horizontal file keeps top and bottom. calibre folds its user
+agent's margins into its own classes when it flattens the CSS, so kfxgen
+reads them first, in `specialize_css_for_output`, which only a real
 conversion runs.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
@@ -44,6 +47,18 @@ BODY = (
     '<p class="ni">G06 見出しの後です。</p>'
 )
 H_BODY = "<h1>Colophon</h1><p>H01 A default paragraph.</p>"
+T = "朝の光が窓から入る。"
+#: QA's P747: V01 `p { margin: 1em 0 }`; V03 `.mt { margin-top: 2em }` on
+#: default <p>s; V12 `.ml { margin-left: 2em; margin-right: 1em }`.
+V01 = (f"<p>V01a {T}</p><p>V01b {T}</p>", VERT + " p { margin: 1em 0 }")
+V03 = (
+    f'<p>V03a {T}</p><p class="mt2">V03t {T}</p><p>V03z {T}</p>',
+    VERT + " .mt2 { margin-top: 2em }",
+)
+V12 = (
+    f'<p>V12a {T}</p><p class="ml">V12l {T}</p><p>V12z {T}</p>',
+    VERT + " .ml { margin-left: 2em; margin-right: 1em }",
+)
 
 
 @pytest.fixture(scope="module")
@@ -51,7 +66,13 @@ def margins(calibre):  # noqa: F811
     """{first word: its $47-$50 keys}, both files."""
     tmp, _env, _version = calibre
     epub, kfx = tmp / "m247.epub", tmp / "m247.kfx"
-    files = {"c1.xhtml": (BODY, VERT + REST), "c2.xhtml": (H_BODY, HORIZ + REST)}
+    files = {
+        "c1.xhtml": (BODY, VERT + REST),
+        "c2.xhtml": (H_BODY, HORIZ + REST),
+        "v01.xhtml": V01,
+        "v03.xhtml": V03,
+        "v12.xhtml": V12,
+    }
     items = "".join(
         f'<item id="x{i}" href="{h}" media-type="application/xhtml+xml"/>'
         for i, h in enumerate(files)
@@ -77,9 +98,7 @@ def margins(calibre):  # noqa: F811
             "</rootfiles></container>",
         )
         z.writestr("content.opf", opf)
-        z.writestr(
-            "toc.ncx", _ncx([("第一章", "c1.xhtml", 1), ("Colophon", "c2.xhtml", 1)])
-        )
+        z.writestr("toc.ncx", _ncx([(h, h, 1) for h in files]))
         for h, (b, css) in files.items():
             z.writestr(h, _page(b, ' xml:lang="ja"', css))
     _ebook_convert(calibre, epub, kfx, True)
@@ -95,27 +114,50 @@ def margins(calibre):  # noqa: F811
             word = str(texts[str(ref["name"])][ref["$403"]]).split()[0]
             s = styles.get(str(e.get("$157")), {})
             out[word] = {
-                k
+                k: "%g%s"
+                % (
+                    float(s[k]["$307"]),
+                    {"$310": "lh", "$308": "em", "$314": "%"}[str(s[k]["$306"])],
+                )
                 for k in ("$47", "$48", "$49", "$50")
-                if k in s and not (k == "$48" and str(s[k]["$306"]) == "$314")
+                if k in s
             }
     return out
 
 
 def test_a_default_paragraphs_margins_go_right_and_left(margins):
     # G01: Previewer $50 1.11667lh and $48 0.833333lh.
-    assert margins["G01"] == {"$50", "$48"}
+    assert margins["G01"] == {"$50": "1.11667lh", "$48": "0.833333lh"}
 
 
 def test_headings_default_margins_go_right_and_left(margins):
-    assert margins["第一章"] == {"$50"}  # its left collapses into G01's right
-    assert margins["G05"] == {"$50", "$48"}
+    assert margins["第一章"] == {
+        "$50": "0.558333lh"
+    }  # its left collapses into G01's right
+    assert margins["G05"] == {"$50": "0.691667lh", "$48": "0.691667lh"}
 
 
-def test_the_books_own_margins_stay_where_it_put_them(margins):
-    assert margins["G03"] == {"$47"}  # margin-top 2em
-    assert margins["G04"] == {"$50"}  # margin-right 2em
-    assert margins["G02"] == set()
+def test_the_books_own_margins_are_physical(margins):
+    assert margins["G03"] == {"$47": "2em"}  # margin: 0; margin-top 2em
+    assert margins["G04"] == {"$50": "1.66667lh"}  # margin: 0; margin-right 2em
+    assert margins["G02"] == {}
+
+
+def test_a_books_margin_top_is_added_to_the_default_space(margins):
+    # P747 V03t: $47 2em and $50 0.833333lh.
+    assert margins["V03t"] == {"$47": "2em", "$50": "0.833333lh"}
+
+
+def test_a_books_top_and_bottom_margins_dont_collapse(margins):
+    # P747 V01: every <p> $47 1em and $49 1em.
+    assert margins["V01a"] == {"$47": "1em", "$49": "1em"}
+    assert margins["V01b"] == {"$47": "1em", "$49": "1em"}
+
+
+def test_a_books_right_and_left_margins_collapse_as_the_space_between(margins):
+    # P747 V12: V12l $50 0.833333lh; its 2em left becomes V12z's $50.
+    assert margins["V12l"] == {"$50": "0.833333lh"}
+    assert margins["V12z"] == {"$50": "1.66667lh", "$48": "0.833333lh"}
 
 
 def test_a_horizontal_file_keeps_top_and_bottom(margins):

@@ -973,13 +973,6 @@ def compute_block_style(css):
         # text size (#241).
         "font_size": css_font_size(css),
         **_block_typography(css),
-        # In a vertical-rl file, which of its top and bottom margins are the
-        # reading system's own (#247); absent elsewhere.
-        **(
-            {"ua_margins": str(css.get("ua-margins"))}
-            if css.get("ua-margins") is not None
-            else {}
-        ),
     }
 
 
