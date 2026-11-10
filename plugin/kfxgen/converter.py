@@ -323,6 +323,117 @@ def mark_link_state_colours(root, stylizer, select=None):
             e.set(_SOURCE_LINK_COLOUR, value)
 
 
+#: On each element of a vertical-rl file (#247): the margin and padding
+#: properties the book sets, and the user agent's own, as "prop:value;...".
+_V_AUTHOR = "data-kfxgen-v-author"
+_V_UA = "data-kfxgen-v-ua"
+_SIDES = ("top", "right", "bottom", "left")
+_BOX_PROPS = tuple(f"{k}-{s}" for k in ("margin", "padding") for s in _SIDES)
+_STYLE_DECL = re.compile(
+    r"(?:^|;)\s*(margin|padding)(?:-(top|right|bottom|left))?\s*:", re.I
+)
+
+
+def mark_vertical_margins(root, stylizer, select=None):
+    """Record, on each element of a vertical-rl file, which of its margins
+    and paddings the book sets and what the user agent's are (#247).
+
+    Kindle Previewer 4.0.3 lays them out as a browser does (QA's P747 on
+    #747, and P247g): the user agent's margins are logical, before and after
+    a block, which in vertical-rl text is right and left, and its list
+    padding is at the start of the line, the top; the book's own are
+    physical, its margin-top the top. So a book's margin-top is added to a
+    <p>'s default space before it, not put in its place, and a book's
+    margin-right is the space before it, which collapses with its
+    neighbour's. calibre folds the user agent's margins into its own classes
+    when it flattens the CSS, so they are told apart here, before: a rule's
+    sort key starts 0 for the user agent's and 1 for the book's, and a
+    `style` attribute is the book's. calibre runs the output plugin's
+    `specialize_css_for_output` on each file just before flattening it,
+    which calls this."""
+    body = next(
+        (
+            e
+            for e in root.iter()
+            if isinstance(e.tag, str) and _local_tag(e.tag) == "body"
+        ),
+        None,
+    )
+    if body is None:
+        return
+    # The body's own, else its <html>'s, which it inherits (P247a, P247d).
+    mode = next(
+        (
+            str(stylizer.style(e).get("writing-mode") or "").strip().lower()
+            for e in (body, body.getparent())
+            if e is not None and stylizer.style(e).get("writing-mode")
+        ),
+        "",
+    )
+    if mode != "vertical-rl":
+        return
+    if select is None:
+        from css_selectors import Select  # noqa: PLC0415
+
+        select = Select(root, ignore_inappropriate_pseudo_classes=True)
+    authored, ua = {}, {}
+    # In cascade order: a later user agent rule's value wins.
+    for rule in getattr(stylizer, "rules", None) or ():
+        props = [p for p in _BOX_PROPS if p in rule[2]]
+        if not props or not rule[0]:
+            continue
+        try:
+            matched = select(str(rule[3]))
+        except Exception:
+            continue
+        for e in matched:
+            if rule[0][0] == 0:
+                ua.setdefault(e, {}).update((p, str(rule[2][p])) for p in props)
+            else:
+                authored.setdefault(e, set()).update(props)
+    for e in body.iter():
+        if not isinstance(e.tag, str):
+            continue
+        own = set(authored.get(e, ()))
+        for m in _STYLE_DECL.finditer(e.get("style") or ""):
+            kind, side = m.group(1).lower(), m.group(2)
+            own.update(f"{kind}-{s}" for s in ((side.lower(),) if side else _SIDES))
+        e.set(_V_AUTHOR, " ".join(p for p in _BOX_PROPS if p in own))
+        e.set(_V_UA, ";".join(f"{p}:{v}" for p, v in (ua.get(e) or {}).items()))
+
+
+#: In vertical-rl text, the physical side each of kfxgen's slots takes: its
+#: top and bottom, the space before and after a block, are the right and
+#: left; its left and right, the line's start and end, the top and bottom
+#: (#247). The generator writes each slot on that side.
+_VERTICAL_SLOTS = {"top": "right", "bottom": "left", "left": "top", "right": "bottom"}
+
+
+def _vertical_box(css, st, elem):
+    """`css`'s margins and paddings, in a vertical-rl file, put in kfxgen's
+    slots (#247): each slot takes the book's value of the physical side it
+    stands for where the book sets one, else the user agent's own for that
+    slot, logical. Unchanged outside a vertical-rl file."""
+    authored = elem.get(_V_AUTHOR)
+    if authored is None:
+        return css
+    authored = set(authored.split())
+    ua = dict(
+        item.split(":", 1) for item in (elem.get(_V_UA) or "").split(";") if ":" in item
+    )
+
+    def value(kind, slot):
+        side = _VERTICAL_SLOTS[slot]
+        if f"{kind}-{side}" in authored:
+            return st.get(f"{kind}-{side}")
+        return ua.get(f"{kind}-{slot}")
+
+    for slot in _SIDES:
+        css[f"margin-{slot}"] = value("margin", slot)
+    css["padding-sides"] = tuple(value("padding", slot) for slot in _BORDER_SIDES)
+    return css
+
+
 def _specified_colour(stylizer, elem):
     """`_specified_inherited`'s colour, with a link's `:link` or `:visited`
     colour in place of calibre's where it wins (#733). `inherit` and
@@ -900,7 +1011,7 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
         def resolve(elem):
             try:
                 st = stylizer.style(elem)
-                return {
+                css = {
                     # A number, in CSS px; the generator measures it
                     # against the book's main text size (#241).
                     "font-size": round(_font_size_px(stylizer, elem, sizes), 3),
@@ -1058,6 +1169,9 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                         for side in _BORDER_SIDES
                     ),
                 }
+                # In vertical-rl text, margins and paddings by the book's
+                # sides and the user agent's (#247).
+                return _vertical_box(css, st, elem)
             except Exception:
                 return None
 

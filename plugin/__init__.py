@@ -150,8 +150,9 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
     def specialize_css_for_output(self, log, opts, item, stylizer):
         """Called by calibre on each file just before it flattens the CSS
         and renames the classes: note which elements the book itself
-        classes `toc`, a printed contents listing (#329), and the colour a
-        `:link` or `:visited` rule gives each link (#733)."""
+        classes `toc`, a printed contents listing (#329), the colour a
+        `:link` or `:visited` rule gives each link (#733), and in vertical
+        text which margins are the reading system's own (#247)."""
         try:
             from .kfxgen.converter import mark_source_classes
 
@@ -166,6 +167,13 @@ class KFXGenOutputPlugin(OutputFormatPlugin):
                 mark_link_state_colours(item.data, stylizer)
         except Exception as e:
             log.warn("kfxgen: could not record link colours ({})".format(e))
+        try:
+            from .kfxgen.converter import mark_vertical_margins
+
+            if hasattr(item.data, "iter"):
+                mark_vertical_margins(item.data, stylizer)
+        except Exception as e:
+            log.warn("kfxgen: could not record vertical margins ({})".format(e))
 
     def convert(self, oeb_book, output_path, input_plugin, opts, log):
         """

@@ -944,6 +944,42 @@ def _chapter_writing_mode(chapter):
     )
 
 
+#: kfxgen's own left margin on a paragraph, 0.5% (build_fragment_157):
+#: none the book set.
+_DEFAULT_LEFT = IonStruct(IS("$307"), IonDecimal("0.5"), IS("$306"), IS("$314"))
+#: In vertical-rl text, the key each of kfxgen's margin and padding keys
+#: moves to (#247): its top and bottom, the space before and after a block,
+#: to the right and left; its left and right, the line's start and end, to
+#: the top and bottom. The converter has put each value in its slot.
+_VERTICAL_KEYS = {
+    "$47": "$50",
+    "$49": "$48",
+    "$48": "$47",
+    "$50": "$49",
+    "$52": "$55",
+    "$54": "$53",
+    "$53": "$52",
+    "$55": "$54",
+}
+
+
+def _rotate_margins(value):
+    """A $157's margins and paddings moved for vertical-rl text, as Kindle
+    Previewer 4.0.3 writes them (QA's P747 and P247g, #247): G01's
+    1.11667lh above and 0.833333lh below are $50 and $48; a book's
+    margin-top 2em, in the left slot, is $47 2em. kfxgen's own 0.5% left
+    margin is dropped: Previewer writes none."""
+    if value.get(IS("$48")) == _DEFAULT_LEFT:
+        value.pop(IS("$48"))
+    moved = {
+        new: value.pop(IS(old))
+        for old, new in _VERTICAL_KEYS.items()
+        if IS(old) in value
+    }
+    for key, v in moved.items():
+        value[IS(key)] = v
+
+
 def _write_typography(
     value, small_caps, text_transform, letter_spacing, colour, text_orientation=None
 ):
@@ -4744,6 +4780,9 @@ class NativeKFXGenerator:
             }
             chapters = [cover_chapter] + chapters
 
+        # Read while the chapters are built: vertical text moves its reading
+        # system's margins (#247).
+        self._book_writing_mode = writing_mode
         ch_data = self._build_chapter_content(chapters)
 
         # Drop image resources no chunk displays (#102). Resources are emitted
@@ -6748,6 +6787,9 @@ class NativeKFXGenerator:
         #: converter measures a text colour against the box around it, which
         #: kfxgen may not draw (a box in a flattened <aside>, #383).
         open_fills = []
+        #: ["vertical"] while a vertical-rl chapter is written: its styles'
+        #: margins and paddings move (#247), and are cached apart.
+        rotation = []
 
         def _bidi_diff(own, parent):
             """`own` direction and language as `$157` key pairs, leaving out
@@ -6773,6 +6815,8 @@ class NativeKFXGenerator:
                 # already readable there is unchanged (#383).
                 attrs["colour"] = _on_page(attrs["colour"])
             key = (kind, tuple(sorted(attrs.items())), bidi)
+            if rotation:
+                key += (tuple(rotation),)
             if key in style_cache:
                 return style_cache[key]
             idx = kind_counts.get(kind, 0)
@@ -6780,6 +6824,8 @@ class NativeKFXGenerator:
             name = f"s{idx}{kind}"
             style_cache[key] = name
             frag = (builder or self.build_fragment_157)(entity_name=name, **attrs)
+            if rotation:
+                _rotate_margins(frag.value)
             for sym, value in bidi:
                 frag.value[IS(sym)] = (
                     value if sym == "$10" else IS(_BIDI_SYMBOLS[value])
@@ -7199,6 +7245,11 @@ class NativeKFXGenerator:
             # its fill is the background of its own text while it is written,
             # as an open cell's is (#740).
             cell_fill_open = False
+            vertical = (
+                _chapter_writing_mode(chapters[ch_idx])
+                or getattr(self, "_book_writing_mode", None)
+            ) == "vertical-rl"
+            rotation[:] = ["vertical"] if vertical else []
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
                 around = open_bidi[-1] if open_bidi else {}
