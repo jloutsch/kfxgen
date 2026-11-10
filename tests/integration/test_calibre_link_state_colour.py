@@ -51,6 +51,8 @@ CSS = (
     " p.v1 a:link { color: green } p.v1 a:visited { color: purple }"
     " p.v2 a { color: #999999 } p.v2 a:visited { color: purple }"
     " p.v3 a[href]:visited { color: purple }"
+    " .va:link { color: green } .va:visited { color: purple }"
+    " .VB:VISITED { color: purple }"
 )
 BODY = (
     "<h1>Links</h1>"
@@ -73,6 +75,8 @@ BODY = (
     "<p class='v1'>V1 x <a href='#t'>barevisited</a> after.</p>"
     "<p class='v2'>V2 x <a href='#t'>plainbefore</a> after.</p>"
     "<p class='v3'>V3 x <a href='#t'>hrefvisited</a> after.</p>"
+    "<p>V4 x <a class='va' href='#t'>classa</a> after.</p>"
+    "<p>V5 x <a class='VB' href='#t'>uppervisited</a> after.</p>"
     + "<p>Filler.</p>" * 5
     + "<p id='t'>T1 target.</p>"
 )
@@ -174,3 +178,6 @@ def test_a_rule_with_a_bare_a_visited_is_dropped(drawn):
     assert _link(drawn, "V1", "barevisited") == GREEN
     assert _link(drawn, "V2", "plainbefore") == GREY
     assert _link(drawn, "V3", "hrefvisited") == PURPLE
+    # P741r: after a class name ending in `a` too, but a class keeps its case.
+    assert _link(drawn, "V4", "classa") == GREEN
+    assert _link(drawn, "V5", "uppervisited") == PURPLE

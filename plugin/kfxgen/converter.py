@@ -256,12 +256,13 @@ _OTHER_STATE = re.compile(
     r"(?![\w-])",
     re.I,
 )
-#: A bare `a` straight before `:visited`. Previewer drops any rule whose
-#: selector has one, in any case and position (`a:visited`, `p a:visited`,
+#: The text `a:visited` in a selector. Previewer drops any rule whose
+#: selector has it, in any position (`a:visited`, `p a:visited`,
 #: `a:visited.x`), and keeps `:visited`, `*:visited`, `a.x:visited` and
-#: `a[href]:visited` (P741m/n/o, #741 QA). A class or id named `a` is no
-#: element `a`.
-_BARE_A_VISITED = re.compile(r"(?<![\w.#-])a:visited(?![\w-])", re.I)
+#: `a[href]:visited` (P741m/n/o, #741 QA). It reads tag names and
+#: pseudo-classes in any case but class names as written: `.a:visited`,
+#: `#a:visited` and `.xa:visited` are dropped, `.A:VISITED` kept (P741r).
+_BARE_A_VISITED = re.compile(r"(?:a|(?<![^\s>+~,(])A):(?i:visited)(?![\w-])")
 _INLINE_COLOUR = re.compile(r"(?:^|;)\s*color\s*:", re.I)
 _INHERITED_COLOUR = frozenset({"inherit", "currentcolor"})
 #: A link's colour from a `:link` or `:visited` rule, as written, set by

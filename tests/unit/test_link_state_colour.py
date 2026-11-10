@@ -145,13 +145,25 @@ def test_a_rule_naming_a_bare_a_visited_is_dropped():
         "A:VISITED",
     ):
         assert _marked_all([(text, "purple")]) is None, text
+    # P741r L01-L06: the text `a:visited` is enough, after a class or id too.
+    for text in (
+        ".a:visited",
+        "#a:visited",
+        ".xa:visited",
+        "a.a:visited",
+        ".b-a:visited",
+    ):
+        assert _marked_all([(text, "purple")]) is None, text
+    assert _marked_all([(".a:link", "green"), (".a:visited", "purple")]) == "green"
     # P741p L08: so a plain rule before it keeps calibre's colour.
     assert _marked_all([("p a", "green"), ("a:visited", "purple")]) is None
 
 
 def test_a_qualified_visited_rule_is_kept():
-    # P741o L07, L11, L12, L18 and P733 L02.
+    # P741o L07, L11, L12, L18 and P733 L02. A class name keeps its case,
+    # so `.A:VISITED` is no `a:visited` (P741r L07).
     for text in (
+        ".A:VISITED",
         ":visited",
         "*:visited",
         ".c :visited",
