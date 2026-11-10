@@ -344,6 +344,8 @@ class _Book:
         (["width=1200, height=1600"] * 4, True),  # QA's C246, the #711 manga
         (["width=1200, height=1600", "width=1200, height=1600", None], True),
         (["width=1200, height=1600", None, None], False),
+        # Exactly half is not most (QA's re-check of #746).
+        (["width=1200, height=1600", "width=1200, height=1600", None, None], False),
         (["width=device-width, initial-scale=1"] * 3, False),  # reflowable
         ([None, None], False),
         ([], False),
