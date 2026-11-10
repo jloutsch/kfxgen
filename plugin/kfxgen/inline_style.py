@@ -365,6 +365,26 @@ def without_math(flags):
     )
 
 
+#: Characters set across a vertical line, 縦中横 (#247): ("tcy", (serial,
+#: text)) on the one placeholder character they take in the paragraph, as an
+#: equation does. Kindle Previewer 4.0.3 writes each element with
+#: `text-combine-upright: all` as an inline container of its own holding the
+#: text, one offset in the paragraph and a position per character (P247
+#: V02).
+TCY_FLAG = "tcy"
+_tcy_serials = itertools.count()
+
+
+def make_tcy_flag(text):
+    """Build the flag-set member that sets `text` across the line."""
+    return (TCY_FLAG, (next(_tcy_serials), text))
+
+
+def tcy_of(flags):
+    """A run's 縦中横 as (serial, text), or None."""
+    return flag_value(flags, TCY_FLAG)
+
+
 PICTURE_FLAG = "picture"
 _picture_serials = itertools.count()
 
@@ -517,12 +537,16 @@ COLOUR_FLAG = "colour"
 #: text-orientation in vertical text (#247): "upright", "sideways" or
 #: "mixed", Kindle Previewer 4.0.3's `$706` (P247 V03, V05).
 ORIENTATION_FLAG = "orientation"
+#: text-emphasis-style, the marks beside the characters of vertical text
+#: (#247): "filled sesame" and so on, Previewer's `$717` (P247 V07).
+EMPHASIS_MARKS_FLAG = "emphasis-marks"
 TYPOGRAPHY_FLAGS = (
     SMALL_CAPS_FLAG,
     TRANSFORM_FLAG,
     SPACING_FLAG,
     COLOUR_FLAG,
     ORIENTATION_FLAG,
+    EMPHASIS_MARKS_FLAG,
 )
 #: Their block_style keys, in the same order.
 TYPOGRAPHY_KEYS = (
@@ -531,6 +555,7 @@ TYPOGRAPHY_KEYS = (
     "letter_spacing",
     "colour",
     "text_orientation",
+    "text_emphasis",
 )
 SPACING_NORMAL = ("0", "$308")
 #: A link's own colour (#728): Previewer writes it in the link's styles,
@@ -805,10 +830,31 @@ def css_text_orientation(value):
     return keyword if keyword in _ORIENTATIONS else None
 
 
+_EMPHASIS_SHAPES = ("dot", "circle", "double-circle", "triangle", "sesame")
+
+
+def css_text_emphasis(value):
+    """A text-emphasis-style as "filled sesame", "open dot", "filled" and so
+    on, the forms Kindle Previewer writes as `$717` (#247), "none", or None
+    for none set or a string of the book's own marks."""
+    words = str(value or "").strip().lower().split()
+    if words == ["none"]:
+        return "none"
+    fill = "open" if "open" in words else "filled"
+    shapes = [w for w in words if w in _EMPHASIS_SHAPES]
+    if (
+        not words
+        or set(words) - {"open", "filled", *_EMPHASIS_SHAPES}
+        or len(shapes) > 1
+    ):
+        return None
+    return f"{fill} {shapes[0]}" if shapes else fill
+
+
 def css_typography(css):
-    """(small caps, text-transform, letter-spacing, colour, text-orientation)
-    from an element's computed CSS, each as its run flag carries it, or None
-    unset (#239, #247)."""
+    """(small caps, text-transform, letter-spacing, colour, text-orientation,
+    emphasis marks) from an element's computed CSS, each as its run flag
+    carries it, or None unset (#239, #247)."""
     css = css or {}
     return (
         css_small_caps(css.get("font-variant")),
@@ -818,6 +864,7 @@ def css_typography(css):
         # behind the text, or the page (#383).
         css_text_colour(str(css.get("color") or "black"), css.get("background-behind")),
         css_text_orientation(css.get("text-orientation")),
+        css_text_emphasis(css.get("text-emphasis-style")),
     )
 
 

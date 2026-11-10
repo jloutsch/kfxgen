@@ -22,6 +22,7 @@ from .inline_style import (
     VALIGN_MAP,
     css_text_colour,
     math_of,
+    tcy_of,
     ruby_of,
     run_font_size,
     without_math,
@@ -980,8 +981,31 @@ def _rotate_margins(value):
         value[IS(key)] = v
 
 
+#: text-emphasis-style as `$717`, as kfxlib maps it (#247).
+_EMPHASIS_SYMBOLS = {
+    "filled": "$724",
+    "open": "$725",
+    "filled dot": "$726",
+    "open dot": "$727",
+    "filled circle": "$728",
+    "open circle": "$729",
+    "filled double-circle": "$730",
+    "open double-circle": "$731",
+    "filled triangle": "$732",
+    "open triangle": "$733",
+    "filled sesame": "$734",
+    "open sesame": "$735",
+}
+
+
 def _write_typography(
-    value, small_caps, text_transform, letter_spacing, colour, text_orientation=None
+    value,
+    small_caps,
+    text_transform,
+    letter_spacing,
+    colour,
+    text_orientation=None,
+    text_emphasis=None,
 ):
     """Small caps ($583), text-transform ($41), letter-spacing ($32),
     colour ($19) and text-orientation ($706) onto a $157 value, as Kindle
@@ -997,6 +1021,8 @@ def _write_typography(
         value[IS("$19")] = colour
     if text_orientation in _ORIENTATION_SYMBOLS:
         value[IS("$706")] = IS(_ORIENTATION_SYMBOLS[text_orientation])
+    if text_emphasis in _EMPHASIS_SYMBOLS:
+        value[IS("$717")] = IS(_EMPHASIS_SYMBOLS[text_emphasis])
 
 
 #: One line of space, in ems: what an unindented paragraph has above it
@@ -1539,6 +1565,9 @@ def _item_widths(item, eids):
     its content (#708)."""
     if item[0] == "picture":
         return [1] * len(eids)
+    if item[0] == "tcy":
+        # Its characters, a position each.
+        return [len(item[1])]
     texts = [p for p in item[1].paths if isinstance(p, MathText)]
     if not texts:
         return [1] * len(eids)
@@ -2330,6 +2359,30 @@ class NativeKFXGenerator:
         name, strings = groups[-1]
         strings.append(text)
         return IonStruct(IS("$4"), IS(name), IS("$403"), len(strings) - 1)
+
+    #: 縦中横's style, as Kindle Previewer 4.0.3 writes it (P247 V02, #247):
+    #: horizontal in the vertical line, combined upright, at the width of
+    #: its characters.
+    TCY_STYLE_NAME = "tcy0"
+
+    def _tcy_entry(self, item, eids):
+        """Characters set across a vertical line (#247): an inline container
+        of the paragraph holding them, as Kindle Previewer 4.0.3 writes
+        each `text-combine-upright: all` element (P247 V02)."""
+        self._wrote_tcy = True
+        self.symtab.create_local_symbol(self.TCY_STYLE_NAME)
+        return IonStruct(
+            IS("$155"),
+            eids[0],
+            IS("$601"),
+            IS("$283"),
+            IS("$157"),
+            IS(self.TCY_STYLE_NAME),
+            IS("$159"),
+            IS("$269"),
+            IS("$145"),
+            self._math_note(item[1]),
+        )
 
     def _inline_picture_entry(self, item, eids):
         """A picture inside a paragraph's words, as Kindle Previewer 4.0.3
@@ -3510,6 +3563,7 @@ class NativeKFXGenerator:
         clear=None,
         link_colour=None,
         text_orientation=None,
+        text_emphasis=None,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -3655,7 +3709,13 @@ class NativeKFXGenerator:
             value[IS("$125")], value[IS("$126")] = drop_cap
 
         _write_typography(
-            value, small_caps, text_transform, letter_spacing, colour, text_orientation
+            value,
+            small_caps,
+            text_transform,
+            letter_spacing,
+            colour,
+            text_orientation,
+            text_emphasis,
         )
         if link_colour is not None:
             # A link's own colour, as Previewer writes it: the colour of the
@@ -3920,6 +3980,7 @@ class NativeKFXGenerator:
         colour=None,
         background=None,
         text_orientation=None,
+        text_emphasis=None,
     ):
         """$157 for a table cell: Previewer's padding, plus the cell's own
         alignment, header weight and spans (#219), its vertical alignment
@@ -3946,7 +4007,13 @@ class NativeKFXGenerator:
         if italic:
             value[IS("$12")] = IS("$382")
         _write_typography(
-            value, small_caps, text_transform, letter_spacing, colour, text_orientation
+            value,
+            small_caps,
+            text_transform,
+            letter_spacing,
+            colour,
+            text_orientation,
+            text_emphasis,
         )
         if colspan > 1:
             value[IS("$148")] = colspan
@@ -4293,6 +4360,8 @@ class NativeKFXGenerator:
                     mixed.append(
                         self._inline_picture_entry(item, eids)
                         if item[0] == "picture"
+                        else self._tcy_entry(item, eids)
+                        if item[0] == "tcy"
                         else self._math_entry(item, eids)
                     )
                     last = k + 1
@@ -6548,6 +6617,15 @@ class NativeKFXGenerator:
                         content_pos_id + n * self.CONTENT_POS_STEP for n in range(count)
                     )
                     content_pos_id += count * self.CONTENT_POS_STEP
+        # 縦中横 (#247): an id of its own, taking a position per character.
+        tcy_eids = {}
+        for chunk_idx, chunk in enumerate(all_chunks):
+            for _s, _length, flags in chunk.get("spans") or ():
+                t = tcy_of(flags)
+                if t is not None and (chunk_idx, t[0]) not in tcy_eids:
+                    tcy_eids[chunk_idx, t[0]] = (content_pos_id,)
+                    content_pos_id += self.CONTENT_POS_STEP
+        self._wrote_tcy = False
         # A picture inside a paragraph's words (#529): an id of its own.
         picture_eids = {}
         for chunk_idx, chunk in enumerate(all_chunks):
@@ -7710,6 +7788,15 @@ class NativeKFXGenerator:
                         chunk.get("pictures") or ()
                     )
                 ]
+                maths += [
+                    (
+                        s,
+                        ("tcy", tcy_of(flags)[1]),
+                        tcy_eids[chunk_idx, tcy_of(flags)[0]],
+                    )
+                    for s, _length, flags in chunk_spans
+                    if tcy_of(flags)
+                ]
                 maths.sort(key=lambda item: item[0])
                 if maths:
                     math_by_position[chunk_positions[chunk_idx]] = (
@@ -7966,6 +8053,24 @@ class NativeKFXGenerator:
                 YJFragment(fid=IS(name), ftype=IS("$157"), value=value)
             )
             extra_style_names.append(name)
+        if self._wrote_tcy:
+            self.fragments.append(
+                YJFragment(
+                    fid=IS(self.TCY_STYLE_NAME),
+                    ftype=IS("$157"),
+                    value=IonStruct(
+                        IS("$560"),
+                        IS("$557"),
+                        IS("$707"),
+                        IS("$573"),
+                        IS("$708"),
+                        IS("$383"),
+                        IS("$173"),
+                        IS(self.TCY_STYLE_NAME),
+                    ),
+                )
+            )
+            extra_style_names.append(self.TCY_STYLE_NAME)
         math_names = []
         if self._math_paths:
             self.symtab.create_local_symbol("mpaths")
@@ -7979,16 +8084,16 @@ class NativeKFXGenerator:
                 )
             )
             math_names.append("mpaths")
-            for name, strings in self._math_strings:
-                self.fragments.append(
-                    self.build_fragment_145(strings, content_name=name)
-                )
-                content_names.append(name)
             for name, value in self._math_styles:
                 self.fragments.append(
                     YJFragment(fid=IS(name), ftype=IS("$157"), value=value)
                 )
                 extra_style_names.append(name)
+
+        # The equations' texts, and 縦中横's (#247), which needs no drawing.
+        for name, strings in self._math_strings:
+            self.fragments.append(self.build_fragment_145(strings, content_name=name))
+            content_names.append(name)
 
         return {
             "math_names": math_names,
