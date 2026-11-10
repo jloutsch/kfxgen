@@ -7100,9 +7100,22 @@ class NativeKFXGenerator:
             open_sizes = []
             # Each open container's direction and language (#246).
             open_bidi = []
+            # A cell written as one chunk, with no open/close pair (#261):
+            # its fill is the background of its own text while it is written,
+            # as an open cell's is (#740).
+            cell_fill_open = False
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
                 around = open_bidi[-1] if open_bidi else {}
+                if cell_fill_open:
+                    open_fills.pop()
+                    cell_fill_open = False
+                if chunk.get("cell") is not None and chunk.get("type") not in (
+                    "open",
+                    "close",
+                ):
+                    open_fills.append(chunk["cell"].get("background"))
+                    cell_fill_open = True
                 if chunk.get("type") == "open":
                     node = chunk.get("node")
                     own = (
