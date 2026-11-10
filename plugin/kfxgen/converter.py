@@ -767,6 +767,46 @@ def _default_stylizer(oeb_book, item):
     return build_stylizer(oeb_book, item)
 
 
+#: The writing modes kfxgen writes (#247). vertical-lr, used for
+#: Mongolian, isn't probed and is left horizontal.
+_WRITING_MODES = frozenset({"vertical-rl", "horizontal-tb"})
+
+
+def _file_writing_mode(root, style_resolver):
+    """A spine file's writing mode from its <body>, which inherits its
+    <html>'s: "vertical-rl", "horizontal-tb", or None when it sets none
+    (#247)."""
+    if style_resolver is None:
+        return None
+    body = next(
+        (
+            e
+            for e in root.iter()
+            if isinstance(e.tag, str) and _local_tag(e.tag) == "body"
+        ),
+        root,
+    )
+    mode = str((style_resolver(body) or {}).get("writing-mode") or "").strip().lower()
+    return mode if mode in _WRITING_MODES else None
+
+
+def _book_writing_mode(items, rtl):
+    """The book's writing mode: "vertical-rl" when its spine turns pages
+    right to left and most of its text is in vertical files, as a Japanese
+    book is (P247a); else "horizontal-tb". With an ltr spine Kindle
+    Previewer 4.0.3 writes the book horizontal and each vertical file's
+    section vertical (P247c). `items` have "text" and "writing_mode"."""
+    if not rtl:
+        return "horizontal-tb"
+    vertical = sum(
+        len(i.get("text") or "")
+        for i in items
+        if i.get("writing_mode") == "vertical-rl"
+    )
+    total = sum(len(i.get("text") or "") for i in items)
+    return "vertical-rl" if total and vertical * 2 > total else "horizontal-tb"
+
+
 def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
     """Return a callable elem->computed-CSS-dict using Calibre's Stylizer, or
     None when Calibre/Stylizer is unavailable or construction fails. Never
@@ -870,6 +910,19 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     ),
                     "text-transform": _specified_inherited(
                         stylizer, elem, "text-transform"
+                    ),
+                    # Inherited; Previewer writes upright and sideways on
+                    # their run (#247).
+                    "text-orientation": _specified_inherited(
+                        stylizer, elem, "text-orientation"
+                    ),
+                    # A file's writing mode, from its <body> or <html>
+                    # (P247a, P247d). calibre reads -epub-writing-mode as
+                    # writing-mode (P247e). Read on those two only.
+                    "writing-mode": (
+                        _specified_inherited(stylizer, elem, "writing-mode")
+                        if _local_tag(elem.tag) in ("html", "body")
+                        else None
                     ),
                     "color": _specified_colour(stylizer, elem),
                     "font-style": _computed_value(st, "font-style"),
@@ -2361,7 +2414,7 @@ def _walk_inline(
                 TYPOGRAPHY_FLAGS,
                 emphasis[4],
                 parent_emphasis[4],
-                ("normal", "none", SPACING_NORMAL, None),
+                ("normal", "none", SPACING_NORMAL, None, "mixed"),
             ):
                 if kind == COLOUR_FLAG and any(_is_link_flag(f) for f in cur):
                     # Compared as given: on a dark box black and #333333
@@ -7538,6 +7591,12 @@ def extract_chapters_from_oeb(
                 - note_ids,
             )
             text = "\n\n".join(b["text"] for b in blocks if b.get("text"))
+            # Each block carries its file's writing mode, so a chapter
+            # spanning files knows its own (#247).
+            writing_mode = _file_writing_mode(item.data, resolver)
+            if writing_mode:
+                for b in blocks:
+                    b["writing_mode"] = writing_mode
             svg_text_files += any(
                 _svg_text_paragraphs(e)
                 for e in item.data.iter()
@@ -9146,6 +9205,10 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
     # Generate KFX
     log.info("Generating KFX file...")
     gen = NativeKFXGenerator()
+    rtl = (
+        getattr(getattr(oeb_book, "spine", None), "page_progression_direction", None)
+        == "rtl"
+    )
     gen.generate_full_book(
         title=metadata["title"],
         author=metadata["author"],
@@ -9158,10 +9221,12 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         language=metadata["language"],
         # The spine's page-progression-direction, as calibre read it: only
         # "rtl" turns the pages right to left; the language doesn't (#246).
-        rtl=getattr(
-            getattr(oeb_book, "spine", None), "page_progression_direction", None
-        )
-        == "rtl",
+        rtl=rtl,
+        # Vertical when the spine is rtl and most text is set vertical-rl
+        # (#247).
+        writing_mode=_book_writing_mode(
+            [b for ch in chapters for b in ch.get("blocks") or ()], rtl
+        ),
         publisher=metadata["publisher"],
         issue_date=metadata.get("issue_date"),
         authors=metadata.get("authors"),

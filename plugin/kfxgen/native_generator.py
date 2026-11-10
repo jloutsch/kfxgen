@@ -925,9 +925,31 @@ _TRANSFORM_SYMBOLS = {
 }
 
 
-def _write_typography(value, small_caps, text_transform, letter_spacing, colour):
-    """Small caps ($583), text-transform ($41), letter-spacing ($32) and
-    colour ($19) onto a $157 value, as Kindle Previewer writes them (#239)."""
+#: text-orientation as `$706`, as Kindle Previewer 4.0.3 writes it (#247).
+_ORIENTATION_SYMBOLS = {"upright": "$779", "sideways": "$778", "mixed": "$383"}
+#: A writing mode as `$560` (#247).
+_WRITING_MODE_SYMBOLS = {"horizontal-tb": "$557", "vertical-rl": "$559"}
+
+
+def _chapter_writing_mode(chapter):
+    """A chapter's writing mode, from its first block that carries its
+    file's (#247), or None."""
+    return next(
+        (
+            b["writing_mode"]
+            for b in chapter.get("blocks") or ()
+            if b.get("writing_mode")
+        ),
+        None,
+    )
+
+
+def _write_typography(
+    value, small_caps, text_transform, letter_spacing, colour, text_orientation=None
+):
+    """Small caps ($583), text-transform ($41), letter-spacing ($32),
+    colour ($19) and text-orientation ($706) onto a $157 value, as Kindle
+    Previewer writes them (#239, #247)."""
     if small_caps in _SMALL_CAPS_SYMBOLS:
         value[IS("$583")] = IS(_SMALL_CAPS_SYMBOLS[small_caps])
     if text_transform in _TRANSFORM_SYMBOLS:
@@ -937,6 +959,8 @@ def _write_typography(value, small_caps, text_transform, letter_spacing, colour)
         value[IS("$32")] = IonStruct(IS("$307"), IonDecimal(mag), IS("$306"), IS(unit))
     if colour is not None:
         value[IS("$19")] = colour
+    if text_orientation in _ORIENTATION_SYMBOLS:
+        value[IS("$706")] = IS(_ORIENTATION_SYMBOLS[text_orientation])
 
 
 #: One line of space, in ems: what an unindented paragraph has above it
@@ -2094,6 +2118,41 @@ class NativeKFXGenerator:
         value = IonStruct(IS("$590"), features_list)
         return YJFragment(fid=IS("$348"), ftype=IS("$585"), value=value)
 
+    def _declare_writing_mode_features(self, writing_mode, section_modes):
+        """The Japanese layout features Kindle Previewer 4.0.3 declares for
+        vertical text (#247): in a vertical book `jp-reflow-language` 1 and
+        `jpvertical-reflow-language` 6, first (P247a); in a horizontal book
+        with vertical sections, also `yj_mixed_writing_mode` 1, with
+        `jpvertical-reflow-language` 4 (P247c)."""
+        if writing_mode == "vertical-rl":
+            add = [("jp-reflow-language", 1), ("jpvertical-reflow-language", 6)]
+        elif "vertical-rl" in section_modes:
+            add = [
+                ("jp-reflow-language", 1),
+                ("jpvertical-reflow-language", 4),
+                ("yj_mixed_writing_mode", 1),
+            ]
+        else:
+            return
+        features = next(f for f in self.fragments if f.ftype == IS("$585")).value[
+            IS("$590")
+        ]
+        for n, (name, major) in enumerate(add):
+            self.symtab.create_local_symbol(name)
+            features.insert(
+                n,
+                IonStruct(
+                    IS("$586"),
+                    "com.amazon.yjconversion",
+                    IS("$492"),
+                    name,
+                    IS("$589"),
+                    IonStruct(
+                        IS("version"), IonStruct(IS("$587"), major, IS("$588"), 0)
+                    ),
+                ),
+            )
+
     def _declare_content_features(self, max_section_pids):
         """Add the content features the built book has to $585, by kfxlib's
         rules (#455): reflow-section-size from its largest section's
@@ -2825,7 +2884,9 @@ class NativeKFXGenerator:
 
         return YJFragment(fid=IS("$348"), ftype=IS("$258"), value=value)
 
-    def build_fragment_538(self, section_names, rtl=False):
+    def build_fragment_538(
+        self, section_names, rtl=False, writing_mode="horizontal-tb"
+    ):
         """
         Builds Fragment $538 (Document Data / Reading Order)
 
@@ -2839,12 +2900,15 @@ class NativeKFXGenerator:
         for name in section_names:
             self.symtab.create_local_symbol(name)
 
-        value = IonStruct(
+        vertical = writing_mode == "vertical-rl"
+        pairs = [
             IS("$560"),
-            IS("$557"),
+            IS(_WRITING_MODE_SYMBOLS.get(writing_mode, "$557")),
             IS("$192"),
             # Page direction: right to left when the spine says so (#246).
-            IS("$375" if rtl else "$376"),
+            # A vertical-rl book is direction ltr: its pages turn right to
+            # left by its writing mode, as kfxlib reads it (P247a, #247).
+            IS("$375" if rtl and not vertical else "$376"),
             IS("$16"),
             IonStruct(IS("$307"), IonDecimal(1), IS("$306"), IS("$308")),
             IS("$112"),
@@ -2856,8 +2920,11 @@ class NativeKFXGenerator:
             0,
             IS("$42"),
             IonStruct(IS("$307"), IonDecimal("1.2"), IS("$306"), IS("$308")),
-            IS("$477"),
-            IS("$56"),
+        ]
+        if not vertical:
+            # Previewer writes no $477 in a vertical book (P247a).
+            pairs += [IS("$477"), IS("$56")]
+        pairs += [
             IS("$169"),
             [
                 IonStruct(
@@ -2867,7 +2934,8 @@ class NativeKFXGenerator:
                     [IS(name) for name in section_names],
                 )
             ],
-        )
+        ]
+        value = IonStruct(*pairs)
 
         return YJFragment(fid=IS("$348"), ftype=IS("$538"), value=value)
 
@@ -3402,6 +3470,7 @@ class NativeKFXGenerator:
         colour=None,
         clear=None,
         link_colour=None,
+        text_orientation=None,
     ):
         """
         Builds Fragment $157 (Style Definition).
@@ -3546,7 +3615,9 @@ class NativeKFXGenerator:
         if drop_cap:
             value[IS("$125")], value[IS("$126")] = drop_cap
 
-        _write_typography(value, small_caps, text_transform, letter_spacing, colour)
+        _write_typography(
+            value, small_caps, text_transform, letter_spacing, colour, text_orientation
+        )
         if link_colour is not None:
             # A link's own colour, as Previewer writes it: the colour of the
             # link and of a visited link (#728).
@@ -3809,6 +3880,7 @@ class NativeKFXGenerator:
         letter_spacing=None,
         colour=None,
         background=None,
+        text_orientation=None,
     ):
         """$157 for a table cell: Previewer's padding, plus the cell's own
         alignment, header weight and spans (#219), its vertical alignment
@@ -3834,7 +3906,9 @@ class NativeKFXGenerator:
             value[IS("$13")] = IS("$361")
         if italic:
             value[IS("$12")] = IS("$382")
-        _write_typography(value, small_caps, text_transform, letter_spacing, colour)
+        _write_typography(
+            value, small_caps, text_transform, letter_spacing, colour, text_orientation
+        )
         if colspan > 1:
             value[IS("$148")] = colspan
         if rowspan > 1:
@@ -4267,6 +4341,7 @@ class NativeKFXGenerator:
         storyline_name,
         section_name,
         field_155_value,
+        writing_mode=None,
     ):
         """
         Builds Fragment $260 (Section)
@@ -4297,9 +4372,12 @@ class NativeKFXGenerator:
             field_155_value,
             IS("$176"),
             IS(storyline_name),
-            IS("$159"),
-            IS("$269"),
         )
+        if writing_mode in _WRITING_MODE_SYMBOLS:
+            # A file set otherwise than the book: its own on its page
+            # template, as Previewer writes it (P247c, P247f, #247).
+            entry[IS("$560")] = IS(_WRITING_MODE_SYMBOLS[writing_mode])
+        entry[IS("$159")] = IS("$269")
 
         value = IonStruct(IS("$174"), IS(section_name), IS("$141"), [entry])
 
@@ -4317,6 +4395,7 @@ class NativeKFXGenerator:
         cover_image=None,
         language="en",
         rtl=False,
+        writing_mode="horizontal-tb",
         publisher="kfxgen",
         issue_date=None,
         authors=None,
@@ -4715,12 +4794,15 @@ class NativeKFXGenerator:
 
         # 3. Build one $260 section per chapter/storyline
         section_names = []
+        section_modes = [_chapter_writing_mode(ch) for ch in chapters]
         for i, sl_name in enumerate(storyline_names):
             sec_name = f"c{i}"
+            own = section_modes[i] if i < len(section_modes) else None
             frag_260, sec_name = self.build_fragment_260(
                 sl_name,
                 section_name=sec_name,
                 field_155_value=section_positions[i],
+                writing_mode=own if own not in (None, writing_mode) else None,
             )
             section_names.append(sec_name)
             self.fragments.append(frag_260)
@@ -4730,7 +4812,10 @@ class NativeKFXGenerator:
 
         # 5. Build Fragment $538 (Document Data / Reading Order)
         # Lists ALL sections in reading order
-        self.fragments.append(self.build_fragment_538(section_names, rtl=rtl))
+        self.fragments.append(
+            self.build_fragment_538(section_names, rtl=rtl, writing_mode=writing_mode)
+        )
+        self._declare_writing_mode_features(writing_mode, section_modes)
 
         # 6. Build Fragment $389 (Navigation / TOC). Synthetic chapters
         # marked with `_omit_from_toc` (e.g. the cover-in-reading-flow
@@ -4919,7 +5004,10 @@ class NativeKFXGenerator:
 
         if self._wrote_zoom_table:
             self._declare_table_viewer()
-        if ruby_names:
+        if ruby_names and writing_mode != "vertical-rl":
+            # Not in a vertical book: Kindle Previewer 4.0.3 declares no
+            # yj_ruby there, its ruby written all the same (P247a V06; it
+            # does in a horizontal book with vertical sections, P247c).
             self._declare_ruby()
         if ch_data.get("math_names"):
             self._declare_feature("yj_mathml")

@@ -514,9 +514,24 @@ SMALL_CAPS_FLAG = "small-caps"
 TRANSFORM_FLAG = "transform"
 SPACING_FLAG = "spacing"
 COLOUR_FLAG = "colour"
-TYPOGRAPHY_FLAGS = (SMALL_CAPS_FLAG, TRANSFORM_FLAG, SPACING_FLAG, COLOUR_FLAG)
+#: text-orientation in vertical text (#247): "upright", "sideways" or
+#: "mixed", Kindle Previewer 4.0.3's `$706` (P247 V03, V05).
+ORIENTATION_FLAG = "orientation"
+TYPOGRAPHY_FLAGS = (
+    SMALL_CAPS_FLAG,
+    TRANSFORM_FLAG,
+    SPACING_FLAG,
+    COLOUR_FLAG,
+    ORIENTATION_FLAG,
+)
 #: Their block_style keys, in the same order.
-TYPOGRAPHY_KEYS = ("small_caps", "text_transform", "letter_spacing", "colour")
+TYPOGRAPHY_KEYS = (
+    "small_caps",
+    "text_transform",
+    "letter_spacing",
+    "colour",
+    "text_orientation",
+)
 SPACING_NORMAL = ("0", "$308")
 #: A link's own colour (#728): Previewer writes it in the link's styles,
 #: `$576` and `$577`, and no `$19`. The value is (its ARGB as given, or None
@@ -780,9 +795,20 @@ def css_link_colour(value):
     return None if rgb is None else 0xFF000000 | rgb
 
 
+_ORIENTATIONS = frozenset({"upright", "sideways", "mixed"})
+
+
+def css_text_orientation(value):
+    """A text-orientation keyword Kindle Previewer writes as `$706`, or None
+    (#247)."""
+    keyword = str(value or "").strip().lower()
+    return keyword if keyword in _ORIENTATIONS else None
+
+
 def css_typography(css):
-    """(small caps, text-transform, letter-spacing, colour) from an element's
-    computed CSS, each as its run flag carries it, or None unset (#239)."""
+    """(small caps, text-transform, letter-spacing, colour, text-orientation)
+    from an element's computed CSS, each as its run flag carries it, or None
+    unset (#239, #247)."""
     css = css or {}
     return (
         css_small_caps(css.get("font-variant")),
@@ -791,6 +817,7 @@ def css_typography(css):
         # Unset is black. A string, for the cache. Measured against the box
         # behind the text, or the page (#383).
         css_text_colour(str(css.get("color") or "black"), css.get("background-behind")),
+        css_text_orientation(css.get("text-orientation")),
     )
 
 
