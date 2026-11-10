@@ -72,6 +72,7 @@ from .inline_style import (
     make_link_flag,
     make_mono_flag,
     make_math_flag,
+    make_tcy_flag,
     make_ruby_flag,
     make_size_flag,
     mono_families,
@@ -1085,6 +1086,12 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     "text-orientation": _specified_inherited(
                         stylizer, elem, "text-orientation"
                     ),
+                    # Inherited: the marks beside the characters (#247).
+                    "text-emphasis-style": _specified_inherited(
+                        stylizer, elem, "text-emphasis-style"
+                    ),
+                    # The element's own: 縦中横 (#247).
+                    "text-combine-upright": st.get("text-combine-upright"),
                     # A file's writing mode, from its <body> or <html>
                     # (P247a, P247d). calibre reads -epub-writing-mode as
                     # writing-mode (P247e). Read on those two only.
@@ -2586,7 +2593,7 @@ def _walk_inline(
                 TYPOGRAPHY_FLAGS,
                 emphasis[4],
                 parent_emphasis[4],
-                ("normal", "none", SPACING_NORMAL, None, "mixed"),
+                ("normal", "none", SPACING_NORMAL, None, "mixed", "none"),
             ):
                 if kind == COLOUR_FLAG and any(_is_link_flag(f) for f in cur):
                     # Compared as given: on a dark box black and #333333
@@ -2682,6 +2689,50 @@ def _walk_inline(
         parts.extend(_math_parts(elem, cur))
         if line:
             parts.append(("", frozenset({LINE_START})))
+        return parts
+    tcy = (
+        " ".join("".join(elem.itertext()).split())
+        if not is_root
+        # In a vertical-rl file only, which mark_vertical_margins marked:
+        # Previewer isn't probed on it in horizontal text.
+        and elem.get(_V_AUTHOR) is not None
+        and str((own_css or {}).get("text-combine-upright") or "").strip().lower()
+        == "all"
+        else ""
+    )
+    if tcy:
+        # Set across the line (#247): one placeholder carrying its text, an
+        # inline container of its own, as an equation is. Its style is the
+        # one all its text shares: Previewer writes a bold run over the
+        # container of `<span class="tcy"><b>56</b></span>` (QA's P748 X06),
+        # and a normal-weight one where a span inside it undoes a bold
+        # around it (P748d D1).
+        inner = [(elem.text, cur)]
+        for child in elem:
+            inner.extend(
+                _walk_inline(
+                    child,
+                    cur,
+                    style_resolver,
+                    is_root=False,
+                    base_href=base_href,
+                    split_tables=split_tables,
+                    parent_emphasis=emphasis,
+                )
+            )
+            inner.append((child.tail, cur))
+        worded = [
+            f
+            for t, f in inner
+            if isinstance(t, str) and t.strip() and isinstance(f, frozenset)
+        ]
+        own = frozenset.intersection(*worded) if worded else cur
+        parts.extend(
+            make_anchor_mark(aid)
+            for d in elem.iterdescendants()
+            for aid in _own_anchor_ids(d)
+        )
+        parts.append(("\ufffc", own | {make_tcy_flag(tcy)}))
         return parts
     quote = _q_marks(elem, style_resolver) if local == "q" else None
     if quote:

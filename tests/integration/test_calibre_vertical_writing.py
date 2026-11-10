@@ -36,11 +36,17 @@ pytestmark = [pytest.mark.slow, pytest.mark.integration]
 
 VERT = "writing-mode: vertical-rl; -webkit-writing-mode: vertical-rl;"
 HORIZ = "writing-mode: horizontal-tb; -webkit-writing-mode: horizontal-tb;"
-REST = " .up { text-orientation: upright } .side { text-orientation: sideways }"
+REST = (
+    " .up { text-orientation: upright } .side { text-orientation: sideways }"
+    " .tcy { text-combine-upright: all; -webkit-text-combine: horizontal }"
+    " .em { text-emphasis-style: filled sesame; -webkit-text-emphasis-style: filled sesame }"
+)
 CH1 = (
     "<h1>第一章</h1>"
+    '<p>V02 数字は<span class="tcy">12</span>月<span class="tcy">31</span>日。</p>'
     '<p>V03 英字を立てて<span class="up">ABC</span>と書く。</p>'
     '<p>V05 横に寝かせて<span class="side">XYZ</span>と書く。</p>'
+    '<p>V07 <span class="em">ここに傍点</span>を打つ。</p>'
     '<p>V10 次へ<a href="c2.xhtml#t">行く</a>。</p>'
 )
 CH2 = '<h1>第二章</h1><p id="t">T1 ここが行き先です。</p>'
@@ -243,3 +249,47 @@ def test_a_fixed_layout_japanese_rtl_book_is_not_made_vertical(calibre):  # noqa
     _ebook_convert(calibre, epub, kfx, True)
     doc = _doc(load_fragments(kfx))
     assert (str(doc["$560"]), str(doc["$192"])) == ("$557", "$375")
+
+
+def test_tcy_is_an_inline_container_in_the_words(books):
+    # P247 V02: two containers, "12" and "31", in Previewer's style.
+    frags = books["a"]
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    strings = {
+        str(f.fid): [str(t) for t in val(f)["$146"]] for f in by_type(frags, "$145")
+    }
+    boxes = [
+        w
+        for st in by_type(frags, "$259")
+        for e in val(st)["$146"]
+        if hasattr(e, "get") and e.get("$146")
+        for w in e["$146"]
+        if not isinstance(w, str) and str(w.get("$601")) == "$283"
+    ]
+    assert [strings[str(b["$145"]["name"])][b["$145"]["$403"]] for b in boxes] == [
+        "12",
+        "31",
+    ]
+    assert {
+        k: str(v) for k, v in styles[str(boxes[0]["$157"])].items() if k != "$173"
+    } == {"$560": "$557", "$707": "$573", "$708": "$383"}
+
+
+def test_emphasis_marks_are_a_runs_717(books):
+    # P247 V07: filled sesame, $734, on ここに傍点.
+    frags = books["a"]
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    found = {}
+    for st in by_type(frags, "$259"):
+        for e in val(st)["$146"]:
+            ref = e.get("$145") if hasattr(e, "get") else None
+            if not ref:
+                continue
+            text = str(texts[str(ref["name"])][ref["$403"]])
+            for r in e.get("$142") or ():
+                mark = styles.get(str(r.get("$157")), {}).get("$717")
+                if mark is not None:
+                    a = int(r["$143"])
+                    found[text[a : a + int(r["$144"])]] = str(mark)
+    assert found == {"ここに傍点": "$734"}
