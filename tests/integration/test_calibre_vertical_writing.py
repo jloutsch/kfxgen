@@ -186,3 +186,60 @@ def test_a_horizontal_file_out_of_the_toc_gets_its_own_section(books):
     (nav,) = by_type(books["t1"], "$389")
     toc = str(val(nav)).split("$212", 1)[1].split("$391::", 1)[0]
     assert re.findall(r"\$244: '([^']*)'", toc) == ["第一章", "第二章"]
+
+
+#: A 1x1 PNG.
+PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+    "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082"
+)
+
+
+def test_a_fixed_layout_japanese_rtl_book_is_not_made_vertical(calibre):  # noqa: F811
+    """QA of #746: the #711 manga test book (ja, rtl, pre-paginated) passed
+    on the Paperwhite as written horizontal with $192 $375. Previewer makes
+    a MOBI of such a book, so there is no evidence for vertical: it is left
+    as main writes it."""
+    tmp, _env, _version = calibre
+    epub, kfx = tmp / "v247fxl.epub", tmp / "v247fxl.kfx"
+    pages = [f"p{n}.xhtml" for n in range(1, 4)]
+    items = "".join(
+        f'<item id="x{n}" href="{h}" media-type="application/xhtml+xml"/>'
+        f'<item id="i{n}" href="p{n + 1}.png" media-type="image/png"/>'
+        for n, h in enumerate(pages)
+    )
+    opf = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="u">'
+        '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        '<dc:identifier id="u">urn:kfxgen:v247fxl</dc:identifier><dc:title>漫画</dc:title>'
+        "<dc:creator>A</dc:creator><dc:language>ja</dc:language>"
+        '<meta property="rendition:layout">pre-paginated</meta></metadata>'
+        f'<manifest>{items}<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/></manifest>'
+        '<spine toc="ncx" page-progression-direction="rtl">'
+        + "".join(f'<itemref idref="x{n}"/>' for n in range(len(pages)))
+        + "</spine></package>"
+    )
+    with zipfile.ZipFile(epub, "w") as z:
+        z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        z.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0" '
+            'xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles>'
+            '<rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>'
+            "</rootfiles></container>",
+        )
+        z.writestr("content.opf", opf)
+        z.writestr("toc.ncx", _ncx([("1", "p1.xhtml", 1)]))
+        for n, h in enumerate(pages, 1):
+            z.writestr(f"p{n}.png", PNG)
+            z.writestr(
+                h,
+                '<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html>'
+                '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>p</title>'
+                '<meta name="viewport" content="width=1200, height=1600"/></head>'
+                f'<body><img src="p{n}.png" alt="page {n}"/></body></html>',
+            )
+    _ebook_convert(calibre, epub, kfx, True)
+    doc = _doc(load_fragments(kfx))
+    assert (str(doc["$560"]), str(doc["$192"])) == ("$557", "$375")

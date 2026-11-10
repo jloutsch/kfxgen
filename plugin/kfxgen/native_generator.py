@@ -4821,8 +4821,7 @@ class NativeKFXGenerator:
         self._declare_writing_mode_features(
             writing_mode,
             section_modes,
-            str(language or "").replace("_", "-").split("-")[0].lower()
-            in ("ja", "jpn"),
+            str(language or "").replace("_", "-").split("-")[0].lower() == "ja",
         )
 
         # 6. Build Fragment $389 (Navigation / TOC). Synthetic chapters

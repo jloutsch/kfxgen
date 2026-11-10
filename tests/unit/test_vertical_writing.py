@@ -144,6 +144,7 @@ def test_a_vertical_file_in_a_horizontal_book_is_set_on_its_section(tmp_path):
     [
         ("ja", True, "vertical-rl"),  # P247a; m5, m6: whatever the CSS
         ("ja-JP", True, "vertical-rl"),
+        ("ja_JP", True, "vertical-rl"),
         ("ja", False, "horizontal-tb"),  # P247c
         ("en", True, "horizontal-tb"),  # m7, m10
         ("zh", True, "horizontal-tb"),  # not probed
@@ -306,3 +307,49 @@ def test_an_english_book_with_vertical_sections_declares_no_jp_language(tmp_path
     assert features["yj_mixed_writing_mode"] == 1
     assert "jp-reflow-language" not in features
     assert _section_modes(frags) == [None, "$559"]
+
+
+@pytest.mark.unit
+def test_a_contents_page_kfxgen_built_is_left_whole():
+    # A chapter with toc_links is kfxgen's own contents page: never cut.
+    chapter = {
+        "title": "目次",
+        "text": "x",
+        "toc_links": [{"anchor": "a"}],
+        "blocks": [
+            {"text": "縦", "spans": [], "writing_mode": "vertical-rl"},
+            {"text": "横", "spans": [], "writing_mode": "horizontal-tb"},
+        ],
+    }
+    assert _conv._split_by_writing_mode([chapter]) == [chapter]
+
+
+class _Item:
+    def __init__(self, viewport):
+        head = f'<meta name="viewport" content="{viewport}"/>' if viewport else ""
+        self.data = etree.fromstring(
+            f'<html xmlns="{XHTML}"><head>{head}</head><body><p>x</p></body></html>'
+        )
+
+
+class _Book:
+    def __init__(self, *viewports):
+        self.spine = [_Item(v) for v in viewports]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("viewports", "fixed"),
+    [
+        (["width=1200, height=1600"] * 4, True),  # QA's C246, the #711 manga
+        (["width=1200, height=1600", "width=1200, height=1600", None], True),
+        (["width=1200, height=1600", None, None], False),
+        (["width=device-width, initial-scale=1"] * 3, False),  # reflowable
+        ([None, None], False),
+        ([], False),
+    ],
+)
+def test_a_fixed_layout_book_is_known_by_its_pages_viewports(viewports, fixed):
+    # calibre drops rendition:layout from the metadata, and keeps each
+    # page's viewport.
+    assert _conv._fixed_layout(_Book(*viewports)) is fixed

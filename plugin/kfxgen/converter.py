@@ -796,9 +796,37 @@ def _book_writing_mode(language, rtl):
     `dc:language` is Japanese, whatever its CSS; else "horizontal-tb" (QA's
     P746 on #746: m1, m3-m6, m8, m9 vertical; m7, an English rtl book, and
     m10, `xml:lang="ja"` under `dc:language` en, not). Other languages
-    aren't probed."""
+    aren't probed. `language` is as `_kfx_language` gives it: "ja", not
+    calibre's "jpn"."""
     base = re.split(r"[-_]", str(language or ""), maxsplit=1)[0].lower()
-    return "vertical-rl" if rtl and base in ("ja", "jpn") else "horizontal-tb"
+    return "vertical-rl" if rtl and base == "ja" else "horizontal-tb"
+
+
+_PIXEL_VIEWPORT = re.compile(r"(?:^|[\s,;])width\s*=\s*\d", re.I)
+
+
+def _fixed_layout(oeb_book):
+    """Whether the book is fixed-layout: most of its spine pages carry a
+    viewport sized in pixels ("width=1200, height=1600"), as a
+    pre-paginated page does. calibre drops `rendition:layout` from the
+    metadata and keeps the viewport. Such a book isn't made vertical: the
+    #711 manga test book (ja, rtl) passed on the Paperwhite written
+    horizontal with `$192: $375`, and Previewer makes a MOBI of it, so there
+    is no evidence for vertical (QA of #746)."""
+    pages = list(getattr(oeb_book, "spine", None) or ())
+    sized = 0
+    for item in pages:
+        root = getattr(item, "data", None)
+        if root is None or not hasattr(root, "iter"):
+            continue
+        sized += any(
+            isinstance(m.tag, str)
+            and _local_tag(m.tag) == "meta"
+            and str(m.get("name") or "").lower() == "viewport"
+            and _PIXEL_VIEWPORT.search(str(m.get("content") or ""))
+            for m in root.iter()
+        )
+    return bool(pages) and sized * 2 > len(pages)
 
 
 def _split_by_writing_mode(chapters):
@@ -9261,8 +9289,13 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         # The spine's page-progression-direction, as calibre read it: only
         # "rtl" turns the pages right to left; the language doesn't (#246).
         rtl=rtl,
-        # Vertical when the spine is rtl and the book Japanese (#247).
-        writing_mode=_book_writing_mode(metadata["language"], rtl),
+        # Vertical when the spine is rtl and the book Japanese, unless it is
+        # fixed-layout (#247).
+        writing_mode=(
+            "horizontal-tb"
+            if _fixed_layout(oeb_book)
+            else _book_writing_mode(metadata["language"], rtl)
+        ),
         publisher=metadata["publisher"],
         issue_date=metadata.get("issue_date"),
         authors=metadata.get("authors"),
