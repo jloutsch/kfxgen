@@ -767,6 +767,104 @@ def _default_stylizer(oeb_book, item):
     return build_stylizer(oeb_book, item)
 
 
+#: The writing modes kfxgen writes (#247). vertical-lr, used for
+#: Mongolian, isn't probed and is left horizontal.
+_WRITING_MODES = frozenset({"vertical-rl", "horizontal-tb"})
+
+
+def _file_writing_mode(root, style_resolver):
+    """A spine file's writing mode from its <body>, which inherits its
+    <html>'s: "vertical-rl", "horizontal-tb", or None when it sets none
+    (#247)."""
+    if style_resolver is None:
+        return None
+    body = next(
+        (
+            e
+            for e in root.iter()
+            if isinstance(e.tag, str) and _local_tag(e.tag) == "body"
+        ),
+        root,
+    )
+    mode = str((style_resolver(body) or {}).get("writing-mode") or "").strip().lower()
+    return mode if mode in _WRITING_MODES else None
+
+
+def _book_writing_mode(language, rtl):
+    """The book's writing mode as Kindle Previewer 4.0.3 sets it:
+    "vertical-rl" when its spine turns pages right to left and its
+    `dc:language` is Japanese, whatever its CSS; else "horizontal-tb" (QA's
+    P746 on #746: m1, m3-m6, m8, m9 vertical; m7, an English rtl book, and
+    m10, `xml:lang="ja"` under `dc:language` en, not). Other languages
+    aren't probed. `language` is as `_kfx_language` gives it: "ja", not
+    calibre's "jpn"."""
+    base = re.split(r"[-_]", str(language or ""), maxsplit=1)[0].lower()
+    return "vertical-rl" if rtl and base == "ja" else "horizontal-tb"
+
+
+_PIXEL_VIEWPORT = re.compile(r"(?:^|[\s,;])width\s*=\s*\d", re.I)
+
+
+def _fixed_layout(oeb_book):
+    """Whether the book is fixed-layout: most of its spine pages carry a
+    viewport sized in pixels ("width=1200, height=1600"), as a
+    pre-paginated page does. calibre drops `rendition:layout` from the
+    metadata and keeps the viewport. Such a book isn't made vertical: the
+    #711 manga test book (ja, rtl) passed on the Paperwhite written
+    horizontal with `$192: $375`, and Previewer makes a MOBI of it, so there
+    is no evidence for vertical (QA of #746)."""
+    pages = list(getattr(oeb_book, "spine", None) or ())
+    sized = 0
+    for item in pages:
+        root = getattr(item, "data", None)
+        if root is None or not hasattr(root, "iter"):
+            continue
+        sized += any(
+            isinstance(m.tag, str)
+            and _local_tag(m.tag) == "meta"
+            and str(m.get("name") or "").lower() == "viewport"
+            and _PIXEL_VIEWPORT.search(str(m.get("content") or ""))
+            for m in root.iter()
+        )
+    return bool(pages) and sized * 2 > len(pages)
+
+
+def _split_by_writing_mode(chapters):
+    """Each chapter cut where its blocks' writing mode changes: a file left
+    out of the TOC is joined to the chapter before it, and Previewer gives a
+    file set otherwise its own section (QA's P746 t1, #247). The parts after
+    the first are no TOC entry and print no title. A contents page kfxgen
+    built (`toc_links`) is left whole."""
+    out = []
+    for ch in chapters:
+        blocks = ch.get("blocks") or []
+        groups = []
+        for b in blocks:
+            mode = b.get("writing_mode")
+            if groups and mode in (None, groups[-1][0]):
+                groups[-1][1].append(b)
+            else:
+                groups.append([mode, [b]])
+        if len(groups) < 2 or ch.get("toc_links"):
+            out.append(ch)
+            continue
+        for n, (_mode, part) in enumerate(groups):
+            text = "\n\n".join(b["text"] for b in part if b.get("text"))
+            if n == 0:
+                out.append({**ch, "blocks": part, "text": text})
+            else:
+                out.append(
+                    {
+                        "title": ch.get("title", ""),
+                        "text": text,
+                        "blocks": part,
+                        "_omit_from_toc": True,
+                        "_omit_title_heading": True,
+                    }
+                )
+    return out
+
+
 def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
     """Return a callable elem->computed-CSS-dict using Calibre's Stylizer, or
     None when Calibre/Stylizer is unavailable or construction fails. Never
@@ -870,6 +968,19 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     ),
                     "text-transform": _specified_inherited(
                         stylizer, elem, "text-transform"
+                    ),
+                    # Inherited; Previewer writes upright and sideways on
+                    # their run (#247).
+                    "text-orientation": _specified_inherited(
+                        stylizer, elem, "text-orientation"
+                    ),
+                    # A file's writing mode, from its <body> or <html>
+                    # (P247a, P247d). calibre reads -epub-writing-mode as
+                    # writing-mode (P247e). Read on those two only.
+                    "writing-mode": (
+                        _specified_inherited(stylizer, elem, "writing-mode")
+                        if _local_tag(elem.tag) in ("html", "body")
+                        else None
                     ),
                     "color": _specified_colour(stylizer, elem),
                     "font-style": _computed_value(st, "font-style"),
@@ -2361,7 +2472,7 @@ def _walk_inline(
                 TYPOGRAPHY_FLAGS,
                 emphasis[4],
                 parent_emphasis[4],
-                ("normal", "none", SPACING_NORMAL, None),
+                ("normal", "none", SPACING_NORMAL, None, "mixed"),
             ):
                 if kind == COLOUR_FLAG and any(_is_link_flag(f) for f in cur):
                     # Compared as given: on a dark box black and #333333
@@ -7538,6 +7649,18 @@ def extract_chapters_from_oeb(
                 - note_ids,
             )
             text = "\n\n".join(b["text"] for b in blocks if b.get("text"))
+            # Each block carries its file's writing mode, so a chapter
+            # spanning files knows its own (#247). A file that sets none is
+            # horizontal: in a vertical book Previewer sets its section so
+            # (QA's P746 m2, m4, m5).
+            if resolver is not None:
+                writing_mode = (
+                    "vertical-rl"
+                    if _file_writing_mode(item.data, resolver) == "vertical-rl"
+                    else "horizontal-tb"
+                )
+                for b in blocks:
+                    b["writing_mode"] = writing_mode
             svg_text_files += any(
                 _svg_text_paragraphs(e)
                 for e in item.data.iter()
@@ -9136,6 +9259,9 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         native_tables=native_tables,
     )
     _warn_media(oeb_book, log)
+    # A file set otherwise than the chapter it was joined to gets its own
+    # section (#247).
+    chapters = _split_by_writing_mode(chapters)
     total_chars = sum(len(ch["text"]) for ch in chapters)
     log.info(f"  Chapters: {len(chapters)}")
     log.info(f"  Total content: {total_chars:,} characters")
@@ -9146,6 +9272,10 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
     # Generate KFX
     log.info("Generating KFX file...")
     gen = NativeKFXGenerator()
+    rtl = (
+        getattr(getattr(oeb_book, "spine", None), "page_progression_direction", None)
+        == "rtl"
+    )
     gen.generate_full_book(
         title=metadata["title"],
         author=metadata["author"],
@@ -9158,10 +9288,14 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         language=metadata["language"],
         # The spine's page-progression-direction, as calibre read it: only
         # "rtl" turns the pages right to left; the language doesn't (#246).
-        rtl=getattr(
-            getattr(oeb_book, "spine", None), "page_progression_direction", None
-        )
-        == "rtl",
+        rtl=rtl,
+        # Vertical when the spine is rtl and the book Japanese, unless it is
+        # fixed-layout (#247).
+        writing_mode=(
+            "horizontal-tb"
+            if _fixed_layout(oeb_book)
+            else _book_writing_mode(metadata["language"], rtl)
+        ),
         publisher=metadata["publisher"],
         issue_date=metadata.get("issue_date"),
         authors=metadata.get("authors"),
