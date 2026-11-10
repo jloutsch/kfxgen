@@ -23,6 +23,7 @@ from .inline_style import (
     css_text_colour,
     math_of,
     tcy_of,
+    without_tcy,
     ruby_of,
     run_font_size,
     without_math,
@@ -1023,6 +1024,9 @@ def _write_typography(
         value[IS("$706")] = IS(_ORIENTATION_SYMBOLS[text_orientation])
     if text_emphasis in _EMPHASIS_SYMBOLS:
         value[IS("$717")] = IS(_EMPHASIS_SYMBOLS[text_emphasis])
+    elif text_emphasis and text_emphasis.startswith('"'):
+        # A mark of the book's own, as the string (QA's P748).
+        value[IS("$717")] = text_emphasis[1:-1]
 
 
 #: One line of space, in ems: what an unindented paragraph has above it
@@ -7806,7 +7810,10 @@ class NativeKFXGenerator:
                 # An inline element's direction: a run over its whole text,
                 # the runs inside layered on it (#710).
                 layered = _direction_layers(
-                    [(s, n, without_math(without_ruby(f))) for s, n, f in chunk_spans]
+                    [
+                        (s, n, without_tcy(without_math(without_ruby(f))))
+                        for s, n, f in chunk_spans
+                    ]
                 )
                 for s, length, flags, bidi_keys, under in layered:
                     # A run layered on others starts from their weight, slant

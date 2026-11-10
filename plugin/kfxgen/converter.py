@@ -2702,13 +2702,36 @@ def _walk_inline(
     )
     if tcy:
         # Set across the line (#247): one placeholder carrying its text, an
-        # inline container of its own, as an equation is.
+        # inline container of its own, as an equation is. A style inside it
+        # over all its text is the placeholder's: Previewer writes a bold
+        # run over the container of `<span class="tcy"><b>56</b></span>`
+        # (QA's P748 X06).
+        inner = [(elem.text, cur)]
+        for child in elem:
+            inner.extend(
+                _walk_inline(
+                    child,
+                    cur,
+                    style_resolver,
+                    is_root=False,
+                    base_href=base_href,
+                    split_tables=split_tables,
+                    parent_emphasis=emphasis,
+                )
+            )
+            inner.append((child.tail, cur))
+        worded = [
+            f
+            for t, f in inner
+            if isinstance(t, str) and t.strip() and isinstance(f, frozenset)
+        ]
+        own = cur | (frozenset.intersection(*worded) if worded else cur)
         parts.extend(
             make_anchor_mark(aid)
             for d in elem.iterdescendants()
             for aid in _own_anchor_ids(d)
         )
-        parts.append(("\ufffc", cur | {make_tcy_flag(tcy)}))
+        parts.append(("\ufffc", own | {make_tcy_flag(tcy)}))
         return parts
     quote = _q_marks(elem, style_resolver) if local == "q" else None
     if quote:

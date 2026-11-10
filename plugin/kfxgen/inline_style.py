@@ -385,6 +385,14 @@ def tcy_of(flags):
     return flag_value(flags, TCY_FLAG)
 
 
+def without_tcy(flags):
+    """A run's flags less its 縦中横, which is written as an entry: left on,
+    it would give a plain placeholder a run of its own (QA's P748 X06)."""
+    return frozenset(
+        f for f in flags if not (isinstance(f, tuple) and f[0] == TCY_FLAG)
+    )
+
+
 PICTURE_FLAG = "picture"
 _picture_serials = itertools.count()
 
@@ -835,9 +843,13 @@ _EMPHASIS_SHAPES = ("dot", "circle", "double-circle", "triangle", "sesame")
 
 def css_text_emphasis(value):
     """A text-emphasis-style as "filled sesame", "open dot", "filled" and so
-    on, the forms Kindle Previewer writes as `$717` (#247), "none", or None
-    for none set or a string of the book's own marks."""
-    words = str(value or "").strip().lower().split()
+    on, the forms Kindle Previewer writes as `$717` (#247), a mark of the
+    book's own in double quotes ('*' is '"*"': Previewer writes the
+    string, QA's P748), "none", or None for none set."""
+    raw = str(value or "").strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+        return f'"{raw[1:-1]}"' if raw[1:-1] else None
+    words = raw.lower().split()
     if words == ["none"]:
         return "none"
     fill = "open" if "open" in words else "filled"

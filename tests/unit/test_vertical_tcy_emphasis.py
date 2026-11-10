@@ -36,7 +36,8 @@ VERTICAL = f'{_conv._V_AUTHOR}="" {_conv._V_UA}=""'
         ("double-circle", "filled double-circle"),
         ("none", "none"),
         (None, None),
-        ('"*"', None),  # a mark of the book's own
+        ('"*"', '"*"'),  # a mark of the book's own (QA's P748)
+        ("'*'", '"*"'),
         ("dot circle", None),
     ],
 )
@@ -153,3 +154,64 @@ def test_emphasis_marks_are_written_on_their_run(tmp_path):
         for r in e.get("$142") or ()
     ]
     assert (3, 2, "$734") in runs
+
+
+@pytest.mark.unit
+def test_a_style_inside_tcy_is_the_placeholders(tmp_path):
+    # QA's P748 X06: `<span class="tcy"><b>56</b></span>`, a bold run over
+    # the container, as Previewer writes it.
+    css = dict(TCY, b={"font-weight": "bold"})
+    blocks, frags = _book(
+        tmp_path,
+        '<p>数字は<span class="t"><span class="b">56</span></span>です。</p>',
+        css,
+    )
+    assert blocks[0]["text"] == "数字は\ufffcです。"
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    (story,) = by_type(frags, "$259")
+    runs = [
+        (int(r["$143"]), int(r["$144"]), str(styles[str(r["$157"])].get("$13")))
+        for e in val(story)["$146"]
+        for r in e.get("$142") or ()
+    ]
+    assert (3, 1, "$361") in runs
+
+
+@pytest.mark.unit
+def test_a_style_on_part_of_tcy_is_not_the_placeholders(tmp_path):
+    css = dict(TCY, b={"font-weight": "bold"})
+    _blocks, frags = _book(
+        tmp_path,
+        '<p>数字は<span class="t"><span class="b">5</span>6</span>です。</p>',
+        css,
+    )
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    (story,) = by_type(frags, "$259")
+    bold = [
+        r
+        for e in val(story)["$146"]
+        for r in e.get("$142") or ()
+        if str(styles[str(r["$157"])].get("$13")) == "$361"
+    ]
+    assert bold == []
+
+
+@pytest.mark.unit
+def test_a_mark_of_the_books_own_is_written_as_it(tmp_path):
+    # QA's P748: Previewer writes $717 "*".
+    css = {"e": {"text-emphasis-style": "'*'"}}
+    _blocks, frags = _book(tmp_path, '<p>ここに<span class="e">傍点</span>。</p>', css)
+    marks = [
+        str(val(f).get("$717")) for f in by_type(frags, "$157") if "$717" in val(f)
+    ]
+    assert marks == ["*"]
+
+
+@pytest.mark.unit
+def test_a_plain_span_inside_tcy_adds_no_run(tmp_path):
+    # QA's P748 X06's second: `<span class="tcy">7<span>8</span></span>`.
+    _blocks, frags = _book(
+        tmp_path, '<p>数字は<span class="t">7<span>8</span></span>です。</p>', TCY
+    )
+    (story,) = by_type(frags, "$259")
+    assert [r for e in val(story)["$146"] for r in e.get("$142") or ()] == []
