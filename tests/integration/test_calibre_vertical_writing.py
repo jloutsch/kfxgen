@@ -5,13 +5,16 @@ Probe P247 (Kindle Previewer 4.0.3, decoded): a Japanese book set
 `$560: $559` and `$192: $376`, whether the rule is on <html> (P247a), on
 <body> (P247d) or written `-epub-writing-mode` (P247e, which calibre reads as
 `writing-mode`). A horizontal file in it gets `$560: $557` on its section
-(P247f). With an ltr spine the book stays horizontal and each vertical
-section gets `$560: $559` (P247c). `text-orientation` is a run's `$706`.
+(P247f), as does a file that sets no writing mode (QA's P746 m2, m4, m5).
+The book is vertical when its spine is rtl and its `dc:language` Japanese,
+whatever its CSS (m6: all horizontal-tb). With an ltr spine the book stays
+horizontal and each vertical section gets `$560: $559` (P247c). `text-orientation` is a run's `$706`.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found.
 """
 
+import re
 import sys
 import zipfile
 from pathlib import Path
@@ -49,11 +52,19 @@ VARIANTS = {
     "d": (True, f"body {{ {VERT} }}" + REST, f"body {{ {VERT} }}" + REST),
     "e": (True, "html { -epub-writing-mode: vertical-rl }" + REST, "html { -epub-writing-mode: vertical-rl }" + REST),
     "f": (True, f"html {{ {VERT} }}" + REST, f"html {{ {HORIZ} }}" + REST),
+    "m6": (True, f"html {{ {HORIZ} }}" + REST, f"html {{ {HORIZ} }}" + REST),
+    "unset": (True, REST, f"html {{ {VERT} }}" + REST),
+    "t1": (True, f"html {{ {VERT} }}" + REST, f"html {{ {VERT} }}" + REST,
+           ("<p>B01 目次にない横書きの頁。</p>", f"html {{ {HORIZ} }}" + REST)),
 }  # fmt: skip
 
 
-def _write(path, rtl, css1, css2):
-    body = {"c1.xhtml": (CH1, css1), "c2.xhtml": (CH2, css2)}
+def _write(path, rtl, css1, css2, middle=None):
+    body = {"c1.xhtml": (CH1, css1)}
+    if middle:
+        # A file left out of the TOC, between the two (QA's P746 t1).
+        body["m.xhtml"] = middle
+    body["c2.xhtml"] = (CH2, css2)
     items = "".join(
         f'<item id="x{i}" href="{h}" media-type="application/xhtml+xml"/>'
         for i, h in enumerate(body)
@@ -90,9 +101,9 @@ def books(calibre):  # noqa: F811
     """{variant: its decoded fragments}."""
     tmp, _env, _version = calibre
     out = {}
-    for name, (rtl, css1, css2) in VARIANTS.items():
+    for name, (rtl, css1, css2, *middle) in VARIANTS.items():
         epub, kfx = tmp / f"v247{name}.epub", tmp / f"v247{name}.kfx"
-        _write(epub, rtl, css1, css2)
+        _write(epub, rtl, css1, css2, *middle)
         _ebook_convert(calibre, epub, kfx, True)
         out[name] = load_fragments(kfx)
     return out
@@ -158,3 +169,20 @@ def test_text_orientation_is_written_on_its_run(books):
                     start = int(r["$143"])
                     found[text[start : start + int(r["$144"])]] = str(o)
     assert found == {"ABC": "$779", "XYZ": "$778"}
+
+
+def test_a_japanese_rtl_book_is_vertical_whatever_its_css(books):
+    # QA's P746 m6: every file horizontal-tb; m2/m4: a file that sets none.
+    assert str(_doc(books["m6"])["$560"]) == "$559"
+    assert _sections(books["m6"]) == ["$557", "$557"]
+    assert str(_doc(books["unset"])["$560"]) == "$559"
+    assert _sections(books["unset"]) == ["$557", None]
+
+
+def test_a_horizontal_file_out_of_the_toc_gets_its_own_section(books):
+    # QA's P746 t1: Previewer gives it a $557 section between the two.
+    assert _sections(books["t1"]) == [None, "$557", None]
+    # Still two TOC entries, the two chapters: the split part is none.
+    (nav,) = by_type(books["t1"], "$389")
+    toc = str(val(nav)).split("$212", 1)[1].split("$391::", 1)[0]
+    assert re.findall(r"\$244: '([^']*)'", toc) == ["第一章", "第二章"]

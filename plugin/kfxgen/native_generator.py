@@ -2118,18 +2118,21 @@ class NativeKFXGenerator:
         value = IonStruct(IS("$590"), features_list)
         return YJFragment(fid=IS("$348"), ftype=IS("$585"), value=value)
 
-    def _declare_writing_mode_features(self, writing_mode, section_modes):
-        """The Japanese layout features Kindle Previewer 4.0.3 declares for
-        vertical text (#247): in a vertical book `jp-reflow-language` 1 and
+    def _declare_writing_mode_features(self, writing_mode, section_modes, japanese):
+        """The layout features Kindle Previewer 4.0.3 declares for vertical
+        text (#247): in a vertical book `jp-reflow-language` 1 and
         `jpvertical-reflow-language` 6, first (P247a); in a horizontal book
-        with vertical sections, also `yj_mixed_writing_mode` 1, with
-        `jpvertical-reflow-language` 4 (P247c)."""
+        with vertical sections `yj_mixed_writing_mode` 1, with
+        `jpvertical-reflow-language` 4 and `jp-reflow-language` 1 in a
+        Japanese book (P247c), 2 and none in an English one (QA's P746 m7).
+        Previewer's version varies between 2, 4 and 6 for reasons not found
+        (P247g writes 2); kfxlib lists them as firmware levels."""
         if writing_mode == "vertical-rl":
             add = [("jp-reflow-language", 1), ("jpvertical-reflow-language", 6)]
         elif "vertical-rl" in section_modes:
             add = [
-                ("jp-reflow-language", 1),
-                ("jpvertical-reflow-language", 4),
+                *([("jp-reflow-language", 1)] if japanese else []),
+                ("jpvertical-reflow-language", 4 if japanese else 2),
                 ("yj_mixed_writing_mode", 1),
             ]
         else:
@@ -4815,7 +4818,12 @@ class NativeKFXGenerator:
         self.fragments.append(
             self.build_fragment_538(section_names, rtl=rtl, writing_mode=writing_mode)
         )
-        self._declare_writing_mode_features(writing_mode, section_modes)
+        self._declare_writing_mode_features(
+            writing_mode,
+            section_modes,
+            str(language or "").replace("_", "-").split("-")[0].lower()
+            in ("ja", "jpn"),
+        )
 
         # 6. Build Fragment $389 (Navigation / TOC). Synthetic chapters
         # marked with `_omit_from_toc` (e.g. the cover-in-reading-flow

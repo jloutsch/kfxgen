@@ -15,8 +15,15 @@ Kindle Previewer 4.0.3 (probe P247, decoded) writes a Japanese book set
 - `text-orientation: upright` and `sideways` as a run's `$706`: `$779`
   and `$778` (P247 V03, V05).
 
-The book's writing mode is set on <html> (P247a), on <body> (P247d) or as
-`-epub-writing-mode` (P247e), which calibre reads as `writing-mode`.
+Which book is vertical (QA's P746 on #746): one whose spine is rtl and
+whose `dc:language` is Japanese, whatever its CSS (m1, m3-m6, m8, m9); an
+English rtl book (m7) or `xml:lang="ja"` with `dc:language` en (m10) is
+not. In a vertical book every file not set vertical-rl, set horizontal or
+not set at all, gets `$560: $557` on its section (m2, m4, m5), and a
+horizontal file joined to a vertical chapter gets a section of its own
+(t1). A file's own writing mode is read on <html> (P247a), on <body>
+(P247d) or as `-epub-writing-mode` (P247e), which calibre reads as
+`writing-mode`.
 """
 
 import pytest
@@ -120,6 +127,7 @@ def test_a_vertical_file_in_a_horizontal_book_is_set_on_its_section(tmp_path):
     frags = _book(
         tmp_path,
         [_chapter("縦書き", "vertical-rl"), _chapter("二章", "vertical-rl")],
+        language="ja",
     )
     doc = _doc(frags)
     assert str(doc["$560"]) == "$557" and str(doc["$192"]) == "$376"
@@ -132,19 +140,69 @@ def test_a_vertical_file_in_a_horizontal_book_is_set_on_its_section(tmp_path):
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("items", "rtl", "mode"),
+    ("language", "rtl", "mode"),
     [
-        ([("vertical-rl", 100)], True, "vertical-rl"),
-        ([("vertical-rl", 100)], False, "horizontal-tb"),  # P247c
-        ([("vertical-rl", 100), ("horizontal-tb", 10)], True, "vertical-rl"),
-        ([("vertical-rl", 10), ("horizontal-tb", 100)], True, "horizontal-tb"),
-        ([("horizontal-tb", 100)], True, "horizontal-tb"),
-        ([(None, 100)], True, "horizontal-tb"),
+        ("ja", True, "vertical-rl"),  # P247a; m5, m6: whatever the CSS
+        ("ja-JP", True, "vertical-rl"),
+        ("ja", False, "horizontal-tb"),  # P247c
+        ("en", True, "horizontal-tb"),  # m7, m10
+        ("zh", True, "horizontal-tb"),  # not probed
     ],
 )
-def test_the_book_is_vertical_when_its_spine_is_rtl_and_most_text_is(items, rtl, mode):
-    spine = [{"text": "x" * n, "writing_mode": m} for m, n in items]
-    assert _conv._book_writing_mode(spine, rtl) == mode
+def test_the_book_is_vertical_when_its_spine_is_rtl_and_its_language_japanese(
+    language, rtl, mode
+):
+    assert _conv._book_writing_mode(language, rtl) == mode
+
+
+@pytest.mark.unit
+def test_a_file_with_no_writing_mode_in_a_vertical_book_is_horizontal(tmp_path):
+    # m2, m4, m5: a file that sets none gets $557, as a horizontal one does.
+    frags = _book(
+        tmp_path,
+        [_chapter("扉", "horizontal-tb"), _chapter("本文", "vertical-rl")],
+        rtl=True,
+        writing_mode="vertical-rl",
+    )
+    assert _section_modes(frags) == ["$557", None]
+
+
+@pytest.mark.unit
+def test_a_chapter_holding_two_writing_modes_is_split(tmp_path):
+    # t1: a horizontal file left out of the TOC, joined to the vertical
+    # chapter before it, gets a section of its own; so does the vertical
+    # text after it.
+    def b(text, mode):
+        return {"text": text, "spans": [], "writing_mode": mode}
+
+    chapter = {
+        "title": "一",
+        "text": "x",
+        "blocks": [
+            b("縦一", "vertical-rl"),
+            b("横", "horizontal-tb"),
+            b("縦二", "vertical-rl"),
+        ],
+    }
+    parts = _conv._split_by_writing_mode([chapter, _chapter("二", "vertical-rl")])
+    assert [[x["text"] for x in p["blocks"]] for p in parts] == [
+        ["縦一"],
+        ["横"],
+        ["縦二"],
+        ["二"],
+    ]
+    assert parts[0]["title"] == "一" and not parts[0].get("_omit_from_toc")
+    assert all(p["_omit_from_toc"] and p["_omit_title_heading"] for p in parts[1:3])
+    assert [p["text"] for p in parts[:3]] == ["縦一", "横", "縦二"]
+    frags = _book(tmp_path, parts, rtl=True, writing_mode="vertical-rl")
+    assert _section_modes(frags) == [None, "$557", None, None]
+
+
+@pytest.mark.unit
+def test_a_chapter_of_one_writing_mode_is_left_whole():
+    chapter = _chapter("一", "vertical-rl")
+    chapter["blocks"].append({"text": "続き", "spans": []})
+    assert _conv._split_by_writing_mode([chapter]) == [chapter]
 
 
 @pytest.mark.unit
@@ -231,3 +289,20 @@ def test_a_vertical_book_declares_no_yj_ruby(tmp_path, writing_mode, declared):
     )
     assert ("yj_ruby" in _features(frags)) is declared
     assert by_type(frags, "$756"), "the ruby is written"
+
+
+@pytest.mark.unit
+def test_an_english_book_with_vertical_sections_declares_no_jp_language(tmp_path):
+    # QA's P746 m7: jpvertical-reflow-language 2, yj_mixed_writing_mode 1,
+    # and no jp-reflow-language.
+    frags = _book(
+        tmp_path,
+        [_chapter("One", "horizontal-tb"), _chapter("縦", "vertical-rl")],
+        rtl=True,
+        language="en",
+    )
+    features = _features(frags)
+    assert features["jpvertical-reflow-language"] == 2
+    assert features["yj_mixed_writing_mode"] == 1
+    assert "jp-reflow-language" not in features
+    assert _section_modes(frags) == [None, "$559"]

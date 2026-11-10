@@ -790,21 +790,51 @@ def _file_writing_mode(root, style_resolver):
     return mode if mode in _WRITING_MODES else None
 
 
-def _book_writing_mode(items, rtl):
-    """The book's writing mode: "vertical-rl" when its spine turns pages
-    right to left and most of its text is in vertical files, as a Japanese
-    book is (P247a); else "horizontal-tb". With an ltr spine Kindle
-    Previewer 4.0.3 writes the book horizontal and each vertical file's
-    section vertical (P247c). `items` have "text" and "writing_mode"."""
-    if not rtl:
-        return "horizontal-tb"
-    vertical = sum(
-        len(i.get("text") or "")
-        for i in items
-        if i.get("writing_mode") == "vertical-rl"
-    )
-    total = sum(len(i.get("text") or "") for i in items)
-    return "vertical-rl" if total and vertical * 2 > total else "horizontal-tb"
+def _book_writing_mode(language, rtl):
+    """The book's writing mode as Kindle Previewer 4.0.3 sets it:
+    "vertical-rl" when its spine turns pages right to left and its
+    `dc:language` is Japanese, whatever its CSS; else "horizontal-tb" (QA's
+    P746 on #746: m1, m3-m6, m8, m9 vertical; m7, an English rtl book, and
+    m10, `xml:lang="ja"` under `dc:language` en, not). Other languages
+    aren't probed."""
+    base = re.split(r"[-_]", str(language or ""), maxsplit=1)[0].lower()
+    return "vertical-rl" if rtl and base in ("ja", "jpn") else "horizontal-tb"
+
+
+def _split_by_writing_mode(chapters):
+    """Each chapter cut where its blocks' writing mode changes: a file left
+    out of the TOC is joined to the chapter before it, and Previewer gives a
+    file set otherwise its own section (QA's P746 t1, #247). The parts after
+    the first are no TOC entry and print no title. A contents page kfxgen
+    built (`toc_links`) is left whole."""
+    out = []
+    for ch in chapters:
+        blocks = ch.get("blocks") or []
+        groups = []
+        for b in blocks:
+            mode = b.get("writing_mode")
+            if groups and mode in (None, groups[-1][0]):
+                groups[-1][1].append(b)
+            else:
+                groups.append([mode, [b]])
+        if len(groups) < 2 or ch.get("toc_links"):
+            out.append(ch)
+            continue
+        for n, (_mode, part) in enumerate(groups):
+            text = "\n\n".join(b["text"] for b in part if b.get("text"))
+            if n == 0:
+                out.append({**ch, "blocks": part, "text": text})
+            else:
+                out.append(
+                    {
+                        "title": ch.get("title", ""),
+                        "text": text,
+                        "blocks": part,
+                        "_omit_from_toc": True,
+                        "_omit_title_heading": True,
+                    }
+                )
+    return out
 
 
 def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
@@ -7592,9 +7622,15 @@ def extract_chapters_from_oeb(
             )
             text = "\n\n".join(b["text"] for b in blocks if b.get("text"))
             # Each block carries its file's writing mode, so a chapter
-            # spanning files knows its own (#247).
-            writing_mode = _file_writing_mode(item.data, resolver)
-            if writing_mode:
+            # spanning files knows its own (#247). A file that sets none is
+            # horizontal: in a vertical book Previewer sets its section so
+            # (QA's P746 m2, m4, m5).
+            if resolver is not None:
+                writing_mode = (
+                    "vertical-rl"
+                    if _file_writing_mode(item.data, resolver) == "vertical-rl"
+                    else "horizontal-tb"
+                )
                 for b in blocks:
                     b["writing_mode"] = writing_mode
             svg_text_files += any(
@@ -9195,6 +9231,9 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         native_tables=native_tables,
     )
     _warn_media(oeb_book, log)
+    # A file set otherwise than the chapter it was joined to gets its own
+    # section (#247).
+    chapters = _split_by_writing_mode(chapters)
     total_chars = sum(len(ch["text"]) for ch in chapters)
     log.info(f"  Chapters: {len(chapters)}")
     log.info(f"  Total content: {total_chars:,} characters")
@@ -9222,11 +9261,8 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         # The spine's page-progression-direction, as calibre read it: only
         # "rtl" turns the pages right to left; the language doesn't (#246).
         rtl=rtl,
-        # Vertical when the spine is rtl and most text is set vertical-rl
-        # (#247).
-        writing_mode=_book_writing_mode(
-            [b for ch in chapters for b in ch.get("blocks") or ()], rtl
-        ),
+        # Vertical when the spine is rtl and the book Japanese (#247).
+        writing_mode=_book_writing_mode(metadata["language"], rtl),
         publisher=metadata["publisher"],
         issue_date=metadata.get("issue_date"),
         authors=metadata.get("authors"),
