@@ -256,6 +256,12 @@ _OTHER_STATE = re.compile(
     r"(?![\w-])",
     re.I,
 )
+#: A bare `a` straight before `:visited`. Previewer drops any rule whose
+#: selector has one, in any case and position (`a:visited`, `p a:visited`,
+#: `a:visited.x`), and keeps `:visited`, `*:visited`, `a.x:visited` and
+#: `a[href]:visited` (P741m/n/o, #741 QA). A class or id named `a` is no
+#: element `a`.
+_BARE_A_VISITED = re.compile(r"(?<![\w.#-])a:visited(?![\w-])", re.I)
 _INLINE_COLOUR = re.compile(r"(?:^|;)\s*color\s*:", re.I)
 _INHERITED_COLOUR = frozenset({"inherit", "currentcolor"})
 #: A link's colour from a `:link` or `:visited` rule, as written, set by
@@ -273,13 +279,16 @@ def mark_link_state_colours(root, stylizer, select=None):
     book's, in cascade order: the last colour rule matching a link decides,
     and only a `:link` or `:visited` one is recorded. A colour in the link's
     `style` attribute wins over both (P733 L07, L17), and a link without an
-    href is no link (L21). calibre runs the output plugin's
+    href is no link (L21). A rule with a bare `a:visited` counts for nothing,
+    as Previewer drops it (P741m/n/o). calibre runs the output plugin's
     `specialize_css_for_output` on each file just before flattening it,
     which calls this. `select(selector)` lists the elements a selector
     matches; calibre's own by default."""
     rules = []
     for rule in getattr(stylizer, "rules", None) or ():
         cssdict, text = rule[2], str(rule[3])
+        if _BARE_A_VISITED.search(text):
+            continue
         if cssdict.get("color") and not _OTHER_STATE.search(text):
             rules.append((text, str(cssdict["color"]), bool(_LINK_STATE.search(text))))
     if not any(state for _, _, state in rules):

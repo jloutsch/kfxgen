@@ -48,6 +48,9 @@ CSS = (
     " a.l20:link { color: green } a.l20:hover { color: orange }"
     " a.l21:link { color: green }"
     " a.l27:link { color: green } a.l27 { color: #999999 }"
+    " p.v1 a:link { color: green } p.v1 a:visited { color: purple }"
+    " p.v2 a { color: #999999 } p.v2 a:visited { color: purple }"
+    " p.v3 a[href]:visited { color: purple }"
 )
 BODY = (
     "<h1>Links</h1>"
@@ -67,6 +70,9 @@ BODY = (
     "<p>L21 x <a class='l21' id='n21'>nohref</a> after.</p>"
     "<p>L27 x <a class='l27' href='#t'>morespecific</a> after.</p>"
     "<p>L28 x <a href='#t'>plainlink</a> after.</p>"
+    "<p class='v1'>V1 x <a href='#t'>barevisited</a> after.</p>"
+    "<p class='v2'>V2 x <a href='#t'>plainbefore</a> after.</p>"
+    "<p class='v3'>V3 x <a href='#t'>hrefvisited</a> after.</p>"
     + "<p>Filler.</p>" * 5
     + "<p id='t'>T1 target.</p>"
 )
@@ -160,3 +166,11 @@ def test_a_descendant_rule_and_links_without_a_rule(drawn):
     assert _link(drawn, "L18", "descendant") == BLUE
     assert _at(drawn, "L21", "nohref") == (None, None)
     assert _at(drawn, "L28", "plainlink") == (None, None)
+
+
+def test_a_rule_with_a_bare_a_visited_is_dropped(drawn):
+    # P741m/n/o (#741 QA): `a:visited` after a bare `a` is dropped, wherever
+    # it is in the selector; a qualified one (`a[href]:visited`) is kept.
+    assert _link(drawn, "V1", "barevisited") == GREEN
+    assert _link(drawn, "V2", "plainbefore") == GREY
+    assert _link(drawn, "V3", "hrefvisited") == PURPLE

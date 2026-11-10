@@ -4,7 +4,8 @@ Kindle Previewer 4.0.3 (probe P733, decoded) reads `:link` and `:visited` as
 always true: such a rule sets a link's colour as the same rule without them
 would, the more specific rule winning, then the later one. It writes that
 colour as the link's, `$576`/`$577`. `:hover`, `:active` and `:focus` set
-none, and a colour in the link's `style` attribute wins over both.
+none, and a colour in the link's `style` attribute wins over both. It drops
+a rule with a bare `a:visited` in its selector (P741m/n/o, #741 QA).
 
 calibre's Stylizer keeps these rules apart from the element's style, and its
 flattened CSS loses their place in the cascade, so kfxgen reads them before
@@ -117,6 +118,48 @@ def test_hover_active_and_focus_give_no_colour():
     assert _marked([("a.x:active", "orange"), ("a.x:focus", "red")], link) == {
         "a": None
     }
+    # P741q L02: a later :focus rule leaves the :link colour.
+    assert _marked([("a.x:link", "green"), ("a.x:focus", "red")], link) == {
+        "a": "green"
+    }
+
+
+def _marked_all(rules):
+    """Each selector here matches the one link, as calibre's engine would."""
+    root = _doc('<p class="c"><a id="a" class="x" href="#t">w</a></p>')
+    links = list(root.iter(f"{{{XHTML}}}a"))
+    mark_link_state_colours(root, _Stylizer(rules), lambda _text: links)
+    return links[0].get(_SOURCE_LINK_COLOUR)
+
+
+def test_a_rule_naming_a_bare_a_visited_is_dropped():
+    # P741m/n/o (#741 QA): Previewer drops a rule whose selector has `a`
+    # straight before `:visited`, in any case and in any position.
+    assert _marked_all([("a:link", "green"), ("a:visited", "purple")]) == "green"
+    assert _marked_all([("a:visited", "purple"), ("a:link", "green")]) == "green"
+    for text in (
+        "a:visited",
+        "p a:visited",
+        ".c a:visited",
+        "a:visited.x",
+        "A:VISITED",
+    ):
+        assert _marked_all([(text, "purple")]) is None, text
+    # P741p L08: so a plain rule before it keeps calibre's colour.
+    assert _marked_all([("p a", "green"), ("a:visited", "purple")]) is None
+
+
+def test_a_qualified_visited_rule_is_kept():
+    # P741o L07, L11, L12, L18 and P733 L02.
+    for text in (
+        ":visited",
+        "*:visited",
+        ".c :visited",
+        "a.x:visited",
+        "a[href]:visited",
+        "a:not(.y):visited",
+    ):
+        assert _marked_all([(text, "purple")]) == "purple", text
 
 
 def test_a_colour_in_the_links_style_wins():
