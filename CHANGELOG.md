@@ -14,7 +14,7 @@ Twenty-three changes since 5.23.0. Each was reviewed, converted through real cal
 - Arabic inside MathML equations is drawn as text instead of missing-glyph boxes, and `dir="rtl"` equations are laid out mirrored (#708, #730).
 
 **Vertical Japanese books**
-- A spine file set `writing-mode: vertical-rl` is written vertically, as Previewer writes it (#247, #746). A book whose spine turns pages right to left and whose `dc:language` is Japanese is marked vertical as a whole; its files that set no writing mode stay horizontal. A fixed-layout book (a comic) isn't made vertical, and its pages still turn right to left (#711).
+- A spine file set `writing-mode: vertical-rl` is written vertically, as Previewer writes it (#247, #746). A book whose spine turns pages right to left and whose `dc:language` is Japanese is marked vertical as a whole; its files that set no writing mode stay horizontal. A fixed-layout book (a comic) isn't marked vertical as a whole, and its pages still turn right to left (#711). Its pages that set `vertical-rl` are still marked vertical; that hasn't been checked on a Kindle.
 - The space around paragraphs and headings goes between the columns, as Previewer places it (#747).
 - Numbers set across the line (縦中横, `text-combine-upright: all`) and emphasis dots (`text-emphasis-style`) are kept (#748).
 - A block set `writing-mode: horizontal-tb` inside vertical text (an English quotation, a URL, a table) is set across the page (#749).
@@ -47,7 +47,7 @@ Twenty-three changes since 5.23.0. Each was reviewed, converted through real cal
 - **Right-to-left equations:** kfxgen doesn't mirror `<mroot>`, `<mmultiscripts>` or a `dir` set inside an equation; Previewer wasn't checked on them (#730).
 - **Colours and links** (open: #743, #744, #745):
   - a fill on a `<tr>` or `<table>` isn't drawn, and its text is measured against the page (#743);
-  - a table nested in a filled cell loses the fill (#744);
+  - a table nested in a filled cell loses the fill, and its text is darkened for the page (#744);
   - a link coloured the same as its paragraph gets no link colour, where Previewer writes one (#745);
   - `!important` on a link colour, and a selector list with a bare `a:visited`, aren't read as Previewer reads them (#741).
 - **Tables:** a table of two or more columns opens in the Kindle's table viewer (a zoom button), which Previewer's books don't have (#272, #735).
