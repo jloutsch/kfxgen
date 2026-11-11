@@ -204,10 +204,13 @@ PNG = bytes.fromhex(
 )
 
 
-def _fixed_layout_book(cal, name, css="", text=""):
+def _fixed_layout_book(
+    cal, name, css="", text="", first="", toc=(("1", "p1.xhtml", 1),)
+):
     """A 3-page fixed-layout Japanese book with an rtl spine, the shape of
     the #711 manga test book: each page a viewport and a picture, with
-    `css` in a <style> and `text` after the picture."""
+    `css` in a <style>, `text` after the picture, and `first` after it on
+    page 1 only; `toc` the NCX entries."""
     tmp, _env, _version = cal
     epub, kfx = tmp / f"{name}.epub", tmp / f"{name}.kfx"
     pages = [f"p{n}.xhtml" for n in range(1, 4)]
@@ -239,7 +242,7 @@ def _fixed_layout_book(cal, name, css="", text=""):
             "</rootfiles></container>",
         )
         z.writestr("content.opf", opf)
-        z.writestr("toc.ncx", _ncx([("1", "p1.xhtml", 1)]))
+        z.writestr("toc.ncx", _ncx(list(toc)))
         for n, h in enumerate(pages, 1):
             z.writestr(f"p{n}.png", PNG)
             z.writestr(
@@ -247,7 +250,8 @@ def _fixed_layout_book(cal, name, css="", text=""):
                 '<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html>'
                 '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>p</title>'
                 f'<meta name="viewport" content="width=1200, height=1600"/>{style}</head>'
-                f'<body><img src="p{n}.png" alt="page {n}"/>{text}</body></html>',
+                f'<body><img src="p{n}.png" alt="page {n}"/>{text}'
+                f"{first if n == 1 else ''}</body></html>",
             )
     _ebook_convert(cal, epub, kfx, True)
     return load_fragments(kfx)
@@ -294,6 +298,42 @@ def test_a_fixed_layout_books_vertical_pages_stay_horizontal(calibre):  # noqa: 
     # Read as horizontal text, margin-top 2em is the space above, $47
     # 1.66667lh; read as vertical, it would be the start of the line.
     assert tops == {("1.66667", "$310")}
+
+
+def test_a_fixed_layout_book_keeping_its_listing_stays_horizontal(calibre):  # noqa: F811
+    """QA's C753L on #753: a printed contents listing and no Contents page
+    send the book through the listings-kept extraction again, which must
+    keep the pages horizontal too."""
+    listing = (
+        '<ol class="toc"><li><a href="p1.xhtml">一</a></li>'
+        '<li><a href="p2.xhtml">二</a></li><li><a href="p3.xhtml">三</a></li></ol>'
+        # A second paragraph, so the page isn't rebuilt as the Contents page.
+        "<p>L02 二つ目の段落。</p>"
+    )
+    frags = _fixed_layout_book(
+        calibre,
+        "v753l",
+        css=f"html {{ {VERT} }}",
+        text="<p>L01 縦書きの頁。</p>",
+        first=listing,
+        toc=[("一", "p1.xhtml", 1), ("二", "p2.xhtml", 1), ("三", "p3.xhtml", 1)],
+    )
+    assert set(_sections(frags)) == {None}
+
+
+def test_a_fixed_layout_books_horizontal_block_is_no_container(calibre):  # noqa: F811
+    """QA's C753 on #753: a horizontal-tb div on a vertical-rl page of a
+    fixed-layout book is plain horizontal text, with no $560 container of
+    its own (#749's), as the rest of the page is."""
+    frags = _fixed_layout_book(
+        calibre,
+        "v753h",
+        css=f"html {{ {VERT} }} .hz {{ writing-mode: horizontal-tb }}",
+        text='<div class="hz"><p>H01 Horizontal line.</p></div>',
+    )
+    assert not [
+        f.fid for f in by_type(frags, "$157") if "$560" in {str(k) for k in val(f)}
+    ]
 
 
 def test_tcy_is_an_inline_container_in_the_words(books):
