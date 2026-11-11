@@ -330,7 +330,6 @@ _V_AUTHOR = "data-kfxgen-v-author"
 _V_UA = "data-kfxgen-v-ua"
 #: On the first horizontal-tb element of a vertical-rl file's branch (#247).
 _HORIZONTAL = "data-kfxgen-horizontal"
-_WRITING_MODES = frozenset({"horizontal-tb", "vertical-rl", "vertical-lr"})
 _SIDES = ("top", "right", "bottom", "left")
 _BOX_PROPS = tuple(f"{k}-{s}" for k in ("margin", "padding") for s in _SIDES)
 _STYLE_DECL = re.compile(
@@ -395,10 +394,13 @@ def mark_vertical_margins(root, stylizer, select=None):
                 ua.setdefault(e, {}).update((p, str(rule[2][p])) for p in props)
             else:
                 authored.setdefault(e, set()).update(props)
-    # Each element's writing mode: its own, else its parent's. A horizontal-tb
-    # element and all inside it are laid out horizontally, with physical
-    # margins: none of them is marked, and the first of them is marked as
-    # the block Previewer wraps in a horizontal container (P247h).
+    # Each element's writing mode: its own, else its parent's. vertical-lr,
+    # which kfxgen doesn't write, counts as unset (_WRITING_MODES): inside a
+    # horizontal block it is horizontal, as in Previewer's (QA's P749 Q09b).
+    # A horizontal-tb element and all inside it are laid out horizontally,
+    # with physical margins: none of them is marked, and the first of them
+    # is marked as the block Previewer wraps in a horizontal container
+    # (P247h).
     modes = {body: "vertical-rl"}
     for e in body.iter():
         if not isinstance(e.tag, str):
@@ -4649,6 +4651,10 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
             # Its direction and language: its cells repeat only theirs that
             # differ, as Kindle Previewer 4.0.3 writes them (#246).
             "bidi": _bidi(table, style_resolver),
+            # A horizontal-tb table in vertical-rl text: Previewer sets it
+            # horizontal on the table itself, with no container (QA's P749
+            # Q02, #247).
+            **({"horizontal": True} if table.get(_HORIZONTAL) is not None else {}),
         },
     }
     return captions, block, carry

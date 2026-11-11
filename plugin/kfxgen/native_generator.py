@@ -730,10 +730,10 @@ def _is_frame(box):
     if box.get("float_wrapper"):
         return True
     if box.get("horizontal") and not (
-        box.get("border") or box.get("background") is not None or box.get("padding")
+        box.get("border") or box.get("background") is not None
     ):
         # A horizontal block in vertical text: Previewer's plain container
-        # (P247h, #247).
+        # (P247h, #247), padded or not (QA's P749d).
         return True
     return bool(box.get("width")) and not (
         box.get("border") or box.get("background") is not None or box.get("float")
@@ -1201,7 +1201,7 @@ def _title_in_table(blocks, title):
     return _eat_split_title(blocks, title)[0] != blocks
 
 
-def _heading_near_start(blocks):
+def _heading_near_start(blocks, title=None):
     """Whether the book prints its own heading among the section's first
     blocks, past the first: after an epigraph or a picture, or in a table
     cell. kfxgen then prints no label of its own, as Kindle Previewer has
@@ -1210,12 +1210,19 @@ def _heading_near_start(blocks):
     A heading in a box counts, unless it opens the chapter's first box:
     the label printed above the book's boxed heading, the title twice
     (#654). A first box opening with the title is drawn round kfxgen's
-    heading (#646). A heading in a box in a table cell counts too (#660)."""
+    heading (#646). One opening with a heading that is not `title` counts:
+    the title cut took the label's words off it and printed them above the
+    box, or printed a label over it, where Kindle Previewer 4.0.3 prints the
+    book's heading whole in the box (QA's P749b T, U, W, and P749c, on
+    #749). A heading in a box in a table cell counts too (#660)."""
     for i, block in enumerate(_drop_edge_rules(blocks or ())[:_MAX_SPLIT_TITLE_BLOCKS]):
         if block.get("heading"):
             return True
         if block.get("type") == "box":
             kids = _unboxed([block])
+            if i == 0 and kids and kids[0].get("heading") and title is not None:
+                if not _label_blocks(kids[:1], title):
+                    return True
             if any(b.get("heading") for b in (kids if i else kids[1:])):
                 return True
         for row in (block.get("table") or {}).get("rows") or ():
@@ -3799,7 +3806,13 @@ class NativeKFXGenerator:
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_table_style_157(
-        self, entity_name, border=None, width=None, clear=None, space_below=None
+        self,
+        entity_name,
+        border=None,
+        width=None,
+        clear=None,
+        space_below=None,
+        horizontal=False,
     ):
         """$157 for a native table node, as Kindle Previewer writes it (#219),
         with the table's own border (#264), clear (#381) and space below it in
@@ -3814,6 +3827,10 @@ class NativeKFXGenerator:
         )  # fmt: skip
         _apply_border(value, border, is_table=True)
         _write_clear(value, clear)
+        if horizontal:
+            # A horizontal-tb table in vertical text, as Kindle Previewer
+            # 4.0.3 writes it (QA's P749 Q02, #247).
+            value[IS("$560")] = IS("$557")
         if space_below:
             value[IS("$49")] = IonStruct(
                 IS("$307"),
@@ -6005,6 +6022,7 @@ class NativeKFXGenerator:
                 "width": tbl.get("width"),
                 "clear": block.get("clear"),  # (#381)
                 "bidi": tbl.get("bidi"),  # (#246)
+                "horizontal": bool(tbl.get("horizontal")),  # (#247)
                 # Spacers after it with nothing below them in the file: their
                 # space below it, as Previewer writes it (#680).
                 "space_below": block.get("trailing_space"),
@@ -6263,7 +6281,7 @@ class NativeKFXGenerator:
             heading_near_start = (
                 not toc_links
                 and title_spans is None
-                and _heading_near_start(chapter.get("blocks"))
+                and _heading_near_start(chapter.get("blocks"), title)
             )
             # A label spelling out the book's first blocks, a heading split
             # over them: they print as they are, each its own entry, and
@@ -7395,8 +7413,9 @@ class NativeKFXGenerator:
                     )
                     open_bidi.append(around if own is None else own)
                     open_horizontal.append(
-                        node == "box"
-                        and bool((chunk.get("box") or {}).get("horizontal"))
+                        bool((chunk.get("box") or {}).get("horizontal"))
+                        if node == "box"
+                        else node == "table" and bool(chunk.get("horizontal"))
                     )
                     rotation[:] = _rotation_for(vertical, open_horizontal)
                     cont_bidi = _bidi_diff(own, around)
@@ -7435,6 +7454,11 @@ class NativeKFXGenerator:
                                 **(
                                     {"space_below": chunk["space_below"]}
                                     if chunk.get("space_below")
+                                    else {}
+                                ),
+                                **(
+                                    {"horizontal": True}
+                                    if chunk.get("horizontal")
                                     else {}
                                 ),
                             )

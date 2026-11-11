@@ -93,6 +93,10 @@ CSS = {
     "hz": {"writing-mode": HZ},
     "bx": {"writing-mode": HZ, "background-color": "#eeeeee"},
     "mt": {"margin-top": "2em"},
+    # Padding on the line's start and the top, physical in horizontal text.
+    "pad": {"padding-top": "1em", "padding-left": "2em"},
+    # A filled box: the fake stylesheet reads no border.
+    "bxp": {"background-color": "#eeeeee", "padding-top": "1em", "padding-left": "2em"},
 }
 
 
@@ -109,7 +113,7 @@ def _blocks(body):
                 x.attrib.pop(_conv._V_UA, None)
             e.set(_conv._HORIZONTAL, "1")
     return _conv.extract_blocks_from_html(
-        root, style_resolver=_resolver(CSS), base_href="c.xhtml"
+        root, style_resolver=_resolver(CSS), native_tables=True, base_href="c.xhtml"
     )
 
 
@@ -155,7 +159,7 @@ def test_an_unmarked_paragraph_is_no_box():
 _SIDES = ("$47", "$48", "$49", "$50")
 
 
-def _storyline(tmp_path, body):
+def _storyline(tmp_path, body, title=""):
     blocks = _blocks(body)
     for b in blocks:
         b["writing_mode"] = "vertical-rl"
@@ -165,7 +169,7 @@ def _storyline(tmp_path, body):
         author="A",
         chapters=[
             {
-                "title": "",
+                "title": title,
                 "text": "\n\n".join(b["text"] for b in blocks),
                 "blocks": blocks,
             }
@@ -179,10 +183,14 @@ def _storyline(tmp_path, body):
     styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
     (story,) = by_type(frags, "$259")
 
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+
     def entry(e):
         st = styles.get(str(e.get("$157")), {})
+        ref = e.get("$145")
         return {
             "type": str(e["$159"]),
+            "text": str(texts[str(ref["name"])][ref["$403"]]) if ref else None,
             "style": {str(k): v for k, v in st.items() if str(k) != "$173"},
             "kids": [entry(k) for k in e.get("$146") or () if hasattr(k, "get")],
         }
@@ -238,3 +246,127 @@ def test_a_filled_one_is_a_box_container(tmp_path):
 def test_vertical_text_after_it_is_moved_again(tmp_path):
     entries = _storyline(tmp_path, '<p data-h="">H</p><p class="mt">V</p>')
     assert "$50" in entries[-1]["style"] and "$47" not in entries[-1]["style"]
+
+
+def _padding(style):
+    return {k for k in ("$52", "$53", "$54", "$55") if k in style}
+
+
+def _unmoved(style):
+    """Whether `pad`'s 1em top and 2em line start are where the book puts
+    them: the top in line heights, the left a share of the page. Moved for
+    vertical text, the top would be the right and the left the top."""
+    top, left = style.get("$52"), style.get("$53")
+    return (
+        top is not None
+        and left is not None
+        and (str(top["$306"]), str(left["$306"])) == ("$310", "$314")
+        and _num(top) == pytest.approx(1 / 1.2, abs=1e-5)
+    )
+
+
+def _walk_entries(entries):
+    for e in entries:
+        yield e
+        yield from _walk_entries(e["kids"])
+
+
+@pytest.mark.unit
+def test_a_padded_one_with_no_border_or_fill_is_a_plain_container(tmp_path):
+    # QA's P749d: Previewer writes a $269 for a padded horizontal block.
+    (box,) = _storyline(tmp_path, '<p data-h="" class="pad">P01</p>')
+    assert box["type"] == "$269"
+    assert _padding(box["style"]) == {"$52", "$53"}
+
+
+@pytest.mark.unit
+def test_a_bordered_box_inside_it_keeps_its_padding_where_the_book_puts_it(
+    tmp_path,
+):
+    # QA's P749 Q07: a box nested in a horizontal block is horizontal too.
+    (outer,) = _storyline(
+        tmp_path, '<div data-h=""><p>Q07</p><div class="bxp"><p>in</p></div></div>'
+    )
+    (inner,) = [k for k in outer["kids"] if k["type"] == "$270"]
+    assert _unmoved(inner["style"]) and "$55" not in inner["style"]
+
+
+def _cells(entries):
+    return [e for e in _walk_entries(entries) if e["text"] in ("a", "b", "c", "d")]
+
+
+@pytest.mark.unit
+def test_a_table_inside_it_keeps_every_cells_padding_where_the_book_puts_it(
+    tmp_path,
+):
+    # QA's P749 Q01: every row, not only the first.
+    entries = _storyline(
+        tmp_path,
+        '<div data-h=""><p>Q01</p><table>'
+        '<tr><td class="pad">a</td><td class="pad">b</td></tr>'
+        '<tr><td class="pad">c</td><td class="pad">d</td></tr></table></div>',
+    )
+    cells = _cells(entries)
+    assert [c["text"] for c in cells] == ["a", "b", "c", "d"]
+    assert all(_unmoved(c["style"]) for c in cells), cells
+
+
+@pytest.mark.unit
+def test_a_horizontal_table_is_set_horizontal_itself_with_no_container(tmp_path):
+    # QA's P749 Q02: $560 $557 on the $278, its cells' padding not moved.
+    entries = _storyline(
+        tmp_path,
+        '<table data-h=""><tr><td class="pad">a</td><td class="pad">b</td></tr>'
+        '<tr><td class="pad">c</td><td class="pad">d</td></tr></table>',
+    )
+    (table,) = [e for e in entries if e["type"] == "$278"]
+    assert str(table["style"]["$560"]) == "$557"
+    assert all(_unmoved(c["style"]) for c in _cells(entries))
+
+
+@pytest.mark.unit
+def test_vertical_text_after_a_horizontal_table_is_moved_again(tmp_path):
+    entries = _storyline(
+        tmp_path,
+        '<table data-h=""><tr><td>a</td></tr></table><p class="mt">V</p>',
+    )
+    assert "$50" in entries[-1]["style"] and "$47" not in entries[-1]["style"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("body", "label"),
+    [
+        # QA's P749b T and W: the label is the heading's first words.
+        ('<div data-h=""><h2>T1 第四章、横</h2><p>ta 本文。</p></div>', "T1 第四章"),
+        ('<h2 data-h="">W1 第六章、横</h2><p>Wa 本文。</p>', "W1 第六章"),
+        # U: a label that is none of the heading's words.
+        ('<div data-h=""><h2>U1 第五章、横</h2><p>ua 本文。</p></div>', "U 章"),
+    ],
+)
+def test_a_chapter_opening_with_a_boxed_heading_prints_it_whole_in_the_box(
+    tmp_path, body, label
+):
+    entries = _storyline(tmp_path, body, title=label)
+    heading = body.split("<h2")[1].split(">", 1)[1].split("<")[0]
+    texts = [e["text"] for e in _walk_entries(entries) if e["text"]]
+    assert heading in texts
+    assert label not in texts
+    assert entries[0]["type"] in ("$269", "$270") and entries[0]["kids"]
+    assert entries[0]["kids"][0]["text"] == heading
+
+
+@pytest.mark.unit
+def test_a_boxed_heading_that_is_the_label_is_still_kfxgens_heading_in_the_box(
+    tmp_path,
+):
+    # QA's P749b S: the label is the whole heading. kfxgen's heading prints
+    # in the box, as for any box opening with its chapter's title (#646).
+    entries = _storyline(
+        tmp_path,
+        '<div data-h=""><h2>S1 第三章</h2><p>sa 本文。</p></div>',
+        title="S1 第三章",
+    )
+    heading = entries[0]["kids"][0]
+    assert heading["text"] == "S1 第三章"
+    assert _num(heading["style"]["$16"]) == NativeKFXGenerator.HEADING_FONT_SIZE
