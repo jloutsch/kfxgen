@@ -12,6 +12,7 @@ import math
 import re
 
 from .font_table import BOLD_WEIGHT_THRESHOLD, parse_style, parse_weight
+from .page_scale import em_percent
 
 FLAG_ITALIC = "italic"
 FLAG_BOLD = "bold"
@@ -955,23 +956,27 @@ def _parse_font_family(value):
 _FONT_FAMILY_PART_RE = re.compile(r'"([^"]*)"|\'([^\']*)\'|([^,"\']+)')
 
 
-#: A unit in the % Kindle Previewer 4.0.3 writes a margin or indent in:
-#: 1em = 12pt, 1px = 0.45pt (#239), and 100% = 384pt (#541 probes).
-_PERCENT_PER_UNIT = {
-    "$308": 3.125,
-    "$505": 3.125,
-    "$318": 3.125 / 12,
-    "$319": 0.45 * 3.125 / 12,
-    "$316": 72 / 25.4 * 3.125 / 12,
-    "$314": 1.0,
-}
+#: The units of a margin or indent Kindle Previewer 4.0.3 writes as a %:
+#: 1em = 12pt, 1px = 0.45pt (#239), and 100% = 384pt (#541 probes), 480pt
+#: in a vertical book (P247j).
+_PERCENT_UNITS = frozenset({"$308", "$505", "$318", "$319", "$316", "$314"})
 
 
 def _length_percent(length):
-    """A parsed length as the % Previewer writes it, or None for none."""
-    if not length or length[1] not in _PERCENT_PER_UNIT:
+    """A parsed length as the % Previewer writes it, or None for none. The
+    arithmetic is main's at 384pt, so a horizontal book is unchanged."""
+    if not length or length[1] not in _PERCENT_UNITS:
         return None
-    return float(length[0]) * _PERCENT_PER_UNIT[length[1]]
+    em = em_percent()
+    per = {
+        "$308": em,
+        "$505": em,
+        "$318": em / 12,
+        "$319": 0.45 * em / 12,
+        "$316": 72 / 25.4 * em / 12,
+        "$314": 1.0,
+    }[length[1]]
+    return float(length[0]) * per
 
 
 def _line_height_factor(value):
