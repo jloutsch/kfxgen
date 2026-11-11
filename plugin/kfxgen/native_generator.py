@@ -4106,8 +4106,8 @@ class NativeKFXGenerator:
     def build_picture_box_style_157(self, entity_name, align):
         """$157 for the container of a picture in a horizontal block of
         vertical text: only its alignment, as Kindle Previewer 4.0.3 writes
-        `text-align` left, center or right there (P247k K07, QA's Q05 and
-        Q11; #247)."""
+        `text-align` left, center, right or justify there (P247k K07, QA's
+        Q05, Q11 and Q15; #247)."""
         self.symtab.create_local_symbol(entity_name)
         value = IonStruct(IS("$173"), IS(entity_name), IS("$34"), IS(ALIGN_MAP[align]))
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
@@ -4121,6 +4121,7 @@ class NativeKFXGenerator:
         clear=None,
         plain=False,
         sized=False,
+        box_align=None,
     ):
         """Builds a $157 style for a picture entry: its own width against the
         text column, as Amazon sizes it (#145), at any size (#462);
@@ -4160,6 +4161,10 @@ class NativeKFXGenerator:
             value = IonStruct(axis, value[axis], IS("$173"), IS(entity_name))
             if sized:
                 value[IS("$546")] = IS("$377")
+            if box_align:
+                # A block picture in an ltr-spine book: the block's
+                # alignment (QA's Q755L Q05, Q11, Q14).
+                value[IS("$580")] = IS(ALIGN_MAP[box_align])
             return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
         if float_side:
             # Floated: the text after it wraps beside it, and it isn't
@@ -5863,9 +5868,11 @@ class NativeKFXGenerator:
                     # A picture in a horizontal block of vertical text: only
                     # its size, as Kindle Previewer 4.0.3 writes it (#247).
                     # In a vertical book it is inline in a plain container
-                    # (P247k); in an ltr-spine book, a block picture (QA's
-                    # P754L H15). kfxgen's block picture, centred by $580,
-                    # took a page of its own on the Paperwhite (S754).
+                    # (P247k), as is a linked one in any book (QA's Q16); in
+                    # an ltr-spine book, a block picture, aligned by $580 as
+                    # the block is (QA's P754L H15, Q755L). kfxgen's block
+                    # picture, centred by $580 among other keys, took a page
+                    # of its own on the Paperwhite in a vertical book (S754).
                     plain = (
                         not (
                             chunk.get("float")
@@ -5874,11 +5881,15 @@ class NativeKFXGenerator:
                         )
                         and _in_horizontal_block()
                     )
+                    align = (block_style or {}).get("align")
                     if plain:
                         chunk["plain"] = True
                     boxed = plain and (
-                        getattr(self, "_book_writing_mode", None) == "vertical-rl"
+                        bool(link)
+                        or getattr(self, "_book_writing_mode", None) == "vertical-rl"
                     )
+                    if plain and not boxed and align in ("left", "center", "right"):
+                        chunk["box_align"] = align
                     if link or boxed:
                         # A linked picture: a container whose link covers
                         # the picture, as Kindle Previewer writes it (#355).
@@ -5889,7 +5900,7 @@ class NativeKFXGenerator:
                         }
                         if boxed:
                             opener["plain"] = True
-                            opener["align"] = (block_style or {}).get("align")
+                            opener["align"] = align
                         all_chunks.append(opener)
                         chunk["inline"] = True
                         # The Voyage drops a floated picture's link, in this
@@ -7118,11 +7129,12 @@ class NativeKFXGenerator:
             return ("w", _image_width_pct(w) if w else 100.0)
 
         def _plain_key(c):
-            """A plain picture's style key (#247): its size, and whether the
-            markup set it."""
+            """A plain picture's style key (#247): its size, whether the
+            markup set it, and a block picture's alignment."""
             return (
                 _image_size_key(c),
                 bool(_parse_size_hint(c.get("size"), IMAGE_COLUMN_PX)),
+                c.get("box_align"),
             )
 
         plain_style_names = {}
@@ -7153,7 +7165,7 @@ class NativeKFXGenerator:
             # their names.
             plain_used = sorted(
                 {_plain_key(c) for c in styled if c.get("plain")},
-                key=lambda k: (k[0][0], k[0][1], k[1]),
+                key=lambda k: (k[0][0], k[0][1], k[1], k[2] or ""),
             )
             floated = sorted(
                 {
@@ -7200,7 +7212,7 @@ class NativeKFXGenerator:
                 extra_style_names.append(name)
                 float_style_names[((axis, pct), side, clear)] = name
 
-            for idx, ((axis, pct), sized) in enumerate(plain_used):
+            for idx, ((axis, pct), sized, box_align) in enumerate(plain_used):
                 name = f"s_img_p{idx}"
                 self.fragments.append(
                     self.build_fragment_157_image(
@@ -7209,10 +7221,11 @@ class NativeKFXGenerator:
                         height_pct=pct if axis == "h" else None,
                         plain=True,
                         sized=sized,
+                        box_align=box_align,
                     )
                 )
                 extra_style_names.append(name)
-                plain_style_names[((axis, pct), sized)] = name
+                plain_style_names[((axis, pct), sized, box_align)] = name
 
         def _image_style_for(chunk):
             if chunk.get("plain"):
@@ -7620,8 +7633,8 @@ class NativeKFXGenerator:
                         if chunk.get("plain"):
                             # In a horizontal block of vertical text: no
                             # style, or only the block's alignment (P247k
-                            # K01, K07; QA's Q05, Q11; #247).
-                            if chunk.get("align") in ("left", "center", "right"):
+                            # K01, K07; QA's Q05, Q11, Q15; #247).
+                            if chunk.get("align") in ALIGN_MAP:
                                 extras["$157"] = IS(
                                     _allocate_style(
                                         "_pbox",

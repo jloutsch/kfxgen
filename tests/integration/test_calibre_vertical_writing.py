@@ -524,6 +524,7 @@ PICTURES = (
     "<p>H07 The words beside a floated picture.</p></div>"
     '<div class="hz" style="text-align: right"><img src="w.jpg" alt="P8"/></div>'
     '<div class="hz" style="text-align: left"><img src="w.jpg" alt="P9"/></div>'
+    '<div class="hz" style="text-align: justify"><img src="w.jpg" alt="P10"/></div>'
     "<p>V02 縦の段落。</p>"
 )
 
@@ -589,12 +590,14 @@ def test_a_picture_in_a_horizontal_block_is_inline_in_a_plain_container(
     assert str(parent.get("$159")) == "$269" and around == {}
 
 
-@pytest.mark.parametrize("alt, align", [("P2", "$320"), ("P8", "$61"), ("P9", "$59")])
+@pytest.mark.parametrize(
+    "alt, align", [("P2", "$320"), ("P8", "$61"), ("P9", "$59"), ("P10", "$321")]
+)
 def test_a_horizontal_blocks_alignment_is_on_its_pictures_container(
     vertical_pictures, alt, align
 ):
-    # P247k K07, QA's Q05 and Q11: the container carries the block's
-    # text-align (center, right, left), nothing else.
+    # P247k K07, QA's Q05, Q11 and Q15: the container carries the block's
+    # text-align (center, right, left, justify), nothing else.
     _entry, _own, _parent, around = vertical_pictures[alt]
     assert around == {"$34": align}
 
@@ -637,16 +640,40 @@ def test_a_horizontal_books_picture_is_unchanged(calibre):  # noqa: F811
         assert entry.get("$601") is None and own["$580"] == "$320", alt
 
 
-def test_in_an_ltr_book_the_picture_is_a_block_with_its_size_only(calibre):  # noqa: F811
+@pytest.fixture(scope="module")
+def ltr_pictures(calibre):  # noqa: F811
+    return _picture_book(calibre, "c247pic", False, "ja", f"html {{ {VERT} }}" + REST)
+
+
+def test_in_an_ltr_book_the_picture_is_a_block_with_its_size_only(ltr_pictures):
     """QA's P754L H15: with an ltr spine the book isn't vertical (#746), but
     its vertical-rl file is, and Previewer writes a picture in a horizontal
     block there as a block `$271` with only `$56`: no container, no `$580`."""
-    pictures = _picture_book(
-        calibre, "c247pic", False, "ja", f"html {{ {VERT} }}" + REST
-    )
+    pictures = ltr_pictures
     entry, own, _parent, around = pictures["P1"]
     assert entry.get("$601") is None and set(own) == {"$56"}
     # Directly in the horizontal block's container.
     assert around.get("$560") == "$557"
     _entry, own, _parent, _around = pictures["P3"]
     assert set(own) == {"$56", "$546"}
+
+
+@pytest.mark.parametrize(
+    "alt, align", [("P2", "$320"), ("P8", "$61"), ("P9", "$59"), ("P10", None)]
+)
+def test_in_an_ltr_book_the_block_picture_takes_the_blocks_alignment(
+    ltr_pictures, alt, align
+):
+    # QA's Q755L Q14, Q05, Q11, Q15: `$580` from text-align center, right,
+    # left; none for justify.
+    entry, own, _parent, _around = ltr_pictures[alt]
+    assert entry.get("$601") is None
+    assert own.get("$580") == align and set(own) <= {"$56", "$580"}
+
+
+def test_in_an_ltr_book_a_linked_picture_has_the_plain_container(ltr_pictures):
+    # QA's Q755L Q10: the vertical book's shape, the link on a plain
+    # container, the picture inline with its size only.
+    entry, own, parent, around = ltr_pictures["P4"]
+    assert str(entry.get("$601")) == "$283" and set(own) == {"$56"}
+    assert parent.get("$142") and around == {}
