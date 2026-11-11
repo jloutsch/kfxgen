@@ -73,8 +73,8 @@ VARIANTS = {
 }  # fmt: skip
 
 
-def _write(path, rtl, css1, css2, middle=None, lang="ja"):
-    body = {"c1.xhtml": (CH1, css1)}
+def _write(path, rtl, css1, css2, middle=None, lang="ja", ch1=CH1, images=()):
+    body = {"c1.xhtml": (ch1, css1)}
     if middle:
         # A file left out of the TOC, between the two (QA's P746 t1).
         body["m.xhtml"] = middle
@@ -82,6 +82,9 @@ def _write(path, rtl, css1, css2, middle=None, lang="ja"):
     items = "".join(
         f'<item id="x{i}" href="{h}" media-type="application/xhtml+xml"/>'
         for i, h in enumerate(body)
+    ) + "".join(
+        f'<item id="i{i}" href="{h}" media-type="image/jpeg"/>'
+        for i, (h, _data) in enumerate(images)
     )
     spine = "".join(f'<itemref idref="x{i}"/>' for i in range(len(body)))
     ppd = ' page-progression-direction="rtl"' if rtl else ""
@@ -106,6 +109,8 @@ def _write(path, rtl, css1, css2, middle=None, lang="ja"):
         )
         z.writestr("content.opf", opf)
         z.writestr("toc.ncx", _ncx(toc))
+        for h, data in images:
+            z.writestr(h, data)
         for h, (b, css) in body.items():
             z.writestr(h, _page(b, ' xml:lang="ja"', css))
 
@@ -503,3 +508,193 @@ def test_a_horizontal_block_in_vertical_text_is_a_horizontal_container(books):
 def test_a_horizontal_block_in_a_horizontal_file_is_no_container(books):
     where = _containers(books["m6"])
     assert where["V09"] is None and where["V11"] is None
+
+
+# --- pictures in horizontal blocks (#247, P247k, S754) ------------------------
+
+PICTURES = (
+    "<h1>第一章</h1><p>V01 縦の段落。</p>"
+    '<div class="hz"><img src="w.jpg" alt="P1"/></div>'
+    '<div class="hz" style="text-align: center"><img src="w.jpg" alt="P2"/></div>'
+    '<div class="hz"><img src="w.jpg" alt="P3" style="width: 50%"/></div>'
+    '<div class="hz"><a href="c2.xhtml#t"><img src="w.jpg" alt="P4"/></a></div>'
+    '<p><img src="w.jpg" alt="P5"/></p>'
+    '<table class="hz"><tr><td><img src="w.jpg" alt="P6"/></td><td>甲</td></tr></table>'
+    '<div class="hz"><img src="w.jpg" alt="P7" style="float: left"/>'
+    "<p>H07 The words beside a floated picture.</p></div>"
+    '<div class="hz" style="text-align: right"><img src="w.jpg" alt="P8"/></div>'
+    '<div class="hz" style="text-align: left"><img src="w.jpg" alt="P9"/></div>'
+    '<div class="hz" style="text-align: justify"><img src="w.jpg" alt="P10"/></div>'
+    '<div class="hz" style="text-align: center"><img src="w.jpg" alt="P11"/>'
+    "<p>H11 A paragraph after a centred picture.</p></div>"
+    '<div class="hz" style="text-align: center"><a href="c2.xhtml#t">'
+    '<img src="w.jpg" alt="P12"/></a><p>H12 A paragraph after it.</p></div>'
+    "<p>V02 縦の段落。</p>"
+)
+
+
+def _pictures(frags):
+    """{alt: (the picture entry, its style, its container entry, the
+    container's style)} for each picture in the storylines."""
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+
+    def style(e):
+        own = styles.get(str(e.get("$157")), {}) if e is not None else {}
+        return {str(k): str(v) for k, v in own.items() if str(k) != "$173"}
+
+    out = {}
+
+    def walk(entries, parent):
+        for e in entries:
+            if not hasattr(e, "get"):
+                continue
+            if str(e.get("$159")) == "$271":
+                out[str(e.get("$584"))] = (e, style(e), parent, style(parent))
+            walk(e.get("$146") or [], e)
+
+    for st in by_type(frags, "$259"):
+        walk(val(st)["$146"], None)
+    return out
+
+
+def _picture_book(calibre, name, rtl, lang, css):  # noqa: F811
+    from tests._helpers import decodable_jpeg_of
+
+    tmp, _env, _version = calibre
+    epub, kfx = tmp / f"{name}.epub", tmp / f"{name}.kfx"
+    _write(
+        epub,
+        rtl,
+        css,
+        css,
+        lang=lang,
+        ch1=PICTURES,
+        images=[("w.jpg", decodable_jpeg_of(400, 100))],
+    )
+    _ebook_convert(calibre, epub, kfx, True)
+    return _pictures(load_fragments(kfx))
+
+
+@pytest.fixture(scope="module")
+def vertical_pictures(calibre):  # noqa: F811
+    return _picture_book(calibre, "v247pic", True, "ja", f"html {{ {VERT} }}" + REST)
+
+
+def test_a_picture_in_a_horizontal_block_is_inline_in_a_plain_container(
+    vertical_pictures,
+):
+    """P247k K01: Previewer writes the picture inline in a container with no
+    style, the picture with only its width (400px of a 640px column). kfxgen's
+    block picture, centred by `$580`, took a page of its own on the
+    Paperwhite (S754)."""
+    entry, own, parent, around = vertical_pictures["P1"]
+    assert str(entry.get("$601")) == "$283"
+    assert set(own) == {"$56"}
+    assert "62.5" in own["$56"]
+    assert str(parent.get("$159")) == "$269" and around == {}
+
+
+@pytest.mark.parametrize(
+    "alt, align", [("P2", "$320"), ("P8", "$61"), ("P9", "$59"), ("P10", "$321")]
+)
+def test_a_horizontal_blocks_alignment_is_on_its_pictures_container(
+    vertical_pictures, alt, align
+):
+    # P247k K07, QA's Q05, Q11 and Q15: the container carries the block's
+    # text-align (center, right, left, justify), nothing else.
+    _entry, _own, _parent, around = vertical_pictures[alt]
+    assert around == {"$34": align}
+
+
+def test_a_sized_picture_in_a_horizontal_block_keeps_its_box_sizing(
+    vertical_pictures,
+):
+    # P247k K08: width 50% is `$56` 50% and `$546 $377`.
+    _entry, own, _parent, _around = vertical_pictures["P3"]
+    assert set(own) == {"$56", "$546"} and own["$546"] == "$377"
+    assert "50" in own["$56"]
+
+
+def test_a_linked_picture_in_a_horizontal_block_has_a_plain_linked_container(
+    vertical_pictures,
+):
+    # P247k K05: the link stays on the container, which has no style.
+    entry, own, parent, around = vertical_pictures["P4"]
+    assert str(entry.get("$601")) == "$283" and set(own) == {"$56"}
+    assert parent.get("$142") and around == {}
+
+
+def test_pictures_outside_horizontal_blocks_are_unchanged(vertical_pictures):
+    # In vertical text, kfxgen's block picture (P247j V01 differs, not this
+    # change); in a table cell, the cell's own picture entry (#262).
+    entry, own, _parent, _around = vertical_pictures["P5"]
+    assert entry.get("$601") is None and own["$580"] == "$320"
+    entry, own, _parent, _around = vertical_pictures["P6"]
+    assert entry.get("$601") is None and "$580" not in own
+    # A floated picture in a horizontal block (not probed): kfxgen's float.
+    entry, own, _parent, _around = vertical_pictures["P7"]
+    assert entry.get("$601") is None and own["$140"] == "$59"
+
+
+def test_a_horizontal_books_picture_is_unchanged(calibre):  # noqa: F811
+    # An English ltr book isn't vertical: the block picture, centred.
+    pictures = _picture_book(calibre, "h247pic", False, "en", REST)
+    for alt in ("P1", "P2", "P3"):
+        entry, own, _parent, _around = pictures[alt]
+        assert entry.get("$601") is None and own["$580"] == "$320", alt
+
+
+@pytest.fixture(scope="module")
+def ltr_pictures(calibre):  # noqa: F811
+    return _picture_book(calibre, "c247pic", False, "ja", f"html {{ {VERT} }}" + REST)
+
+
+def test_in_an_ltr_book_the_picture_is_a_block_with_its_size_only(ltr_pictures):
+    """QA's P754L H15: with an ltr spine the book isn't vertical (#746), but
+    its vertical-rl file is, and Previewer writes a picture in a horizontal
+    block there as a block `$271` with only `$56`: no container, no `$580`."""
+    pictures = ltr_pictures
+    entry, own, _parent, around = pictures["P1"]
+    assert entry.get("$601") is None and set(own) == {"$56"}
+    # Directly in the horizontal block's container.
+    assert around.get("$560") == "$557"
+    _entry, own, _parent, _around = pictures["P3"]
+    assert set(own) == {"$56", "$546"}
+
+
+@pytest.mark.parametrize(
+    "alt, align", [("P2", "$320"), ("P8", "$61"), ("P9", "$59"), ("P10", None)]
+)
+def test_in_an_ltr_book_the_block_picture_takes_the_blocks_alignment(
+    ltr_pictures, alt, align
+):
+    # QA's Q755L Q14, Q05, Q11, Q15: `$580` from text-align center, right,
+    # left; none for justify.
+    entry, own, _parent, _around = ltr_pictures[alt]
+    assert entry.get("$601") is None
+    assert own.get("$580") == align and set(own) <= {"$56", "$580"}
+
+
+def test_in_an_ltr_book_a_linked_picture_has_the_plain_container(ltr_pictures):
+    # QA's Q755L Q10: the vertical book's shape, the link on a plain
+    # container, the picture inline with its size only.
+    entry, own, parent, around = ltr_pictures["P4"]
+    assert str(entry.get("$601")) == "$283" and set(own) == {"$56"}
+    assert parent.get("$142") and around == {}
+
+
+def test_a_picture_beside_a_paragraph_takes_its_blocks_alignment(
+    vertical_pictures, ltr_pictures
+):
+    # S755: a picture beside a paragraph in a centred horizontal block is a
+    # block of its own in kfxgen; it still takes the block's text-align, as
+    # Previewer writes it: the container's `$34` in a vertical book, `$580`
+    # with an ltr spine.
+    _entry, _own, _parent, around = vertical_pictures["P11"]
+    assert around == {"$34": "$320"}
+    _entry, own, _parent, _around = ltr_pictures["P11"]
+    assert own.get("$580") == "$320"
+    # A linked one (QA's Q27): its plain container, centred, in both spines.
+    for pictures in (vertical_pictures, ltr_pictures):
+        _entry, _own, parent, around = pictures["P12"]
+        assert parent.get("$142") and around == {"$34": "$320"}

@@ -715,7 +715,8 @@ _TABLE_NODE_TYPES = {
     # the plain container Kindle Previewer writes for it (#382).
     "frame": "$269",
     # A container around a linked picture: its $142 link covers the picture
-    # (#355), as Kindle Previewer writes `<a href><img/></a>`.
+    # (#355), as Kindle Previewer writes `<a href><img/></a>`. Also the plain
+    # container of a picture in a horizontal block of vertical text (#247).
     "link": "$269",
 }
 
@@ -966,6 +967,15 @@ _VERTICAL_KEYS = {
     "$53": "$52",
     "$55": "$54",
 }
+
+
+def _opens_horizontal(chunk):
+    """Whether an "open" chunk starts a horizontal block, as in vertical text:
+    a horizontal-tb box or table (P247h, #247)."""
+    node = chunk.get("node")
+    if node == "box":
+        return bool((chunk.get("box") or {}).get("horizontal"))
+    return node == "table" and bool(chunk.get("horizontal"))
 
 
 def _rotation_for(vertical, open_horizontal):
@@ -4093,6 +4103,15 @@ class NativeKFXGenerator:
             value[IS("$70")] = background
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
+    def build_picture_box_style_157(self, entity_name, align):
+        """$157 for the container of a picture in a horizontal block of
+        vertical text: only its alignment, as Kindle Previewer 4.0.3 writes
+        `text-align` left, center, right or justify there (P247k K07, QA's
+        Q05, Q11 and Q15; #247)."""
+        self.symtab.create_local_symbol(entity_name)
+        value = IonStruct(IS("$173"), IS(entity_name), IS("$34"), IS(ALIGN_MAP[align]))
+        return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
+
     def build_fragment_157_image(
         self,
         entity_name,
@@ -4100,6 +4119,9 @@ class NativeKFXGenerator:
         height_pct=None,
         float_side=None,
         clear=None,
+        plain=False,
+        sized=False,
+        box_align=None,
     ):
         """Builds a $157 style for a picture entry: its own width against the
         text column, as Amazon sizes it (#145), at any size (#462);
@@ -4132,6 +4154,18 @@ class NativeKFXGenerator:
             IS("$173"),
             IS(entity_name),
         )
+        if plain:
+            # In a horizontal block of vertical text: its size only, and
+            # `$546` when the markup sizes it, as Kindle Previewer 4.0.3
+            # writes it (P247k K01, K08; #247).
+            value = IonStruct(axis, value[axis], IS("$173"), IS(entity_name))
+            if sized:
+                value[IS("$546")] = IS("$377")
+            if box_align:
+                # A block picture in an ltr-spine book: the block's
+                # alignment (QA's Q755L Q05, Q11, Q14).
+                value[IS("$580")] = IS(ALIGN_MAP[box_align])
+            return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
         if float_side:
             # Floated: the text after it wraps beside it, and it isn't
             # centred, as Kindle Previewer writes it (#243).
@@ -5448,6 +5482,24 @@ class NativeKFXGenerator:
         all_chunks = []
         chapter_chunk_ranges = []
         heading_chunk_indices = set()
+        # The chapter being written: where its chunks start, and whether it is
+        # vertical-rl text (#247).
+        chapter_now = {"start": 0, "vertical": False}
+
+        def _in_horizontal_block():
+            """Whether a chunk appended now is inside a horizontal block of a
+            vertical-rl chapter (#247)."""
+            if not chapter_now["vertical"]:
+                return False
+            open_horizontal = []
+            for c in all_chunks[chapter_now["start"] :]:
+                kind = c.get("type") if isinstance(c, dict) else None
+                if kind == "open":
+                    open_horizontal.append(_opens_horizontal(c))
+                elif kind == "close" and open_horizontal:
+                    open_horizontal.pop()
+            return any(open_horizontal)
+
         toc_link_chunks = {}
         toc_link_levels = {}  # chunk index -> depth in the contents (#313)
 
@@ -5813,19 +5865,55 @@ class NativeKFXGenerator:
                             k for k in block_anchor_keys if k not in set(at_start)
                         ]
                     link = _picture_link(chunk.pop("at"), para_spans)
-                    if link:
+                    # A picture in a horizontal block of vertical text: only
+                    # its size, as Kindle Previewer 4.0.3 writes it (#247).
+                    # In a vertical book it is inline in a plain container
+                    # (P247k), as is a linked one in any book (QA's Q16); in
+                    # an ltr-spine book, a block picture, aligned by $580 as
+                    # the block is (QA's P754L H15, Q755L). kfxgen's block
+                    # picture, centred by $580 among other keys, took a page
+                    # of its own on the Paperwhite in a vertical book (S754).
+                    plain = (
+                        not (
+                            chunk.get("float")
+                            or chunk.get("clear")
+                            or block.get("in_cell_paragraph")
+                        )
+                        and _in_horizontal_block()
+                    )
+                    # A picture walked as a block of its own beside the
+                    # block's paragraphs has no block_style: the text-align
+                    # it inherits (S755).
+                    align = (block_style or {}).get("align") or block.get(
+                        "picture_align"
+                    )
+                    if plain:
+                        chunk["plain"] = True
+                    boxed = plain and (
+                        bool(link)
+                        or getattr(self, "_book_writing_mode", None) == "vertical-rl"
+                    )
+                    if plain and not boxed and align in ("left", "center", "right"):
+                        chunk["box_align"] = align
+                    if link or boxed:
                         # A linked picture: a container whose link covers
                         # the picture, as Kindle Previewer writes it (#355).
-                        all_chunks.append(
-                            {"type": "open", "node": "link", "spans": [(0, 1, link)]}
-                        )
+                        opener = {
+                            "type": "open",
+                            "node": "link",
+                            "spans": [(0, 1, link)] if link else [],
+                        }
+                        if boxed:
+                            opener["plain"] = True
+                            opener["align"] = align
+                        all_chunks.append(opener)
                         chunk["inline"] = True
                         # The Voyage drops a floated picture's link, in this
                         # shape and in Previewer's, so it stays unfloated
                         # (#243).
                         chunk.pop("float", None)
                     all_chunks.append(chunk)
-                    if link:
+                    if link or boxed:
                         all_chunks.append({"type": "close"})
                 else:
                     placed = _append_text_with_spans(
@@ -6233,6 +6321,11 @@ class NativeKFXGenerator:
 
         for ch_idx, chapter in enumerate(chapters):
             start_idx = len(all_chunks)
+            chapter_now["start"] = start_idx
+            chapter_now["vertical"] = (
+                _chapter_writing_mode(chapter)
+                or getattr(self, "_book_writing_mode", None)
+            ) == "vertical-rl"
             # Anchor ids belonging to blocks this chapter drops (a heading that
             # duplicates the chapter title). Re-attached to the chapter's first
             # chunk below so links to those ids still resolve. (#62) A page the
@@ -7040,6 +7133,17 @@ class NativeKFXGenerator:
             w, _h = resource_to_dims.get(c.get("resource"), (None, None))
             return ("w", _image_width_pct(w) if w else 100.0)
 
+        def _plain_key(c):
+            """A plain picture's style key (#247): its size, whether the
+            markup set it, and a block picture's alignment."""
+            return (
+                _image_size_key(c),
+                bool(_parse_size_hint(c.get("size"), IMAGE_COLUMN_PX)),
+                c.get("box_align"),
+            )
+
+        plain_style_names = {}
+
         if any_image_chunk:
             for base, dims in (self._image_dims or {}).items():
                 resname, _ = (self.image_resources or {}).get(base, (None, None))
@@ -7059,8 +7163,15 @@ class NativeKFXGenerator:
             keys_used = {
                 _image_size_key(c)
                 for c in styled
-                if not (c.get("float") or c.get("clear"))
+                if not (c.get("float") or c.get("clear") or c.get("plain"))
             }
+            # Pictures in horizontal blocks of vertical text (#247): their
+            # own styles, after the others, so a book's other pictures keep
+            # their names.
+            plain_used = sorted(
+                {_plain_key(c) for c in styled if c.get("plain")},
+                key=lambda k: (k[0][0], k[0][1], k[1], k[2] or ""),
+            )
             floated = sorted(
                 {
                     (_image_size_key(c), c.get("float"), c.get("clear"))
@@ -7106,7 +7217,24 @@ class NativeKFXGenerator:
                 extra_style_names.append(name)
                 float_style_names[((axis, pct), side, clear)] = name
 
+            for idx, ((axis, pct), sized, box_align) in enumerate(plain_used):
+                name = f"s_img_p{idx}"
+                self.fragments.append(
+                    self.build_fragment_157_image(
+                        entity_name=name,
+                        width_pct=pct if axis == "w" else None,
+                        height_pct=pct if axis == "h" else None,
+                        plain=True,
+                        sized=sized,
+                        box_align=box_align,
+                    )
+                )
+                extra_style_names.append(name)
+                plain_style_names[((axis, pct), sized, box_align)] = name
+
         def _image_style_for(chunk):
+            if chunk.get("plain"):
+                return plain_style_names.get(_plain_key(chunk))
             if chunk.get("float") or chunk.get("clear"):
                 return float_style_names.get(
                     (_image_size_key(chunk), chunk.get("float"), chunk.get("clear"))
@@ -7413,11 +7541,7 @@ class NativeKFXGenerator:
                         else None
                     )
                     open_bidi.append(around if own is None else own)
-                    open_horizontal.append(
-                        bool((chunk.get("box") or {}).get("horizontal"))
-                        if node == "box"
-                        else node == "table" and bool(chunk.get("horizontal"))
-                    )
+                    open_horizontal.append(_opens_horizontal(chunk))
                     rotation[:] = _rotation_for(vertical, open_horizontal)
                     cont_bidi = _bidi_diff(own, around)
                     open_fills.append(
@@ -7498,15 +7622,32 @@ class NativeKFXGenerator:
                         # position the inline picture takes. The container
                         # centres the picture, as `$580` does a block one; in
                         # a cell it has no style, as the picture has none.
-                        ((_s, _length, flags),) = chunk["spans"]
-                        anchor = body_anchor_map.get(_link_target(flags))
-                        if anchor:
-                            extras["$142"] = [
-                                IonStruct(
-                                    IS("$143"), 0, IS("$144"), 1, IS("$179"), IS(anchor)
+                        for _s, _length, flags in chunk["spans"]:
+                            anchor = body_anchor_map.get(_link_target(flags))
+                            if anchor:
+                                extras["$142"] = [
+                                    IonStruct(
+                                        IS("$143"),
+                                        0,
+                                        IS("$144"),
+                                        1,
+                                        IS("$179"),
+                                        IS(anchor),
+                                    )
+                                ]
+                        if chunk.get("plain"):
+                            # In a horizontal block of vertical text: no
+                            # style, or only the block's alignment (P247k
+                            # K01, K07; QA's Q05, Q11, Q15; #247).
+                            if chunk.get("align") in ALIGN_MAP:
+                                extras["$157"] = IS(
+                                    _allocate_style(
+                                        "_pbox",
+                                        builder=self.build_picture_box_style_157,
+                                        align=chunk["align"],
+                                    )
                                 )
-                            ]
-                        if not chunk.get("in_cell"):
+                        elif not chunk.get("in_cell"):
                             extras["$157"] = IS(
                                 _allocate_style(
                                     "",

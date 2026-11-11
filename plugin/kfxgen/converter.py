@@ -5978,15 +5978,21 @@ def extract_blocks_from_html(
             alt = elem.get("alt", "") or ""
             size = _img_size_hint(elem, style_resolver)
             side, size = _img_float(elem, elem.getparent(), size, style_resolver)
-        blocks.append(
-            {
-                "text": _make_img_token(href, alt, size, side),
-                "spans": [],
-                "block_style": None,
-                "anchor_ids": block_ids,
-                "anchor_offsets": dict.fromkeys(block_ids, 0),
-            }
-        )
+        block = {
+            "text": _make_img_token(href, alt, size, side),
+            "spans": [],
+            "block_style": None,
+            "anchor_ids": block_ids,
+            "anchor_offsets": dict.fromkeys(block_ids, 0),
+        }
+        css = style_resolver(elem) if style_resolver is not None else None
+        align = compute_block_style(css)["align"] if css is not None else None
+        if align:
+            # The text-align it inherits from its block: a picture in a
+            # horizontal block of vertical text is placed by it, as Kindle
+            # Previewer 4.0.3 writes it (#247, S755).
+            block["picture_align"] = align
+        blocks.append(block)
 
     def _emit_svg_blocks(elem):
         """Each <image> an <svg> draws becomes an image block of its own, and
@@ -6924,6 +6930,13 @@ def extract_blocks_from_html(
             pending_ids.clear()
             ids.extend(mark_offsets)
             block_ids = _dedupe_keep_order(ids)
+            if _IMG_TOKEN_RE.search(text) and style_resolver is not None:
+                # A picture in it, a linked one say, takes the container's
+                # text-align, as a block picture does (QA's Q27, #247).
+                css = style_resolver(elem)
+                align = compute_block_style(css)["align"] if css is not None else None
+            else:
+                align = None
             blocks.append(
                 {
                     "text": text,
@@ -6941,6 +6954,7 @@ def extract_blocks_from_html(
                     "anchor_offsets": {
                         aid: mark_offsets.get(aid, 0) for aid in block_ids
                     },
+                    **({"picture_align": align} if align else {}),
                 }
             )
 
