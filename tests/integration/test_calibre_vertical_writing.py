@@ -204,13 +204,12 @@ PNG = bytes.fromhex(
 )
 
 
-def test_a_fixed_layout_japanese_rtl_book_is_not_made_vertical(calibre):  # noqa: F811
-    """QA of #746: the #711 manga test book (ja, rtl, pre-paginated) passed
-    on the Paperwhite as written horizontal with $192 $375. Previewer makes
-    a MOBI of such a book, so there is no evidence for vertical: it is left
-    as main writes it."""
-    tmp, _env, _version = calibre
-    epub, kfx = tmp / "v247fxl.epub", tmp / "v247fxl.kfx"
+def _fixed_layout_book(cal, name, css="", text=""):
+    """A 3-page fixed-layout Japanese book with an rtl spine, the shape of
+    the #711 manga test book: each page a viewport and a picture, with
+    `css` in a <style> and `text` after the picture."""
+    tmp, _env, _version = cal
+    epub, kfx = tmp / f"{name}.epub", tmp / f"{name}.kfx"
     pages = [f"p{n}.xhtml" for n in range(1, 4)]
     items = "".join(
         f'<item id="x{n}" href="{h}" media-type="application/xhtml+xml"/>'
@@ -221,7 +220,7 @@ def test_a_fixed_layout_japanese_rtl_book_is_not_made_vertical(calibre):  # noqa
         '<?xml version="1.0" encoding="utf-8"?>'
         '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="u">'
         '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
-        '<dc:identifier id="u">urn:kfxgen:v247fxl</dc:identifier><dc:title>漫画</dc:title>'
+        f'<dc:identifier id="u">urn:kfxgen:{name}</dc:identifier><dc:title>漫画</dc:title>'
         "<dc:creator>A</dc:creator><dc:language>ja</dc:language>"
         '<meta property="rendition:layout">pre-paginated</meta></metadata>'
         f'<manifest>{items}<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/></manifest>'
@@ -229,6 +228,7 @@ def test_a_fixed_layout_japanese_rtl_book_is_not_made_vertical(calibre):  # noqa
         + "".join(f'<itemref idref="x{n}"/>' for n in range(len(pages)))
         + "</spine></package>"
     )
+    style = f"<style>{css}</style>" if css else ""
     with zipfile.ZipFile(epub, "w") as z:
         z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
         z.writestr(
@@ -246,12 +246,54 @@ def test_a_fixed_layout_japanese_rtl_book_is_not_made_vertical(calibre):  # noqa
                 h,
                 '<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html>'
                 '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>p</title>'
-                '<meta name="viewport" content="width=1200, height=1600"/></head>'
-                f'<body><img src="p{n}.png" alt="page {n}"/></body></html>',
+                f'<meta name="viewport" content="width=1200, height=1600"/>{style}</head>'
+                f'<body><img src="p{n}.png" alt="page {n}"/>{text}</body></html>',
             )
-    _ebook_convert(calibre, epub, kfx, True)
-    doc = _doc(load_fragments(kfx))
+    _ebook_convert(cal, epub, kfx, True)
+    return load_fragments(kfx)
+
+
+def test_a_fixed_layout_japanese_rtl_book_is_not_made_vertical(calibre):  # noqa: F811
+    """QA of #746: the #711 manga test book (ja, rtl, pre-paginated) passed
+    on the Paperwhite as written horizontal with $192 $375. Previewer makes
+    a MOBI of such a book, so there is no evidence for vertical: it is left
+    as main writes it."""
+    doc = _doc(_fixed_layout_book(calibre, "v247fxl"))
     assert (str(doc["$560"]), str(doc["$192"])) == ("$557", "$375")
+
+
+def test_a_fixed_layout_books_vertical_pages_stay_horizontal(calibre):  # noqa: F811
+    """#752: pages set vertical-rl in a fixed-layout book (QA's C751, the
+    #711 manga with `html { writing-mode: vertical-rl }`) were vertical
+    sections with the Japanese features. They are written as the manga
+    that passed on the Paperwhite: no vertical section, no vertical
+    features, and a book's margin-top in its own place."""
+    frags = _fixed_layout_book(
+        calibre,
+        "v752fxl",
+        css=f"html {{ {VERT} }} .mt {{ margin-top: 2em }}",
+        text='<p class="mt">F01 縦書きの頁。</p>',
+    )
+    doc = _doc(frags)
+    assert (str(doc["$560"]), str(doc["$192"])) == ("$557", "$375")
+    assert _sections(frags) == [None, None, None]
+    assert not {
+        "jp-reflow-language",
+        "jpvertical-reflow-language",
+        "yj_mixed_writing_mode",
+    } & _features(frags)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    tops = set()
+    for f in by_type(frags, "$259"):
+        for e in val(f)["$146"]:
+            r = e.get("$145")
+            if r and str(texts[str(r["name"])][r["$403"]]).startswith("F01"):
+                top = styles[str(e["$157"])].get("$47")
+                tops.add(top and (str(top["$307"]), str(top["$306"])))
+    # Read as horizontal text, margin-top 2em is the space above, $47
+    # 1.66667lh; read as vertical, it would be the start of the line.
+    assert tops == {("1.66667", "$310")}
 
 
 def test_tcy_is_an_inline_container_in_the_words(books):
