@@ -1,5 +1,46 @@
 # Changelog
 
+## 5.24.0 — Right-to-left books, vertical Japanese books, links, rules, colours
+
+Twenty-three changes since 5.23.0. Each was reviewed, converted through real calibre and, where it changes what a book shows, compared with Kindle Previewer 4.0.3's output for the same book. Twenty-two were checked on a Kindle Paperwhite (5.19.2); the vertical-book change (#746) also on a Voyage (5.13.6). One was not checked on a Kindle: #719, which makes spacing the same from one conversion to the next and adds no new layout. The Oasis was not checked for this release.
+
+### What readers will notice
+
+**Right-to-left books (Arabic, Hebrew, Persian)**
+- Pages turn right to left when the book's spine says so, and paragraphs carry their writing direction and language, so `text-align: start` and list bullets sit on the right side (#246, #515, #711). Right-to-left comics page right to left too.
+- Direction and language inside a paragraph (`<span dir>`, `<bdi>`, `<bdo>`, `<span lang>`) are kept, and `dir="auto"` follows the text (#710, #713).
+- Tables, rows and cells take their direction as Previewer writes it (#605, #735).
+- Arabic inside MathML equations is drawn as text instead of missing-glyph boxes, and `dir="rtl"` equations are laid out mirrored (#708, #730).
+
+**Vertical Japanese books**
+- A Japanese book whose pages turn right to left is written vertically, as Previewer writes it (#247, #746). A fixed-layout book (a comic) stays as it is.
+- The space around paragraphs and headings goes between the columns, as Previewer places it (#747).
+- Numbers set across the line (縦中横, `text-combine-upright: all`) and emphasis dots (`text-emphasis-style`) are kept (#748).
+- A block set `writing-mode: horizontal-tb` inside vertical text (an English quotation, a URL, a table) is set across the page (#749).
+
+**Links**
+- A link is one run, its bold, italic or sized words layered on it, in every paragraph (#715, #726).
+- A colour the book sets on a link, or with a `:link` or `:visited` rule, is written as Previewer's link colour (#728, #732, #733, #741).
+
+**Rules, headings and pages**
+- An `<hr>` keeps the book's width, alignment and border (#722, #724).
+- A page holding only its title prints the book's heading and the rule under it (#717, #718, #720), and sized words in a heading keep their size (#721, #725).
+- Only the book's own contents page is rebuilt; a play's or part's own "Contents" listing is kept (#714, #716).
+- Font-size keywords (`small`, `x-large`) come out at Previewer's sizes (#729, #731).
+- An inline `<svg>` drawn only with shapes (formulas set as glyph outlines) is drawn as a picture (#709, #727).
+
+**Colours**
+- A text colour that can't get light enough on a dark box is kept, as Previewer keeps it (#734, #739); in a one-paragraph table cell it is measured against the cell's fill only (#740, #742).
+
+### Under the hood
+- Spacing no longer changes between two conversions of the same book (#712, #719).
+- The book lists only the symbols it uses, each section's pictures, and the right `max_id` (#456, #736, #737, #738). kfxlib's "unused symbols" warning, which every book had, is gone (90 of the Gutenberg 90 before, 0 after).
+
+### Known differences from Previewer
+- **Search in Arabic books:** the Paperwhite finds nothing in a sideloaded book whose language is Arabic, in Previewer's file as in kfxgen's (#711).
+- **Vertical books:** percentages are measured against a narrower page than Previewer's (work in progress); a horizontal span inside a line, a horizontal item in a vertical list and vertical text inside a horizontal block are not yet written as Previewer writes them (#749).
+- **Tables:** a table of two or more columns opens in the Kindle's table viewer (a zoom button), which Previewer's books don't have (#272, #735).
+
 ## 5.23.0 — Pictures in words and table cells, floats, content outside table cells
 
 Five fixes since 5.22.0. Each was reviewed, converted through real calibre and compared with Kindle Previewer 4.0.3's output for the same book. The float and table-cell picture changes (#697, #701) were checked on a Kindle Paperwhite (5.19.2) and a Voyage (5.13.6). The other three (#695, #703, #705) were not checked on a Kindle: no book in the samples changes with #695 or #705, and #703 brings back tables in the native structure the devices already show. The Oasis was not checked for this release.
