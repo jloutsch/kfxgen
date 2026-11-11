@@ -4105,13 +4105,19 @@ class NativeKFXGenerator:
             value[IS("$70")] = background
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
-    def build_picture_box_style_157(self, entity_name, align):
-        """$157 for the container of a picture in a horizontal block of
-        vertical text: only its alignment, as Kindle Previewer 4.0.3 writes
-        `text-align` left, center, right or justify there (P247k K07, QA's
-        Q05, Q11 and Q15; #247)."""
+    def build_picture_box_style_157(self, entity_name, align=None, indent=None):
+        """$157 for the plain container of a picture in vertical text: only
+        its alignment, as Kindle Previewer 4.0.3 writes `text-align` left,
+        center, right or justify there (P247k K07, QA's Q05, Q11 and Q15;
+        #247), and its paragraph's text-indent (PVA H02)."""
         self.symtab.create_local_symbol(entity_name)
-        value = IonStruct(IS("$173"), IS(entity_name), IS("$34"), IS(ALIGN_MAP[align]))
+        value = IonStruct(IS("$173"), IS(entity_name))
+        if align:
+            value[IS("$34")] = IS(ALIGN_MAP[align])
+        if indent:
+            value[IS("$36")] = IonStruct(
+                IS("$307"), IonDecimal(indent[0]), IS("$306"), IS(indent[1])
+            )
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_fragment_157_image(
@@ -5875,14 +5881,18 @@ class NativeKFXGenerator:
                     # the block is (QA's P754L H15, Q755L). kfxgen's block
                     # picture, centred by $580 among other keys, took a page
                     # of its own on the Paperwhite in a vertical book (S754).
-                    plain = (
-                        not (
-                            chunk.get("float")
-                            or chunk.get("clear")
-                            or block.get("in_cell_paragraph")
-                        )
-                        and _in_horizontal_block()
+                    free = not (
+                        chunk.get("float")
+                        or chunk.get("clear")
+                        or block.get("in_cell_paragraph")
                     )
+                    horizontal = free and _in_horizontal_block()
+                    # Directly in vertical-rl text: sized by its height, with
+                    # no other key but an alignment the block sets, in
+                    # either spine (PVA, PVAL V01-V15). A linked one is
+                    # inline in a plain container (V07).
+                    upright = free and chapter_now["vertical"] and not horizontal
+                    plain = horizontal or upright
                     # A picture walked as a block of its own beside the
                     # block's paragraphs has no block_style: the text-align
                     # it inherits (S755).
@@ -5891,9 +5901,18 @@ class NativeKFXGenerator:
                     )
                     if plain:
                         chunk["plain"] = True
+                    if upright:
+                        chunk["upright"] = True
+                    # `display: block` keeps it a block picture in a vertical
+                    # book's horizontal block (PVA H10, P247k K10).
                     boxed = plain and (
                         bool(link)
-                        or getattr(self, "_book_writing_mode", None) == "vertical-rl"
+                        or (
+                            horizontal
+                            and not block.get("picture_block")
+                            and getattr(self, "_book_writing_mode", None)
+                            == "vertical-rl"
+                        )
                     )
                     if plain and not boxed and align in ("left", "center", "right"):
                         chunk["box_align"] = align
@@ -5908,6 +5927,9 @@ class NativeKFXGenerator:
                         if boxed:
                             opener["plain"] = True
                             opener["align"] = align
+                            # A paragraph's text-indent stays on its
+                            # container (PVA H02, H18, V18; P247k K02).
+                            opener["indent"] = (block_style or {}).get("indent")
                         all_chunks.append(opener)
                         chunk["inline"] = True
                         # The Voyage drops a floated picture's link, in this
@@ -7135,9 +7157,33 @@ class NativeKFXGenerator:
             w, _h = resource_to_dims.get(c.get("resource"), (None, None))
             return ("w", _image_width_pct(w) if w else 100.0)
 
+        def _upright_size_key(c):
+            """A picture directly in vertical-rl text is sized by its height
+            (`$57`), against the column as a width is (px/640 in a vertical
+            book, px/512 with an ltr spine), capped at 100 (PVA, PVAL V01,
+            V12-V14). A percentage the markup sets keeps its axis (V09,
+            V10); a width in a length gives the height at the picture's
+            proportions (V15)."""
+            m = _SIZE_HINT_RE.match(c.get("size") or "")
+            if m and m.group(3) == "%" and float(m.group(2)) > 0:
+                return _parse_size_hint(c["size"], IMAGE_COLUMN_PX)
+            w, h = resource_to_dims.get(c.get("resource"), (None, None))
+            if not (w and h):
+                return _image_size_key(c)
+            if m and m.group(3) != "%" and float(m.group(2)) > 0:
+                px = float(m.group(2)) * _CSS_PX_PER_UNIT[m.group(3) or "px"]
+                h = px * h / w if m.group(1) == "w" else px
+            return ("h", _image_width_pct(h))
+
         def _plain_key(c):
             """A plain picture's style key (#247): its size, whether the
             markup set it, and a block picture's alignment."""
+            if c.get("upright"):
+                return (
+                    _upright_size_key(c),
+                    bool(_SIZE_HINT_RE.match(c.get("size") or "")),
+                    c.get("box_align"),
+                )
             return (
                 _image_size_key(c),
                 bool(_parse_size_hint(c.get("size"), IMAGE_COLUMN_PX)),
@@ -7638,15 +7684,19 @@ class NativeKFXGenerator:
                                     )
                                 ]
                         if chunk.get("plain"):
-                            # In a horizontal block of vertical text: no
-                            # style, or only the block's alignment (P247k
-                            # K01, K07; QA's Q05, Q11, Q15; #247).
-                            if chunk.get("align") in ALIGN_MAP:
+                            # In vertical text or a horizontal block of it:
+                            # no style, or only the block's alignment and
+                            # its paragraph's indent (P247k K01, K07; QA's
+                            # Q05, Q11, Q15; PVA H02, V07; #247).
+                            box_align = chunk.get("align")
+                            box_align = box_align if box_align in ALIGN_MAP else None
+                            if box_align or chunk.get("indent"):
                                 extras["$157"] = IS(
                                     _allocate_style(
                                         "_pbox",
                                         builder=self.build_picture_box_style_157,
-                                        align=chunk["align"],
+                                        align=box_align,
+                                        indent=chunk.get("indent"),
                                     )
                                 )
                         elif not chunk.get("in_cell"):
