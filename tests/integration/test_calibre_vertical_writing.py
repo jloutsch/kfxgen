@@ -520,6 +520,8 @@ PICTURES = (
     '<div class="hz"><a href="c2.xhtml#t"><img src="w.jpg" alt="P4"/></a></div>'
     '<p><img src="w.jpg" alt="P5"/></p>'
     '<table class="hz"><tr><td><img src="w.jpg" alt="P6"/></td><td>甲</td></tr></table>'
+    '<div class="hz"><img src="w.jpg" alt="P7" style="float: left"/>'
+    "<p>H07 The words beside a floated picture.</p></div>"
     "<p>V02 縦の段落。</p>"
 )
 
@@ -618,6 +620,9 @@ def test_pictures_outside_horizontal_blocks_are_unchanged(vertical_pictures):
     assert entry.get("$601") is None and own["$580"] == "$320"
     entry, own, _parent, _around = vertical_pictures["P6"]
     assert entry.get("$601") is None and "$580" not in own
+    # A floated picture in a horizontal block (not probed): kfxgen's float.
+    entry, own, _parent, _around = vertical_pictures["P7"]
+    assert entry.get("$601") is None and own["$140"] == "$59"
 
 
 def test_a_horizontal_books_picture_is_unchanged(calibre):  # noqa: F811
