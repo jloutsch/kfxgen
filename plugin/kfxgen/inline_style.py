@@ -882,11 +882,15 @@ def css_typography(css):
 
 
 def link_target(flags):
-    """Return the link target carried by a run's flag set, or None."""
-    for flag in flags:
-        if isinstance(flag, tuple) and len(flag) == 2 and flag[0] == LINK_FLAG:
-            return flag[1]
-    return None
+    """Return the link target carried by a run's flag set, or None. Of two,
+    the smallest: a frozenset's order follows string hashing, which changes
+    from run to run, so "the first" would too (#759)."""
+    targets = [
+        flag[1]
+        for flag in flags
+        if isinstance(flag, tuple) and len(flag) == 2 and flag[0] == LINK_FLAG
+    ]
+    return min(targets) if targets else None
 
 
 #: vertical-align keywords that mean "raise"/"lower" without a length.
