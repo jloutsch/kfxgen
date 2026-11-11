@@ -328,6 +328,8 @@ def mark_link_state_colours(root, stylizer, select=None):
 #: properties the book sets, and the user agent's own, as "prop:value;...".
 _V_AUTHOR = "data-kfxgen-v-author"
 _V_UA = "data-kfxgen-v-ua"
+#: On the first horizontal-tb element of a vertical-rl file's branch (#247).
+_HORIZONTAL = "data-kfxgen-horizontal"
 _SIDES = ("top", "right", "bottom", "left")
 _BOX_PROPS = tuple(f"{k}-{s}" for k in ("margin", "padding") for s in _SIDES)
 _STYLE_DECL = re.compile(
@@ -392,9 +394,25 @@ def mark_vertical_margins(root, stylizer, select=None):
                 ua.setdefault(e, {}).update((p, str(rule[2][p])) for p in props)
             else:
                 authored.setdefault(e, set()).update(props)
+    # Each element's writing mode: its own, else its parent's. vertical-lr,
+    # which kfxgen doesn't write, counts as unset (_WRITING_MODES): inside a
+    # horizontal block it is horizontal, as in Previewer's (QA's P749 Q09b).
+    # A horizontal-tb element and all inside it are laid out horizontally,
+    # with physical margins: none of them is marked, and the first of them
+    # is marked as the block Previewer wraps in a horizontal container
+    # (P247h).
+    modes = {body: "vertical-rl"}
     for e in body.iter():
         if not isinstance(e.tag, str):
             continue
+        if e is not body:
+            own = str(stylizer.style(e).get("writing-mode") or "").strip().lower()
+            above = modes.get(e.getparent(), "vertical-rl")
+            modes[e] = own if own in _WRITING_MODES else above
+            if modes[e] == "horizontal-tb":
+                if above != "horizontal-tb":
+                    e.set(_HORIZONTAL, "1")
+                continue
         own = set(authored.get(e, ()))
         for m in _STYLE_DECL.finditer(e.get("style") or ""):
             kind, side = m.group(1).lower(), m.group(2)
@@ -4633,6 +4651,10 @@ def _table_block(table, style_resolver=None, base_href=None, walk_cell=None):
             # Its direction and language: its cells repeat only theirs that
             # differ, as Kindle Previewer 4.0.3 writes them (#246).
             "bidi": _bidi(table, style_resolver),
+            # A horizontal-tb table in vertical-rl text: Previewer sets it
+            # horizontal on the table itself, with no container (QA's P749
+            # Q02, #247).
+            **({"horizontal": True} if table.get(_HORIZONTAL) is not None else {}),
         },
     }
     return captions, block, carry
@@ -6674,7 +6696,10 @@ def extract_blocks_from_html(
         straight in a bordered <div>); its margins move to the box.
         Returns whether it made a box."""
         tag = _local_tag(elem.tag)
-        if style_resolver is None or tag not in _SIZED_BOX_TAGS:
+        # A horizontal-tb block in vertical-rl text: Previewer writes it in a
+        # horizontal container of its own, whatever the tag (P247h).
+        horizontal = elem.get(_HORIZONTAL) is not None
+        if style_resolver is None or (tag not in _SIZED_BOX_TAGS and not horizontal):
             return False
         css = style_resolver(elem) or {}
         border, fill = _css_border(css), _box_background(css)
@@ -6696,7 +6721,7 @@ def extract_blocks_from_html(
             m = _IMG_TOKEN_RE.fullmatch(kids[0].get("text") or "")
             if m and m.group(4):
                 return False
-        if border is None and fill is None and width is None:
+        if border is None and fill is None and width is None and not horizontal:
             return False
         if not kids or not any(
             b.get("type") in ("table", "box") or (b.get("text") or "").strip()
@@ -6755,6 +6780,7 @@ def extract_blocks_from_html(
                     # paragraphs in it repeat only theirs that differ (QA's
                     # Q15, #246).
                     "bidi": _bidi(elem, style_resolver),
+                    **({"horizontal": True} if horizontal else {}),
                 },
             }
         ]

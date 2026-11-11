@@ -729,6 +729,12 @@ def _is_frame(box):
     a paragraph holding a floated picture (#565)."""
     if box.get("float_wrapper"):
         return True
+    if box.get("horizontal") and not (
+        box.get("border") or box.get("background") is not None
+    ):
+        # A horizontal block in vertical text: Previewer's plain container
+        # (P247h, #247), padded or not (QA's P749d).
+        return True
     return bool(box.get("width")) and not (
         box.get("border") or box.get("background") is not None or box.get("float")
     )
@@ -965,14 +971,29 @@ _VERTICAL_KEYS = {
 }
 
 
+def _rotation_for(vertical, open_horizontal):
+    """The margin rotation for styles written now: ["vertical"] in a
+    vertical-rl chapter, ["horizontal"] inside a horizontal block in one
+    (P247h, #247), else none."""
+    if not vertical:
+        return []
+    return ["horizontal"] if any(open_horizontal) else ["vertical"]
+
+
+def _drop_default_left(value):
+    """kfxgen's own 0.5% left margin taken off a $157: Previewer writes none
+    in a vertical book, on a horizontal block in it either (P247h, #247)."""
+    if value.get(IS("$48")) == _DEFAULT_LEFT:
+        value.pop(IS("$48"))
+
+
 def _rotate_margins(value):
     """A $157's margins and paddings moved for vertical-rl text, as Kindle
     Previewer 4.0.3 writes them (QA's P747 and P247g, #247): G01's
     1.11667lh above and 0.833333lh below are $50 and $48; a book's
     margin-top 2em, in the left slot, is $47 2em. kfxgen's own 0.5% left
     margin is dropped: Previewer writes none."""
-    if value.get(IS("$48")) == _DEFAULT_LEFT:
-        value.pop(IS("$48"))
+    _drop_default_left(value)
     moved = {
         new: value.pop(IS(old))
         for old, new in _VERTICAL_KEYS.items()
@@ -1180,7 +1201,7 @@ def _title_in_table(blocks, title):
     return _eat_split_title(blocks, title)[0] != blocks
 
 
-def _heading_near_start(blocks):
+def _heading_near_start(blocks, title=None):
     """Whether the book prints its own heading among the section's first
     blocks, past the first: after an epigraph or a picture, or in a table
     cell. kfxgen then prints no label of its own, as Kindle Previewer has
@@ -1189,12 +1210,19 @@ def _heading_near_start(blocks):
     A heading in a box counts, unless it opens the chapter's first box:
     the label printed above the book's boxed heading, the title twice
     (#654). A first box opening with the title is drawn round kfxgen's
-    heading (#646). A heading in a box in a table cell counts too (#660)."""
+    heading (#646). One opening with a heading that is not `title` counts:
+    the title cut took the label's words off it and printed them above the
+    box, or printed a label over it, where Kindle Previewer 4.0.3 prints the
+    book's heading whole in the box (QA's P749b T, U, W, and P749c, on
+    #749). A heading in a box in a table cell counts too (#660)."""
     for i, block in enumerate(_drop_edge_rules(blocks or ())[:_MAX_SPLIT_TITLE_BLOCKS]):
         if block.get("heading"):
             return True
         if block.get("type") == "box":
             kids = _unboxed([block])
+            if i == 0 and kids and kids[0].get("heading") and title is not None:
+                if not _label_blocks(kids[:1], title):
+                    return True
             if any(b.get("heading") for b in (kids if i else kids[1:])):
                 return True
         for row in (block.get("table") or {}).get("rows") or ():
@@ -3778,7 +3806,13 @@ class NativeKFXGenerator:
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_table_style_157(
-        self, entity_name, border=None, width=None, clear=None, space_below=None
+        self,
+        entity_name,
+        border=None,
+        width=None,
+        clear=None,
+        space_below=None,
+        horizontal=False,
     ):
         """$157 for a native table node, as Kindle Previewer writes it (#219),
         with the table's own border (#264), clear (#381) and space below it in
@@ -3793,6 +3827,10 @@ class NativeKFXGenerator:
         )  # fmt: skip
         _apply_border(value, border, is_table=True)
         _write_clear(value, clear)
+        if horizontal:
+            # A horizontal-tb table in vertical text, as Kindle Previewer
+            # 4.0.3 writes it (QA's P749 Q02, #247).
+            value[IS("$560")] = IS("$557")
         if space_below:
             value[IS("$49")] = IonStruct(
                 IS("$307"),
@@ -3826,6 +3864,7 @@ class NativeKFXGenerator:
         float_side=None,
         centred=False,
         clear=None,
+        horizontal=False,
     ):
         """$157 for a box (#238), as Kindle Previewer 4.0.1 writes a bordered
         or filled container: border as for a table part, fill $70 (ARGB),
@@ -3861,6 +3900,16 @@ class NativeKFXGenerator:
             value[IS("$580")] = IS("$320")
         # A box or rule set to clear floats (#381).
         _write_clear(value, clear)
+        if horizontal:
+            # A horizontal block in vertical text, as Kindle Previewer 4.0.3
+            # writes it (P247h, #247): horizontal-tb, the page's width, and
+            # its two fit flags.
+            value[IS("$560")] = IS("$557")
+            value[IS("$56")] = IonStruct(
+                IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")
+            )
+            value[IS("$478")] = True
+            value[IS("$784")] = True
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_rule_style_157(
@@ -5973,6 +6022,7 @@ class NativeKFXGenerator:
                 "width": tbl.get("width"),
                 "clear": block.get("clear"),  # (#381)
                 "bidi": tbl.get("bidi"),  # (#246)
+                "horizontal": bool(tbl.get("horizontal")),  # (#247)
                 # Spacers after it with nothing below them in the file: their
                 # space below it, as Previewer writes it (#680).
                 "space_below": block.get("trailing_space"),
@@ -6231,7 +6281,7 @@ class NativeKFXGenerator:
             heading_near_start = (
                 not toc_links
                 and title_spans is None
-                and _heading_near_start(chapter.get("blocks"))
+                and _heading_near_start(chapter.get("blocks"), title)
             )
             # A label spelling out the book's first blocks, a heading split
             # over them: they print as they are, each its own entry, and
@@ -6871,6 +6921,7 @@ class NativeKFXGenerator:
         open_fills = []
         #: ["vertical"] while a vertical-rl chapter is written: its styles'
         #: margins and paddings move (#247), and are cached apart.
+        #: ["horizontal"] in a horizontal block inside it: they stay.
         rotation = []
 
         def _bidi_diff(own, parent):
@@ -6906,8 +6957,10 @@ class NativeKFXGenerator:
             name = f"s{idx}{kind}"
             style_cache[key] = name
             frag = (builder or self.build_fragment_157)(entity_name=name, **attrs)
-            if rotation:
+            if rotation == ["vertical"]:
                 _rotate_margins(frag.value)
+            elif rotation:
+                _drop_default_left(frag.value)
             for sym, value in bidi:
                 frag.value[IS(sym)] = (
                     value if sym == "$10" else IS(_BIDI_SYMBOLS[value])
@@ -7332,6 +7385,9 @@ class NativeKFXGenerator:
                 or getattr(self, "_book_writing_mode", None)
             ) == "vertical-rl"
             rotation[:] = ["vertical"] if vertical else []
+            # Whether each open container is a horizontal block: in one, and
+            # on it, margins stay where the book puts them (P247h, #247).
+            open_horizontal = []
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
                 around = open_bidi[-1] if open_bidi else {}
@@ -7356,6 +7412,12 @@ class NativeKFXGenerator:
                         else None
                     )
                     open_bidi.append(around if own is None else own)
+                    open_horizontal.append(
+                        bool((chunk.get("box") or {}).get("horizontal"))
+                        if node == "box"
+                        else node == "table" and bool(chunk.get("horizontal"))
+                    )
+                    rotation[:] = _rotation_for(vertical, open_horizontal)
                     cont_bidi = _bidi_diff(own, around)
                     open_fills.append(
                         (chunk.get("box") or chunk.get("cell") or {}).get("background")
@@ -7367,6 +7429,9 @@ class NativeKFXGenerator:
                     )
                 elif chunk.get("type") == "close" and open_fills:
                     open_fills.pop()
+                    if open_horizontal:
+                        open_horizontal.pop()
+                        rotation[:] = _rotation_for(vertical, open_horizontal)
                     if open_sizes:
                         open_sizes.pop()
                     if open_bidi:
@@ -7389,6 +7454,11 @@ class NativeKFXGenerator:
                                 **(
                                     {"space_below": chunk["space_below"]}
                                     if chunk.get("space_below")
+                                    else {}
+                                ),
+                                **(
+                                    {"horizontal": True}
+                                    if chunk.get("horizontal")
                                     else {}
                                 ),
                             )
@@ -7476,6 +7546,11 @@ class NativeKFXGenerator:
                                 float_side=box.get("float"),
                                 centred=bool(box.get("centred")),
                                 **({"clear": box["clear"]} if box.get("clear") else {}),
+                                **(
+                                    {"horizontal": True}
+                                    if box.get("horizontal")
+                                    else {}
+                                ),
                             )
                         )
                     if node in ("row", "head", "body", "foot") and (

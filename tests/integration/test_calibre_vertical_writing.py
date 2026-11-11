@@ -40,6 +40,7 @@ REST = (
     " .up { text-orientation: upright } .side { text-orientation: sideways }"
     " .tcy { text-combine-upright: all; -webkit-text-combine: horizontal }"
     " .em { text-emphasis-style: filled sesame; -webkit-text-emphasis-style: filled sesame }"
+    " .hz { writing-mode: horizontal-tb; -webkit-writing-mode: horizontal-tb }"
 )
 CH1 = (
     "<h1>第一章</h1>"
@@ -47,6 +48,8 @@ CH1 = (
     '<p>V03 英字を立てて<span class="up">ABC</span>と書く。</p>'
     '<p>V05 横に寝かせて<span class="side">XYZ</span>と書く。</p>'
     '<p>V07 <span class="em">ここに傍点</span>を打つ。</p>'
+    '<p class="hz">V09 この段落だけ横書きにする。</p>'
+    '<div class="hz"><p>V11 箱の一つ目。</p><p>V12 箱の二つ目。</p></div>'
     '<p>V10 次へ<a href="c2.xhtml#t">行く</a>。</p>'
 )
 CH2 = '<h1>第二章</h1><p id="t">T1 ここが行き先です。</p>'
@@ -293,3 +296,46 @@ def test_emphasis_marks_are_a_runs_717(books):
                     a = int(r["$143"])
                     found[text[a : a + int(r["$144"])]] = str(mark)
     assert found == {"ここに傍点": "$734"}
+
+
+def _containers(frags):
+    """{first words of each text entry: the style of the container it is in,
+    or None at the top of its storyline}."""
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    out = {}
+
+    def walk(entries, around):
+        for e in entries:
+            if not hasattr(e, "get"):
+                continue
+            ref = e.get("$145")
+            if ref:
+                text = str(texts[str(ref["name"])][ref["$403"]])
+                out[text.split()[0]] = around
+            kids = e.get("$146")
+            if kids:
+                own = styles.get(str(e.get("$157")), {})
+                walk(kids, {k: str(v) for k, v in own.items() if k != "$173"})
+
+    for st in by_type(frags, "$259"):
+        walk(val(st)["$146"], None)
+    return out
+
+
+def test_a_horizontal_block_in_vertical_text_is_a_horizontal_container(books):
+    # P247h H01 and H03/H04: a horizontal <p>, and a horizontal <div> of two
+    # paragraphs, each in one container, horizontal-tb at the page's width.
+    where = _containers(books["a"])
+    for words in ("V09", "V11"):
+        st = where[words]
+        assert st is not None, words
+        assert (st["$560"], st["$478"], st["$784"]) == ("$557", "True", "True")
+        assert "100" in st["$56"] and "$314" in st["$56"]
+    assert where["V11"] is where["V12"] or where["V11"] == where["V12"]
+    assert where["V07"] is None and where["V10"] is None
+
+
+def test_a_horizontal_block_in_a_horizontal_file_is_no_container(books):
+    where = _containers(books["m6"])
+    assert where["V09"] is None and where["V11"] is None
