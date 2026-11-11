@@ -439,9 +439,11 @@ def _direction_layers(spans):
             else:
                 r[1] = max(r[1], s + n)
                 r[4] = r[4] & plain
-        for f in plain:
-            if not link_target({f}):
-                continue
+        # In target order, not the set's, which follows string hashing
+        # (#759).
+        for f in sorted(
+            (f for f in plain if link_target({f})), key=lambda f: link_target({f})
+        ):
             if links and links[-1][4] == f and links[-1][1] == s:
                 links[-1][1] = s + n
             else:
