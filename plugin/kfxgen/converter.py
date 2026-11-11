@@ -6930,6 +6930,13 @@ def extract_blocks_from_html(
             pending_ids.clear()
             ids.extend(mark_offsets)
             block_ids = _dedupe_keep_order(ids)
+            if _IMG_TOKEN_RE.search(text) and style_resolver is not None:
+                # A picture in it, a linked one say, takes the container's
+                # text-align, as a block picture does (QA's Q27, #247).
+                css = style_resolver(elem)
+                align = compute_block_style(css)["align"] if css is not None else None
+            else:
+                align = None
             blocks.append(
                 {
                     "text": text,
@@ -6947,6 +6954,7 @@ def extract_blocks_from_html(
                     "anchor_offsets": {
                         aid: mark_offsets.get(aid, 0) for aid in block_ids
                     },
+                    **({"picture_align": align} if align else {}),
                 }
             )
 

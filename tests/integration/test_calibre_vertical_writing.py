@@ -527,6 +527,8 @@ PICTURES = (
     '<div class="hz" style="text-align: justify"><img src="w.jpg" alt="P10"/></div>'
     '<div class="hz" style="text-align: center"><img src="w.jpg" alt="P11"/>'
     "<p>H11 A paragraph after a centred picture.</p></div>"
+    '<div class="hz" style="text-align: center"><a href="c2.xhtml#t">'
+    '<img src="w.jpg" alt="P12"/></a><p>H12 A paragraph after it.</p></div>'
     "<p>V02 縦の段落。</p>"
 )
 
@@ -692,3 +694,7 @@ def test_a_picture_beside_a_paragraph_takes_its_blocks_alignment(
     assert around == {"$34": "$320"}
     _entry, own, _parent, _around = ltr_pictures["P11"]
     assert own.get("$580") == "$320"
+    # A linked one (QA's Q27): its plain container, centred, in both spines.
+    for pictures in (vertical_pictures, ltr_pictures):
+        _entry, _own, parent, around = pictures["P12"]
+        assert parent.get("$142") and around == {"$34": "$320"}
