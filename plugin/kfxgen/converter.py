@@ -84,6 +84,7 @@ from .inline_style import (
 )
 from .math_draw import draw as draw_math
 from .native_generator import NativeKFXGenerator
+from .page_scale import VERTICAL_PT, HORIZONTAL_PT, em_percent, page_pt, page_width
 
 _ITALIC_TAGS = {"em", "i"}
 _BOLD_TAGS = {"strong", "b"}
@@ -1215,17 +1216,27 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
         return None
 
 
-#: Each length unit as a share of the page width, as Kindle Previewer converts
-#: a container's margin onto its paragraphs: 2em became 6.25 % (#238). A px is
-#: 0.45pt and an em 12pt, the rates #296 measured for padding.
-_UNIT_TO_PCT = {
-    "$308": 3.125,  # em
-    "$505": 3.125,  # rem
-    "$319": 3.125 * 0.45 / 12,  # px
-    "$318": 3.125 / 12,  # pt
-    "$316": 3.125 * 72 / 25.4 / 12,  # mm
-    "$314": 1.0,  # %
-}
+#: The length units a margin is converted from: as Kindle Previewer converts a
+#: container's margin onto its paragraphs, 2em became 6.25 % (#238), 5% in a
+#: vertical book (P247j). A px is 0.45pt and an em 12pt, the rates #296
+#: measured for padding.
+_UNIT_TO_PCT = frozenset({"$308", "$505", "$319", "$318", "$316", "$314"})
+
+
+def _unit_percent(unit):
+    """One `unit` as a % of the page, in the arithmetic main used at 384pt,
+    so a horizontal book's values are unchanged to the last digit."""
+    em = em_percent()
+    return {
+        "$308": em,
+        "$505": em,
+        "$319": em * 0.45 / 12,
+        "$318": em / 12,
+        "$316": em * 72 / 25.4 / 12,
+        "$314": 1.0,
+    }[unit]
+
+
 #: Table parts: a table's margins do not reach its rows (#219).
 _NO_CARRY_TAGS = frozenset(
     {"table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption", "colgroup"}
@@ -1239,7 +1250,9 @@ _MAX_CARRIED_MARGINS = 50.0
 
 def _page_share(margin):
     """A (magnitude, unit) margin as a share of the page width, in %."""
-    return float(margin[0]) * _UNIT_TO_PCT[margin[1]] if margin else 0.0
+    if not margin:
+        return 0.0
+    return float(margin[0]) * _unit_percent(margin[1])
 
 
 def _add_margin(own, extra):
@@ -4095,13 +4108,14 @@ def _margin_em(css, side, share=1.0):
     """An element's declared margin-top or -bottom in the 16px root's ems
     (1px = 0.45pt, 12pt = 1em, as for padding; an em is the element's own,
     #647); a percentage on Kindle Previewer 4.0.3's scale, 100% = 384pt =
-    32em (#640), of `share` of the page: inside a box, the box's width
-    (#652); negative as the book sets it (#640); 0 when unset."""
+    32em (#640), 480pt = 40em in a vertical book (P247j), of `share` of the
+    page: inside a box, the box's width (#652); negative as the book sets it
+    (#640); 0 when unset."""
     value = str((css or {}).get(f"margin-{side}") or "").strip()
     sign = -1.0 if value.startswith("-") else 1.0
     em = _padding_em(value.lstrip("-"), _font_ratio(css))
     if isinstance(em, tuple):
-        return sign * em[1] * 0.32 * share
+        return sign * em[1] * (page_pt() / 1200) * share
     return 0.0 if em is None else sign * em
 
 
@@ -6547,7 +6561,7 @@ def extract_blocks_from_html(
 
         def em(value):
             v = _padding_em(value, ratio)
-            return v[1] * 0.32 if isinstance(v, tuple) else (v or 0.0)
+            return v[1] * (page_pt() / 1200) if isinstance(v, tuple) else (v or 0.0)
 
         top, bottom = em(sides[0]), em(sides[2])
         if not (top or bottom):
@@ -6631,18 +6645,21 @@ def extract_blocks_from_html(
                 share *= float(width[0]) / 100
                 continue
             if width and width[1] in _CSS_PX:
-                share = float(width[0]) * _CSS_PX[width[1]] * 0.45 / 384
+                share = float(width[0]) * _CSS_PX[width[1]] * 0.45 / page_pt()
                 continue
             border = _css_border(css) or {}
             share -= sum(
-                border.get(s, (None, 0.0, None))[1] / 384 for s in ("left", "right")
+                border.get(s, (None, 0.0, None))[1] / page_pt()
+                for s in ("left", "right")
             )
             pads = dict(zip(_BORDER_SIDES, css.get("padding-sides") or ()))
             outer = share
             for s in ("left", "right"):
                 em = _padding_em(str(pads.get(s) or "").strip())
                 share -= (
-                    em[1] / 100 * outer if isinstance(em, tuple) else (em or 0.0) / 32
+                    em[1] / 100 * outer
+                    if isinstance(em, tuple)
+                    else (em or 0.0) / (page_pt() / 12)
                 )
         return max(share, 0.05)
 
@@ -9464,14 +9481,29 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
     if not native_tables:
         log.info("  Native tables disabled (kfxgen_disable_native_tables=True)")
     fixed_layout = _fixed_layout(oeb_book)
-    chapters = extract_chapters_from_oeb(
-        oeb_book,
-        log,
-        metadata=metadata,
-        cover_href=cover_href,
-        native_tables=native_tables,
-        fixed_layout=fixed_layout,
+    rtl = (
+        getattr(getattr(oeb_book, "spine", None), "page_progression_direction", None)
+        == "rtl"
     )
+    # Vertical when the spine is rtl and the book Japanese, unless it is
+    # fixed-layout (#247).
+    writing_mode = (
+        "horizontal-tb"
+        if fixed_layout
+        else _book_writing_mode(metadata["language"], rtl)
+    )
+    # Percentages are measured against Previewer's page: 480pt in a vertical
+    # book, 384pt otherwise (P247j).
+    pt = VERTICAL_PT if writing_mode == "vertical-rl" else HORIZONTAL_PT
+    with page_width(pt):
+        chapters = extract_chapters_from_oeb(
+            oeb_book,
+            log,
+            metadata=metadata,
+            cover_href=cover_href,
+            native_tables=native_tables,
+            fixed_layout=fixed_layout,
+        )
     _warn_media(oeb_book, log)
     # A file set otherwise than the chapter it was joined to gets its own
     # section (#247).
@@ -9486,45 +9518,36 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
     # Generate KFX
     log.info("Generating KFX file...")
     gen = NativeKFXGenerator()
-    rtl = (
-        getattr(getattr(oeb_book, "spine", None), "page_progression_direction", None)
-        == "rtl"
-    )
-    gen.generate_full_book(
-        title=metadata["title"],
-        author=metadata["author"],
-        chapters=chapters,
-        output_path=output_path,
-        cover_image=cover_image,
-        images=images,  # ISSUE-4 INVESTIGATION (image rendering)
-        display_dims=display_dims,
-        footnote_keys=_footnote_keys(oeb_book, log),
-        language=metadata["language"],
-        # The spine's page-progression-direction, as calibre read it: only
-        # "rtl" turns the pages right to left; the language doesn't (#246).
-        rtl=rtl,
-        # Vertical when the spine is rtl and the book Japanese, unless it is
-        # fixed-layout (#247).
-        writing_mode=(
-            "horizontal-tb"
-            if fixed_layout
-            else _book_writing_mode(metadata["language"], rtl)
-        ),
-        publisher=metadata["publisher"],
-        issue_date=metadata.get("issue_date"),
-        authors=metadata.get("authors"),
-        description=metadata.get("description"),
-        font_table=font_table,
-        landmarks=_book_landmarks_for(oeb_book, opts),
-        page_list=_book_page_list(oeb_book),
-        # Approximate pages for a book with no page list, unless the user
-        # turned them off (#586).
-        approximate_pages=getattr(opts, "kfxgen_disable_approximate_pages", False)
-        is not True,
-        # Every <img src> went through _resolve_img_src, so a miss means the
-        # file is absent, not that the href is spelled differently. (#195)
-        resolved_image_refs=True,
-    )
+    with page_width(pt):
+        gen.generate_full_book(
+            title=metadata["title"],
+            author=metadata["author"],
+            chapters=chapters,
+            output_path=output_path,
+            cover_image=cover_image,
+            images=images,  # ISSUE-4 INVESTIGATION (image rendering)
+            display_dims=display_dims,
+            footnote_keys=_footnote_keys(oeb_book, log),
+            language=metadata["language"],
+            # The spine's page-progression-direction, as calibre read it: only
+            # "rtl" turns the pages right to left; the language doesn't (#246).
+            rtl=rtl,
+            writing_mode=writing_mode,
+            publisher=metadata["publisher"],
+            issue_date=metadata.get("issue_date"),
+            authors=metadata.get("authors"),
+            description=metadata.get("description"),
+            font_table=font_table,
+            landmarks=_book_landmarks_for(oeb_book, opts),
+            page_list=_book_page_list(oeb_book),
+            # Approximate pages for a book with no page list, unless the user
+            # turned them off (#586).
+            approximate_pages=getattr(opts, "kfxgen_disable_approximate_pages", False)
+            is not True,
+            # Every <img src> went through _resolve_img_src, so a miss means the
+            # file is absent, not that the href is spelled differently. (#195)
+            resolved_image_refs=True,
+        )
 
     if os.path.isfile(output_path):
         size = os.path.getsize(output_path)

@@ -22,7 +22,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "plugin"))
 sys.path.insert(0, str(REPO))
 
-from kfxgen.native_generator import _IMAGE_COLUMN_PX  # noqa: E402
+from kfxgen.page_scale import column_px  # noqa: E402
 from tests._helpers import decodable_jpeg_of  # noqa: E402
 from tests._kfx_introspect import by_type, iter_entries, load_fragments, val  # noqa: E402
 from tests.integration.test_calibre_table_rows import (  # noqa: E402
@@ -136,7 +136,7 @@ def test_attribute_sizes_reach_the_picture(book):
     # height counts only as a percentage, and only without a width.
     (sized, _scan, _tiled), version = book
     styles = dict(sized)
-    width = round(150 / _IMAGE_COLUMN_PX * 100, 3)
+    width = round(150 / column_px() * 100, 3)
     assert _pct(styles["attr"], "$56") == width, f"calibre {version}"
     assert _pct(styles["tall"], "$57") == 50.0, f"calibre {version}"
     assert _pct(styles["tall"], "$56") is None, f"calibre {version}"

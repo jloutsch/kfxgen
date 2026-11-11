@@ -38,6 +38,7 @@ from .kfxlib_minimal.ion import (
     IonSymbol,
 )
 from .math_draw import TEXT_SIZE as MATH_TEXT_SIZE
+from .page_scale import column_px, em_percent, page_pt
 from .math_draw import MathText
 from .kfxlib_minimal.kfx_container import KfxContainer
 from .kfxlib_minimal.standard_symbols import StandardSymbolTable
@@ -58,10 +59,6 @@ _log = logging.getLogger(__name__)
 #: A token size hint: axis, number, unit (bare = px).
 _SIZE_HINT_RE = re.compile(r"^([wh])=(\d+(?:\.\d+)?)(%|px|em|pt)?$")
 _CSS_PX_PER_UNIT = {"px": 1.0, "em": 16.0, "pt": 4.0 / 3.0}
-#: Text column width Amazon sizes against, in CSS pixels: 512 in Kindle
-#: Previewer 4.0.3 (#467, probed 1 to 400 px). It was 496, recovered from
-#: Previewer 3.106's output across seven books (#145).
-_IMAGE_COLUMN_PX = 512.0
 #: Book languages Kindle Previewer 4.0.3 declares `<lang>-reflow-language`
 #: for in `$585`: ar, fa and he (#246). It makes no KFX for ur, and refuses
 #: yi and ckb.
@@ -236,7 +233,7 @@ def _size_in_box(hint, box):
     if box.get("width_px"):
         pct = px / box["width_px"] * 100.0
     else:
-        pct = px / _IMAGE_COLUMN_PX * 100.0 / box["width"] * 100.0
+        pct = px / column_px() * 100.0 / box["width"] * 100.0
     return f"w={pct:.3f}%"
 
 
@@ -285,21 +282,21 @@ def _inline_float_style(side, m, width_px, height_px):
     width its shape gives, px at 0.45pt as #541 measured (QA on #697: 3em
     high is 12.784%, 40px 6.392%); a % height stays a %, with no width.
     With neither, its own pixels."""
-    pct, fill = width_px / 512 * 100, False
+    pct, fill = width_px / column_px() * 100, False
     if m and m.group(1) == "h" and m.group(3) == "%":
         return ("float", side, None, False, True, f"{float(m.group(2)):g}")
     if m and m.group(1) == "h":
         number, unit = float(m.group(2)), m.group(3) or "px"
         h = number * {"em": 16.0, "pt": 4 / 3}.get(unit, 0.6)
-        pct = h * width_px / height_px / 512 * 100
+        pct = h * width_px / height_px / column_px() * 100
     elif m and m.group(1) == "w":
         number, unit = float(m.group(2)), m.group(3) or "px"
         if unit == "%":
             pct = number
         elif unit == "em":
-            pct, fill = number * 16 / 512 * 100, True
+            pct, fill = number * 16 / column_px() * 100, True
         else:
-            pct = number * (4 / 3 if unit == "pt" else 1.0) / 512 * 100
+            pct = number * (4 / 3 if unit == "pt" else 1.0) / column_px() * 100
     return ("float", side, f"{round(pct, 5):g}", fill, bool(m), None)
 
 
@@ -2071,7 +2068,8 @@ def _column_widths_152(column_widths):
 def _padding_values(padding, table_width):
     """A cell's padding as Kindle Previewer 4.0.1 writes it (#264):
     {"$52": IonStruct, ...} for each side that isn't zero. Top and bottom
-    em / 1.2 lh; left and right em x 3.125 %, over the table's width
+    em / 1.2 lh; left and right em x 3.125 % (2.5 % in a vertical book,
+    P247j), over the table's width
     fraction; a percentage p is p x 32 / 100 em vertically and p %
     horizontally."""
     from decimal import ROUND_HALF_UP, Decimal
@@ -2081,9 +2079,9 @@ def _padding_values(padding, table_width):
     out = {}
     for side, value in padding.items():
         if isinstance(value, (tuple, list)):
-            em, pct = value[1] * 32 / 100.0, value[1] / frac
+            em, pct = value[1] * (page_pt() / 12) / 100.0, value[1] / frac
         else:
-            em, pct = value, value * 3.125 / frac
+            em, pct = value, value * em_percent() / frac
         if em == 0:
             continue
         if side in ("top", "bottom"):
@@ -2479,12 +2477,12 @@ class NativeKFXGenerator:
                 w_text = f"{round(number, 5):g}%"
             else:
                 pt = number * (0.45 if unit == "px" else 1.0)
-                w_text = f"{round(pt / 384 * 100, 5):g}%"
+                w_text = f"{round(pt / page_pt() * 100, 5):g}%"
         if pct_h is None and m and m.group(1) == "w":
             if unit == "em":
                 w_em, fill = number, True
             elif unit == "%":
-                w_em = number / 100 * 512 / scale
+                w_em = number / 100 * column_px() / scale
             else:
                 pt = number * (0.45 if unit == "px" else 1.0)
                 w_em = pt / 12 / (font_size or 1)
@@ -4043,9 +4041,11 @@ class NativeKFXGenerator:
         self.symtab.create_local_symbol(entity_name)
         lh = lambda v: IonStruct(IS("$307"), IonDecimal(v), IS("$306"), IS("$310"))  # noqa: E731
         pct = lambda v: IonStruct(IS("$307"), IonDecimal(v), IS("$306"), IS("$314"))  # noqa: E731
+        # 1px (0.45pt) at the sides, as a share of the page (P247j).
+        side = f"{round(0.45 / page_pt() * 100, 3):g}"
         value = IonStruct(
-            IS("$52"), lh("0.03125"), IS("$53"), pct("0.117"),
-            IS("$54"), lh("0.03125"), IS("$55"), pct("0.117"),
+            IS("$52"), lh("0.03125"), IS("$53"), pct(side),
+            IS("$54"), lh("0.03125"), IS("$55"), pct(side),
             IS("$173"), IS(entity_name),
         )  # fmt: skip
         if valign in VALIGN_MAP:
@@ -7006,12 +7006,13 @@ class NativeKFXGenerator:
                     extra_style_names.append(link_name)
 
         # Picture entries need their own $157 styles (build_fragment_157_image).
-        IMAGE_COLUMN_PX = _IMAGE_COLUMN_PX
+        IMAGE_COLUMN_PX = column_px()
 
         def _image_width_pct(w):
             """CSS width for an image `w` pixels wide, as Amazon computes it.
 
-            `min(100, px / 512 * 100)`, as Kindle Previewer 4.0.3 writes it
+            `min(100, px / 512 * 100)`, px / 640 in a vertical book (P247j),
+            as Kindle Previewer 4.0.3 writes it
             (#467; 496 in Previewer 3.106, #145). An image at least as
             wide as the column fills it; a narrower one keeps its natural
             proportion instead of being stretched.
@@ -7717,7 +7718,7 @@ class NativeKFXGenerator:
                         # Indented by depth, 6.25% a level: Kindle
                         # Previewer's width for a 2em margin (#238, #313).
                         indent = (
-                            {"margin_left": (f"{6.25 * level:g}", "$314")}
+                            {"margin_left": (f"{2 * em_percent() * level:g}", "$314")}
                             if level
                             else {}
                         )

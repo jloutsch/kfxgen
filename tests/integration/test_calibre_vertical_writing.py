@@ -41,6 +41,7 @@ REST = (
     " .tcy { text-combine-upright: all; -webkit-text-combine: horizontal }"
     " .em { text-emphasis-style: filled sesame; -webkit-text-emphasis-style: filled sesame }"
     " .hz { writing-mode: horizontal-tb; -webkit-writing-mode: horizontal-tb }"
+    " .bxp { border: 1px solid black; padding: 10px }"
 )
 CH1 = (
     "<h1>第一章</h1>"
@@ -52,7 +53,11 @@ CH1 = (
     '<div class="hz"><p>V11 箱の一つ目。</p><p>V12 箱の二つ目。</p></div>'
     '<p>V10 次へ<a href="c2.xhtml#t">行く</a>。</p>'
 )
-CH2 = '<h1>第二章</h1><p id="t">T1 ここが行き先です。</p>'
+CH2 = (
+    '<h1>第二章</h1><p id="t">T1 ここが行き先です。</p>'
+    '<p style="margin-left: 10%">P01 左に十パーセント。</p>'
+    '<div class="bxp"><p>P02 枠の内側に十ピクセル。</p></div>'
+)
 
 #: name: (rtl spine, CSS for c1.xhtml, CSS for c2.xhtml)
 VARIANTS = {
@@ -334,6 +339,58 @@ def test_a_fixed_layout_books_horizontal_block_is_no_container(calibre):  # noqa
     assert not [
         f.fid for f in by_type(frags, "$157") if "$560" in {str(k) for k in val(f)}
     ]
+
+
+def _entry_and_parent(frags, prefix):
+    """The style values of the storyline entry whose text starts `prefix`,
+    and of the container around it ({} at the top)."""
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+
+    def lengths(e):
+        style = styles.get(str(e.get("$157")), {}) if e is not None else {}
+        return {
+            str(k): str(v["$307"])
+            for k, v in style.items()
+            if str(k) in ("$47", "$48", "$49", "$50", "$52", "$53", "$54", "$55")
+        }
+
+    def walk(entries, parent):
+        for e in entries:
+            if not hasattr(e, "get"):
+                continue
+            r = e.get("$145")
+            if r and str(texts[str(r["name"])][r["$403"]]).startswith(prefix):
+                return lengths(e), lengths(parent)
+            found = walk(e.get("$146") or [], e)
+            if found:
+                return found
+        return None
+
+    for f in by_type(frags, "$259"):
+        found = walk(val(f)["$146"], None)
+        if found:
+            return found
+    raise AssertionError(prefix)
+
+
+@pytest.mark.parametrize(
+    "name, lh, pad",
+    [
+        # P247j V04 and V09: a vertical book measures against 480pt.
+        ("a", "3.33333", "0.938"),
+        # An ltr spine isn't a vertical book (#746): 384pt, as main.
+        ("c", "2.66667", "1.172"),
+    ],
+)
+def test_percentages_are_measured_against_previewers_page(books, name, lh, pad):
+    """margin-left 10% in vertical text is the space before the line, in lh
+    from 10% of the page; 10px of box padding at the line's ends is a % of
+    it (Previewer 4.0.3, P247j). The page is 480pt in a vertical book."""
+    p01, _ = _entry_and_parent(books[name], "P01")
+    assert p01["$48"] == lh
+    _, box = _entry_and_parent(books[name], "P02")
+    assert (box["$52"], box["$54"]) == (pad, pad)
 
 
 def test_tcy_is_an_inline_container_in_the_words(books):
