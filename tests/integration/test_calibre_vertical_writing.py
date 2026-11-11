@@ -522,6 +522,8 @@ PICTURES = (
     '<table class="hz"><tr><td><img src="w.jpg" alt="P6"/></td><td>甲</td></tr></table>'
     '<div class="hz"><img src="w.jpg" alt="P7" style="float: left"/>'
     "<p>H07 The words beside a floated picture.</p></div>"
+    '<div class="hz" style="text-align: right"><img src="w.jpg" alt="P8"/></div>'
+    '<div class="hz" style="text-align: left"><img src="w.jpg" alt="P9"/></div>'
     "<p>V02 縦の段落。</p>"
 )
 
@@ -587,12 +589,14 @@ def test_a_picture_in_a_horizontal_block_is_inline_in_a_plain_container(
     assert str(parent.get("$159")) == "$269" and around == {}
 
 
-def test_a_centred_horizontal_blocks_picture_container_is_centred(
-    vertical_pictures,
+@pytest.mark.parametrize("alt, align", [("P2", "$320"), ("P8", "$61"), ("P9", "$59")])
+def test_a_horizontal_blocks_alignment_is_on_its_pictures_container(
+    vertical_pictures, alt, align
 ):
-    # P247k K07: the container carries the block's text-align, nothing else.
-    _entry, _own, _parent, around = vertical_pictures["P2"]
-    assert around == {"$34": "$320"}
+    # P247k K07, QA's Q05 and Q11: the container carries the block's
+    # text-align (center, right, left), nothing else.
+    _entry, _own, _parent, around = vertical_pictures[alt]
+    assert around == {"$34": align}
 
 
 def test_a_sized_picture_in_a_horizontal_block_keeps_its_box_sizing(
@@ -631,3 +635,18 @@ def test_a_horizontal_books_picture_is_unchanged(calibre):  # noqa: F811
     for alt in ("P1", "P2", "P3"):
         entry, own, _parent, _around = pictures[alt]
         assert entry.get("$601") is None and own["$580"] == "$320", alt
+
+
+def test_in_an_ltr_book_the_picture_is_a_block_with_its_size_only(calibre):  # noqa: F811
+    """QA's P754L H15: with an ltr spine the book isn't vertical (#746), but
+    its vertical-rl file is, and Previewer writes a picture in a horizontal
+    block there as a block `$271` with only `$56`: no container, no `$580`."""
+    pictures = _picture_book(
+        calibre, "c247pic", False, "ja", f"html {{ {VERT} }}" + REST
+    )
+    entry, own, _parent, around = pictures["P1"]
+    assert entry.get("$601") is None and set(own) == {"$56"}
+    # Directly in the horizontal block's container.
+    assert around.get("$560") == "$557"
+    _entry, own, _parent, _around = pictures["P3"]
+    assert set(own) == {"$56", "$546"}

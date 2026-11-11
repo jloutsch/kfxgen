@@ -4106,7 +4106,8 @@ class NativeKFXGenerator:
     def build_picture_box_style_157(self, entity_name, align):
         """$157 for the container of a picture in a horizontal block of
         vertical text: only its alignment, as Kindle Previewer 4.0.3 writes
-        `text-align: center` there (P247k K07, #247)."""
+        `text-align` left, center or right there (P247k K07, QA's Q05 and
+        Q11; #247)."""
         self.symtab.create_local_symbol(entity_name)
         value = IonStruct(IS("$173"), IS(entity_name), IS("$34"), IS(ALIGN_MAP[align]))
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
@@ -5859,11 +5860,12 @@ class NativeKFXGenerator:
                             k for k in block_anchor_keys if k not in set(at_start)
                         ]
                     link = _picture_link(chunk.pop("at"), para_spans)
-                    # A picture in a horizontal block of vertical text: inline
-                    # in a plain container, with only its size, as Kindle
-                    # Previewer 4.0.3 writes it (P247k, #247). kfxgen's block
-                    # picture, centred by $580, took a page of its own there
-                    # on the Paperwhite (S754).
+                    # A picture in a horizontal block of vertical text: only
+                    # its size, as Kindle Previewer 4.0.3 writes it (#247).
+                    # In a vertical book it is inline in a plain container
+                    # (P247k); in an ltr-spine book, a block picture (QA's
+                    # P754L H15). kfxgen's block picture, centred by $580,
+                    # took a page of its own on the Paperwhite (S754).
                     plain = (
                         not (
                             chunk.get("float")
@@ -5872,7 +5874,12 @@ class NativeKFXGenerator:
                         )
                         and _in_horizontal_block()
                     )
-                    if link or plain:
+                    if plain:
+                        chunk["plain"] = True
+                    boxed = plain and (
+                        getattr(self, "_book_writing_mode", None) == "vertical-rl"
+                    )
+                    if link or boxed:
                         # A linked picture: a container whose link covers
                         # the picture, as Kindle Previewer writes it (#355).
                         opener = {
@@ -5880,10 +5887,9 @@ class NativeKFXGenerator:
                             "node": "link",
                             "spans": [(0, 1, link)] if link else [],
                         }
-                        if plain:
+                        if boxed:
                             opener["plain"] = True
                             opener["align"] = (block_style or {}).get("align")
-                            chunk["plain"] = True
                         all_chunks.append(opener)
                         chunk["inline"] = True
                         # The Voyage drops a floated picture's link, in this
@@ -5891,7 +5897,7 @@ class NativeKFXGenerator:
                         # (#243).
                         chunk.pop("float", None)
                     all_chunks.append(chunk)
-                    if link or plain:
+                    if link or boxed:
                         all_chunks.append({"type": "close"})
                 else:
                     placed = _append_text_with_spans(
@@ -7614,8 +7620,8 @@ class NativeKFXGenerator:
                         if chunk.get("plain"):
                             # In a horizontal block of vertical text: no
                             # style, or only the block's alignment (P247k
-                            # K01, K07; #247).
-                            if chunk.get("align") in ("center", "right"):
+                            # K01, K07; QA's Q05, Q11; #247).
+                            if chunk.get("align") in ("left", "center", "right"):
                                 extras["$157"] = IS(
                                     _allocate_style(
                                         "_pbox",
