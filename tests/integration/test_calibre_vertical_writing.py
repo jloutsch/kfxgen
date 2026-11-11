@@ -525,6 +525,8 @@ PICTURES = (
     '<div class="hz" style="text-align: right"><img src="w.jpg" alt="P8"/></div>'
     '<div class="hz" style="text-align: left"><img src="w.jpg" alt="P9"/></div>'
     '<div class="hz" style="text-align: justify"><img src="w.jpg" alt="P10"/></div>'
+    '<div class="hz" style="text-align: center"><img src="w.jpg" alt="P11"/>'
+    "<p>H11 A paragraph after a centred picture.</p></div>"
     "<p>V02 縦の段落。</p>"
 )
 
@@ -677,3 +679,16 @@ def test_in_an_ltr_book_a_linked_picture_has_the_plain_container(ltr_pictures):
     entry, own, parent, around = ltr_pictures["P4"]
     assert str(entry.get("$601")) == "$283" and set(own) == {"$56"}
     assert parent.get("$142") and around == {}
+
+
+def test_a_picture_beside_a_paragraph_takes_its_blocks_alignment(
+    vertical_pictures, ltr_pictures
+):
+    # S755: a picture beside a paragraph in a centred horizontal block is a
+    # block of its own in kfxgen; it still takes the block's text-align, as
+    # Previewer writes it: the container's `$34` in a vertical book, `$580`
+    # with an ltr spine.
+    _entry, _own, _parent, around = vertical_pictures["P11"]
+    assert around == {"$34": "$320"}
+    _entry, own, _parent, _around = ltr_pictures["P11"]
+    assert own.get("$580") == "$320"

@@ -5881,7 +5881,12 @@ class NativeKFXGenerator:
                         )
                         and _in_horizontal_block()
                     )
-                    align = (block_style or {}).get("align")
+                    # A picture walked as a block of its own beside the
+                    # block's paragraphs has no block_style: the text-align
+                    # it inherits (S755).
+                    align = (block_style or {}).get("align") or block.get(
+                        "picture_align"
+                    )
                     if plain:
                         chunk["plain"] = True
                     boxed = plain and (
