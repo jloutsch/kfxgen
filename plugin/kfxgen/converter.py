@@ -814,6 +814,33 @@ def _inline_bidi(elem, css):
 _BIDI_SERIAL = itertools.count()
 
 
+def _pictures_among_words(elem, holds_blocks):
+    """`elem`'s <img> children that share a run of loose content with words:
+    between two block children (or an end), some text or an inline element
+    with text (#757). The elements themselves, not their `id()`: lxml makes
+    a new proxy for each access once the last one is gone (#712)."""
+    found, run, words = set(), [], bool((elem.text or "").strip())
+    for child in elem:
+        if not isinstance(child.tag, str):
+            words = words or bool((child.tail or "").strip())
+            continue
+        if holds_blocks(child) or _local_tag(child.tag) == "svg":
+            # A block, or an <svg>, which `_walk_container` writes as
+            # pictures of its own: the run ends.
+            if words:
+                found.update(run)
+            run, words = [], False
+        elif _local_tag(child.tag) == "img":
+            run.append(child)
+        elif "".join(child.itertext()).strip():
+            words = True
+        if (child.tail or "").strip():
+            words = True
+    if words:
+        found.update(run)
+    return found
+
+
 def _with_bidi(block_style, elem, style_resolver, own=True):
     """`block_style` with `elem`'s direction and language in it (#246).
     `own=False` for text loose in `elem`, between or after its blocks: it
@@ -6896,6 +6923,24 @@ def extract_blocks_from_html(
             style["margin_left"], style["margin_right"] = new_left, new_right
             b["block_style"] = style
 
+    def _inline_picture_parts(img, parent):
+        """An <img> child of `parent` as `_walk_inline` writes a picture in
+        the words: its ids, then its token (#757). A hidden one gives only
+        its ids (#428)."""
+        if _is_hidden(img, style_resolver):
+            return [make_anchor_mark(a) for a in _subtree_anchor_ids(img)]
+        parts = [make_anchor_mark(a) for a in _own_anchor_ids(img)]
+        size = _img_size_hint(img, style_resolver)
+        side, size = _img_float(img, parent, size, style_resolver)
+        token = _make_img_token(
+            _resolve_img_src(base_href, img.get("src", "") or ""),
+            img.get("alt", "") or "",
+            size,
+            side,
+            _img_inline_extras(img, style_resolver),
+        )
+        return [*parts, (token, frozenset())]
+
     def _walk_container(elem, is_block=None):
         """`elem`'s children in order: block children walked as blocks, each
         run of inline content between them (its own text, inline children,
@@ -6930,13 +6975,17 @@ def extract_blocks_from_html(
             pending_ids.clear()
             ids.extend(mark_offsets)
             block_ids = _dedupe_keep_order(ids)
-            if _IMG_TOKEN_RE.search(text) and style_resolver is not None:
-                # A picture in it, a linked one say, takes the container's
-                # text-align, as a block picture does (QA's Q27, #247).
-                css = style_resolver(elem)
-                align = compute_block_style(css)["align"] if css is not None else None
-            else:
-                align = None
+            # The container's text-align: loose text in a centred <div> is
+            # centred, as Kindle Previewer 4.0.3 writes it (P757 R04, R07,
+            # R11, R12; QA's Q27 on #755). Only its alignment: the margins
+            # and indent are the box's.
+            css = style_resolver(elem) if style_resolver is not None else None
+            align = compute_block_style(css)["align"] if css is not None else None
+            block_style = _with_bidi(
+                {"align": align} if align else None, elem, style_resolver, own=False
+            )
+            if align:
+                block_style = _start_end_align(block_style, css)
             blocks.append(
                 {
                     "text": text,
@@ -6945,7 +6994,7 @@ def extract_blocks_from_html(
                     # between two paragraphs, or a list item's own line before
                     # its nested list, is in its page's language, as Kindle
                     # Previewer 4.0.3 writes it (#718).
-                    "block_style": _with_bidi(None, elem, style_resolver, own=False),
+                    "block_style": block_style,
                     "anchor_ids": block_ids,
                     # Cells fuse into one block (#128), so an offset is what
                     # makes a link land on the right cell rather than at the
@@ -6954,11 +7003,13 @@ def extract_blocks_from_html(
                     "anchor_offsets": {
                         aid: mark_offsets.get(aid, 0) for aid in block_ids
                     },
-                    **({"picture_align": align} if align else {}),
                 }
             )
 
         ws = _white_space_flags(elem, style_resolver, frozenset())
+        among_words = (
+            _pictures_among_words(elem, _holds_blocks) if is_block is None else set()
+        )
         if elem.text:
             inline_parts.append((elem.text, ws))
         # In a table whose link targets follow their rows, an anchor after a
@@ -6979,6 +7030,11 @@ def extract_blocks_from_html(
                     # they reach a later row.
                     if tbl is not None and aid not in tbl["anchor_ids"]:
                         tbl["anchor_ids"].append(aid)
+            elif child in among_words:
+                # A picture among the container's loose words runs with them,
+                # one paragraph, as Kindle Previewer 4.0.3 writes it (P757,
+                # #757); alone between blocks it stays a block of its own.
+                inline_parts.extend(_inline_picture_parts(child, elem))
             elif (
                 is_block(child)
                 if is_block is not None
