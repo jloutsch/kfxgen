@@ -959,6 +959,15 @@ def _fixed_layout(oeb_book):
     return bool(pages) and sized * 2 > len(pages)
 
 
+def _drop_vertical_marks(root):
+    """`mark_vertical_margins`' marks taken off a file, so it is read as
+    horizontal text: its margins in their own places, no 縦中横 (#752)."""
+    for e in root.iter():
+        if isinstance(e.tag, str):
+            for mark in (_V_AUTHOR, _V_UA, _HORIZONTAL):
+                e.attrib.pop(mark, None)
+
+
 def _split_by_writing_mode(chapters):
     """Each chapter cut where its blocks' writing mode changes: a file left
     out of the TOC is joined to the chapter before it, and Previewer gives a
@@ -7738,6 +7747,7 @@ def extract_chapters_from_oeb(
     cover_href=None,
     native_tables=False,
     keep_nav_listings=False,
+    fixed_layout=False,
 ):
     """
     Extract structured chapters from OEB book by mapping TOC to spine items.
@@ -7813,6 +7823,11 @@ def extract_chapters_from_oeb(
                 href_for_log = getattr(item, "href", "") or "<unknown>"
                 log.info(f"  Skipping calibre's generated inline TOC ({href_for_log})")
                 continue
+            if fixed_layout:
+                # A fixed-layout book (a comic) stays horizontal, each file
+                # too, as the #711 manga passed on the Paperwhite; a page
+                # set vertical-rl isn't checked on a Kindle (#752).
+                _drop_vertical_marks(item.data)
             resolver = _build_style_resolver(oeb_book, item, log)
             nav_listing_at = []
             tables_seen = []
@@ -7847,7 +7862,8 @@ def extract_chapters_from_oeb(
             if resolver is not None:
                 writing_mode = (
                     "vertical-rl"
-                    if _file_writing_mode(item.data, resolver) == "vertical-rl"
+                    if not fixed_layout
+                    and _file_writing_mode(item.data, resolver) == "vertical-rl"
                     else "horizontal-tb"
                 )
                 for b in blocks:
@@ -7945,7 +7961,7 @@ def extract_chapters_from_oeb(
             log.info(f"Assembled {len(chapters)} chapters from TOC coordinates")
             if _listing_without_contents(chapters, keep_nav_listings):
                 return _with_listings_kept(
-                    oeb_book, log, metadata, cover_href, native_tables
+                    oeb_book, log, metadata, cover_href, native_tables, fixed_layout
                 )
             _replace_title_page(chapters, metadata, log, keep_nav_listings)
             _warn_flattened_tables(
@@ -7983,7 +7999,9 @@ def extract_chapters_from_oeb(
 
     log.info(f"Using {len(chapters)} spine items as chapters (no TOC mapping)")
     if _listing_without_contents(chapters, keep_nav_listings):
-        return _with_listings_kept(oeb_book, log, metadata, cover_href, native_tables)
+        return _with_listings_kept(
+            oeb_book, log, metadata, cover_href, native_tables, fixed_layout
+        )
     _replace_title_page(chapters, metadata, log, keep_nav_listings)
     _warn_flattened_tables(chapters, table_blocks, log, native_tables, notes_blocks)
     return chapters
@@ -8003,7 +8021,9 @@ def _listing_without_contents(chapters, kept):
     return not titled and _nav_listing_contents_chapter(chapters) is None
 
 
-def _with_listings_kept(oeb_book, log, metadata, cover_href, native_tables):
+def _with_listings_kept(
+    oeb_book, log, metadata, cover_href, native_tables, fixed_layout=False
+):
     """The chapters again, with the book's own contents listings printed and
     their links working, for a book that gets no Contents page (#335)."""
     log.info("  No Contents page to rebuild: keeping the book's own listing")
@@ -8014,6 +8034,7 @@ def _with_listings_kept(oeb_book, log, metadata, cover_href, native_tables):
         cover_href=cover_href,
         native_tables=native_tables,
         keep_nav_listings=True,
+        fixed_layout=fixed_layout,
     )
 
 
@@ -9442,12 +9463,14 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
     native_tables = not getattr(opts, "kfxgen_disable_native_tables", False)
     if not native_tables:
         log.info("  Native tables disabled (kfxgen_disable_native_tables=True)")
+    fixed_layout = _fixed_layout(oeb_book)
     chapters = extract_chapters_from_oeb(
         oeb_book,
         log,
         metadata=metadata,
         cover_href=cover_href,
         native_tables=native_tables,
+        fixed_layout=fixed_layout,
     )
     _warn_media(oeb_book, log)
     # A file set otherwise than the chapter it was joined to gets its own
@@ -9484,7 +9507,7 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
         # fixed-layout (#247).
         writing_mode=(
             "horizontal-tb"
-            if _fixed_layout(oeb_book)
+            if fixed_layout
             else _book_writing_mode(metadata["language"], rtl)
         ),
         publisher=metadata["publisher"],
