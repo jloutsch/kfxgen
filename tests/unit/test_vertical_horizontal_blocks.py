@@ -370,3 +370,38 @@ def test_a_boxed_heading_that_is_the_label_is_still_kfxgens_heading_in_the_box(
     heading = entries[0]["kids"][0]
     assert heading["text"] == "S1 第三章"
     assert _num(heading["style"]["$16"]) == NativeKFXGenerator.HEADING_FONT_SIZE
+
+
+@pytest.mark.unit
+def test_a_horizontal_books_chapter_opening_with_a_boxed_heading_prints_it_whole(
+    tmp_path,
+):
+    # QA's P749c: the same in a horizontal book, a filled box (the fake
+    # stylesheet reads no border). Main printed the label "T1 Chapter four"
+    # above the box and ", boxed" in it.
+    xhtml = (
+        f'<html xmlns="{XHTML}"><body><div class="bx">'
+        "<h2>T1 Chapter four, boxed</h2><p>ta Text.</p></div></body></html>"
+    )
+    blocks = _conv.extract_blocks_from_html(
+        etree.fromstring(xhtml.encode()),
+        style_resolver=_resolver({"bx": {"background-color": "#eeeeee"}}),
+        base_href="c.xhtml",
+    )
+    out = tmp_path / "c.kfx"
+    NativeKFXGenerator().generate_full_book(
+        title="T",
+        author="A",
+        chapters=[
+            {
+                "title": "T1 Chapter four",
+                "text": "\n\n".join(b["text"] for b in blocks),
+                "blocks": blocks,
+            }
+        ],
+        output_path=str(out),
+    )
+    frags = load_fragments(out)
+    texts = [str(t) for f in by_type(frags, "$145") for t in val(f)["$146"]]
+    assert "T1 Chapter four, boxed" in texts
+    assert "T1 Chapter four" not in texts and ", boxed" not in texts
