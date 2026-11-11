@@ -73,7 +73,7 @@ VARIANTS = {
 }  # fmt: skip
 
 
-def _write(path, rtl, css1, css2, middle=None):
+def _write(path, rtl, css1, css2, middle=None, lang="ja"):
     body = {"c1.xhtml": (CH1, css1)}
     if middle:
         # A file left out of the TOC, between the two (QA's P746 t1).
@@ -90,7 +90,7 @@ def _write(path, rtl, css1, css2, middle=None):
         '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="u">'
         '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
         f'<dc:identifier id="u">urn:kfxgen:{path.stem}</dc:identifier><dc:title>縦書き</dc:title>'
-        "<dc:creator>A</dc:creator><dc:language>ja</dc:language></metadata>"
+        f"<dc:creator>A</dc:creator><dc:language>{lang}</dc:language></metadata>"
         f'<manifest>{items}<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/></manifest>'
         f'<spine toc="ncx"{ppd}>{spine}</spine></package>'
     )
@@ -391,6 +391,31 @@ def test_percentages_are_measured_against_previewers_page(books, name, lh, pad):
     assert p01["$48"] == lh
     _, box = _entry_and_parent(books[name], "P02")
     assert (box["$52"], box["$54"]) == (pad, pad)
+
+
+def test_an_rtl_book_that_isnt_japanese_keeps_the_384pt_page(calibre):  # noqa: F811
+    """QA on #754: an Arabic book turns its pages right to left but isn't
+    vertical (#746), so its percentages stay on 384pt: 10px of box padding
+    at the sides is 1.172%, not 0.938%."""
+    tmp, _env, _version = calibre
+    epub, kfx = tmp / "v754ar.epub", tmp / "v754ar.kfx"
+    _write(epub, True, REST, REST, lang="ar")
+    _ebook_convert(calibre, epub, kfx, True)
+    _, box = _entry_and_parent(load_fragments(kfx), "P02")
+    assert (box["$53"], box["$55"]) == ("1.172", "1.172")
+
+
+def test_a_fixed_layout_japanese_book_keeps_the_384pt_page(calibre):  # noqa: F811
+    """QA on #754: a fixed-layout book isn't vertical (#746, #753), so its
+    percentages stay on 384pt too, its pages set vertical-rl or not."""
+    frags = _fixed_layout_book(
+        calibre,
+        "v754fxl",
+        css=f"html {{ {VERT} }} .bxp {{ border: 1px solid black; padding: 10px }}",
+        text='<div class="bxp"><p>F01 枠の内側。</p></div>',
+    )
+    _, box = _entry_and_parent(frags, "F01")
+    assert (box["$53"], box["$55"]) == ("1.172", "1.172")
 
 
 def test_tcy_is_an_inline_container_in_the_words(books):
