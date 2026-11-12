@@ -3910,6 +3910,10 @@ class NativeKFXGenerator:
         vertical=False,
         start=None,
         end=None,
+        before=None,
+        after=None,
+        over=None,
+        under=None,
     ):
         """$157 for a box (#238), as Kindle Previewer 4.0.1 writes a bordered
         or filled container: border as for a table part, fill $70 (ARGB),
@@ -3963,8 +3967,28 @@ class NativeKFXGenerator:
                 value[IS(key)] = IonStruct(
                     IS("$307"), IonDecimal(f"{em / 1.2:.6g}"), IS("$306"), IS("$310")
                 )
+        # A horizontal block given a vertical list's margins (PQ4, QA's P749
+        # Q04): its space before and after on its right and left, in line
+        # heights; the list's top and bottom on its top and bottom, in em.
+        for key, em, own in (
+            ("$50", before, margin_right),
+            ("$48", after, margin_left),
+        ):
+            if em:
+                # Its own side margin, in vertical text the space before or
+                # after it too, collapses with the list's (PQ4 L08).
+                if own:
+                    em = max(em, own / em_percent())
+                value[IS(key)] = IonStruct(
+                    IS("$307"), IonDecimal(f"{em / 1.2:.6g}"), IS("$306"), IS("$310")
+                )
+        for key, em in (("$47", over), ("$49", under)):
+            if em:
+                value[IS(key)] = IonStruct(
+                    IS("$307"), IonDecimal(f"{em:.6g}"), IS("$306"), IS("$308")
+                )
         for key, pct in (("$48", margin_left), ("$50", margin_right)):
-            if pct:
+            if pct and IS(key) not in value:
                 value[IS(key)] = IonStruct(
                     IS("$307"), IonDecimal(f"{pct:.6g}"), IS("$306"), IS("$314")
                 )
@@ -7878,7 +7902,19 @@ class NativeKFXGenerator:
                                 centred=bool(box.get("centred")),
                                 **({"clear": box["clear"]} if box.get("clear") else {}),
                                 **(
-                                    {"horizontal": True}
+                                    {
+                                        "horizontal": True,
+                                        **{
+                                            k: box[k]
+                                            for k in (
+                                                "before",
+                                                "after",
+                                                "over",
+                                                "under",
+                                            )
+                                            if box.get(k)
+                                        },
+                                    }
                                     if box.get("horizontal")
                                     else {}
                                 ),

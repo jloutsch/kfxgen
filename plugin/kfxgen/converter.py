@@ -6767,6 +6767,17 @@ def extract_blocks_from_html(
             return
         if not mine:
             return
+        # A horizontal block first or last: this element is vertical text (a
+        # horizontal box is the first horizontal element of its branch), so
+        # its margin-top and -bottom are its space before and after it, its
+        # right and left (`_vertical_box`). The block takes them on those
+        # sides, not on its top and bottom (QA's P749 Q04, probe PQ4).
+        for i, key, value in ((0, "before", top), (-1, "after", bottom)):
+            box = (mine[i].get("box") or {}) if value else {}
+            if box.get("horizontal"):
+                box[key] = _collapse(box.get(key) or 0.0, value)
+        top = 0.0 if (mine[0].get("box") or {}).get("horizontal") else top
+        bottom = 0.0 if (mine[-1].get("box") or {}).get("horizontal") else bottom
         # A padded wrapper inside, here or deeper, keeps the paragraph's
         # margin apart: this one meets that wrapper's margin (#643).
         if padded[0] or (paddings.get(mine[0]) or (0.0,))[0]:
@@ -6977,6 +6988,17 @@ def extract_blocks_from_html(
         if left is None and right is None:
             return
         for b in blocks[start:]:
+            if b.get("type") == "box" and b["box"].get("horizontal"):
+                # This element is vertical text, as around every horizontal
+                # block: its left and right are its top and bottom
+                # (`_vertical_box`), and the block takes them there, in ems
+                # (PQ4 L05).
+                box = b["box"]
+                for key, side in (("over", "left"), ("under", "right")):
+                    em = _margin_em(css, side)
+                    if em:
+                        box[key] = (box.get(key) or 0.0) + em
+                continue
             if b.get("type") == "box":
                 # The box takes them, not its paragraphs.
                 box = b["box"]

@@ -14,6 +14,7 @@ It needs calibre installed, so it is `slow` and skips when `ebook-convert`
 is not found.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -109,8 +110,12 @@ def _tree(frags):
             ref = e.get("$145")
             if ref:
                 text = str(texts[str(ref["name"])][ref["$403"]])
-                # A list item's first word after its bullet.
-                words = [w for w in text.split() if w != "•"] or [text]
+                # A list item's first word after its bullet or number.
+                words = [
+                    w
+                    for w in text.split()
+                    if w != "•" and not re.fullmatch(r"\d+\.", w)
+                ] or [text]
                 out[words[0]] = (style(e), chain)
             elif str(e.get("$159")) == "$271":
                 out[str(e.get("$584"))] = (style(e), chain)
