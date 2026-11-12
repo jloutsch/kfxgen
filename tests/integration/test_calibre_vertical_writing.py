@@ -625,10 +625,11 @@ def test_a_linked_picture_in_a_horizontal_block_has_a_plain_linked_container(
 
 
 def test_pictures_outside_horizontal_blocks_are_unchanged(vertical_pictures):
-    # In vertical text, kfxgen's block picture (P247j V01 differs, not this
-    # change); in a table cell, the cell's own picture entry (#262).
+    # In vertical text, a block picture sized by its height
+    # (test_calibre_vertical_pictures.py); in a table cell, the cell's own
+    # picture entry (#262).
     entry, own, _parent, _around = vertical_pictures["P5"]
-    assert entry.get("$601") is None and own["$580"] == "$320"
+    assert entry.get("$601") is None and set(own) == {"$57"}
     entry, own, _parent, _around = vertical_pictures["P6"]
     assert entry.get("$601") is None and "$580" not in own
     # A floated picture in a horizontal block (not probed): kfxgen's float.

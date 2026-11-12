@@ -1431,6 +1431,26 @@ def _img_inline_extras(elem, style_resolver=None):
     return ";".join(out) or None
 
 
+def _displays_as_block(css):
+    """Whether an element's CSS sets `display: block`."""
+    return str((css or {}).get("display") or "").strip().lower() == "block"
+
+
+def _lone_block_picture(elem, style_resolver):
+    """Whether a block holds nothing but one <img> set to `display: block`:
+    Previewer writes it as a block picture in a vertical book's horizontal
+    block, where a plain one is inline in a container (PVA H10, P247k K10)."""
+    if style_resolver is None or (elem.text or "").strip():
+        return False
+    kids = [c for c in elem if isinstance(c.tag, str)]
+    return (
+        len(kids) == 1
+        and _local_tag(kids[0].tag) == "img"
+        and not (kids[0].tail or "").strip()
+        and _displays_as_block(style_resolver(kids[0]))
+    )
+
+
 def _float_side(css):
     """ "left" or "right" for an element floated to that side, else None."""
     side = str((css or {}).get("float") or "").strip().lower()
@@ -5999,14 +6019,16 @@ def extract_blocks_from_html(
         pending_ids.clear()
         ids.extend(_own_anchor_ids(elem))
         block_ids = _dedupe_keep_order(ids)
-        side = None
+        side = extra = None
         if href is None:
             href = _resolve_img_src(base_href, elem.get("src", "") or "")
             alt = elem.get("alt", "") or ""
             size = _img_size_hint(elem, style_resolver)
             side, size = _img_float(elem, elem.getparent(), size, style_resolver)
+            # Its height too, which sizes a picture in vertical text (#247).
+            extra = _img_inline_extras(elem, style_resolver)
         block = {
-            "text": _make_img_token(href, alt, size, side),
+            "text": _make_img_token(href, alt, size, side, extra),
             "spans": [],
             "block_style": None,
             "anchor_ids": block_ids,
@@ -6019,6 +6041,10 @@ def extract_blocks_from_html(
             # horizontal block of vertical text is placed by it, as Kindle
             # Previewer 4.0.3 writes it (#247, S755).
             block["picture_align"] = align
+        if _displays_as_block(css):
+            # Set to display as a block: a block picture in a vertical book's
+            # horizontal block too, as Previewer writes it (PVA H10).
+            block["picture_block"] = True
         blocks.append(block)
 
     def _emit_svg_blocks(elem):
@@ -6454,6 +6480,12 @@ def extract_blocks_from_html(
                         ),
                         # A table row written as a paragraph (#219).
                         "row": _local_tag(elem.tag) == "tr",
+                        # Only a picture set to display as a block (PVA H10).
+                        **(
+                            {"picture_block": True}
+                            if _lone_block_picture(elem, style_resolver)
+                            else {}
+                        ),
                         # In a list item: Previewer floats no picture there
                         # (#699).
                         **(
