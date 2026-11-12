@@ -3932,13 +3932,24 @@ class NativeKFXGenerator:
                 # in em; left and right across it, in line heights.
                 for side, key in (("top", "$52"), ("bottom", "$54")):
                     em = sides.get(side)
-                    if em and not isinstance(em, (tuple, list)):
+                    if isinstance(em, (tuple, list)):
+                        # A % stays a % (QA's U08).
+                        value[IS(key)] = IonStruct(
+                            IS("$307"),
+                            IonDecimal(f"{em[1]:.6g}"),
+                            IS("$306"),
+                            IS("$314"),
+                        )
+                    elif em:
                         value[IS(key)] = IonStruct(
                             IS("$307"), IonDecimal(f"{em:.6g}"), IS("$306"), IS("$308")
                         )
                 for side, key in (("left", "$53"), ("right", "$55")):
                     em = sides.get(side)
-                    if em and not isinstance(em, (tuple, list)):
+                    if isinstance(em, (tuple, list)):
+                        # A % of the page, in ems (U08: 5% is 2em).
+                        em = em[1] * page_pt() / 1200
+                    if em:
                         value[IS(key)] = IonStruct(
                             IS("$307"),
                             IonDecimal(f"{em / 1.2:.6g}"),
@@ -7874,8 +7885,10 @@ class NativeKFXGenerator:
                                 **(
                                     {
                                         "vertical": True,
-                                        "start": (box.get("start") or 0.0) * own,
-                                        "end": (box.get("end") or 0.0) * own,
+                                        # In the main size already
+                                        # (`_margin_em`; QA's U14, U15).
+                                        "start": box.get("start") or 0.0,
+                                        "end": box.get("end") or 0.0,
                                     }
                                     if box.get("vertical")
                                     else {}

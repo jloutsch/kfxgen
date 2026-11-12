@@ -5681,9 +5681,12 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                 b["blocks"] = _space_between(b["blocks"], margins, measured, paddings)
                 last = b["blocks"][-1] if b["blocks"] else None
                 tail = last.pop("trailing_space", 0.0) if last else 0.0
-                edge = (b["box"].get("border") or {}).get("bottom") or (
+                # A vertical block's blocks end at its left (QA's U03, U16).
+                vertical = bool(b["box"].get("vertical"))
+                end_side = "left" if vertical else "bottom"
+                edge = (b["box"].get("border") or {}).get(end_side) or (
                     b["box"].get("padding") or {}
-                ).get("bottom")
+                ).get(end_side)
                 keep = last.get("padding_below", 0.0) if last is not None else 0.0
                 if (
                     not edge
@@ -5705,6 +5708,9 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                     )
                     pad["bottom"] = (pad.get("bottom") or 0.0) + tail / _ems_own(b)
                     b["box"]["padding"] = pad
+                elif tail and vertical:
+                    # Along its own axis: its space after it, its left.
+                    b["box"]["end"] = _collapse(b["box"].get("end") or 0.0, tail)
                 elif tail:
                     # It collapses with the box's margin below, where the run
                     # around the box meets it, the next block's or its own end

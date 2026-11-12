@@ -67,6 +67,26 @@ BODY = (
     '<div class="hz"><div class="vt fill"><p>T07 塗り。</p></div></div>'
     '<div class="hz"><ul class="vt"><li>T09 項目。</li></ul></div>'
     '<div class="hz"><div class="vt"><h2>T12 見出し</h2><p>T12b 後。</p></div></div>'
+    # QA's Q763 U cases: a border at the start (U01) or end (U03), its own
+    # margin before against its first block's (U04, U05, U07), a smaller
+    # font (U14), padding in % (U08).
+    '<div class="hz"><div class="vt" style="border-right: 1px solid black">'
+    '<p style="margin-right: 2em">U01 右の枠。</p></div></div>'
+    '<div class="hz"><div class="vt" style="border-left: 1px solid black">'
+    '<p>U03a 一。</p><p style="margin-left: 2em">U03 左の枠。</p></div></div>'
+    "<p>V03 縦の段落。</p>"
+    '<div class="hz"><div class="vt" style="margin-right: 1em">'
+    '<p style="margin-right: 2em">U04 外が小さい。</p></div></div>'
+    '<div class="hz"><div class="vt" style="margin-right: 2em">'
+    '<p style="margin-right: 1em">U05 外が大きい。</p></div></div>'
+    '<div class="hz"><div class="vt" style="margin-right: 2em">'
+    '<p style="margin-right: -1em">U07 負。</p></div></div>'
+    '<div class="hz"><div class="vt" style="font-size: 0.8em; margin-right: 2em">'
+    "<p>U14 小さい字。</p></div></div>"
+    '<div class="hz"><div class="vt" style="padding: 5%"><p>U08 割合。</p></div></div>'
+    # PSB4 R11: spacers after its last paragraph.
+    '<div class="hz"><div class="vt"><p>R11 空き。</p><p>&#160;</p><p>&#160;</p></div></div>'
+    "<p>V11 縦の段落。</p>"
     "<p>V99 縦の段落。</p>"
 )
 
@@ -257,3 +277,58 @@ def test_a_vertical_paragraphs_own_margins_go_by_their_sides(tree):
         assert abs(_lh(chain[0][key]) - 0.833333) < 1e-6
     for key in ("$47", "$49"):
         assert abs(_lh(chain[1][key]) - 1.66667) < 1e-5
+
+
+def test_a_border_at_its_start_keeps_the_margin_inside(tree):
+    # U01: a right border: the first paragraph keeps its margin before.
+    st, chain = tree["U01"]
+    assert abs(_lh(st["$50"]) - 1.66667) < 1e-5
+    assert "$50" not in chain[0]
+
+
+def test_a_border_at_its_end_keeps_the_margin_inside(tree):
+    # U03: a left border: the last paragraph keeps its margin after, and
+    # nothing leaves below the horizontal block (QA's finding A).
+    st, chain = tree["U03"]
+    assert abs(_lh(st["$48"]) - 1.66667) < 1e-5
+    assert "$48" not in chain[0]
+    assert "$49" not in chain[1]
+
+
+@pytest.mark.parametrize(
+    "words, lh",
+    [
+        # Its own 1em and its paragraph's 2em: the larger (U04, U05).
+        ("U04", 1.66667),
+        ("U05", 1.66667),
+        # 2em and -1em: 1em (U07).
+        ("U07", 0.833333),
+        # 2em in a 0.8em block: 1.6 main em (U14; Previewer writes `$16` 0.8
+        # and 1.66667lh in its own ems), not scaled twice (QA's finding B).
+        ("U14", 1.33333),
+    ],
+)
+def test_its_margin_before_meets_its_first_blocks(tree, words, lh):
+    st, chain = tree[words]
+    assert abs(_lh(chain[0]["$50"]) - lh) < 1e-5
+    assert "$50" not in st
+
+
+def test_its_padding_in_percent_is_by_its_axes(tree, request):
+    # U08, padding: 5%: top and bottom 5%; left and right 5% of the page, 2em
+    # of 480pt (1.6em of 384pt with an ltr spine), in line heights.
+    _st, chain = tree["U08"]
+    for key in ("$52", "$54"):
+        assert "$314" in chain[0][key] and "'5'" in chain[0][key]
+    lh = 1.66667 if "rtl" in request.node.callspec.id else 1.33333
+    for key in ("$53", "$55"):
+        assert abs(_lh(chain[0][key]) - lh) < 1e-5
+
+
+def test_spacers_at_its_end_are_space_after_it(tree):
+    # PSB4 R11: the spacers' space is on the vertical container's left
+    # (`$48`; Previewer 1.75lh, kfxgen's spacer rule a smaller amount), not
+    # below the horizontal block.
+    _st, chain = tree["R11"]
+    assert _lh(chain[0]["$48"]) > 0
+    assert "$49" not in chain[1]
