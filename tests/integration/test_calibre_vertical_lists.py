@@ -75,6 +75,14 @@ BODY = (
     "<p>V13 縦の段落。</p>"
     '<div style="padding-right: 1em"><ul style="margin-right: 2em">'
     '<li class="hz">L11 Inside padding.</li></ul></div>'
+    "<p>V14 縦の段落。</p>"
+    # QA's W21, W30: margins outside a padding meet only each other.
+    '<div style="margin-right: 2em"><div style="margin-right: 1em">'
+    '<div style="padding-right: 1em"><div class="hz"><p>W21 Two outside.</p></div>'
+    "</div></div></div>"
+    "<p>V15 縦の段落。</p>"
+    '<div style="margin-right: 2em"><div style="padding-right: 1em; margin-right: 1em">'
+    '<div class="hz"><p>W30 Both sides.</p></div></div></div>'
     "<p>V99 縦の段落。</p>"
 )
 
@@ -185,4 +193,13 @@ def test_a_margin_inside_a_padding_adds_to_it(tree):
     # Previewer's div `$55` 0.833333lh and list `$50` 1.66667lh; on the
     # block, 2.5lh.
     box = _sides(tree, "L11")
+    assert abs(_lh(box["$50"]) - 2.5) < 1e-6
+
+
+@pytest.mark.parametrize("words", ["W21", "W30"])
+def test_margins_outside_a_padding_meet_only_each_other(tree, words):
+    # QA's W21 (2em › 1em › padding 1em) and W30 (2em › padding 1em and
+    # margin 1em): 1em padding + the larger of 1em and 2em = 3em, 2.5lh,
+    # as Previewer totals them.
+    box = _sides(tree, words)
     assert abs(_lh(box["$50"]) - 2.5) < 1e-6

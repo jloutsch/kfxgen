@@ -7904,14 +7904,18 @@ class NativeKFXGenerator:
                                 **(
                                     {
                                         "horizontal": True,
+                                        # Padding taken and the margins
+                                        # inside it, plus the margins
+                                        # outside it (QA's W21, W30).
+                                        **{
+                                            k: (box.get(k) or 0.0)
+                                            + (box.get(f"{k}_fixed") or 0.0)
+                                            for k in ("before", "after")
+                                            if box.get(k) or box.get(f"{k}_fixed")
+                                        },
                                         **{
                                             k: box[k]
-                                            for k in (
-                                                "before",
-                                                "after",
-                                                "over",
-                                                "under",
-                                            )
+                                            for k in ("over", "under")
                                             if box.get(k)
                                         },
                                     }
