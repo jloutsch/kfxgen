@@ -83,6 +83,17 @@ BODY = (
     "<p>V15 縦の段落。</p>"
     '<div style="margin-right: 2em"><div style="padding-right: 1em; margin-right: 1em">'
     '<div class="hz"><p>W30 Both sides.</p></div></div></div>'
+    "<p>V16 縦の段落。</p>"
+    # QA's W41: the block's own margin inside a padding; W45, beside an outer
+    # margin only.
+    '<div style="padding-right: 1em"><div class="hz" style="margin-right: 2em">'
+    "<p>W41 Own inside.</p></div><p>W41b 縦。</p></div>"
+    '<div style="margin-right: 1em"><div class="hz" style="margin-right: 2em">'
+    "<p>W45 Own beside.</p></div><p>W45b 縦。</p></div>"
+    # QA's W42: padding › margin › padding.
+    '<div style="padding-right: 1em"><div style="margin-right: 1em">'
+    '<div style="padding-right: 1em"><div class="hz"><p>W42 Three.</p></div></div>'
+    "</div></div>"
     "<p>V99 縦の段落。</p>"
 )
 
@@ -203,3 +214,16 @@ def test_margins_outside_a_padding_meet_only_each_other(tree, words):
     # as Previewer totals them.
     box = _sides(tree, words)
     assert abs(_lh(box["$50"]) - 2.5) < 1e-6
+
+
+def test_its_own_margin_inside_a_padding_adds_to_it(tree):
+    # QA's Q764C W41: padding 1em › its own margin-right 2em: 3em, 2.5lh
+    # (Previewer: the wrapper's `$55` 0.833333lh and the block's 2em).
+    # W45: its own 2em beside an outer 1em, collapsed: 2em, 1.66667lh.
+    assert abs(_lh(_sides(tree, "W41")["$50"]) - 2.5) < 1e-6
+    assert abs(_lh(_sides(tree, "W45")["$50"]) - 1.66667) < 1e-5
+
+
+def test_a_margin_between_two_paddings_adds_to_both(tree):
+    # QA's Q764C W42: padding 1em › margin 1em › padding 1em: 3em, 2.5lh.
+    assert abs(_lh(_sides(tree, "W42")["$50"]) - 2.5) < 1e-6

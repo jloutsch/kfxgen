@@ -6660,8 +6660,14 @@ def extract_blocks_from_html(
                 # The margins it holds are inside this padding now: fixed,
                 # with it; margins outside meet only each other (QA's W21,
                 # W30), as `paddings` keeps them for a paragraph (#642).
-                fixed = f"{key}_fixed"
-                box[fixed] = (box.get(fixed) or 0.0) + (box.get(key) or 0.0) + value
+                fixed, inner = f"{key}_fixed", f"{key}_inner"
+                if fixed in box:
+                    box[fixed] += (box.get(key) or 0.0) + value
+                else:
+                    # The margins inside the first padding still meet the
+                    # block's own margin (QA's Q764C W41).
+                    box[inner] = box.get(key) or 0.0
+                    box[fixed] = value
                 box[key] = 0.0
         top = 0.0 if (mine[0].get("box") or {}).get("horizontal") else top
         bottom = 0.0 if (mine[-1].get("box") or {}).get("horizontal") else bottom
@@ -6793,7 +6799,7 @@ def extract_blocks_from_html(
             if box.get("horizontal"):
                 # It meets the margins outside any padding the block took
                 # (QA's W11); the padding and what is inside it stay apart
-                # ("before_fixed", "after_fixed").
+                # ("before_fixed", "before_inner" and the same after).
                 box[key] = _collapse(box.get(key) or 0.0, value)
         top = 0.0 if (mine[0].get("box") or {}).get("horizontal") else top
         bottom = 0.0 if (mine[-1].get("box") or {}).get("horizontal") else bottom
