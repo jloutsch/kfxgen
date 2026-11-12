@@ -394,6 +394,33 @@ def without_tcy(flags):
     )
 
 
+#: Text set in the other direction from the line it is in (#247): ("turn",
+#: (serial, mode, text, spans)) on the one placeholder character it takes,
+#: as 縦中横 does. `mode` is "horizontal" (horizontal-tb in vertical text)
+#: or "vertical" (vertical-rl in a horizontal block); `spans` its own runs,
+#: (start, length, flags) in `text`. Kindle Previewer 4.0.3 writes it as an
+#: inline container holding a paragraph of its text (probe PSB S01-S12, R05).
+TURN_FLAG = "turn"
+_turn_serials = itertools.count()
+
+
+def make_turn_flag(mode, text, spans):
+    """Build the flag-set member that sets `text` the other way."""
+    return (TURN_FLAG, (next(_turn_serials), mode, text, tuple(spans)))
+
+
+def turn_of(flags):
+    """A run's turned text as (serial, mode, text, spans), or None."""
+    return flag_value(flags, TURN_FLAG)
+
+
+def without_turn(flags):
+    """A run's flags less its turned text, written as an entry."""
+    return frozenset(
+        f for f in flags if not (isinstance(f, tuple) and f[0] == TURN_FLAG)
+    )
+
+
 PICTURE_FLAG = "picture"
 _picture_serials = itertools.count()
 

@@ -23,7 +23,9 @@ from .inline_style import (
     css_text_colour,
     math_of,
     tcy_of,
+    turn_of,
     without_tcy,
+    without_turn,
     ruby_of,
     run_font_size,
     without_math,
@@ -1641,6 +1643,10 @@ def _item_widths(item, eids):
     if item[0] == "tcy":
         # Its characters, a position each.
         return [len(item[1])]
+    if item[0] == "turn":
+        # Its container one, its paragraph a position per character, as
+        # Previewer's position map counts them (PSB S01).
+        return [1, len(item[2])]
     texts = [p for p in item[1].paths if isinstance(p, MathText)]
     if not texts:
         return [1] * len(eids)
@@ -2456,6 +2462,56 @@ class NativeKFXGenerator:
             IS("$269"),
             IS("$145"),
             self._math_note(item[1]),
+        )
+
+    #: Text set the other way from its line, as Kindle Previewer 4.0.3
+    #: writes its container (probe PSB, #247): horizontal-tb in vertical text
+    #: at the line's width, or vertical-rl in a horizontal block at its
+    #: height, with the two fit flags.
+    TURN_STYLE_NAMES = {"horizontal": "turnh0", "vertical": "turnv0"}
+
+    def _turn_entry(self, item, eids):
+        """Text set the other way from its line (#247): an inline `$270`
+        holding a paragraph of it, with its own runs, as Kindle Previewer
+        4.0.3 writes a horizontal-tb span in vertical text (PSB S01-S12) and
+        a vertical-rl one in a horizontal block (R05)."""
+        _kind, mode, text, runs = item
+        name = self.TURN_STYLE_NAMES[mode]
+        self._wrote_turns.add(mode)
+        self.symtab.create_local_symbol(name)
+        inner = IonStruct(
+            IS("$155"),
+            eids[1],
+            IS("$159"),
+            IS("$269"),
+            IS("$145"),
+            self._math_note(text),
+        )
+        spans = []
+        for start, length, style_name, anchor_name in runs:
+            span = IonStruct(IS("$143"), start, IS("$144"), length)
+            if anchor_name:
+                self.symtab.create_local_symbol(anchor_name)
+                span[IS("$179")] = IS(anchor_name)
+            if style_name:
+                self.symtab.create_local_symbol(style_name)
+                span[IS("$157")] = IS(style_name)
+            spans.append(span)
+        if spans:
+            inner[IS("$142")] = spans
+        return IonStruct(
+            IS("$155"),
+            eids[0],
+            IS("$601"),
+            IS("$283"),
+            IS("$156"),
+            IS("$323" if mode == "horizontal" else "$322"),
+            IS("$157"),
+            IS(name),
+            IS("$159"),
+            IS("$270"),
+            IS("$146"),
+            [inner],
         )
 
     def _inline_picture_entry(self, item, eids):
@@ -4594,6 +4650,8 @@ class NativeKFXGenerator:
                         if item[0] == "picture"
                         else self._tcy_entry(item, eids)
                         if item[0] == "tcy"
+                        else self._turn_entry(item, eids)
+                        if item[0] == "turn"
                         else self._math_entry(item, eids)
                     )
                     last = k + 1
@@ -6942,6 +7000,19 @@ class NativeKFXGenerator:
                     tcy_eids[chunk_idx, t[0]] = (content_pos_id,)
                     content_pos_id += self.CONTENT_POS_STEP
         self._wrote_tcy = False
+        # Text set the other way from its line (#247): its container and the
+        # paragraph in it, an id each.
+        turn_eids = {}
+        for chunk_idx, chunk in enumerate(all_chunks):
+            for _s, _length, flags in chunk.get("spans") or ():
+                t = turn_of(flags)
+                if t is not None and (chunk_idx, t[0]) not in turn_eids:
+                    turn_eids[chunk_idx, t[0]] = (
+                        content_pos_id,
+                        content_pos_id + self.CONTENT_POS_STEP,
+                    )
+                    content_pos_id += 2 * self.CONTENT_POS_STEP
+        self._wrote_turns = set()
         # A picture inside a paragraph's words (#529): an id of its own.
         picture_eids = {}
         for chunk_idx, chunk in enumerate(all_chunks):
@@ -7047,7 +7118,16 @@ class NativeKFXGenerator:
         referenced_targets = set()
         noteref_targets = set()
         for chunk in all_chunks:
-            for _s, _length, flags in chunk.get("spans") or []:
+            spans = list(chunk.get("spans") or [])
+            # And the runs inside text set the other way (#247): a link in
+            # it is its own (PSB S05).
+            spans += [
+                inner
+                for _s, _length, flags in spans
+                if turn_of(flags)
+                for inner in turn_of(flags)[3]
+            ]
+            for _s, _length, flags in spans:
                 target = _link_target(flags)
                 if target:
                     referenced_targets.add(target)
@@ -8277,6 +8357,48 @@ class NativeKFXGenerator:
                     for s, _length, flags in chunk_spans
                     if tcy_of(flags)
                 ]
+                sized = chunk_idx not in heading_chunk_indices or bool(heading_book)
+                for s, _length, flags in chunk_spans:
+                    turned = turn_of(flags)
+                    if turned is None:
+                        continue
+                    serial, mode, t_text, t_spans = turned
+                    runs = []
+                    for t_s, t_n, t_flags in t_spans:
+                        # Its own runs: a style for what sets it apart, a
+                        # link where it goes somewhere (PSB S05, S06, S08).
+                        t_target = _link_target(t_flags)
+                        t_anchor = body_anchor_map.get(t_target) if t_target else None
+                        # A size of its own is a run too (QA's Q765 Y10).
+                        plain = frozenset(
+                            f
+                            for f in t_flags
+                            if not _link_target((f,))
+                            and flag_value((f,), LANG_FLAG) is None
+                        )
+                        t_style = (
+                            _emphasis_style(
+                                t_flags,
+                                chunk_fam,
+                                _blk_b,
+                                _blk_i,
+                                in_cell="cell" in chunk or "in_header_cell" in chunk,
+                                sized=sized,
+                                blk_fs=blk_fs,
+                                link_found=bool(t_anchor) or not t_target,
+                            )
+                            if plain
+                            else None
+                        )
+                        if t_style or t_anchor:
+                            runs.append((t_s, t_n, t_style, t_anchor))
+                    maths.append(
+                        (
+                            s,
+                            ("turn", mode, t_text, tuple(runs)),
+                            turn_eids[chunk_idx, serial],
+                        )
+                    )
                 maths.sort(key=lambda item: item[0])
                 if maths:
                     math_by_position[chunk_positions[chunk_idx]] = (
@@ -8287,7 +8409,7 @@ class NativeKFXGenerator:
                 # the runs inside layered on it (#710).
                 layered = _direction_layers(
                     [
-                        (s, n, without_tcy(without_math(without_ruby(f))))
+                        (s, n, without_turn(without_tcy(without_math(without_ruby(f)))))
                         for s, n, f in chunk_spans
                     ]
                 )
@@ -8534,6 +8656,30 @@ class NativeKFXGenerator:
             # Built after the pruning, as the equations' are (#529).
             self.fragments.append(
                 YJFragment(fid=IS(name), ftype=IS("$157"), value=value)
+            )
+            extra_style_names.append(name)
+        for mode in sorted(self._wrote_turns):
+            name = self.TURN_STYLE_NAMES[mode]
+            axis = IS("$56") if mode == "horizontal" else IS("$57")
+            self.fragments.append(
+                YJFragment(
+                    fid=IS(name),
+                    ftype=IS("$157"),
+                    value=IonStruct(
+                        IS("$560"),
+                        IS("$557" if mode == "horizontal" else "$559"),
+                        axis,
+                        IonStruct(
+                            IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")
+                        ),
+                        IS("$478"),
+                        True,
+                        IS("$784"),
+                        True,
+                        IS("$173"),
+                        IS(name),
+                    ),
+                )
             )
             extra_style_names.append(name)
         if self._wrote_tcy:
