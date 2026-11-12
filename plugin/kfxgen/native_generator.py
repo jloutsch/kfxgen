@@ -3974,11 +3974,16 @@ class NativeKFXGenerator:
         # A horizontal block given a vertical list's margins (PQ4, QA's P749
         # Q04): its space before and after on its right and left, in line
         # heights; the list's top and bottom on its top and bottom, in em.
+        # Sides whose own margin went into the sum: written there, even when
+        # it comes to 0 (QA's Q764E W51, W54), not again below.
+        summed = set()
         for key, em, own in (
             ("$50", (before, before_fixed, before_inner), margin_right),
             ("$48", (after, after_fixed, after_inner), margin_left),
         ):
             run, fixed, inner = (v or 0.0 for v in em)
+            if run or fixed:
+                summed.add(key)
             # Its own side margin, in vertical text the space before or after
             # it too, meets the margins next to it: the list's (PQ4 L08), or
             # inside a padding the ones inside it, the padding and the
@@ -4001,7 +4006,7 @@ class NativeKFXGenerator:
                     IS("$307"), IonDecimal(f"{em:.6g}"), IS("$306"), IS("$308")
                 )
         for key, pct in (("$48", margin_left), ("$50", margin_right)):
-            if pct and IS(key) not in value:
+            if pct and key not in summed:
                 value[IS(key)] = IonStruct(
                     IS("$307"), IonDecimal(f"{pct:.6g}"), IS("$306"), IS("$314")
                 )

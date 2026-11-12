@@ -94,6 +94,13 @@ BODY = (
     '<div style="padding-right: 1em"><div style="margin-right: 1em">'
     '<div style="padding-right: 1em"><div class="hz"><p>W42 Three.</p></div></div>'
     "</div></div>"
+    "<p>V17 縦の段落。</p>"
+    # QA's Q764E W51, W54: margins that meet to 0.
+    '<div style="margin-right: -2em"><div class="hz" style="margin-right: 2em">'
+    "<p>W51 Zero.</p></div><p>W51b 縦。</p></div>"
+    '<div style="margin-right: -2em"><div style="padding-right: 1em">'
+    '<div class="hz" style="margin-right: 1em"><p>W54 Zero again.</p></div>'
+    "<p>W54b 縦。</p></div></div>"
     "<p>V99 縦の段落。</p>"
 )
 
@@ -227,3 +234,11 @@ def test_its_own_margin_inside_a_padding_adds_to_it(tree):
 def test_a_margin_between_two_paddings_adds_to_both(tree):
     # QA's Q764C W42: padding 1em › margin 1em › padding 1em: 3em, 2.5lh.
     assert abs(_lh(_sides(tree, "W42")["$50"]) - 2.5) < 1e-6
+
+
+@pytest.mark.parametrize("words", ["W51", "W54"])
+def test_margins_meeting_to_nothing_write_nothing(tree, words):
+    # QA's Q764E W51 (-2em › its own 2em) and W54 (-2em › padding 1em › its
+    # own 1em): 0, as Previewer writes them; not its own margin again.
+    box = _sides(tree, words)
+    assert "$50" not in box
