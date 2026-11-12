@@ -6651,6 +6651,18 @@ def extract_blocks_from_html(
         mine = [b for b in blocks[start:] if b.get("type") not in ("space", "rule")]
         if not mine:
             return (False, False)
+        # A horizontal block first or last, in vertical text: the padding is
+        # space before or after it, on its right and left, added to what it
+        # holds; padding doesn't collapse (QA's Q764 W05, W06).
+        for i, key, value in ((0, "before", top), (-1, "after", bottom)):
+            box = (mine[i].get("box") or {}) if value else {}
+            if box.get("horizontal"):
+                box[key] = (box.get(key) or 0.0) + value
+                box[f"{key}_padded"] = True
+        top = 0.0 if (mine[0].get("box") or {}).get("horizontal") else top
+        bottom = 0.0 if (mine[-1].get("box") or {}).get("horizontal") else bottom
+        if not (top or bottom):
+            return (False, False)
         # An inner wrapper's margin waiting outside its padding is now inside
         # this one's: padding keeps it from collapsing with the margins
         # beyond (QA on #642).
@@ -6775,7 +6787,14 @@ def extract_blocks_from_html(
         for i, key, value in ((0, "before", top), (-1, "after", bottom)):
             box = (mine[i].get("box") or {}) if value else {}
             if box.get("horizontal"):
-                box[key] = _collapse(box.get(key) or 0.0, value)
+                held = box.pop(f"{key}_padded", False)
+                # Outside a padding it holds, a margin adds; else it meets
+                # the margins already there (QA's W11).
+                box[key] = (
+                    (box.get(key) or 0.0) + value
+                    if held
+                    else _collapse(box.get(key) or 0.0, value)
+                )
         top = 0.0 if (mine[0].get("box") or {}).get("horizontal") else top
         bottom = 0.0 if (mine[-1].get("box") or {}).get("horizontal") else bottom
         # A padded wrapper inside, here or deeper, keeps the paragraph's

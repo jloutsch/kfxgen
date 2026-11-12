@@ -60,6 +60,21 @@ BODY = (
     '<div class="hz" style="margin-left: 2em"><p>L09 Left margin.</p></div>'
     "<p>V09 縦の段落。</p>"
     '<p class="hz" style="margin-top: 2em">L10 Top margin.</p>'
+    "<p>V10 縦の段落。</p>"
+    # QA's Q764: W06 a padded wrapper, W05 padded on all sides, W11 nested
+    # lists, W12 two margin-tops.
+    '<div style="padding-right: 1em; margin-right: 2em"><div class="hz">'
+    "<p>W06 First, padded.</p></div><p>W06b 縦。</p></div>"
+    '<div style="padding: 1em; margin: 0 2em"><div class="hz"><p>W05 Only.</p></div></div>'
+    "<p>V11 縦の段落。</p>"
+    '<ul style="margin-right: 1em"><li><ul style="margin-right: 2em">'
+    '<li class="hz">W11 Nested.</li></ul></li></ul>'
+    "<p>V12 縦の段落。</p>"
+    '<div style="margin-top: 1em"><ul style="margin-top: 1em">'
+    '<li class="hz">W12 Twice.</li></ul></div>'
+    "<p>V13 縦の段落。</p>"
+    '<div style="padding-right: 1em"><ul style="margin-right: 2em">'
+    '<li class="hz">L11 Inside padding.</li></ul></div>'
     "<p>V99 縦の段落。</p>"
 )
 
@@ -138,3 +153,36 @@ def test_a_horizontal_blocks_own_margins_are_unchanged(tree, request):
     assert "$314" in box["$48"] and pct in box["$48"]
     box = _sides(tree, "L10")
     assert abs(_lh(box["$47"]) - 1.66667) < 1e-5 and "$50" not in box
+
+
+def test_a_padded_wrappers_padding_and_margin_add_up_before_it(tree):
+    # QA's W06, padding-right 1em and margin-right 2em: Previewer's outer
+    # container `$50` 1.66667lh and `$55` 0.833333lh; on the block, 3em,
+    # 2.5lh. W05, padding 1em and margin 0 2em: 2.5lh on both sides.
+    box = _sides(tree, "W06")
+    assert abs(_lh(box["$50"]) - 2.5) < 1e-6 and "$47" not in box
+    box = _sides(tree, "W05")
+    for key in ("$50", "$48"):
+        assert abs(_lh(box[key]) - 2.5) < 1e-6
+    assert "$47" not in box and "$49" not in box
+
+
+def test_nested_lists_space_before_collapses(tree):
+    # QA's W11: 1em and 2em before, collapsed: 2em, 1.66667lh.
+    box = _sides(tree, "W11")
+    assert abs(_lh(box["$50"]) - 1.66667) < 1e-5
+
+
+def test_two_margin_tops_add_up(tree):
+    # QA's W12: a <div>'s and a list's margin-top 1em each, in vertical
+    # text on the line's axis, don't collapse: `$47` 2em.
+    box = _sides(tree, "W12")
+    assert "$308" in box["$47"] and "'2'" in box["$47"]
+
+
+def test_a_margin_inside_a_padding_adds_to_it(tree):
+    # PQ4C L11: a list's margin-right 2em inside a div's padding-right 1em:
+    # Previewer's div `$55` 0.833333lh and list `$50` 1.66667lh; on the
+    # block, 2.5lh.
+    box = _sides(tree, "L11")
+    assert abs(_lh(box["$50"]) - 2.5) < 1e-6
