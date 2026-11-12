@@ -3884,9 +3884,11 @@ def test_a_picture_only_cell_is_a_container_of_one_unstyled_picture(tmp_path):
             [_para("Captain Smith"), _para(_pic())],
             [("text", "Captain Smith"), ("picture", False, True)],
         ),
+        # Two side by side: one paragraph holding both, as Kindle Previewer
+        # 4.0.3 writes them in a cell too (#762, probe PSS2 P13, P14).
         (
             [_para(f"{_pic()}{_pic('b.png')}")],
-            [("picture", False, True), ("picture", False, True)],
+            [("mixed", ["picture", "picture"])],
         ),
         # Inside the words: one entry, as Kindle Previewer 4.0.3 writes it
         # in a cell (#565; #262 cut it into three).

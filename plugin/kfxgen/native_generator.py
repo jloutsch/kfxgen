@@ -5842,8 +5842,13 @@ class NativeKFXGenerator:
                 return None
             # Pictures alone: entries. A line of only a picture after words
             # stays in them; `_cut_after_picture_lines` has cut the
-            # paragraph after it (#565).
-            if not IMG_TOKEN_RE.sub("", para).strip():
+            # paragraph after it (#565). Two or more on one line are one
+            # paragraph, side by side, as Kindle Previewer 4.0.3 writes them
+            # (#762, probe PSS P01-P09); a line break between them still
+            # makes each an entry (P04).
+            if not IMG_TOKEN_RE.sub("", para).strip() and (
+                len(tokens) < 2 or "\n" in para
+            ):
                 return None
             text, cuts, pictures, last = [], [], [], 0
             for m in tokens:

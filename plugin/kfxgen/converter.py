@@ -829,8 +829,10 @@ _BIDI_SERIAL = itertools.count()
 def _pictures_among_words(elem, holds_blocks):
     """`elem`'s <img> children that share a run of loose content with words:
     between two block children (or an end), some text or an inline element
-    with text (#757). The elements themselves, not their `id()`: lxml makes
-    a new proxy for each access once the last one is gone (#712)."""
+    with text (#757); or with another picture, as Kindle Previewer 4.0.3
+    writes pictures side by side, one paragraph (#762, probe PSS P11). The
+    elements themselves, not their `id()`: lxml makes a new proxy for each
+    access once the last one is gone (#712)."""
     found, run, words = set(), [], bool((elem.text or "").strip())
     for child in elem:
         if not isinstance(child.tag, str):
@@ -839,7 +841,7 @@ def _pictures_among_words(elem, holds_blocks):
         if holds_blocks(child) or _local_tag(child.tag) == "svg":
             # A block, or an <svg>, which `_walk_container` writes as
             # pictures of its own: the run ends.
-            if words:
+            if words or len(run) > 1:
                 found.update(run)
             run, words = [], False
         elif _local_tag(child.tag) == "img":
@@ -848,7 +850,7 @@ def _pictures_among_words(elem, holds_blocks):
             words = True
         if (child.tail or "").strip():
             words = True
-    if words:
+    if words or len(run) > 1:
         found.update(run)
     return found
 
