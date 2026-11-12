@@ -3910,6 +3910,14 @@ class NativeKFXGenerator:
         vertical=False,
         start=None,
         end=None,
+        before=None,
+        after=None,
+        over=None,
+        under=None,
+        before_fixed=None,
+        after_fixed=None,
+        before_inner=None,
+        after_inner=None,
     ):
         """$157 for a box (#238), as Kindle Previewer 4.0.1 writes a bordered
         or filled container: border as for a table part, fill $70 (ARGB),
@@ -3963,8 +3971,42 @@ class NativeKFXGenerator:
                 value[IS(key)] = IonStruct(
                     IS("$307"), IonDecimal(f"{em / 1.2:.6g}"), IS("$306"), IS("$310")
                 )
+        # A horizontal block given a vertical list's margins (PQ4, QA's P749
+        # Q04): its space before and after on its right and left, in line
+        # heights; the list's top and bottom on its top and bottom, in em.
+        # Sides whose own margin went into the sum: written there, even when
+        # it comes to 0 (QA's Q764E W51, W54), not again below.
+        summed = set()
+        for key, em, own in (
+            ("$50", (before, before_fixed, before_inner), margin_right),
+            ("$48", (after, after_fixed, after_inner), margin_left),
+        ):
+            run, fixed, inner = (v or 0.0 for v in em)
+            if run or fixed:
+                summed.add(key)
+            # Its own side margin, in vertical text the space before or after
+            # it too, meets the margins next to it: the list's (PQ4 L08), or
+            # inside a padding the ones inside it, the padding and the
+            # margins outside it adding (QA's W21, W30, W41).
+            own = own / em_percent() if own and (run or fixed) else 0.0
+
+            def meet(a, b):
+                # Touching margins: the largest positive plus the most
+                # negative, as the converter's `_collapse`.
+                return max(0.0, a, b) + min(0.0, a, b)
+
+            em = meet(inner, own) + fixed + run if fixed else meet(run, own)
+            if em:
+                value[IS(key)] = IonStruct(
+                    IS("$307"), IonDecimal(f"{em / 1.2:.6g}"), IS("$306"), IS("$310")
+                )
+        for key, em in (("$47", over), ("$49", under)):
+            if em:
+                value[IS(key)] = IonStruct(
+                    IS("$307"), IonDecimal(f"{em:.6g}"), IS("$306"), IS("$308")
+                )
         for key, pct in (("$48", margin_left), ("$50", margin_right)):
-            if pct:
+            if pct and key not in summed:
                 value[IS(key)] = IonStruct(
                     IS("$307"), IonDecimal(f"{pct:.6g}"), IS("$306"), IS("$314")
                 )
@@ -7878,7 +7920,23 @@ class NativeKFXGenerator:
                                 centred=bool(box.get("centred")),
                                 **({"clear": box["clear"]} if box.get("clear") else {}),
                                 **(
-                                    {"horizontal": True}
+                                    {
+                                        "horizontal": True,
+                                        # Padding taken and the margins
+                                        # inside it, plus the margins
+                                        # outside it (QA's W21, W30).
+                                        **{
+                                            f"{k}{part}": box[f"{k}{part}"]
+                                            for k in ("before", "after")
+                                            for part in ("", "_fixed", "_inner")
+                                            if box.get(f"{k}{part}")
+                                        },
+                                        **{
+                                            k: box[k]
+                                            for k in ("over", "under")
+                                            if box.get(k)
+                                        },
+                                    }
                                     if box.get("horizontal")
                                     else {}
                                 ),
