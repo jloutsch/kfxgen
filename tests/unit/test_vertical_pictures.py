@@ -70,16 +70,25 @@ def test_in_vertical_text_a_picture_is_sized_by_its_height_only(tmp_path):
                     _block(_make_img_token(PIC, "")),
                     _block(_make_img_token(PIC, ""), block_style={"align": "center"}),
                     _block(_make_img_token(PIC, "", "w=100px")),
+                    _block(_make_img_token(PIC, "", "w=200px", None, "h=100")),
+                    _block(_make_img_token(PIC, "", None, None, "h=50px")),
+                    _block(_make_img_token(PIC, ""), clear="both"),
                 ]
             )
         ],
     )
-    plain, centred, sized = styles
+    plain, centred, sized, both, tall, cleared = styles
     # 100 px high of a 640 px column.
     assert set(plain) == {"$57"} and "15.625" in plain["$57"]
     assert set(centred) == {"$57", "$580"} and centred["$580"] == "$320"
-    # 100 px wide is 25 px high: 25/640, and the markup sized it.
-    assert set(sized) == {"$57", "$546"} and "3.906" in sized["$57"]
+    # 100 px wide at 0.45pt is 11.25pt high, of 480pt; the markup sized it.
+    assert set(sized) == {"$57", "$546"} and "2.344" in sized["$57"]
+    # A height given wins over the width: 100 px at 0.75pt.
+    assert set(both) == {"$57", "$546"} and "15.625" in both["$57"]
+    # 7.8125, rounded half up.
+    assert "7.813" in tall["$57"]
+    # The block's clear stays on the picture.
+    assert set(cleared) == {"$57", "$628"} and cleared["$628"] == "$421"
 
 
 def test_in_a_horizontal_file_the_picture_is_unchanged(tmp_path):

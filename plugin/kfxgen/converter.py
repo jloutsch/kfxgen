@@ -6019,14 +6019,16 @@ def extract_blocks_from_html(
         pending_ids.clear()
         ids.extend(_own_anchor_ids(elem))
         block_ids = _dedupe_keep_order(ids)
-        side = None
+        side = extra = None
         if href is None:
             href = _resolve_img_src(base_href, elem.get("src", "") or "")
             alt = elem.get("alt", "") or ""
             size = _img_size_hint(elem, style_resolver)
             side, size = _img_float(elem, elem.getparent(), size, style_resolver)
+            # Its height too, which sizes a picture in vertical text (#247).
+            extra = _img_inline_extras(elem, style_resolver)
         block = {
-            "text": _make_img_token(href, alt, size, side),
+            "text": _make_img_token(href, alt, size, side, extra),
             "spans": [],
             "block_style": None,
             "anchor_ids": block_ids,

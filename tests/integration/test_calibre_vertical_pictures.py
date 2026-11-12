@@ -9,9 +9,15 @@ book isn't, #746):
   text-align left, center or right, and `$546 $377` when the markup sizes it.
   kfxgen wrote its horizontal block picture: `$56` by width, `$580` centred,
   `$65`, `$785`, `$546`.
-- A percentage width or height keeps its axis; a width in pixels gives the
-  height at the picture's proportions.
+- A height the markup gives wins, whatever the width (QA's Q761 E51-E54).
+  Else a width in % keeps its axis; else a width in a length gives the
+  height at the picture's proportions. Previewer counts a height in px at
+  0.75pt, in pt as pt/0.45 px, and a width in px at 0.45pt; em is 12pt
+  (E01-E06, E55). A height in em adds `$64` 100% (E04). Values round half
+  up (7.813, E32).
 - A linked one is inline in a plain container that carries the link.
+- The block's `clear` is kept: on the picture, or on a linked one's
+  container (E61-E63).
 
 And in a vertical book's horizontal block (P247k K02 and K10, PVA H02, H10):
 - a picture in a `<p>` sits in a container carrying the paragraph's
@@ -53,7 +59,7 @@ def _img(alt, src="w.jpg", attrs=""):
 
 WIDE = ' style="width: 50%"'
 HIGH = ' style="height: 50%"'
-ATTRS = ' width="100" height="25"'
+ATTRS = ' width="200" height="100"'
 BLOCK = ' style="display: block"'
 LINK = '<a href="c2.xhtml#t">{}</a>'
 INDENT = '<p style="text-indent: 1em">{}</p>'
@@ -67,7 +73,18 @@ BODY = (
     f"<div>{_img('V09', attrs=WIDE)}</div>"
     f"<div>{_img('V10', attrs=HIGH)}</div>"
     f"<div>{_img('V13', 't.jpg')}</div>"
-    f"<div>{_img('V15', attrs=ATTRS)}</div>"
+    f"<div>{_img('E51', attrs=ATTRS)}</div>"
+    f"<div>{_img('E53', attrs=' style="width: 50%; height: 100px"')}</div>"
+    f"<div>{_img('E55', attrs=' width="100"')}</div>"
+    f"<div>{_img('E01', attrs=' style="width: 5em"')}</div>"
+    f"<div>{_img('E04', attrs=' style="height: 2em"')}</div>"
+    f"<div>{_img('E05', attrs=' style="height: 30pt"')}</div>"
+    f"<div>{_img('E32', attrs=' style="height: 50px"')}</div>"
+    f'<p style="text-indent: 10%">{LINK.format(_img("E11"))}</p>'
+    f"<div>{_img('E52b', attrs=' style="width: 200px; height: 100px"')}<p>E52b 縦の段落。</p></div>"
+    f'<div style="clear: both">{_img("E61")}</div>'
+    f'<div style="clear: both">{LINK.format(_img("E62"))}</div>'
+    f'<div style="clear: both; text-align: center">{_img("E63")}</div>'
     f"{INDENT.format(LINK.format(_img('V18')))}"
     f'<div class="hz">{INDENT.format(_img("H02"))}</div>'
     f'<div class="hz">{_img("H10", attrs=BLOCK)}</div>'
@@ -146,10 +163,44 @@ def test_a_percentage_keeps_its_axis(vertical):
     assert set(own) == {"$57", "$546"} and _pct(own, "$57") == 50
 
 
-def test_a_width_in_pixels_gives_the_height(vertical):
-    # V15: width 100 of a 400x100 picture is 25 px high: 25/640.
-    _entry, own, _parent, _around = vertical["V15"]
-    assert set(own) == {"$57", "$546"} and _pct(own, "$57") == 3.906
+@pytest.mark.parametrize(
+    "alt, height",
+    [
+        # A height given wins: 100 px at 0.75pt over 480pt, with a width in
+        # px (E51) or in % (E53).
+        ("E51", 15.625),
+        ("E53", 15.625),
+        # A width alone gives the height: 100 px at 0.45pt is 45pt wide, so
+        # 11.25pt high (E55); 5em is 60pt wide, 15pt high (E01).
+        ("E55", 2.344),
+        ("E01", 3.125),
+        # 2em high is 24pt (E04); 30pt high counts as 50pt (E05).
+        ("E04", 5),
+        ("E05", 10.417),
+        # 50 px high is 7.8125%: rounded half up (E32).
+        ("E32", 7.813),
+        # A picture beside a paragraph, walked as a block of its own: its
+        # height still wins over its width (E52b).
+        ("E52b", 15.625),
+    ],
+)
+def test_a_size_in_the_markup_sets_the_height(vertical, alt, height):
+    _entry, own, _parent, _around = vertical[alt]
+    assert set(own) - {"$64"} == {"$57", "$546"} and _pct(own, "$57") == height
+    # Only a height in em adds `$64` 100%.
+    assert ("$64" in own) == (alt == "E04")
+
+
+@pytest.mark.parametrize("pictures", ["vertical", "ltr"])
+def test_the_blocks_clear_is_kept(request, pictures):
+    # E61, E63: on the picture; E62: on the linked picture's container.
+    found = request.getfixturevalue(pictures)
+    for alt in ("E61", "E63"):
+        _entry, own, _parent, _around = found[alt]
+        assert own.get("$628") == "$421", alt
+    _entry, own, parent, around = found["E62"]
+    assert parent.get("$142") and around == {"$628": "$421"}
+    assert "$628" not in own
 
 
 def test_a_linked_picture_in_vertical_text_is_inline_in_a_plain_container(
@@ -170,6 +221,13 @@ def test_a_paragraphs_indent_is_on_its_pictures_container(vertical, alt):
     assert str(entry.get("$601")) == "$283"
     assert set(around) == {"$36"} and "$308" in around["$36"]
     assert bool(parent.get("$142")) == (alt != "H02")
+
+
+def test_an_indent_keeps_its_unit(vertical):
+    # QA's Q761 E11: a 10% indent. Previewer writes 4em (1em is 2.5% of the
+    # 480pt page); kfxgen keeps 10%, as it writes a text paragraph's.
+    _entry, _own, _parent, around = vertical["E11"]
+    assert set(around) == {"$36"} and "$314" in around["$36"]
 
 
 def test_without_an_indent_the_container_has_no_style(vertical):

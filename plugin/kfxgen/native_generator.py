@@ -59,6 +59,26 @@ _log = logging.getLogger(__name__)
 #: A token size hint: axis, number, unit (bare = px).
 _SIZE_HINT_RE = re.compile(r"^([wh])=(\d+(?:\.\d+)?)(%|px|em|pt)?$")
 _CSS_PX_PER_UNIT = {"px": 1.0, "em": 16.0, "pt": 4.0 / 3.0}
+#: A length, as `_img_size_hint` and `_img_inline_extras` pass it.
+_LENGTH_RE = re.compile(r"^(\d+(?:\.\d+)?)(%|px|em|pt)?$")
+
+
+def _up(pct):
+    """A picture's percentage in vertical text, at most 100, to three places
+    rounded half up, as Previewer rounds it (7.813, where `round` gives
+    7.812; QA's Q761 E32)."""
+    from decimal import ROUND_HALF_UP, Decimal
+
+    exact = Decimal(f"{min(100.0, pct):.9f}")
+    return float(exact.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP))
+
+
+#: Points per unit for a picture's height and width in vertical text, as
+#: Kindle Previewer 4.0.3 counts them (#247, QA's Q761 E01-E06, E51-E55): a
+#: height in px is the picture's own pixel rate (0.75pt, the default), one
+#: in pt goes through px at 0.45pt; a width in px is 0.45pt. em is 12pt.
+_HEIGHT_PT = {"em": 12.0, "pt": 0.75 / 0.45}
+_WIDTH_PT = {"px": 0.45, "em": 12.0, "pt": 1.0}
 #: Book languages Kindle Previewer 4.0.3 declares `<lang>-reflow-language`
 #: for in `$585`: ar, fa and he (#246). It makes no KFX for ur, and refuses
 #: yi and ckb.
@@ -4105,11 +4125,14 @@ class NativeKFXGenerator:
             value[IS("$70")] = background
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
-    def build_picture_box_style_157(self, entity_name, align=None, indent=None):
+    def build_picture_box_style_157(
+        self, entity_name, align=None, indent=None, clear=None
+    ):
         """$157 for the plain container of a picture in vertical text: only
         its alignment, as Kindle Previewer 4.0.3 writes `text-align` left,
         center, right or justify there (P247k K07, QA's Q05, Q11 and Q15;
-        #247), and its paragraph's text-indent (PVA H02)."""
+        #247), its paragraph's text-indent (PVA H02) and its block's clear
+        (QA's Q761 E62)."""
         self.symtab.create_local_symbol(entity_name)
         value = IonStruct(IS("$173"), IS(entity_name))
         if align:
@@ -4118,6 +4141,7 @@ class NativeKFXGenerator:
             value[IS("$36")] = IonStruct(
                 IS("$307"), IonDecimal(indent[0]), IS("$306"), IS(indent[1])
             )
+        _write_clear(value, clear)
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
 
     def build_fragment_157_image(
@@ -4130,6 +4154,7 @@ class NativeKFXGenerator:
         plain=False,
         sized=False,
         box_align=None,
+        full_width=False,
     ):
         """Builds a $157 style for a picture entry: its own width against the
         text column, as Amazon sizes it (#145), at any size (#462);
@@ -4173,6 +4198,13 @@ class NativeKFXGenerator:
                 # A block picture in an ltr-spine book: the block's
                 # alignment (QA's Q755L Q05, Q11, Q14).
                 value[IS("$580")] = IS(ALIGN_MAP[box_align])
+            if full_width:
+                # A height in em, in vertical text (QA's Q761 E04).
+                value[IS("$64")] = IonStruct(
+                    IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")
+                )
+            # Its block's clear, as Previewer keeps it (QA's E61, E63).
+            _write_clear(value, clear)
             return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
         if float_side:
             # Floated: the text after it wraps beside it, and it isn't
@@ -5554,6 +5586,15 @@ class NativeKFXGenerator:
                         chunk["size"] = m.group(3)  # the markup's own size
                     if m.group(4):
                         chunk["float"] = m.group(4)  # left or right (#243)
+                    height = dict(
+                        e.split("=", 1)
+                        for e in (m.group(5) or "").split(";")
+                        if "=" in e
+                    ).get("h")
+                    if height:
+                        # The markup's height: in vertical text it sizes
+                        # the picture whenever given (#247, QA's E51-E54).
+                        chunk["height"] = height
                     chunks.append(chunk)
                 # Unknown href: drop the token silently
                 last = m.end()
@@ -5881,11 +5922,9 @@ class NativeKFXGenerator:
                     # the block is (QA's P754L H15, Q755L). kfxgen's block
                     # picture, centred by $580 among other keys, took a page
                     # of its own on the Paperwhite in a vertical book (S754).
-                    free = not (
-                        chunk.get("float")
-                        or chunk.get("clear")
-                        or block.get("in_cell_paragraph")
-                    )
+                    # A block's clear reaches its first chunk later; a
+                    # plain picture keeps it (QA's E61-E63).
+                    free = not (chunk.get("float") or block.get("in_cell_paragraph"))
                     horizontal = free and _in_horizontal_block()
                     # Directly in vertical-rl text: sized by its height, with
                     # no other key but an alignment the block sets, in
@@ -7157,37 +7196,62 @@ class NativeKFXGenerator:
             w, _h = resource_to_dims.get(c.get("resource"), (None, None))
             return ("w", _image_width_pct(w) if w else 100.0)
 
+        def _upright_lengths(c):
+            """A picture's height and width as the markup gives them, each a
+            (number, unit) or None."""
+            size = _SIZE_HINT_RE.match(c.get("size") or "")
+            raw = {"h": c.get("height") or "", "w": ""}
+            if size and not (size.group(1) == "h" and raw["h"]):
+                raw[size.group(1)] = size.group(2) + (size.group(3) or "")
+            out = []
+            for axis in ("h", "w"):
+                m = _LENGTH_RE.match(raw[axis])
+                ok = m and float(m.group(1)) > 0
+                out.append((float(m.group(1)), m.group(2) or "px") if ok else None)
+            return out
+
         def _upright_size_key(c):
             """A picture directly in vertical-rl text is sized by its height
-            (`$57`), against the column as a width is (px/640 in a vertical
-            book, px/512 with an ltr spine), capped at 100 (PVA, PVAL V01,
-            V12-V14). A percentage the markup sets keeps its axis (V09,
-            V10); a width in a length gives the height at the picture's
-            proportions (V15)."""
-            m = _SIZE_HINT_RE.match(c.get("size") or "")
-            if m and m.group(3) == "%" and float(m.group(2)) > 0:
-                return _parse_size_hint(c["size"], IMAGE_COLUMN_PX)
+            (`$57`), capped at 100%, as Kindle Previewer 4.0.3 writes it
+            (PVA, PVAL; QA's Q761 E01-E06, E51-E55). A height the markup
+            gives wins, in % or a length; else a width in % keeps its axis;
+            else a width in a length gives the height at the picture's
+            proportions; else the picture's own height. Lengths count in
+            points over the page width, at Previewer's rates (`_HEIGHT_PT`,
+            `_WIDTH_PT`)."""
+            height, width = _upright_lengths(c)
+            if height and height[1] == "%":
+                return ("h", _up(height[0]))
+            if height:
+                pt = height[0] * _HEIGHT_PT.get(height[1], 0.75)
+                return ("h", _up(pt / page_pt() * 100.0))
+            if width and width[1] == "%":
+                return ("w", _up(width[0]))
             w, h = resource_to_dims.get(c.get("resource"), (None, None))
             if not (w and h):
                 return _image_size_key(c)
-            if m and m.group(3) != "%" and float(m.group(2)) > 0:
-                px = float(m.group(2)) * _CSS_PX_PER_UNIT[m.group(3) or "px"]
-                h = px * h / w if m.group(1) == "w" else px
-            return ("h", _image_width_pct(h))
+            pt = width[0] * _WIDTH_PT[width[1]] * h / w if width else h * 0.75
+            return ("h", _up(pt / page_pt() * 100.0))
 
         def _plain_key(c):
             """A plain picture's style key (#247): its size, whether the
-            markup set it, and a block picture's alignment."""
+            markup set it, a block picture's alignment, its clear (QA's
+            E61-E63), and whether a height in em gives it `$64` (E04)."""
             if c.get("upright"):
+                height, width = _upright_lengths(c)
                 return (
                     _upright_size_key(c),
-                    bool(_SIZE_HINT_RE.match(c.get("size") or "")),
+                    bool(height or width),
                     c.get("box_align"),
+                    c.get("clear"),
+                    bool(height and height[1] == "em"),
                 )
             return (
                 _image_size_key(c),
                 bool(_parse_size_hint(c.get("size"), IMAGE_COLUMN_PX)),
                 c.get("box_align"),
+                c.get("clear"),
+                False,
             )
 
         plain_style_names = {}
@@ -7218,13 +7282,13 @@ class NativeKFXGenerator:
             # their names.
             plain_used = sorted(
                 {_plain_key(c) for c in styled if c.get("plain")},
-                key=lambda k: (k[0][0], k[0][1], k[1], k[2] or ""),
+                key=lambda k: (k[0][0], k[0][1], k[1], k[2] or "", k[3] or "", k[4]),
             )
             floated = sorted(
                 {
                     (_image_size_key(c), c.get("float"), c.get("clear"))
                     for c in styled
-                    if c.get("float") or c.get("clear")
+                    if (c.get("float") or c.get("clear")) and not c.get("plain")
                 },
                 key=lambda k: (k[0][0], k[0][1] or 0, k[1] or "", k[2] or ""),
             )
@@ -7265,20 +7329,23 @@ class NativeKFXGenerator:
                 extra_style_names.append(name)
                 float_style_names[((axis, pct), side, clear)] = name
 
-            for idx, ((axis, pct), sized, box_align) in enumerate(plain_used):
+            for idx, key in enumerate(plain_used):
+                (axis, pct), sized, box_align, clear, full_width = key
                 name = f"s_img_p{idx}"
                 self.fragments.append(
                     self.build_fragment_157_image(
                         entity_name=name,
                         width_pct=pct if axis == "w" else None,
                         height_pct=pct if axis == "h" else None,
+                        clear=clear,
                         plain=True,
                         sized=sized,
                         box_align=box_align,
+                        full_width=full_width,
                     )
                 )
                 extra_style_names.append(name)
-                plain_style_names[((axis, pct), sized, box_align)] = name
+                plain_style_names[key] = name
 
         def _image_style_for(chunk):
             if chunk.get("plain"):
@@ -7690,13 +7757,14 @@ class NativeKFXGenerator:
                             # Q05, Q11, Q15; PVA H02, V07; #247).
                             box_align = chunk.get("align")
                             box_align = box_align if box_align in ALIGN_MAP else None
-                            if box_align or chunk.get("indent"):
+                            if box_align or chunk.get("indent") or chunk.get("clear"):
                                 extras["$157"] = IS(
                                     _allocate_style(
                                         "_pbox",
                                         builder=self.build_picture_box_style_157,
                                         align=box_align,
                                         indent=chunk.get("indent"),
+                                        clear=chunk.get("clear"),
                                     )
                                 )
                         elif not chunk.get("in_cell"):
