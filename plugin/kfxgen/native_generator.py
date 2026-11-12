@@ -3908,6 +3908,8 @@ class NativeKFXGenerator:
         clear=None,
         horizontal=False,
         vertical=False,
+        start=None,
+        end=None,
     ):
         """$157 for a box (#238), as Kindle Previewer 4.0.1 writes a bordered
         or filled container: border as for a table part, fill $70 (ARGB),
@@ -3923,15 +3925,35 @@ class NativeKFXGenerator:
         if padding:
             for k, v in _padding_values(dict(padding), None).items():
                 value[IS(k)] = v
-        for key, pct in (("$48", margin_left), ("$50", margin_right)):
-            if pct and vertical:
-                # A vertical block's left and right are its space before
-                # and after: in line heights, em / 1.2 (PSB R06).
-                lh = pct / em_percent() / 1.2
+            sides = dict(padding)
+            if vertical:
+                # A vertical block's padding by its own axes, as Previewer
+                # writes it (QA's Q763 T02): top and bottom along the line,
+                # in em; left and right across it, in line heights.
+                for side, key in (("top", "$52"), ("bottom", "$54")):
+                    em = sides.get(side)
+                    if em and not isinstance(em, (tuple, list)):
+                        value[IS(key)] = IonStruct(
+                            IS("$307"), IonDecimal(f"{em:.6g}"), IS("$306"), IS("$308")
+                        )
+                for side, key in (("left", "$53"), ("right", "$55")):
+                    em = sides.get(side)
+                    if em and not isinstance(em, (tuple, list)):
+                        value[IS(key)] = IonStruct(
+                            IS("$307"),
+                            IonDecimal(f"{em / 1.2:.6g}"),
+                            IS("$306"),
+                            IS("$310"),
+                        )
+        for key, em in (("$50", start), ("$48", end)):
+            # A vertical block's space before and after it, its right and
+            # left, in line heights (PSB R06; QA's Q763 T01).
+            if em:
                 value[IS(key)] = IonStruct(
-                    IS("$307"), IonDecimal(f"{lh:.6g}"), IS("$306"), IS("$310")
+                    IS("$307"), IonDecimal(f"{em / 1.2:.6g}"), IS("$306"), IS("$310")
                 )
-            elif pct:
+        for key, pct in (("$48", margin_left), ("$50", margin_right)):
+            if pct:
                 value[IS(key)] = IonStruct(
                     IS("$307"), IonDecimal(f"{pct:.6g}"), IS("$306"), IS("$314")
                 )
@@ -7849,7 +7871,15 @@ class NativeKFXGenerator:
                                     if box.get("horizontal")
                                     else {}
                                 ),
-                                **({"vertical": True} if box.get("vertical") else {}),
+                                **(
+                                    {
+                                        "vertical": True,
+                                        "start": (box.get("start") or 0.0) * own,
+                                        "end": (box.get("end") or 0.0) * own,
+                                    }
+                                    if box.get("vertical")
+                                    else {}
+                                ),
                             )
                         )
                         rotation[:] = inside

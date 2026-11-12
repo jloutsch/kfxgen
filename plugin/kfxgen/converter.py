@@ -6873,8 +6873,10 @@ def extract_blocks_from_html(
                     # padding, in its ems, against the book's main size
                     # (#647).
                     "font_px": css_font_size(css),
-                    "margin_left": _page_share(left) or None,
-                    "margin_right": _page_share(right) or None,
+                    # A vertical block's left and right are its space after
+                    # and before, in ems ("start", "end" below).
+                    "margin_left": None if vertical else _page_share(left) or None,
+                    "margin_right": None if vertical else _page_share(right) or None,
                     "width": width,
                     "width_px": _box_width_px(css) if width is not None else None,
                     "float": side if width is not None else None,
@@ -6886,7 +6888,15 @@ def extract_blocks_from_html(
                     # Q15, #246).
                     "bidi": _bidi(elem, style_resolver),
                     **({"horizontal": True} if horizontal else {}),
-                    **({"vertical": True} if vertical else {}),
+                    **(
+                        {
+                            "vertical": True,
+                            "start": _margin_em(css, "right"),
+                            "end": _margin_em(css, "left"),
+                        }
+                        if vertical
+                        else {}
+                    ),
                 },
             }
         ]
@@ -6916,8 +6926,21 @@ def extract_blocks_from_html(
             "space",
             "rule",
         )
+        turned = box["box"].get("vertical")
         for side, i, end in (("top", 0, 0), ("bottom", -1, 1)):
             inner = margins.get(mine[i]) if mine else None
+            if turned:
+                # A vertical block in a horizontal one: its blocks' first
+                # and last margins run along its own axis, before and after
+                # it, its right and left sides; they meet its own there, not
+                # the horizontal block's (QA's Q763 T01, T12, T14).
+                edge = "right" if end == 0 else "left"
+                if inner is None or border.get(edge) or padding.get(edge):
+                    continue
+                key = "start" if end == 0 else "end"
+                box["box"][key] = _collapse(box["box"][key], inner[end])
+                inner[end] = 0.0
+                continue
             if inner is None or border.get(side) or padding.get(side):
                 continue
             if end and spaced_end:

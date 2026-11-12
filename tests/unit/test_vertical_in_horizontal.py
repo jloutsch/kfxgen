@@ -97,15 +97,27 @@ def test_a_vertical_box_is_vertical_at_the_pages_height():
     assert float(st["$57"]["$307"]) == 100
 
 
-def test_its_side_margins_are_in_line_heights():
-    # 1em is 2.5% of the 480pt page: 0.833333lh, as Previewer writes R06.
-    st = _style(vertical=True, margin_left=2.5, margin_right=2.5)
-    for key in ("$48", "$50"):
-        assert str(st[key]["$306"]) == "$310"
-        assert abs(float(st[key]["$307"]) - 0.833333) < 1e-6
-    # A horizontal box's stay a share of the page.
+def test_its_space_before_and_after_are_in_line_heights():
+    # Its right (before it) and left (after it), 1em: 0.833333lh, as
+    # Previewer writes R06 and QA's T01.
+    st = _style(vertical=True, start=1.0, end=2.0)
+    assert str(st["$50"]["$306"]) == "$310" and str(st["$48"]["$306"]) == "$310"
+    assert abs(float(st["$50"]["$307"]) - 0.833333) < 1e-6
+    assert abs(float(st["$48"]["$307"]) - 1.66667) < 1e-5
+    # A horizontal box's side margins stay a share of the page.
     st = _style(horizontal=True, margin_left=2.5)
     assert str(st["$48"]["$306"]) == "$314"
+
+
+def test_its_padding_is_by_its_own_axes():
+    # QA's T02, padding 1em: top and bottom in em, left and right in lh.
+    pad = (("top", 1.0), ("right", 1.0), ("bottom", 1.0), ("left", 1.0))
+    st = _style(vertical=True, padding=pad)
+    for key in ("$52", "$54"):
+        assert str(st[key]["$306"]) == "$308" and float(st[key]["$307"]) == 1
+    for key in ("$53", "$55"):
+        assert str(st[key]["$306"]) == "$310"
+        assert abs(float(st[key]["$307"]) - 0.833333) < 1e-6
 
 
 def test_a_fixed_layout_page_drops_the_mark():

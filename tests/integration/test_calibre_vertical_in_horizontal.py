@@ -40,7 +40,8 @@ VLR = "writing-mode: vertical-lr; -webkit-writing-mode: vertical-lr;"
 # As the probe's: paragraphs without margins, so only R06's own count.
 CSS = (
     f"html {{ {VERT} }} p {{ margin: 0; text-indent: 1em }}"
-    f" .vt {{ {VERT} }} .vlr {{ {VLR} }}" + REST
+    f" .vt {{ {VERT} }} .vlr {{ {VLR} }}"
+    " .bx { border: 1px solid black } .fill { background-color: #dddddd }" + REST
 )
 BODY = (
     "<h1>第一章</h1><p>V00 縦の段落。</p>"
@@ -51,9 +52,21 @@ BODY = (
     '<div class="hz"><p class="vlr">R04 左から右。</p></div>'
     '<div class="hz"><p class="vt" style="margin: 1em">R06 余白。</p></div>'
     "<p>V06 縦の段落。</p>"
+    '<div class="hz"><p class="vt" style="margin: 2em 1em">R10 上下。</p></div>'
+    "<p>V10 縦の段落。</p>"
     '<div class="hz" style="text-align: center"><p class="vt">R07 中央。</p></div>'
     '<div class="hz"><div class="vt"><p>R09 縦。</p><img src="w.jpg" alt="R09"/>'
     "</div></div>"
+    # QA's Q763: T01 a first paragraph with margins; T02 a padded vertical
+    # block; T06, T07 bordered and filled; T09 a vertical list; T12 a
+    # heading first.
+    '<div class="hz"><div class="vt"><p style="margin: 1em 2em">T01a 縦一。</p>'
+    "<p>T01b 縦二。</p></div></div>"
+    '<div class="hz"><div class="vt" style="padding: 1em"><p>T02 余白。</p></div></div>'
+    '<div class="hz"><div class="vt bx"><p>T06 枠。</p></div></div>'
+    '<div class="hz"><div class="vt fill"><p>T07 塗り。</p></div></div>'
+    '<div class="hz"><ul class="vt"><li>T09 項目。</li></ul></div>'
+    '<div class="hz"><div class="vt"><h2>T12 見出し</h2><p>T12b 後。</p></div></div>'
     "<p>V99 縦の段落。</p>"
 )
 
@@ -76,7 +89,9 @@ def _tree(frags):
             ref = e.get("$145")
             if ref:
                 text = str(texts[str(ref["name"])][ref["$403"]])
-                out[text.split()[0]] = (style(e), chain)
+                # A list item's first word after its bullet.
+                words = [w for w in text.split() if w != "•"] or [text]
+                out[words[0]] = (style(e), chain)
             elif str(e.get("$159")) == "$271":
                 out[str(e.get("$584"))] = (style(e), chain)
             kids = e.get("$146")
@@ -181,3 +196,64 @@ def test_a_picture_in_it_is_sized_by_height(tree, request):
     height = 15.625 if "rtl" in request.node.callspec.id else 19.531
     assert set(st) == {"$57"} and str(height) in st["$57"]
     assert any(_is_vertical(c) for c in chain)
+
+
+def _lh(value):
+    """A `{$307: Decimal('x'), $306: $310}` value's x, in line heights."""
+    assert "$310" in value, value
+    return float(value.split("Decimal('")[1].split("'")[0])
+
+
+def test_its_first_blocks_margin_before_is_its_own(tree):
+    # T01: the first paragraph's margin before (its right, 2em) meets the
+    # vertical block's, on its container as `$50` 1.66667lh, not on the
+    # horizontal block above it.
+    st, chain = tree["T01a"]
+    assert abs(_lh(chain[0]["$50"]) - 1.66667) < 1e-5
+    assert "$47" not in chain[1] and "$49" not in chain[1]
+    # The paragraph keeps the rest, turned as vertical text: its top and
+    # bottom 1em, its left (after it) 1.66667lh.
+    assert "$50" not in st
+    assert "1" in st["$47"] and "1" in st["$49"]
+    assert abs(_lh(st["$48"]) - 1.66667) < 1e-5
+
+
+def test_a_heading_first_gives_its_margin_to_the_block(tree):
+    # T12: an h2's margin before, on the vertical container.
+    _st, chain = tree["T12"]
+    assert _is_vertical(chain[0]) and "$50" in chain[0]
+    assert "$47" not in chain[1]
+
+
+def test_its_padding_is_by_its_own_axes(tree):
+    # T02, padding: 1em: top and bottom 1em, left and right 0.833333lh.
+    _st, chain = tree["T02"]
+    for key in ("$52", "$54"):
+        assert "$308" in chain[0][key] and "'1'" in chain[0][key]
+    for key in ("$53", "$55"):
+        assert abs(_lh(chain[0][key]) - 0.833333) < 1e-6
+
+
+@pytest.mark.parametrize("words, key", [("T06", "$88"), ("T07", "$70")])
+def test_a_bordered_or_filled_vertical_block_is_a_box(tree, words, key):
+    # T06, T07: a `$270` with its border or fill and the vertical keys.
+    _st, chain = tree[words]
+    assert chain[0]["@type"] == "$270" and key in chain[0]
+    assert _is_vertical(chain[0])
+
+
+def test_a_vertical_list_in_a_horizontal_block_is_vertical(tree):
+    # T09: Previewer writes the list itself vertical (`$276`); kfxgen writes
+    # its items in a vertical container.
+    _st, chain = tree["T09"]
+    assert any(_is_vertical(c) for c in chain)
+
+
+def test_a_vertical_paragraphs_own_margins_go_by_their_sides(tree):
+    # PSB3 R10, `<p class="vt" style="margin: 2em 1em">`: its top and bottom
+    # (2em) on the horizontal block, its left and right (1em) on itself.
+    _st, chain = tree["R10"]
+    for key in ("$48", "$50"):
+        assert abs(_lh(chain[0][key]) - 0.833333) < 1e-6
+    for key in ("$47", "$49"):
+        assert abs(_lh(chain[1][key]) - 1.66667) < 1e-5
