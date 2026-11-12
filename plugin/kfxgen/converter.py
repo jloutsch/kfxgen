@@ -331,6 +331,9 @@ _V_AUTHOR = "data-kfxgen-v-author"
 _V_UA = "data-kfxgen-v-ua"
 #: On the first horizontal-tb element of a vertical-rl file's branch (#247).
 _HORIZONTAL = "data-kfxgen-horizontal"
+#: On the first vertical-rl element inside such a horizontal one (#247,
+#: QA's P749 Q09c, probe PSB R01-R07).
+_VERTICAL = "data-kfxgen-vertical"
 _SIDES = ("top", "right", "bottom", "left")
 _BOX_PROPS = tuple(f"{k}-{s}" for k in ("margin", "padding") for s in _SIDES)
 _STYLE_DECL = re.compile(
@@ -414,6 +417,10 @@ def mark_vertical_margins(root, stylizer, select=None):
                 if above != "horizontal-tb":
                     e.set(_HORIZONTAL, "1")
                 continue
+            if above == "horizontal-tb":
+                # Vertical again inside a horizontal block: Previewer writes
+                # it in a vertical container of its own (PSB R01-R03).
+                e.set(_VERTICAL, "1")
         own = set(authored.get(e, ()))
         for m in _STYLE_DECL.finditer(e.get("style") or ""):
             kind, side = m.group(1).lower(), m.group(2)
@@ -435,7 +442,11 @@ def _vertical_box(css, st, elem):
     stands for where the book sets one, else the user agent's own for that
     slot, logical. Unchanged outside a vertical-rl file."""
     authored = elem.get(_V_AUTHOR)
-    if authored is None:
+    if authored is None or elem.get(_VERTICAL) is not None:
+        # A vertical block inside a horizontal one is laid out in that
+        # block: its own margins are physical, as a horizontal block's are
+        # (PSB R06: its top and bottom meet the horizontal block's, its left
+        # and right stay on it).
         return css
     authored = set(authored.split())
     ua = dict(
@@ -992,7 +1003,7 @@ def _drop_vertical_marks(root):
     horizontal text: its margins in their own places, no 縦中横 (#752)."""
     for e in root.iter():
         if isinstance(e.tag, str):
-            for mark in (_V_AUTHOR, _V_UA, _HORIZONTAL):
+            for mark in (_V_AUTHOR, _V_UA, _HORIZONTAL, _VERTICAL):
                 e.attrib.pop(mark, None)
 
 
@@ -5670,9 +5681,12 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                 b["blocks"] = _space_between(b["blocks"], margins, measured, paddings)
                 last = b["blocks"][-1] if b["blocks"] else None
                 tail = last.pop("trailing_space", 0.0) if last else 0.0
-                edge = (b["box"].get("border") or {}).get("bottom") or (
+                # A vertical block's blocks end at its left (QA's U03, U16).
+                vertical = bool(b["box"].get("vertical"))
+                end_side = "left" if vertical else "bottom"
+                edge = (b["box"].get("border") or {}).get(end_side) or (
                     b["box"].get("padding") or {}
-                ).get("bottom")
+                ).get(end_side)
                 keep = last.get("padding_below", 0.0) if last is not None else 0.0
                 if (
                     not edge
@@ -5694,6 +5708,9 @@ def _space_between(blocks, margins, measured=True, paddings=None):
                     )
                     pad["bottom"] = (pad.get("bottom") or 0.0) + tail / _ems_own(b)
                     b["box"]["padding"] = pad
+                elif tail and vertical:
+                    # Along its own axis: its space after it, its left.
+                    b["box"]["end"] = _collapse(b["box"].get("end") or 0.0, tail)
                 elif tail:
                     # It collapses with the box's margin below, where the run
                     # around the box meets it, the next block's or its own end
@@ -6790,7 +6807,10 @@ def extract_blocks_from_html(
         # A horizontal-tb block in vertical-rl text: Previewer writes it in a
         # horizontal container of its own, whatever the tag (P247h).
         horizontal = elem.get(_HORIZONTAL) is not None
-        if style_resolver is None or (tag not in _SIZED_BOX_TAGS and not horizontal):
+        # And a vertical-rl block inside one: a vertical container (PSB).
+        vertical = elem.get(_VERTICAL) is not None
+        turned = horizontal or vertical
+        if style_resolver is None or (tag not in _SIZED_BOX_TAGS and not turned):
             return False
         css = style_resolver(elem) or {}
         border, fill = _css_border(css), _box_background(css)
@@ -6812,7 +6832,7 @@ def extract_blocks_from_html(
             m = _IMG_TOKEN_RE.fullmatch(kids[0].get("text") or "")
             if m and m.group(4):
                 return False
-        if border is None and fill is None and width is None and not horizontal:
+        if border is None and fill is None and width is None and not turned:
             return False
         if not kids or not any(
             b.get("type") in ("table", "box") or (b.get("text") or "").strip()
@@ -6859,8 +6879,10 @@ def extract_blocks_from_html(
                     # padding, in its ems, against the book's main size
                     # (#647).
                     "font_px": css_font_size(css),
-                    "margin_left": _page_share(left) or None,
-                    "margin_right": _page_share(right) or None,
+                    # A vertical block's left and right are its space after
+                    # and before, in ems ("start", "end" below).
+                    "margin_left": None if vertical else _page_share(left) or None,
+                    "margin_right": None if vertical else _page_share(right) or None,
                     "width": width,
                     "width_px": _box_width_px(css) if width is not None else None,
                     "float": side if width is not None else None,
@@ -6872,6 +6894,15 @@ def extract_blocks_from_html(
                     # Q15, #246).
                     "bidi": _bidi(elem, style_resolver),
                     **({"horizontal": True} if horizontal else {}),
+                    **(
+                        {
+                            "vertical": True,
+                            "start": _margin_em(css, "right"),
+                            "end": _margin_em(css, "left"),
+                        }
+                        if vertical
+                        else {}
+                    ),
                 },
             }
         ]
@@ -6901,8 +6932,21 @@ def extract_blocks_from_html(
             "space",
             "rule",
         )
+        turned = box["box"].get("vertical")
         for side, i, end in (("top", 0, 0), ("bottom", -1, 1)):
             inner = margins.get(mine[i]) if mine else None
+            if turned:
+                # A vertical block in a horizontal one: its blocks' first
+                # and last margins run along its own axis, before and after
+                # it, its right and left sides; they meet its own there, not
+                # the horizontal block's (QA's Q763 T01, T12, T14).
+                edge = "right" if end == 0 else "left"
+                if inner is None or border.get(edge) or padding.get(edge):
+                    continue
+                key = "start" if end == 0 else "end"
+                box["box"][key] = _collapse(box["box"][key], inner[end])
+                inner[end] = 0.0
+                continue
             if inner is None or border.get(side) or padding.get(side):
                 continue
             if end and spaced_end:

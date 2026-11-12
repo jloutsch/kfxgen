@@ -749,11 +749,12 @@ def _is_frame(box):
     a paragraph holding a floated picture (#565)."""
     if box.get("float_wrapper"):
         return True
-    if box.get("horizontal") and not (
+    if (box.get("horizontal") or box.get("vertical")) and not (
         box.get("border") or box.get("background") is not None
     ):
         # A horizontal block in vertical text: Previewer's plain container
-        # (P247h, #247), padded or not (QA's P749d).
+        # (P247h, #247), padded or not (QA's P749d); a vertical block in
+        # one too (PSB R01-R07).
         return True
     return bool(box.get("width")) and not (
         box.get("border") or box.get("background") is not None or box.get("float")
@@ -991,22 +992,33 @@ _VERTICAL_KEYS = {
 }
 
 
-def _opens_horizontal(chunk):
-    """Whether an "open" chunk starts a horizontal block, as in vertical text:
-    a horizontal-tb box or table (P247h, #247)."""
+def _opens_mode(chunk):
+    """The writing mode an "open" chunk starts in vertical text, or None:
+    "horizontal" for a horizontal-tb box or table (P247h, #247), "vertical"
+    for a vertical-rl box inside one (PSB R01-R07)."""
     node = chunk.get("node")
     if node == "box":
-        return bool((chunk.get("box") or {}).get("horizontal"))
-    return node == "table" and bool(chunk.get("horizontal"))
+        box = chunk.get("box") or {}
+        if box.get("horizontal"):
+            return "horizontal"
+        return "vertical" if box.get("vertical") else None
+    return "horizontal" if node == "table" and chunk.get("horizontal") else None
 
 
-def _rotation_for(vertical, open_horizontal):
+def _innermost_mode(open_modes):
+    """The mode of the innermost open block that sets one, or None."""
+    return next((m for m in reversed(open_modes) if m), None)
+
+
+def _rotation_for(vertical, open_modes):
     """The margin rotation for styles written now: ["vertical"] in a
     vertical-rl chapter, ["horizontal"] inside a horizontal block in one
-    (P247h, #247), else none."""
+    (P247h, #247), ["vertical"] again inside a vertical block in that
+    (PSB R01-R07), else none."""
     if not vertical:
         return []
-    return ["horizontal"] if any(open_horizontal) else ["vertical"]
+    inner = _innermost_mode(open_modes)
+    return ["horizontal"] if inner == "horizontal" else ["vertical"]
 
 
 def _drop_default_left(value):
@@ -3895,6 +3907,9 @@ class NativeKFXGenerator:
         centred=False,
         clear=None,
         horizontal=False,
+        vertical=False,
+        start=None,
+        end=None,
     ):
         """$157 for a box (#238), as Kindle Previewer 4.0.1 writes a bordered
         or filled container: border as for a table part, fill $70 (ARGB),
@@ -3910,6 +3925,44 @@ class NativeKFXGenerator:
         if padding:
             for k, v in _padding_values(dict(padding), None).items():
                 value[IS(k)] = v
+            sides = dict(padding)
+            if vertical:
+                # A vertical block's padding by its own axes, as Previewer
+                # writes it (QA's Q763 T02): top and bottom along the line,
+                # in em; left and right across it, in line heights.
+                for side, key in (("top", "$52"), ("bottom", "$54")):
+                    em = sides.get(side)
+                    if isinstance(em, (tuple, list)):
+                        # A % stays a % (QA's U08).
+                        value[IS(key)] = IonStruct(
+                            IS("$307"),
+                            IonDecimal(f"{em[1]:.6g}"),
+                            IS("$306"),
+                            IS("$314"),
+                        )
+                    elif em:
+                        value[IS(key)] = IonStruct(
+                            IS("$307"), IonDecimal(f"{em:.6g}"), IS("$306"), IS("$308")
+                        )
+                for side, key in (("left", "$53"), ("right", "$55")):
+                    em = sides.get(side)
+                    if isinstance(em, (tuple, list)):
+                        # A % of the page, in ems (U08: 5% is 2em).
+                        em = em[1] * page_pt() / 1200
+                    if em:
+                        value[IS(key)] = IonStruct(
+                            IS("$307"),
+                            IonDecimal(f"{em / 1.2:.6g}"),
+                            IS("$306"),
+                            IS("$310"),
+                        )
+        for key, em in (("$50", start), ("$48", end)):
+            # A vertical block's space before and after it, its right and
+            # left, in line heights (PSB R06; QA's Q763 T01).
+            if em:
+                value[IS(key)] = IonStruct(
+                    IS("$307"), IonDecimal(f"{em / 1.2:.6g}"), IS("$306"), IS("$310")
+                )
         for key, pct in (("$48", margin_left), ("$50", margin_right)):
             if pct:
                 value[IS(key)] = IonStruct(
@@ -3936,6 +3989,16 @@ class NativeKFXGenerator:
             # its two fit flags.
             value[IS("$560")] = IS("$557")
             value[IS("$56")] = IonStruct(
+                IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")
+            )
+            value[IS("$478")] = True
+            value[IS("$784")] = True
+        if vertical:
+            # A vertical-rl block inside a horizontal one, as Kindle
+            # Previewer 4.0.3 writes it (PSB R01-R07, QA's P749 Q09c):
+            # vertical-rl, the page's height, and the two fit flags.
+            value[IS("$560")] = IS("$559")
+            value[IS("$57")] = IonStruct(
                 IS("$307"), IonDecimal("100"), IS("$306"), IS("$314")
             )
             value[IS("$478")] = True
@@ -5531,14 +5594,15 @@ class NativeKFXGenerator:
             vertical-rl chapter (#247)."""
             if not chapter_now["vertical"]:
                 return False
-            open_horizontal = []
+            open_modes = []
             for c in all_chunks[chapter_now["start"] :]:
                 kind = c.get("type") if isinstance(c, dict) else None
                 if kind == "open":
-                    open_horizontal.append(_opens_horizontal(c))
-                elif kind == "close" and open_horizontal:
-                    open_horizontal.pop()
-            return any(open_horizontal)
+                    open_modes.append(_opens_mode(c))
+                elif kind == "close" and open_modes:
+                    open_modes.pop()
+            # Inside a vertical block in it, vertical text again (PSB).
+            return _innermost_mode(open_modes) == "horizontal"
 
         toc_link_chunks = {}
         toc_link_levels = {}  # chunk index -> depth in the contents (#313)
@@ -7631,7 +7695,7 @@ class NativeKFXGenerator:
             rotation[:] = ["vertical"] if vertical else []
             # Whether each open container is a horizontal block: in one, and
             # on it, margins stay where the book puts them (P247h, #247).
-            open_horizontal = []
+            open_modes = []
             for chunk_idx in range(start, end):
                 chunk = all_chunks[chunk_idx]
                 around = open_bidi[-1] if open_bidi else {}
@@ -7656,8 +7720,8 @@ class NativeKFXGenerator:
                         else None
                     )
                     open_bidi.append(around if own is None else own)
-                    open_horizontal.append(_opens_horizontal(chunk))
-                    rotation[:] = _rotation_for(vertical, open_horizontal)
+                    open_modes.append(_opens_mode(chunk))
+                    rotation[:] = _rotation_for(vertical, open_modes)
                     cont_bidi = _bidi_diff(own, around)
                     open_fills.append(
                         (chunk.get("box") or chunk.get("cell") or {}).get("background")
@@ -7669,9 +7733,9 @@ class NativeKFXGenerator:
                     )
                 elif chunk.get("type") == "close" and open_fills:
                     open_fills.pop()
-                    if open_horizontal:
-                        open_horizontal.pop()
-                        rotation[:] = _rotation_for(vertical, open_horizontal)
+                    if open_modes:
+                        open_modes.pop()
+                        rotation[:] = _rotation_for(vertical, open_modes)
                     if open_sizes:
                         open_sizes.pop()
                     if open_bidi:
@@ -7782,6 +7846,11 @@ class NativeKFXGenerator:
                             )
                     if node == "box":
                         box = chunk["box"]
+                        # A vertical block's own margins are laid out in the
+                        # horizontal block around it, unturned (PSB R06).
+                        inside = rotation[:]
+                        if box.get("vertical"):
+                            rotation[:] = _rotation_for(vertical, open_modes[:-1])
                         # Its margins and padding are in its own ems; kfxgen
                         # writes a box at the main size, so they are scaled
                         # to it, as Previewer's box `$16` scales them (#647).
@@ -7813,8 +7882,20 @@ class NativeKFXGenerator:
                                     if box.get("horizontal")
                                     else {}
                                 ),
+                                **(
+                                    {
+                                        "vertical": True,
+                                        # In the main size already
+                                        # (`_margin_em`; QA's U14, U15).
+                                        "start": box.get("start") or 0.0,
+                                        "end": box.get("end") or 0.0,
+                                    }
+                                    if box.get("vertical")
+                                    else {}
+                                ),
                             )
                         )
+                        rotation[:] = inside
                     if node in ("row", "head", "body", "foot") and (
                         chunk.get("border") or cont_bidi
                     ):
