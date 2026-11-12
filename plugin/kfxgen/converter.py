@@ -826,11 +826,13 @@ def _inline_bidi(elem, css):
 _BIDI_SERIAL = itertools.count()
 
 
-def _pictures_among_words(elem, holds_blocks):
+def _pictures_among_words(elem, holds_blocks, set_apart=lambda img: False):
     """`elem`'s <img> children that share a run of loose content with words:
     between two block children (or an end), some text or an inline element
     with text (#757); or with another picture, as Kindle Previewer 4.0.3
-    writes pictures side by side, one paragraph (#762, probe PSS P11). The
+    writes pictures side by side, one paragraph (#762, probe PSS P11),
+    unless one of them is set apart (`display: block`: each its own block,
+    as Previewer writes it, QA's Q766 Z38). The
     elements themselves, not their `id()`: lxml makes a new proxy for each
     access once the last one is gone (#712)."""
     found, run, words = set(), [], bool((elem.text or "").strip())
@@ -841,7 +843,7 @@ def _pictures_among_words(elem, holds_blocks):
         if holds_blocks(child) or _local_tag(child.tag) == "svg":
             # A block, or an <svg>, which `_walk_container` writes as
             # pictures of its own: the run ends.
-            if words or len(run) > 1:
+            if words or _side_by_side(run, set_apart):
                 found.update(run)
             run, words = [], False
         elif _local_tag(child.tag) == "img":
@@ -850,9 +852,15 @@ def _pictures_among_words(elem, holds_blocks):
             words = True
         if (child.tail or "").strip():
             words = True
-    if words or len(run) > 1:
+    if words or _side_by_side(run, set_apart):
         found.update(run)
     return found
+
+
+def _side_by_side(pictures, set_apart):
+    """Whether a run of pictures alone is written side by side, one
+    paragraph: two or more, none set to display as a block (#762)."""
+    return len(pictures) > 1 and not any(set_apart(p) for p in pictures)
 
 
 def _with_bidi(block_style, elem, style_resolver, own=True):
@@ -6594,6 +6602,20 @@ def extract_blocks_from_html(
                             if _lone_block_picture(elem, style_resolver)
                             else {}
                         ),
+                        # A picture in it set to display as a block keeps
+                        # pictures beside it apart (#762, QA's Q766 Z18,
+                        # Z31, Z38, Z40).
+                        **(
+                            {"pictures_apart": True}
+                            if style_resolver is not None
+                            and any(
+                                isinstance(d.tag, str)
+                                and _local_tag(d.tag) == "img"
+                                and _displays_as_block(style_resolver(d))
+                                for d in elem.iterdescendants()
+                            )
+                            else {}
+                        ),
                         # In a list item: Previewer floats no picture there
                         # (#699).
                         **(
@@ -7222,7 +7244,16 @@ def extract_blocks_from_html(
 
         ws = _white_space_flags(elem, style_resolver, frozenset())
         among_words = (
-            _pictures_among_words(elem, _holds_blocks) if is_block is None else set()
+            _pictures_among_words(
+                elem,
+                _holds_blocks,
+                lambda img: (
+                    style_resolver is not None
+                    and _displays_as_block(style_resolver(img))
+                ),
+            )
+            if is_block is None
+            else set()
         )
         if elem.text:
             inline_parts.append((elem.text, ws))

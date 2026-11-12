@@ -570,7 +570,12 @@ def _cut_after_picture_lines(block):
     if any(m.group(4) for m in tokens) or block.get("preformatted"):
         return [block]
     if not IMG_TOKEN_RE.sub("", text).strip():
-        return [block]
+        # Pictures alone: one entry, unless a line of them holds two or more
+        # side by side, which Previewer writes as a paragraph of its own, a
+        # line of one as a picture (#762, QA's Q766 Z03, Z04).
+        per_line = [len(IMG_TOKEN_RE.findall(line)) for line in text.split("\n")]
+        if len(per_line) < 2 or max(per_line) < 2 or block.get("pictures_apart"):
+            return [block]
     # (end of a piece, start of the next): a cut after a picture line drops
     # its line break; one before it, after an empty line, drops nothing.
     cuts, start = [], 0
@@ -5826,7 +5831,7 @@ class NativeKFXGenerator:
             return set(mine)
 
         def _inline_pictures(
-            para, para_spans, offsets, floats_in_words=False, unfloat=False
+            para, para_spans, offsets, floats_in_words=False, unfloat=False, apart=False
         ):
             """(text, spans, offsets, pictures) for a paragraph whose words
             hold pictures, or None (#529). Each picture becomes one
@@ -5847,7 +5852,7 @@ class NativeKFXGenerator:
             # (#762, probe PSS P01-P09); a line break between them still
             # makes each an entry (P04).
             if not IMG_TOKEN_RE.sub("", para).strip() and (
-                len(tokens) < 2 or "\n" in para
+                len(tokens) < 2 or "\n" in para or apart
             ):
                 return None
             text, cuts, pictures, last = [], [], [], 0
@@ -6061,6 +6066,8 @@ class NativeKFXGenerator:
                 block_offsets,
                 bool(block.get("float_wrapped")),
                 _floats_unfloated(block),
+                # One set to display as a block keeps them apart (#762).
+                apart=bool(block.get("pictures_apart")),
             )
             if inline:
                 para, para_spans, block_offsets, pictures = inline

@@ -44,6 +44,11 @@ BODY = (
     f'<div style="text-align: center">{_img("P08a", "n.jpg")}{_img("P08b", "n.jpg")}</div>'
     f"<div>{_img('P10a', 'n.jpg')}</div><div>{_img('P10b', 'n.jpg')}</div>"
     f"<div>{_img('P11a', 'n.jpg')}{_img('P11b', 'n.jpg')}<p>A caption below.</p></div>"
+    # QA's Q766 Z18, Z38: display: block, both or the first only.
+    f'<div>{_img("Z18a")[:-2]} style="display: block"/>{_img("Z18b", "n.jpg")[:-2]} style="display: block"/></div>'
+    f'<div>{_img("Z38a")[:-2]} style="display: block"/>{_img("Z38b", "n.jpg")}</div>'
+    # Z03: a line of two, then one.
+    f"<p>{_img('Z03a', 'n.jpg')}{_img('Z03b', 'n.jpg')}<br/>{_img('Z03c', 'n.jpg')}</p>"
     "<p>V99 A paragraph.</p>"
 )
 
@@ -122,3 +127,18 @@ def test_a_line_break_or_separate_blocks_keep_each_a_block(pictures, pair):
     for side in "ab":
         entry, _own, _parent, _around = pictures[f"{pair}{side}"]
         assert entry.get("$601") is None
+
+
+@pytest.mark.parametrize("pair", ["Z18", "Z38"])
+def test_one_set_to_display_as_a_block_keeps_each_a_block(pictures, pair):
+    # QA's Q766 Z18, Z38: as main and Previewer write them.
+    for side in "ab":
+        entry, _own, _parent, _around = pictures[f"{pair}{side}"]
+        assert entry.get("$601") is None
+
+
+def test_a_line_of_two_then_a_line_of_one(pictures):
+    # QA's Q766 Z03: the two inline in one paragraph, the third a block.
+    first, second, third = (pictures[f"Z03{s}"] for s in "abc")
+    assert str(first[0].get("$601")) == "$283" and first[2] is second[2]
+    assert third[0].get("$601") is None
