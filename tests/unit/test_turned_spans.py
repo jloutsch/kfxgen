@@ -30,7 +30,7 @@ from tests.unit.test_floats import _resolver
 pytestmark = pytest.mark.unit
 
 XHTML = "http://www.w3.org/1999/xhtml"
-CSS = {"b": {"font-weight": "bold"}}
+CSS = {"b": {"font-weight": "bold"}, "blk": {"display": "block"}}
 
 
 def _paragraphs(body, mark, **kw):
@@ -186,3 +186,56 @@ def test_a_vertical_one_is_vertical_at_the_lines_height(tmp_path):
     assert str(entry["$156"]) == "$322"
     assert str(style["$560"]) == "$559" and float(style["$57"]["$307"]) == 100
     assert "$142" not in entry["$146"][0]
+
+
+def test_one_turned_inside_another_keeps_its_text():
+    # QA's Q765 Y01: Previewer nests a vertical container in the horizontal
+    # one; kfxgen keeps its text in the outer one's paragraph.
+    root = etree.fromstring(
+        f'<html xmlns="{XHTML}"><body><p>縦<span id="o">AB<span id="v">縦</span>CD'
+        "</span>終わり。</p></body></html>"
+    )
+    for e in root.iter():
+        if isinstance(e.tag, str):
+            e.set(_conv._V_AUTHOR, "")
+    root.find(f".//{{{XHTML}}}span[@id='o']").set(_conv._HORIZONTAL, "1")
+    root.find(f".//{{{XHTML}}}span[@id='v']").set(_conv._VERTICAL, "1")
+    (block,) = _conv.extract_blocks_from_html(root, style_resolver=_resolver(CSS))
+    ((_at, (_serial, mode, text, _spans)),) = _turns(block)
+    assert mode == "horizontal" and text == "AB縦CD"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # QA's Q765 Y06: display: block keeps its own lines, as on main.
+        '<p>前<span id="t1" class="blk">BLOCK</span>後。</p>',
+        # Y04: Previewer doesn't turn one in a table cell.
+        '<table><tr><td>表<span id="t1">12</span>です</td></tr></table>',
+        # Y31, Y32: sup and sub stay in the line (Previewer sizes their box).
+        '<p>上付き<sup id="t1">12</sup>です。</p>',
+        '<p>下付き<sub id="t1">34</sub>です。</p>',
+    ],
+)
+def test_these_stay_in_the_line(body):
+    blocks = _paragraphs(body, _conv._HORIZONTAL)
+    assert not any(_turns(b) for b in blocks)
+
+
+def test_a_space_it_ends_with_stays_inside_it():
+    # QA's Q765 Y08, Y12: Previewer keeps it, the space before the next word.
+    (block,) = _paragraphs(
+        '<p>前<span id="t1"> AB CD </span>後。</p>', _conv._HORIZONTAL
+    )
+    ((_at, (_serial, _mode, text, _spans)),) = _turns(block)
+    assert text == "AB CD "
+
+
+def test_a_quote_and_a_label_are_turned():
+    # QA's Q765B Y33: a <q>, its marks inside it; Y34: a <label>.
+    (block,) = _paragraphs('<p>前<q id="t1">AB</q>後。</p>', _conv._HORIZONTAL)
+    ((_at, (_serial, _mode, text, _spans)),) = _turns(block)
+    assert len(text) == 4 and text[1:3] == "AB" and text[0] != "A" and text[3] != "B"
+    (block,) = _paragraphs('<p>前<label id="t1">LB</label>後。</p>', _conv._HORIZONTAL)
+    ((_at, (_serial, _mode, text, _spans)),) = _turns(block)
+    assert text == "LB"

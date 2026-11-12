@@ -8369,12 +8369,12 @@ class NativeKFXGenerator:
                         # link where it goes somewhere (PSB S05, S06, S08).
                         t_target = _link_target(t_flags)
                         t_anchor = body_anchor_map.get(t_target) if t_target else None
+                        # A size of its own is a run too (QA's Q765 Y10).
                         plain = frozenset(
                             f
                             for f in t_flags
                             if not _link_target((f,))
                             and flag_value((f,), LANG_FLAG) is None
-                            and run_font_size((f,)) is None
                         )
                         t_style = (
                             _emphasis_style(

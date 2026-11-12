@@ -46,6 +46,7 @@ BODY = (
     '<p>太字<span class="hz"><b>S06</b></span>です。</p>'
     '<p>強調<em class="hz">S08</em>です。</p>'
     '<p><span class="hz">S10</span></p>'
+    '<p>前<span class="hz"><small>Y1</small>0</span>後。</p>'
     '<div class="hz"><p>Horizontal <span class="vt">R05</span> text.</p></div>'
     "<p>V99 縦の段落。</p>"
 )
@@ -135,3 +136,12 @@ def test_the_position_map_counts_it_as_previewer_does(book):
     assert by_eid[int(inner["$155"])] == [(k + 1, 0)]
     paragraph = by_eid[int(outer["$155"])]
     assert (k, 4) in paragraph and (k + 4, 5) in paragraph
+
+
+def test_a_size_of_its_own_is_a_run_inside_it(book):
+    # QA's Q765 Y10: <small> inside keeps its run, as Previewer writes it.
+    found, _pm = book
+    _e, _s, inner, _outer, styles = found["Y10"]
+    (run,) = inner["$142"]
+    assert (run["$143"], run["$144"]) == (0, 2)
+    assert "$16" in styles[str(run["$157"])]

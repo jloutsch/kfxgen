@@ -2210,7 +2210,10 @@ _LINK_INLINE_TAGS = frozenset(
 #: Inline elements a vertical book can set the other way from their line,
 #: as an inline container of their own (#247, probe PSB): those that hold
 #: text and nothing else drawn.
-_TURN_TAGS = _LINK_INLINE_TAGS - {"q", "sub", "sup", "label"}
+_TURN_TAGS = _LINK_INLINE_TAGS - {"sub", "sup"}
+#: Display values that make an element a block, not a span to turn: it keeps
+#: its own lines, as on main (QA's Q765 Y06; Previewer makes it a block).
+_TURN_BLOCK_DISPLAYS = frozenset({"block", "list-item", "table", "flex", "grid"})
 
 
 #: The whitespace CSS collapses: a no-break space is not (#728, P732u U01).
@@ -2541,7 +2544,16 @@ def _turned_parts(elem, cur, style_resolver, base_href, emphasis, mode):
         # from the text; a ruby or an equation is an entry its paragraph
         # can't hold: these stay in the line.
         return None
-    inner = [(elem.text, cur)]
+    for d in elem.iterdescendants():
+        # An element turned again inside it is read as its text, in this
+        # one's direction: Previewer nests a container there, which this
+        # one's paragraph can't hold (QA's Q765 Y01).
+        if isinstance(d.tag, str):
+            d.attrib.pop(_HORIZONTAL, None)
+            d.attrib.pop(_VERTICAL, None)
+    quote = _q_marks(elem, style_resolver) if _local_tag(elem.tag) == "q" else None
+    inner = [(quote[0], cur)] if quote else []
+    inner.append((elem.text, cur))
     for child in elem:
         inner.extend(
             _walk_inline(
@@ -2554,10 +2566,17 @@ def _turned_parts(elem, cur, style_resolver, base_href, emphasis, mode):
             )
         )
         inner.append((child.tail, cur))
+    if quote:
+        inner.append((quote[1], cur))
     inner = [(t, f) for t, f in inner if isinstance(f, frozenset) and t is not None]
     text, spans, _marks = normalize_runs_with_anchors(inner)
     if not text.strip():
         return None
+    raw = "".join(t for t, _f in inner)
+    if raw[-1:] in _COLLAPSING and not text.endswith(" "):
+        # Previewer keeps a space it ends with, inside it: the space between
+        # it and the next word (QA's Q765 Y08, Y12).
+        text += " "
     ids = [aid for d in elem.iterdescendants() for aid in _own_anchor_ids(d)]
     return [
         *(make_anchor_mark(aid) for aid in ids),
@@ -2886,7 +2905,18 @@ def _walk_inline(
         if elem.get(_VERTICAL) is not None
         else None
     )
-    if turn and not is_root and local in _TURN_TAGS:
+    if (
+        turn
+        and not is_root
+        and local in _TURN_TAGS
+        and str((own_css or {}).get("display") or "").strip().lower()
+        not in _TURN_BLOCK_DISPLAYS
+        # Previewer doesn't turn one in a table cell (QA's Q765 Y04).
+        and not any(
+            isinstance(a.tag, str) and _local_tag(a.tag) in _CELL_TAGS
+            for a in elem.iterancestors()
+        )
+    ):
         turned = _turned_parts(elem, cur, style_resolver, base_href, emphasis, turn)
         if turned is not None:
             parts.extend(turned)
