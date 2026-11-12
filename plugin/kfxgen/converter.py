@@ -73,6 +73,7 @@ from .inline_style import (
     make_mono_flag,
     make_math_flag,
     make_tcy_flag,
+    make_turn_flag,
     make_ruby_flag,
     make_size_flag,
     mono_families,
@@ -2206,6 +2207,11 @@ _LINK_INLINE_TAGS = frozenset(
     " samp small span strike strong sub sup time tt u var".split()
 )
 
+#: Inline elements a vertical book can set the other way from their line,
+#: as an inline container of their own (#247, probe PSB): those that hold
+#: text and nothing else drawn.
+_TURN_TAGS = _LINK_INLINE_TAGS - {"q", "sub", "sup", "label"}
+
 
 #: The whitespace CSS collapses: a no-break space is not (#728, P732u U01).
 _COLLAPSING = " \t\n\r\f"
@@ -2516,6 +2522,47 @@ def _q_marks(q, style_resolver=None):
         # Not in its document's walk (a copy): counted on its own.
         marks = _document_q_marks(q, lambda e: None).get(q, ("", ""))
     return marks
+
+
+def _turned_parts(elem, cur, style_resolver, base_href, emphasis, mode):
+    """An inline element set the other way from its line (#247): its ids,
+    then one placeholder carrying its text and its own runs, written as an
+    inline container holding a paragraph, as Kindle Previewer 4.0.3 writes
+    a horizontal-tb span in vertical text (probe PSB S01-S12) and a
+    vertical-rl one in a horizontal block (R05). Its runs are inside it,
+    as Previewer writes them, a link round it too; the placeholder takes
+    none. None when it holds something its paragraph can't (a picture, a
+    ruby, an equation): it stays in the line, as before."""
+    if any(
+        isinstance(d.tag, str) and _local_tag(d.tag) in ("img", "svg", "math", "ruby")
+        for d in elem.iterdescendants()
+    ):
+        # A picture is walked by the element holding it, so it would be lost
+        # from the text; a ruby or an equation is an entry its paragraph
+        # can't hold: these stay in the line.
+        return None
+    inner = [(elem.text, cur)]
+    for child in elem:
+        inner.extend(
+            _walk_inline(
+                child,
+                cur,
+                style_resolver,
+                is_root=False,
+                base_href=base_href,
+                parent_emphasis=emphasis,
+            )
+        )
+        inner.append((child.tail, cur))
+    inner = [(t, f) for t, f in inner if isinstance(f, frozenset) and t is not None]
+    text, spans, _marks = normalize_runs_with_anchors(inner)
+    if not text.strip():
+        return None
+    ids = [aid for d in elem.iterdescendants() for aid in _own_anchor_ids(d)]
+    return [
+        *(make_anchor_mark(aid) for aid in ids),
+        ("\ufffc", frozenset({make_turn_flag(mode, text, spans)})),
+    ]
 
 
 def _walk_inline(
@@ -2832,6 +2879,18 @@ def _walk_inline(
         )
         parts.append(("\ufffc", own | {make_tcy_flag(tcy)}))
         return parts
+    turn = (
+        "horizontal"
+        if elem.get(_HORIZONTAL) is not None
+        else "vertical"
+        if elem.get(_VERTICAL) is not None
+        else None
+    )
+    if turn and not is_root and local in _TURN_TAGS:
+        turned = _turned_parts(elem, cur, style_resolver, base_href, emphasis, turn)
+        if turned is not None:
+            parts.extend(turned)
+            return parts
     quote = _q_marks(elem, style_resolver) if local == "q" else None
     if quote:
         parts.append((quote[0], cur))
