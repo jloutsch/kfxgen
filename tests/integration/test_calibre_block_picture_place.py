@@ -75,7 +75,7 @@ CSS = " ".join(
         "div.s10 { margin: 0 10% }",
         "div.r30 { margin-right: 30% }",
         "p.p10 { margin-left: 10%; margin-right: 5%; text-indent: 0 }",
-        "div.neg { margin-left: -5% }",
+        "div.z0r20 { margin-left: 0; margin-right: 20% }",
     ]
 )
 
@@ -130,7 +130,7 @@ LTR = (
     f'<div class="r30"><div class="l40"><div class="s10"><p class="flat">{_img("Y83")}</p></div></div></div>'
     f'<div class="ml3"><p class="p10">{_img("Y63")}</p></div>'
     f'<div class="m20"><div class="ml3"><div class="m20"><p class="flat">{_img("Y69")}</p></div></div></div>'
-    f'<div class="neg"><p class="flat">{_img("Y65")}</p></div>'
+    f'<div class="z0r20"><div class="s10"><p class="flat">{_img("Y91")}</p></div></div>'
     "<p>V99 A paragraph.</p>"
 )
 RTL = (
@@ -265,7 +265,9 @@ def test_its_margins_and_indent(ltr, alt, left, right):
         ("Y83", 44.2, 34.2),  # 40 + 10% of 42; 30 + 10% of 42
         ("Y63", 18.438, 5.0),  # 3em + 10% of 90.625; 5% of the page
         ("Y69", 39.5, 30.125),
-        ("Y65", -5.0, None),  # a container's negative margin
+        # A zero margin isn't one: the inner 10% is of the page on the left
+        # (QA's Q770H Y91).
+        ("Y91", 10.0, 28.0),
         # Library 6858: a 20pt indent past the block's own 65% isn't
         # divided by the 35 that leaves (QA's re-check of 2aec1f9).
         ("L6858", 70.208, None),
