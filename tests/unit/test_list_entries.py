@@ -146,3 +146,52 @@ def test_a_list_in_a_horizontal_block_of_a_vertical_file_keeps_its_paragraphs():
     )
     assert not _lists(blocks)
     assert "• a" in str(blocks)
+
+
+#: Items with no marker, as calibre's computed style gives them from the list.
+_NONE = '<li class="i">a</li><li class="i">b</li>'
+
+
+def _plain(blocks):
+    return [
+        b["box"] for b in blocks if b.get("type") == "box" and b["box"].get("plain")
+    ]
+
+
+@pytest.mark.parametrize(
+    "css, left, right",
+    [
+        ({}, 4.6875, None),  # 40px
+        ({"margin-left": "-2em"}, -1.5625, None),  # QA's Q771D D5
+        ({"padding-sides": ("0", "0", "0", "1em"), "font-size": 13.28}, 2.59375, None),
+        ({"margin-left": "1.3em", "margin-right": "1em"}, 8.75, 3.125),  # D2
+    ],
+    ids=["default", "negative-margin", "own-size", "both-sides"],
+)
+def test_an_unmarked_lists_indent_is_its_margin_and_padding(css, left, right):
+    blocks = _blocks(
+        f'<ul class="n">{_NONE}</ul>',
+        {"n": css, "i": {"list-style-type": "none"}},
+    )
+    (box,) = _plain(blocks)
+    assert box["margin_left"] == pytest.approx(left)
+    assert box["margin_right"] == (None if right is None else pytest.approx(right))
+
+
+def test_an_unmarked_list_in_rtl_text_is_plain_paragraphs():
+    # QA's Q771 B15: no container, so no indent on the end side.
+    blocks = _blocks(
+        f'<div dir="rtl"><ul>{_NONE}</ul></div>',
+        {"i": {"list-style-type": "none"}},
+    )
+    assert not _plain(blocks) and not _lists(blocks)
+    assert _texts(blocks) == ["a", "b"]
+
+
+def test_an_empty_item_is_an_empty_item_box():
+    # QA's Q771 X26: Previewer writes an empty `$277`, which shows "2.".
+    (lst,) = _blocks("<ol><li>a</li><li></li><li>c</li></ol>")
+    first, empty, third = lst["blocks"]
+    assert empty["type"] == "box" and empty["blocks"] == []
+    assert empty["box"]["item"] == {"value": None, "n": 2, "empty": True}
+    assert third["list_item"] == {"value": None, "n": 3}

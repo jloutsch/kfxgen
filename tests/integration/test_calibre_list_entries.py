@@ -48,6 +48,9 @@ CSS = " ".join(
         "ol.alpha { list-style-type: upper-alpha }",
         "ul.inside { list-style-position: inside }",
         "ul.square { list-style-type: square }",
+        "ul.neg { list-style-type: none; margin-left: -2em }",
+        "ul.small { list-style-type: none; padding-left: 1em; font-size: 0.83em }",
+        "ol.armenian { list-style-type: armenian }",
     ]
 )
 
@@ -77,6 +80,17 @@ CASES = {
     "L15": f'<ul class="square">{_items("L15")}</ul>',
     # Items that type their own number keep kfxgen's text (#201).
     "L16": "<ol><li>1. L16 typed</li><li>2. L16 typed</li></ol>",
+    # QA on #771 (Previewer 4.0.3, Q771 and Q771D, Q771R): unmarked lists
+    # with a negative margin (D5) or their own type size (D8), and in rtl
+    # text (B15); a marked rtl list (R01); an empty item (X26); start 0
+    # (X27); armenian (X34).
+    "L17": f'<ul class="neg">{_items("L17")}</ul>',
+    "L18": f'<ul class="small">{_items("L18")}</ul>',
+    "L19": f'<div dir="rtl"><ul class="none">{_items("L19")}</ul></div>',
+    "L20": f'<div dir="rtl"><ul>{_items("L20", 2)}</ul></div>',
+    "L21": "<ol><li>L21 item 1</li><li></li><li>L21 item 3</li></ol>",
+    "L22": f'<ol start="0">{_items("L22", 2)}</ol>',
+    "L23": f'<ol class="armenian">{_items("L23", 2)}</ol>',
 }
 BODY = (
     "<h1>Chapter</h1>"
@@ -225,6 +239,57 @@ def test_a_list_with_no_markers_is_indented_by_its_padding(book):
     assert [k[3] for k in box[4]] == ["L5 item 1", "L5 item 2", "L5 item 3"]
     (box,) = _after(tree, "L5b")
     assert "$48" not in box[2]
+
+
+def _share(style):
+    return round(float(style["$48"].removesuffix("$314")), 3)
+
+
+def test_an_unmarked_lists_indent_takes_its_margin_and_its_own_type_size(book):
+    # Previewer's `$48` is the margin and the padding: Q771D D5 -6.25 + 4.688,
+    # D8 1em in 0.83em type, 3.125 x 0.83.
+    tree = book[0]
+    (box,) = _after(tree, "L17")
+    assert (box[0], _share(box[2])) == ("$269", -1.562)
+    (box,) = _after(tree, "L18")
+    assert (box[0], _share(box[2])) == ("$269", 2.594)
+
+
+def test_an_unmarked_list_in_rtl_text_has_no_container(book):
+    # Q771 B15, R04: Previewer writes the items as plain paragraphs, with no
+    # indent on either side: their side margins are a paragraph's.
+    entries = _after(book[0], "L19")
+    assert [(n[0], n[3]) for n in entries] == [
+        ("$269", f"L19 item {i}") for i in (1, 2, 3)
+    ]
+    (before,) = [n for n in book[0] if n[3] == "L19 before."]
+    for n in entries:
+        assert [n[2].get(k) for k in ("$48", "$49")] == [
+            before[2].get(k) for k in ("$48", "$49")
+        ]
+
+
+def test_a_marked_list_in_rtl_text_is_a_list_with_its_direction(book):
+    # Q771R R01: `$682 $375` on the `$276`.
+    (lst,) = _after(book[0], "L20")
+    assert (lst[0], lst[2].get("$682")) == ("$276", "$375")
+    assert [k[3] for k in lst[4]] == ["L20 item 1", "L20 item 2"]
+
+
+def test_an_empty_item_start_0_and_armenian(book):
+    tree = book[0]
+    # X26: an empty `$277`, which shows its number.
+    assert _list(tree, "L21") == (
+        "$276",
+        {"$100": "$343"},
+        [("$277", {}, "L21 item 1"), ("$277", {}, ""), ("$277", {}, "L21 item 3")],
+    )
+    # X27: the start on the list only.
+    assert _list(tree, "L22") == _items_of(
+        "$343", "L22", 2, keys={"$100": "$343", "$104": "0"}
+    )
+    # X34: `$100 $794`.
+    assert _list(tree, "L23") == _items_of("$794", "L23", 2)
 
 
 def test_a_reversed_list_and_typed_numbers_keep_kfxgens_text(book):

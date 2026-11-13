@@ -4037,6 +4037,21 @@ _DEFAULT_PADDING_EM = 0.45 / 12
 _PADDING_EM_PER_UNIT = {"px": 0.45 / 12, "pt": 1 / 12, "em": 1.0, "rem": 1.0}
 
 
+def _side_share(value, ratio=1.0):
+    """A declared side margin or padding as a share of the page width, in %,
+    as Kindle Previewer 4.0.3 writes an unmarked list's indent (QA's Q771D):
+    an em is the element's own (`ratio`, D4, D8) and a negative one counts
+    (D5). 0 when unset or unreadable."""
+    value = str(value or "").strip()
+    sign = -1.0 if value.startswith("-") else 1.0
+    em = _padding_em(value.lstrip("-"), ratio)
+    if em is None:
+        return 0.0
+    if isinstance(em, tuple):
+        return sign * em[1]
+    return sign * em * em_percent()
+
+
 def _padding_em(value, ratio=1.0):
     """A declared padding as Kindle Previewer measures it: ems (1px = 0.45pt,
     12pt = 1em), ("%", n) for a percentage, or None when unreadable. An em
@@ -5310,6 +5325,7 @@ _LIST_STYLE_SYMBOLS = {
     "upper-latin": "$347",
     "lower-greek": "$791",
     "decimal-leading-zero": "$796",
+    "armenian": "$794",  # QA's Q771 X34
 }
 #: A list's or an item's box: no border, fill, padding, width or float.
 _LIST_BOX = {
@@ -6539,12 +6555,23 @@ def extract_blocks_from_html(
             elif _already_numbered(text, ordinals.get(li, 0)):
                 return None
         if kinds == {"none"}:
+            if _bidi(lst, style_resolver).get("direction") == "rtl":
+                # In rtl text Previewer writes the items as plain
+                # paragraphs, with no container and no indent on either
+                # side (QA's Q771 B15, Q771R R04, R06).
+                return None
             # No markers: Previewer writes a plain `$269` around the items,
-            # indented by the list's padding, 40px unless the book sets one
-            # (S768 L5: `$48` 4.688%). calibre's sheet gives lists none.
+            # indented by the list's margin and its padding, 40px unless
+            # the book sets one (S768 L5: `$48` 4.688%; QA's Q771D: an em
+            # in the list's own type size, a negative margin counted).
+            # calibre's sheet gives lists no padding.
+            ratio = _font_ratio(css)
             pad = (css.get("padding-sides") or (None,) * 4)[3]
-            pad = parse_css_length(str(pad)) if pad is not None else ("40", "$319")
-            return {"none": True, "pad": _page_share(pad) if pad else None}
+            left = _side_share(css.get("margin-left"), ratio) + _side_share(
+                "40px" if pad is None else pad, ratio
+            )
+            right = _side_share(css.get("margin-right"), ratio)
+            return {"none": True, "pad": left or None, "right": right or None}
         if len(kinds) != 1 or next(iter(kinds)) not in _LIST_STYLE_SYMBOLS:
             return None
         start = _parse_int(lst.get("start"))
@@ -6583,8 +6610,6 @@ def extract_blocks_from_html(
         _walk_element(li)
         kids = blocks[start:]
         real = [b for b in kids if b.get("type") != "space"]
-        if not real:
-            return
         if native.get("none"):
             return  # plain paragraphs in the list's container
         # Its number too: the generator writes it as the item's value where
@@ -6594,7 +6619,11 @@ def extract_blocks_from_html(
             "value": native["values"].get(li),
             "n": None if native["bullets"] else native["ordinals"].get(li),
         }
-        if len(real) == 1 and not real[0].get("type"):
+        if not real:
+            # An empty item is an empty `$277`, which shows its number, as
+            # Previewer writes it (QA's Q771 X26).
+            item["empty"] = True
+        elif len(real) == 1 and not real[0].get("type"):
             real[0]["list_item"] = item
             return
         blocks[start:] = [_list_box(kids, {"item": item})]
@@ -6606,7 +6635,11 @@ def extract_blocks_from_html(
             return
         css = style_resolver(elem) or {}
         own = (
-            {"plain": True, "margin_left": native["pad"]}
+            {
+                "plain": True,
+                "margin_left": native["pad"],
+                "margin_right": native["right"],
+            }
             if native.get("none")
             else {"list": {k: native[k] for k in ("type", "start", "inside")}}
         )
@@ -6891,7 +6924,9 @@ def extract_blocks_from_html(
             and (native := _native_list(elem)) is not None
         ):
             _make_list(elem, start, native)
-            _carry_container_margins(elem, start)
+            if not native.get("none"):
+                # An unmarked list's side margins are in its indent.
+                _carry_container_margins(elem, start)
             return
         if not _make_box(elem, start):
             _carry_container_margins(elem, start)

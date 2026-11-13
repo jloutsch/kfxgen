@@ -6394,9 +6394,10 @@ class NativeKFXGenerator:
             # A list's count as the Kindle keeps it (#768): an item whose
             # number differs, from a `value` or after an item that made no
             # entry, writes it as its `$104`.
-            count = (
-                ((box.get("list") or {}).get("start") or 1) if box.get("list") else None
-            )
+            count = None
+            if box.get("list"):
+                start = box["list"].get("start")
+                count = 1 if start is None else start  # 0 counts (Q771 X27)
             for k_idx, kid in enumerate(kids):
                 first = len(all_chunks)
                 # A table or a box inside is nested in it, as Kindle
@@ -6419,7 +6420,11 @@ class NativeKFXGenerator:
                             if ch.get("type") == "image":
                                 ch["size"] = _size_in_box(ch.get("size"), box)
                 item = kid.get("list_item") or (kid.get("box") or {}).get("item")
-                if count is not None and item and _emitted_content(first):
+                if (
+                    count is not None
+                    and item
+                    and (_emitted_content(first) or item.get("empty"))
+                ):
                     n = item.get("n")
                     if n is not None:
                         item["value"] = n if n != count else None
