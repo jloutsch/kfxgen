@@ -570,11 +570,11 @@ def _cut_after_picture_lines(block):
     if any(m.group(4) for m in tokens) or block.get("preformatted"):
         return [block]
     if not IMG_TOKEN_RE.sub("", text).strip():
-        # Pictures alone: one entry, unless a line of them holds two or more
-        # side by side, which Previewer writes as a paragraph of its own, a
-        # line of one as a picture (#762, QA's Q766 Z03, Z04).
-        per_line = [len(IMG_TOKEN_RE.findall(line)) for line in text.split("\n")]
-        if len(per_line) < 2 or max(per_line) < 2 or block.get("pictures_apart"):
+        # Pictures alone: one entry on one line, else cut line by line, as
+        # Previewer writes them: a line of two or more a paragraph of its
+        # own, a line of one a picture (#762, QA's Q766 Z03, Z04), and a
+        # link to a picture on a line of its own lands on it (Z66).
+        if "\n" not in text:
             return [block]
     # (end of a piece, start of the next): a cut after a picture line drops
     # its line break; one before it, after an empty line, drops nothing.
@@ -2585,7 +2585,10 @@ class NativeKFXGenerator:
                 w_text = f"{round(pt / page_pt() * 100, 5):g}%"
         if pct_h is None and m and m.group(1) == "w":
             if unit == "em":
-                w_em, fill = number, True
+                # An em width alone is in the base em, divided by the
+                # paragraph's font size; with a height, as written, as
+                # Previewer writes both (#766 QA, probe PEM E01, E05, E06).
+                w_em, fill = number / (1 if given else font_size or 1), True
             elif unit == "%":
                 w_em = number / 100 * column_px() / scale
             else:
@@ -2598,6 +2601,9 @@ class NativeKFXGenerator:
             # A height alone, the same rule on the other axis (QA on #564:
             # 2em stays 2em, height="30" is 1.125em).
             h_em = _inline_length_em(m, font_size)
+            if unit == "em":
+                # In the base em too (#766 QA, probe PEM E02-E04).
+                h_em /= font_size or 1
             w_em = h_em * width / height
         valign = _INLINE_VALIGN_SYMBOLS.get(extras.get("va"))
         shift = None if valign else _valign_shift(extras.get("va"))

@@ -164,3 +164,10 @@ def test_the_walker_keeps_a_loose_run_with_one_set_apart_as_blocks():
         blocks = _conv.extract_blocks_from_html(root, style_resolver=_resolver(css))
         assert [b["text"] for b in blocks][-1] == "Caption."
         assert len(blocks) - 1 == expected
+
+
+def test_preformatted_pictures_on_lines_stay_entries(tmp_path):
+    # Not cut line by line (preformatted text stays one entry, #590), so
+    # a line break among them keeps each an entry, as main writes them.
+    lines = f"{_pic()}{_pic('b.jpg')}\n{_pic()}"
+    assert _shapes(tmp_path, lines, preformatted=True) == ["picture"] * 3

@@ -12,6 +12,7 @@ It needs calibre installed, so it is `slow` and skips when `ebook-convert`
 is not found.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -31,8 +32,18 @@ from tests.integration.test_calibre_vertical_writing import _write  # noqa: E402
 pytestmark = [pytest.mark.slow, pytest.mark.integration]
 
 
-def _img(alt, src="w.jpg"):
-    return f'<img src="{src}" alt="{alt}"/>'
+def _img(alt, src="w.jpg", style=""):
+    style = f' style="{style}"' if style else ""
+    return f'<img src="{src}" alt="{alt}"{style}/>'
+
+
+def _sized(case, size, style, words=""):
+    """A paragraph at font size `size` of two pictures styled `style`, or
+    of `words` and one."""
+    pics = _img(f"{case}a", "w.jpg", style) + (
+        "" if words else _img(f"{case}b", "n.jpg", style)
+    )
+    return f'<p style="font-size: {size}; text-indent: 0">{words}{pics}</p>'
 
 
 BODY = (
@@ -49,6 +60,17 @@ BODY = (
     f'<div>{_img("Z38a")[:-2]} style="display: block"/>{_img("Z38b", "n.jpg")}</div>'
     # Z03: a line of two, then one.
     f"<p>{_img('Z03a', 'n.jpg')}{_img('Z03b', 'n.jpg')}<br/>{_img('Z03c', 'n.jpg')}</p>"
+    # QA's finding B, probe PEM: an em size given alone is in the base em.
+    + _sized("E01", "1.31em", "width: 1em")
+    + _sized("E03", "0.75em", "height: 1em")
+    + _sized("E05", "0.75em", "width: 1em", words="E05 words ")
+    + _sized("E06", "1.31em", "width: 2em; height: 1em")
+    # Q766 Z66: a picture on a line of its own between two linked ones,
+    # and a link to it.
+    + f'<p><a href="c2.xhtml#t">{_img("Z66a", "n.jpg")}</a><br/>'
+    f'<img src="n.jpg" alt="Z66b" id="z66b"/><br/>'
+    f'<a href="c2.xhtml#t">{_img("Z66c", "n.jpg")}</a></p>'
+    '<p>V98 <a href="#z66b">a link to Z66b</a>.</p>'
     "<p>V99 A paragraph.</p>"
 )
 
@@ -93,7 +115,13 @@ def pictures(calibre):  # noqa: F811
 
     for st in by_type(frags, "$259"):
         walk(val(st)["$146"], None)
+    out["_frags"] = frags
     return out
+
+
+def _num(v):
+    (n,) = re.findall(r"'(-?[0-9.]+)'", v)
+    return float(n)
 
 
 @pytest.mark.parametrize("pair", ["P01", "P02", "P07", "P08", "P11"])
@@ -142,3 +170,47 @@ def test_a_line_of_two_then_a_line_of_one(pictures):
     first, second, third = (pictures[f"Z03{s}"] for s in "abc")
     assert str(first[0].get("$601")) == "$283" and first[2] is second[2]
     assert third[0].get("$601") is None
+
+
+@pytest.mark.parametrize(
+    "case, key, expected",
+    [
+        # PEM E01: width 1em in a 1.31em paragraph is 0.763359em.
+        ("E01", "$56", 1 / 1.31),
+        # E03: height 1em in a 0.75em paragraph is 1.33333em.
+        ("E03", "$57", 1 / 0.75),
+        # E05: the #529 path, words and one picture (QA's Z73).
+        ("E05", "$56", 1 / 0.75),
+        # E06: width and height both given stay as written.
+        ("E06", "$56", 2),
+        ("E06", "$57", 1),
+    ],
+)
+def test_an_em_size_alone_is_in_the_base_em(pictures, case, key, expected):
+    _e, own, _parent, _around = pictures[f"{case}a"]
+    assert _num(own[key]) == pytest.approx(expected, abs=1e-4)
+
+
+def test_a_link_to_a_picture_on_its_own_line_lands_on_it(pictures):
+    # Q766 Z66: one picture early on main and before this fix.
+    entry = pictures["Z66b"][0]
+    frags = pictures["_frags"]
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    targets = []
+
+    def walk(entries):
+        for e in entries:
+            if not hasattr(e, "get"):
+                continue
+            r = e.get("$145")
+            if r and str(texts[str(r["name"])][r["$403"]]).startswith("V98"):
+                targets.extend(
+                    str(run["$179"]) for run in e.get("$142") or () if "$179" in run
+                )
+            walk(e.get("$146") or [])
+
+    for st in by_type(frags, "$259"):
+        walk(val(st)["$146"])
+    (target,) = targets
+    (anchor,) = [val(f) for f in by_type(frags, "$266") if str(f.fid) == target]
+    assert str(anchor["$183"]["$155"]) == str(entry["$155"])
