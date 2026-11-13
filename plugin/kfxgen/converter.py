@@ -8055,6 +8055,8 @@ def _assemble_chapters_by_coordinate(
     # Coords pointing before the entry listed above them: places, in the
     # book's TOC order, landing on their own block (#484).
     out_of_order = set()
+    # Ids at a file's very end whose entries start the next file (#772).
+    moved_ids = set()
     for entry in toc_entries:
         norm = _normalize_href(entry["href"])
         try:
@@ -8085,11 +8087,25 @@ def _assemble_chapters_by_coordinate(
         else:
             bi = 0
         bi = min(bi, len(spine_blocks[si]) - 1) if spine_blocks[si] else 0
+        own_si = si
+        if (
+            frag
+            and frag in spine_items_ordered[si].get("trailing_ids", ())
+            and si + 1 < len(spine_items_ordered)
+        ):
+            # An id at the file's very end, with no block after it, names
+            # the next file's start, where its link lands (#338): the entry
+            # starts its chapter there. On the file's last block it took
+            # that block into the next chapter, after its heading; Kindle
+            # Previewer 4.0.3 keeps every block in its own file's chapter
+            # (QA's Q771C, #772).
+            si, bi = si + 1, 0
+            moved_ids.add(frag)
         fi = file_offset[si] + bi
         names_listing = next(
             (
                 ids
-                for _, ids in spine_items_ordered[si].get("nav_listing_at") or ()
+                for _, ids in spine_items_ordered[own_si].get("nav_listing_at") or ()
                 if frag and frag in ids
             ),
             None,
@@ -8120,7 +8136,7 @@ def _assemble_chapters_by_coordinate(
                 "place, no section of its own"
             )
             out_of_order.add(len(coords))
-        key = _entry_key(spine_items_ordered[si], frag)
+        key = _entry_key(spine_items_ordered[own_si], frag)
         if key is None and len(coords) in out_of_order:
             # A whole-file entry out of order: the file's key, on its first
             # block, so it lands there and not at the section's start.
@@ -8213,8 +8229,12 @@ def _assemble_chapters_by_coordinate(
     # NOTE: Known limitation — a malformed EPUB where genuine front matter
     # carries an `id` that duplicates a TOC fragment would be folded into
     # chapter 1 rather than emitted as a separate leading chapter.
+    # Not one at a file's very end that names the next file's start: it
+    # doesn't make its file's blocks the first chapter's (#772).
     head_has_toc_anchor = first_fi > 0 and any(
-        a in toc_anchors for b in flat[0:first_fi] for a in (b.get("anchor_ids") or [])
+        a in toc_anchors - moved_ids
+        for b in flat[0:first_fi]
+        for a in (b.get("anchor_ids") or [])
     )
     if first_fi > 0 and not head_has_toc_anchor:
         head = flat[0:first_fi]
@@ -8492,6 +8512,8 @@ def extract_chapters_from_oeb(
                 "blocks": blocks,
                 "nav_listing_at": nav_listing_at,
                 "note_ids": note_ids,
+                # Ids at its very end, with no block after them (#338, #772).
+                "trailing_ids": frozenset(trailing),
                 # Where the pages break is known only from the CSS (#363).
                 "breaks_known": resolver is not None,
             }

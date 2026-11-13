@@ -9524,6 +9524,92 @@ def test_moving_an_end_id_leaves_the_chapters_as_they_were():
     assert [b["text"] for b in before[0]["blocks"]][-1] == "Whale Song."
 
 
+def _toc_at_end(end_of_a, end_of_b=""):
+    """Each chapter's TOC entry names the empty <div id> ending the file
+    before it, as one library book does (QA's Q771C on #771, #772)."""
+    spine = [
+        _RawSpineItem("a.xhtml", f"<p>Title words.</p>{end_of_a}<div id='x1'></div>"),
+        _RawSpineItem(
+            "b.xhtml", f"<h2>Chapter 1</h2><p>Call me Ishmael.</p>{end_of_b}"
+        ),
+    ]
+    toc = [_TOCNode("Title", "a.xhtml"), _TOCNode("Chapter 1", "a.xhtml#x1")]
+    return _conv.extract_chapters_from_oeb(_OEBBook(spine, toc), _silent_log())
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "end_of_a",
+    ["<p>Last words of A.</p>", "<ol><li>A one</li><li>A two</li></ol>"],
+    ids=["paragraph", "list"],
+)
+def test_a_toc_entry_naming_an_id_at_a_files_very_end_starts_the_next_file(end_of_a):
+    """kfxgen started the chapter one block early: on the file's last block,
+    which then followed the next chapter's heading (#772). Kindle Previewer
+    4.0.3 keeps every block in its own file's chapter (QA's Q771C)."""
+    chapters = _toc_at_end(end_of_a)
+    assert [c["title"] for c in chapters] == ["Title", "Chapter 1"]
+    assert [b["text"] for b in chapters[1]["blocks"]][0] == "Chapter 1"
+    assert [b["text"] for b in chapters[0]["blocks"]][0] == "Title words."
+    assert "Chapter 1" not in [b["text"] for b in chapters[0]["blocks"]]
+    assert len(chapters[0]["blocks"]) == (2 if "<p>" in end_of_a else 3)
+    # The entry lands on the next file's first block, as its link does (#338).
+    assert _keys_by_text(chapters)["Chapter 1"][0] == "a.xhtml#x1"
+
+
+@pytest.mark.unit
+def test_a_first_toc_entry_naming_an_id_at_a_files_very_end_leaves_the_file_before():
+    """The title page before it stays a page of its own, as Previewer's
+    first section (QA's Q771C), not the start of Chapter 1 (#772)."""
+    spine = [
+        _RawSpineItem("a.xhtml", "<p>Title words.</p><div id='x1'></div>"),
+        _RawSpineItem("b.xhtml", "<h2>Chapter 1</h2><p>Call me Ishmael.</p>"),
+    ]
+    toc = [_TOCNode("Chapter 1", "a.xhtml#x1")]
+    chapters = _conv.extract_chapters_from_oeb(_OEBBook(spine, toc), _silent_log())
+    assert [[b["text"] for b in c["blocks"]] for c in chapters] == [
+        ["Title words."],
+        ["Chapter 1", "Call me Ishmael."],
+    ]
+    assert chapters[1]["title"] == "Chapter 1"
+
+
+@pytest.mark.unit
+def test_an_out_of_order_entry_naming_an_id_at_a_files_very_end_keeps_its_own_key():
+    """Listed after a later chapter, it is a place, not a section (#484),
+    landing by its own key, "a.xhtml#x1", which #338 put on the next file's
+    first block (#772)."""
+    spine = [
+        _RawSpineItem(
+            "a.xhtml", "<h1>Title</h1><p>Title words.</p><div id='x1'></div>"
+        ),
+        _RawSpineItem("b.xhtml", "<h2>Chapter 1</h2><p>Call me Ishmael.</p>"),
+        _RawSpineItem("c.xhtml", "<h2>Chapter 2</h2><p>Words.</p>"),
+    ]
+    toc = [
+        _TOCNode("Title", "a.xhtml"),
+        _TOCNode("Chapter 1", "b.xhtml"),
+        _TOCNode("Chapter 2", "c.xhtml"),
+        _TOCNode("Back to Chapter 1", "a.xhtml#x1"),
+    ]
+    chapters = _conv.extract_chapters_from_oeb(_OEBBook(spine, toc), _silent_log())
+    subs = [e for c in chapters for e in c.get("sub_entries") or ()]
+    assert subs == [{"title": "Back to Chapter 1", "key": "a.xhtml#x1", "level": 0}]
+    assert "a.xhtml#x1" in _keys_by_text(chapters)["Chapter 1"]
+
+
+@pytest.mark.unit
+def test_a_toc_entry_naming_an_id_at_the_books_very_end_keeps_its_last_block():
+    spine = [
+        _RawSpineItem("a.xhtml", "<h1>A</h1><p>A words.</p>"),
+        _RawSpineItem("b.xhtml", "<p>The end.</p><div id='fin'></div>"),
+    ]
+    toc = [_TOCNode("A", "a.xhtml"), _TOCNode("End", "b.xhtml#fin")]
+    chapters = _conv.extract_chapters_from_oeb(_OEBBook(spine, toc), _silent_log())
+    assert [c["title"] for c in chapters] == ["A", "End"]
+    assert [b["text"] for b in chapters[1]["blocks"]] == ["The end."]
+
+
 @pytest.mark.unit
 def test_an_end_id_after_a_native_table_names_the_next_files_start():
     """QA review: the key was on the table's last row too."""
