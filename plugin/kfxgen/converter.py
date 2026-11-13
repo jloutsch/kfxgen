@@ -1453,15 +1453,18 @@ def _img_inline_extras(elem, style_resolver=None):
     # A block picture's own side margins, which Previewer adds to its
     # block's, and `display: block` with both margins auto, which it
     # centres (#769, probe PBJ J04, J05; J16 auto margins inline: nothing).
+    # A negative one too (QA's Q770 Y12). `margin-left: auto` alone sets
+    # it right (Y17).
     for side, key in (("left", "ml"), ("right", "mr")):
         raw = str(css.get(f"margin-{side}") or "").strip()
-        if parse_css_length(raw) is not None:
+        if parse_css_length(raw, negative=True) is not None:
             out.append(f"{key}={raw}")
-    if _displays_as_block(css) and all(
+    auto = [
         str(css.get(f"margin-{side}") or "").strip().lower() == "auto"
         for side in ("left", "right")
-    ):
-        out.append("c=1")
+    ]
+    if _displays_as_block(css) and auto[0]:
+        out.append("c=1" if auto[1] else "c=r")
     return ";".join(out) or None
 
 
@@ -7164,12 +7167,12 @@ def extract_blocks_from_html(
             if not _has_real_text(b.get("text") or ""):
                 if _IMG_TOKEN_RE.search(b.get("text") or ""):
                     # Pictures alone: Previewer adds the containers' side
-                    # margins to theirs (#769, probe PBJ J09-J11), kept
-                    # apart from the block's own, which hold its em sizes.
-                    held = b.get("picture_margins") or (0.0, 0.0)
-                    b["picture_margins"] = (
-                        held[0] + _page_share(left),
-                        held[1] + _page_share(right),
+                    # margins to theirs (#769, probe PBJ J09-J11), a % one
+                    # of the width the outer ones leave (QA's Q770 Y11),
+                    # so each is kept as written, the innermost first.
+                    b["picture_boxes"] = (
+                        *(b.get("picture_boxes") or ()),
+                        (left, right),
                     )
                 continue
             style = dict(b.get("block_style") or compute_block_style({}))

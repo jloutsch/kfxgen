@@ -4396,7 +4396,8 @@ class NativeKFXGenerator:
             else:
                 value.pop(IS("$580"), None)
             for key, pct in (("$48", left), ("$50", right)):
-                if pct > 0:
+                # A negative one too, as Previewer keeps it (QA's Q770 Y12).
+                if pct:
                     value[IS(key)] = IonStruct(
                         IS("$307"), IonDecimal(f"{pct:g}"), IS("$306"), IS("$314")
                     )
@@ -6166,7 +6167,7 @@ class NativeKFXGenerator:
                         # Inline in its link's container, which takes the
                         # block's alignment and indent (#769, probe PBI
                         # B07): the picture none.
-                        chunk["place"] = (None, None, None, None, (0.0, 0.0), None)
+                        chunk["place"] = (None, None, None, None, (), None)
                     elif not plain and not chapter_now.get("cover"):
                         # A block picture, placed as Kindle Previewer 4.0.3
                         # places it (#769, probes PBI, PBJ, PBR): `$580` by
@@ -6182,7 +6183,7 @@ class NativeKFXGenerator:
                             style.get("indent") if first else None,
                             style.get("margin_left"),
                             style.get("margin_right"),
-                            tuple(block.get("picture_margins") or (0.0, 0.0)),
+                            tuple(block.get("picture_boxes") or ()),
                             style.get("font_size"),
                         )
                     if link or boxed:
@@ -6205,7 +6206,7 @@ class NativeKFXGenerator:
                             opener["picture_sides"] = (
                                 style.get("margin_left"),
                                 style.get("margin_right"),
-                                tuple(block.get("picture_margins") or (0.0, 0.0)),
+                                tuple(block.get("picture_boxes") or ()),
                                 style.get("font_size"),
                             )
                         if boxed:
@@ -7600,29 +7601,64 @@ class NativeKFXGenerator:
             }.get(length[1], 0.0)
             return float(length[0]) * per
 
+        def _sides(boxes, scale, left=None, right=None, indent=None, own=()):
+            """A picture's or its link container's (`$48`, `$50`) in % of
+            the page, as Kindle Previewer 4.0.3 adds them (#769; QA's Q770):
+            its containers' side margins, outermost first, then its block's,
+            its block's first-line indent and its own. A % one is of the
+            width the % ones outside it leave (Y11: 20 + 12 + 7.2); an em or
+            px one isn't (Y31), save an indent in em, which the width left
+            divides (Y32). An em of its block at `scale`."""
+            width = 100.0
+            out = [0.0, 0.0]
+
+            def part(length, s=1.0):
+                if not length:
+                    return 0.0, 0.0
+                if length[1] == "$314":
+                    pct = float(length[0]) * width / 100
+                    return pct, pct
+                return _share(length, s), 0.0
+
+            outer = [(box, 1.0) for box in reversed(boxes)]
+            for box, at in (*outer, ((left, right), scale)):
+                taken = 0.0
+                for i, length in enumerate(box):
+                    pct, rel = part(length, at)
+                    out[i] += pct
+                    taken += rel
+                width = max(width - taken, 1.0)
+            if indent:
+                pct, rel = part(indent, scale)
+                out[0] += pct if rel else pct * 100 / width
+            for i, length in enumerate(own):
+                out[i] += part(length, scale)[0]
+            return out
+
         def _place_key(c):
             """A block picture's place (#769): (`$580` or None, `$48` %,
             `$50` %), or None for a picture placed as before, centred."""
             raw = c.get("place")
             if raw is None:
                 return None
-            align, indent, left, right, held, font_px = raw
+            align, indent, left, right, boxes, font_px = raw
             own = c.get("own_place") or {}
             if own.get("c"):
-                # display: block with auto margins (PBJ J04).
-                align = "center"
+                # display: block with auto margins: both centre it (PBJ
+                # J04), the left one alone sets it right (QA's Q770 Y17).
+                align = "right" if own["c"] == "r" else "center"
             scale = font_px / main_px if font_px and main_px else 1.0
             sym = {"left": "$59", "center": "$320", "right": "$61"}.get(align)
-            in_left = (
-                _share(left, scale)
-                + _share(indent, scale)
-                + held[0]
-                + _share(parse_css_length(own.get("ml") or ""), scale)
-            )
-            in_right = (
-                _share(right, scale)
-                + held[1]
-                + _share(parse_css_length(own.get("mr") or ""), scale)
+            in_left, in_right = _sides(
+                boxes,
+                scale,
+                left,
+                right,
+                indent,
+                own=[
+                    parse_css_length(own.get(k) or "", negative=True)
+                    for k in ("ml", "mr")
+                ],
             )
             return (sym, _up(in_left), _up(in_right))
 
@@ -8120,15 +8156,15 @@ class NativeKFXGenerator:
                                     # isn't matched (none in pg1260).
                                     "space_above": _LINE_EM,
                                 }
-                                left, right, held, font_px = chunk["picture_sides"]
+                                left, right, boxes, font_px = chunk["picture_sides"]
                                 scale = (
                                     font_px / main_px if font_px and main_px else 1.0
                                 )
-                                for key, length, extra in (
-                                    ("margin_left", left, held[0]),
-                                    ("margin_right", right, held[1]),
+                                sides = _sides(boxes, scale, left, right)
+                                for key, pct in zip(
+                                    ("margin_left", "margin_right"), sides
                                 ):
-                                    pct = _up(_share(length, scale) + extra)
+                                    pct = _up(pct)
                                     if pct > 0:
                                         place[key] = (f"{pct:g}", "$314")
                             extras["$157"] = IS(

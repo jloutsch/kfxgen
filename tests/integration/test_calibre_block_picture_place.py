@@ -63,6 +63,13 @@ CSS = " ".join(
         "p.mr { margin-right: 2em; text-indent: 0 }",
         "div.mr3 { margin-right: 3em }",
         "p.cen { text-align: center; text-indent: 0 }",
+        ".m20 { margin-left: 20%; margin-right: 20% }",
+        "p.ml3l { margin-left: 3em; text-indent: 0; text-align: left }",
+        "p.pct { text-indent: 10% }",
+        "img.neg { margin-left: -1em }",
+        "img.ml10 { margin-left: 10% }",
+        "img.mln5 { margin-left: -5% }",
+        "img.autol { display: block; margin-left: auto; margin-right: 0 }",
     ]
 )
 
@@ -101,6 +108,16 @@ LTR = (
     f'<p class="mlind"><a href="c2.xhtml#t">{_img("K08")}</a></p>'
     f'<div class="ml3"><p class="flat"><a href="c2.xhtml#t">{_img("L01")}</a></p></div>'
     f'<div class="mr3"><p class="ml"><a href="c2.xhtml#t">{_img("L02")}</a></p></div>'
+    # QA's Q770: nested % margins, negative and right-auto ones.
+    f'<div class="m20"><div class="m20"><div class="m20"><p class="flat">{_img("Y11")}</p></div></div></div>'
+    f'<p class="flat">{_img("Y12", "neg")}</p>'
+    f'<p class="flat">{_img("Y17", "autol")}</p>'
+    f'<div class="m20"><div class="m20"><p class="flat">{_img("Y26", "ml10")}</p></div></div>'
+    f'<div class="m20"><p class="ml3l">{_img("Y31")}</p></div>'
+    f'<div class="m20"><div class="m20"><p>{_img("Y32")}</p></div></div>'
+    f'<div class="m20"><p class="flat">{_img("Y33", "ml10")}</p></div>'
+    f'<div class="m20"><p class="pct">{_img("Y35")}</p></div>'
+    f'<div class="m20"><div class="m20"><p class="flat">{_img("Y37", "mln5")}</p></div></div>'
     "<p>V99 A paragraph.</p>"
 )
 RTL = (
@@ -212,6 +229,31 @@ def test_aligned_as_its_block(ltr, alt, align):
 def test_its_margins_and_indent(ltr, alt, left, right):
     style = ltr[alt][0]
     assert (_pct(style, "$48"), _pct(style, "$50")) == (left, right)
+
+
+@pytest.mark.parametrize(
+    "alt, left, right",
+    [
+        # Each % of the width the % margins outside it leave, as Previewer
+        # writes it (QA's Q770): 20 + 12 + 7.2.
+        ("Y11", 39.2, 39.2),
+        ("Y12", -3.125, None),  # a negative one kept
+        ("Y26", 35.6, 32.0),  # 20 + 12, and the img's 10% of 36
+        ("Y31", 29.375, 20.0),  # an em margin isn't scaled
+        ("Y32", 45.021, 32.0),  # an em indent is divided by the 0.36 left
+        ("Y33", 26.0, 20.0),
+        ("Y35", 26.0, 20.0),  # a 10% indent of the 60 left
+        ("Y37", 30.2, 32.0),  # -5% of 36
+    ],
+)
+def test_nested_margins_as_previewer_adds_them(ltr, alt, left, right):
+    style = ltr[alt][0]
+    assert (_pct(style, "$48"), _pct(style, "$50")) == (left, right)
+
+
+def test_a_left_auto_margin_alone_sets_it_right(ltr):
+    # QA's Q770 Y17: display: block; margin-left: auto; margin-right: 0.
+    assert ltr["Y17"][0].get("$580") == "$61"
 
 
 def test_a_linked_one_has_its_blocks_indent_on_its_container(ltr):
