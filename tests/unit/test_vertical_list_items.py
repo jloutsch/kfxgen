@@ -78,7 +78,10 @@ def test_a_horizontal_block_in_horizontal_text_is_unchanged():
         f'<html xmlns="{XHTML}"><body><ul><li class="hz">One.</li></ul></body></html>'
     )
     blocks = _conv.extract_blocks_from_html(root, style_resolver=_resolver(CSS))
-    assert not any(b.get("type") == "box" for b in blocks)
+    # The list is a `$276` box (#768); nothing in it is a horizontal block.
+    boxes = [b["box"] for b in blocks if b.get("type") == "box"]
+    assert [bool(b.get("list")) for b in boxes] == [True]
+    assert not any(b.get("horizontal") or b.get("before") for b in boxes)
 
 
 def _style(**kw):

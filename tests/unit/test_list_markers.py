@@ -212,10 +212,16 @@ def test_display_other_than_list_item_shows_nothing():
 
 
 def test_computed_style_overrides_the_markup():
-    assert _texts(
-        "<ol><li>a</li><li>b</li></ol>",
-        lambda e: {"list-style-type": "upper-alpha", "display": "list-item"},
-    ) == ["A. a", "B. b"]
+    # Written as a `$276` list (#768): its marker style is the computed one.
+    (lst,) = extract_blocks_from_html(
+        _doc("<ol><li>a</li><li>b</li></ol>"),
+        style_resolver=lambda e: {
+            "list-style-type": "upper-alpha",
+            "display": "list-item",
+        },
+    )
+    assert lst["box"]["list"]["type"] == "$347"
+    assert [b["text"] for b in lst["blocks"]] == ["a", "b"]
 
 
 def test_quoted_string_style_is_the_marker():

@@ -1229,6 +1229,8 @@ def _build_style_resolver(oeb_book, item, log, stylizer_factory=None):
                     # is expanded by Stylizer. display does not inherit:
                     # the declared value is what can take the marker away.
                     "list-style-type": _computed_value(st, "list-style-type"),
+                    # Markers inside the text box: the list's `$551` (#768).
+                    "list-style-position": _computed_value(st, "list-style-position"),
                     "display": st.get("display"),
                     # Each side's computed border (style, width in points,
                     # colour), top, right, bottom, left (#264).
@@ -4035,6 +4037,21 @@ _DEFAULT_PADDING_EM = 0.45 / 12
 _PADDING_EM_PER_UNIT = {"px": 0.45 / 12, "pt": 1 / 12, "em": 1.0, "rem": 1.0}
 
 
+def _side_share(value, ratio=1.0):
+    """A declared side margin or padding as a share of the page width, in %,
+    as Kindle Previewer 4.0.3 writes an unmarked list's indent (QA's Q771D):
+    an em is the element's own (`ratio`, D4, D8) and a negative one counts
+    (D5). 0 when unset or unreadable."""
+    value = str(value or "").strip()
+    sign = -1.0 if value.startswith("-") else 1.0
+    em = _padding_em(value.lstrip("-"), ratio)
+    if em is None:
+        return 0.0
+    if isinstance(em, tuple):
+        return sign * em[1]
+    return sign * em * em_percent()
+
+
 def _padding_em(value, ratio=1.0):
     """A declared padding as Kindle Previewer measures it: ems (1px = 0.45pt,
     12pt = 1em), ("%", n) for a percentage, or None when unreadable. An em
@@ -5292,6 +5309,38 @@ _LIST_TYPE_ATTR = {
 #: circle and square glyphs are not guaranteed, and a missing glyph is worse
 #: than a disc where a circle was meant.
 _BULLET_TYPES = frozenset({"disc", "circle", "square"})
+#: A list's `$100` marker style, as Kindle Previewer 4.0.3 writes it (#768,
+#: S768) and kfxlib reads it (`yj_to_epub_properties.py`). A list whose
+#: style is not here keeps kfxgen's typed markers.
+_LIST_STYLE_SYMBOLS = {
+    "disc": "$340",
+    "square": "$341",
+    "circle": "$342",
+    "decimal": "$343",
+    "lower-roman": "$344",
+    "upper-roman": "$345",
+    "lower-alpha": "$346",
+    "lower-latin": "$346",
+    "upper-alpha": "$347",
+    "upper-latin": "$347",
+    "lower-greek": "$791",
+    "decimal-leading-zero": "$796",
+    "armenian": "$794",  # QA's Q771 X34
+}
+#: A list's or an item's box: no border, fill, padding, width or float.
+_LIST_BOX = {
+    "border": None,
+    "background": None,
+    "padding": None,
+    "font_px": None,
+    "margin_left": None,
+    "margin_right": None,
+    "width": None,
+    "width_px": None,
+    "float": None,
+    "centred": False,
+    "bidi": None,
+}
 _BULLET = "•"
 #: An item that opens with its own bullet has typed its marker, as an item
 #: that opens with "1." has typed its number. A shape glyph counts on its own
@@ -6043,6 +6092,11 @@ def extract_blocks_from_html(
     # is (marker, ordinal or None).
     pending_markers = []
     list_ordinals = {}  # list element -> {li: ordinal}
+    # A list written as Kindle Previewer writes it, a `$276` of `$277` items
+    # (#768): list element -> its marker style, start and item values, or
+    # None for a list that keeps typed markers.
+    native_lists = {}
+    cell_depth = [0]  # lists in table cells keep typed markers (#768)
     # Space between paragraphs (#230): each block's own margin-top and
     # -bottom, in ems, with its containers' added at its edges. A spacer
     # paragraph or an <hr> that draws nothing is a {"type": "space"} block
@@ -6265,7 +6319,11 @@ def extract_blocks_from_html(
         # the body, so a picture inside its words stays in them (#565). One
         # holding blocks is still walked block by block.
         leaf_cells.add(id(cell))
-        _walk_element(cell)
+        cell_depth[0] += 1
+        try:
+            _walk_element(cell)
+        finally:
+            cell_depth[0] -= 1
         leaf_cells.discard(id(cell))
         out = blocks[start:]
         del blocks[start:]
@@ -6422,6 +6480,10 @@ def extract_blocks_from_html(
                     tables_seen.append(blocks[start])
             return
         parent = elem.getparent()
+        native = _native_list(parent) if parent is not None else None
+        if native is not None:
+            _walk_list_item(elem, native)
+            return
         if parent not in list_ordinals:
             list_ordinals[parent] = _list_ordinals(parent, style_resolver)
         css = style_resolver(elem) if style_resolver is not None else None
@@ -6438,6 +6500,161 @@ def extract_blocks_from_html(
             # The item held no text to carry its marker (an image, or
             # nothing); it does not leak onto whatever follows the list.
             pending_markers[:] = before
+
+    def _native_list(lst):
+        """The list's `$276` settings when it is written as Kindle Previewer
+        4.0.3 writes it (#768), else None. Previewer counts a `reversed` list
+        up (S768 L8 on the Paperwhite), and an item that types its own
+        number or bullet would show two, so those keep typed markers; so do
+        lists in table cells or vertical text, which were not probed."""
+        key = lst
+        if key not in native_lists:
+            native_lists[key] = _list_settings(lst)
+        return native_lists[key]
+
+    def _list_settings(lst):
+        if (
+            style_resolver is None
+            or cell_depth[0]
+            or _local_tag(lst.tag) not in ("ul", "ol")
+            or lst.get("reversed") is not None
+        ):
+            return None
+        css = style_resolver(lst) or {}
+        if (
+            any(
+                e.get(_V_AUTHOR) is not None or e.get(_HORIZONTAL) is not None
+                for e in lst.iterancestors()
+            )
+            or lst.get(_V_AUTHOR) is not None
+        ):
+            # A list in a vertical file, vertical or in a horizontal block of
+            # one, keeps #764's paragraphs: not probed as a `$276`.
+            return None
+        kids = [c for c in lst if isinstance(c.tag, str)]
+        if not kids or any(_local_tag(c.tag) != "li" for c in kids):
+            return None
+        items = [li for li in kids if not _is_hidden(li, style_resolver)]
+        if not items:
+            return None
+        ordinals = _list_ordinals(lst, style_resolver)
+        kinds = set()
+        for li in items:
+            li_css = style_resolver(li) or {}
+            display = str(li_css.get("display") or "").strip().lower()
+            if display and "list-item" not in display:
+                return None
+            kind = _list_style_type(li, li_css)
+            kinds.add(kind)
+            text = "".join(li.itertext())
+            if kind == "none":
+                pass
+            elif kind in _BULLET_TYPES:
+                if _TYPED_BULLET_RE.match(text):
+                    return None
+            elif _already_numbered(text, ordinals.get(li, 0)):
+                return None
+        if kinds == {"none"}:
+            if _bidi(lst, style_resolver).get("direction") == "rtl":
+                # In rtl text Previewer writes the items as plain
+                # paragraphs, with no container and no indent on either
+                # side (QA's Q771 B15, Q771R R04, R06).
+                return None
+            # No markers: Previewer writes a plain `$269` around the items,
+            # indented by the list's margin and its padding, 40px unless
+            # the book sets one (S768 L5: `$48` 4.688%; QA's Q771D: an em
+            # in the list's own type size, a negative margin counted).
+            # calibre's sheet gives lists no padding.
+            ratio = _font_ratio(css)
+            pad = (css.get("padding-sides") or (None,) * 4)[3]
+            left = _side_share(css.get("margin-left"), ratio) + _side_share(
+                "40px" if pad is None else pad, ratio
+            )
+            right = _side_share(css.get("margin-right"), ratio)
+            return {"none": True, "pad": left or None, "right": right or None}
+        if len(kinds) != 1 or next(iter(kinds)) not in _LIST_STYLE_SYMBOLS:
+            return None
+        start = _parse_int(lst.get("start"))
+        bullets = bool(kinds & _BULLET_TYPES)
+        return {
+            "type": _LIST_STYLE_SYMBOLS[kinds.pop()],
+            "start": start if start is not None and start != 1 else None,
+            "inside": str(css.get("list-style-position") or "").strip().lower()
+            == "inside",
+            "values": {li: _parse_int(li.get("value")) for li in items},
+            "ordinals": dict(ordinals),
+            "bullets": bullets,
+        }
+
+    def _list_box(kids, box, font_px=None):
+        ids = _dedupe_keep_order([a for b in kids for a in b.get("anchor_ids") or ()])
+        return {
+            "type": "box",
+            "break_before": any(b.get("break_before") for b in kids),
+            "text": "\n\n".join(b["text"] for b in kids if b.get("text")),
+            "spans": [],
+            "block_style": None,
+            "font_px": font_px,
+            "blocks": kids,
+            "anchor_ids": ids,
+            "anchor_offsets": dict.fromkeys(ids, 0),
+            "box": {**_LIST_BOX, **box},
+        }
+
+    def _walk_list_item(li, native):
+        """One `<li>` of a native list (#768): no typed marker. An item of
+        one paragraph is that paragraph, written as a `$277`; one holding
+        several blocks, a nested list or a table is a `$277` container of
+        them, as Previewer writes S768's L3, L4 and L10."""
+        start = len(blocks)
+        _walk_element(li)
+        kids = blocks[start:]
+        real = [b for b in kids if b.get("type") != "space"]
+        if native.get("none"):
+            return  # plain paragraphs in the list's container
+        # Its number too: the generator writes it as the item's value where
+        # the Kindle's count would differ, after an item that made no entry
+        # (calibre's C22) as for a `value`.
+        item = {
+            "value": native["values"].get(li),
+            "n": None if native["bullets"] else native["ordinals"].get(li),
+        }
+        if not real:
+            # An empty item is an empty `$277`, which shows its number, as
+            # Previewer writes it (QA's Q771 X26).
+            item["empty"] = True
+        elif len(real) == 1 and not real[0].get("type"):
+            real[0]["list_item"] = item
+            return
+        blocks[start:] = [_list_box(kids, {"item": item})]
+
+    def _make_list(elem, start, native):
+        """The blocks of a native list's items, in one `$276` box (#768)."""
+        kids = blocks[start:]
+        if not any(b.get("type") != "space" for b in kids):
+            return
+        css = style_resolver(elem) or {}
+        own = (
+            {
+                "plain": True,
+                "margin_left": native["pad"],
+                "margin_right": native["right"],
+            }
+            if native.get("none")
+            else {"list": {k: native[k] for k in ("type", "start", "inside")}}
+        )
+        blocks[start:] = [
+            _list_box(
+                kids,
+                {
+                    "font_px": css_font_size(css),
+                    "bidi": _bidi(elem, style_resolver),
+                    **own,
+                },
+                css_font_size(css),
+            )
+        ]
+        _note_box_margins(blocks[start], css)
 
     def _walk_element(elem):
         if not isinstance(elem.tag, str):
@@ -6701,6 +6918,15 @@ def extract_blocks_from_html(
         if id(elem) in leaf_cells:
             # The cell itself: its padding is the cell's, written on it, and
             # a cell has no margins (#655).
+            return
+        if (
+            _local_tag(elem.tag) in ("ul", "ol")
+            and (native := _native_list(elem)) is not None
+        ):
+            _make_list(elem, start, native)
+            if not native.get("none"):
+                # An unmarked list's side margins are in its indent.
+                _carry_container_margins(elem, start)
             return
         if not _make_box(elem, start):
             _carry_container_margins(elem, start)

@@ -748,14 +748,38 @@ _TABLE_NODE_TYPES = {
     # (#355), as Kindle Previewer writes `<a href><img/></a>`. Also the plain
     # container of a picture in a horizontal block of vertical text (#247).
     "link": "$269",
+    # A list and an item holding several blocks, as Kindle Previewer 4.0.3
+    # writes `<ul>`/`<ol>` and `<li>` (#768).
+    "list": "$276",
+    "item": "$277",
 }
+
+
+def _list_entry_keys(box):
+    """A list's or an item's own entry keys (#768): the marker style, a
+    start or a value, the marker inside, as Previewer writes them on the
+    entry (S768 L7, L9, L11)."""
+    out = {}
+    lst = box.get("list")
+    if lst:
+        out["$100"] = IS(lst["type"])
+        if lst.get("start") is not None:
+            out["$104"] = lst["start"]
+        if lst.get("inside"):
+            out["$551"] = IS("$552")
+    item = box.get("item")
+    if item and item.get("value") is not None:
+        out["$104"] = item["value"]
+    return out
 
 
 def _is_frame(box):
     """A box drawn as Previewer's plain container: a wrapper's width around
     a picture, with no border, fill or float (#382), or the container round
     a paragraph holding a floated picture (#565)."""
-    if box.get("float_wrapper"):
+    if box.get("float_wrapper") or box.get("plain"):
+        # Also a list with no markers (#768): Previewer's `$269` round its
+        # items.
         return True
     if (box.get("horizontal") or box.get("vertical")) and not (
         box.get("border") or box.get("background") is not None
@@ -4656,6 +4680,10 @@ class NativeKFXGenerator:
             entry = IonStruct(
                 IS("$155"), position, IS("$157"), IS(story_name), IS("$159"), IS("$269")
             )
+            if container_extras and i < len(container_extras) and container_extras[i]:
+                # A list item of one paragraph (#768).
+                for k, v in container_extras[i].items():
+                    entry[IS(k)] = v
             if content_refs[i] is not None:
                 ref_name, ref_index = content_refs[i]
                 entry[IS("$145")] = IonStruct(
@@ -6019,10 +6047,12 @@ class NativeKFXGenerator:
                 return _emit_paragraph(rest)
             # The paragraph's own margins go on a container round the
             # pictures and the words, as Previewer writes them (QA on #701);
-            # with none, there's no container, as in a bare cell.
+            # with none, there's no container, as in a bare cell. A clear
+            # needs it too: in a list item the margins may have collapsed
+            # into the item's `$277` (#768), and the clear is the container's.
             above = 0.0 if block.get("tight") else block.get("margin_above") or 0.0
             below = block.get("margin_below") or 0.0
-            boxed = bool(above or below)
+            boxed = bool(above or below or block.get("clear"))
             if boxed:
                 box = {
                     "space_above": above,
@@ -6361,6 +6391,13 @@ class NativeKFXGenerator:
                 all_chunks.append({"type": "open", "node": "box", "box": box})
             pending = own
             kids = block["blocks"]
+            # A list's count as the Kindle keeps it (#768): an item whose
+            # number differs, from a `value` or after an item that made no
+            # entry, writes it as its `$104`.
+            count = None
+            if box.get("list"):
+                start = box["list"].get("start")
+                count = 1 if start is None else start  # 0 counts (Q771 X27)
             for k_idx, kid in enumerate(kids):
                 first = len(all_chunks)
                 # A table or a box inside is nested in it, as Kindle
@@ -6372,6 +6409,8 @@ class NativeKFXGenerator:
                     unplaced = _emit_box_chunks(kid)
                 else:
                     unplaced = _emit_paragraph(kid)
+                    if kid.get("list_item") is not None:
+                        _mark_list_item(first, kid, box)
                     if box.get("width"):
                         # A picture's size is a share of a sized box, as
                         # Previewer writes it (#382). Set here, not in the
@@ -6380,12 +6419,48 @@ class NativeKFXGenerator:
                         for ch in all_chunks[first:]:
                             if ch.get("type") == "image":
                                 ch["size"] = _size_in_box(ch.get("size"), box)
+                item = kid.get("list_item") or (kid.get("box") or {}).get("item")
+                if (
+                    count is not None
+                    and item
+                    and (_emitted_content(first) or item.get("empty"))
+                ):
+                    n = item.get("n")
+                    if n is not None:
+                        item["value"] = n if n != count else None
+                        count = n + 1
                 if pending and _emitted_content(first):
                     _attach_keys(first, pending)
                     pending = []
                 pending += unplaced
             all_chunks.append({"type": "close"})
             return pending
+
+        def _mark_list_item(first, kid, around):
+            """The chunks of a one-paragraph list item (#768): one text
+            chunk is the `$277` itself; anything else (a picture beside its
+            words, a cut) goes in an item container."""
+            made = [c for c in all_chunks[first:] if c["type"] not in ("open", "close")]
+            if len(made) == 1 and made[0]["type"] == "text":
+                made[0]["list_item"] = kid["list_item"]
+                return
+            if not made:
+                return
+            item = {
+                k: None for k in ("border", "background", "padding", "width", "float")
+            }
+            item.update(
+                font_px=None,
+                margin_left=None,
+                margin_right=None,
+                centred=False,
+                bidi=None,
+                space_above=0.0,
+                space_below=0.0,
+                item=kid["list_item"],
+            )
+            all_chunks.insert(first, {"type": "open", "node": "box", "box": item})
+            all_chunks.append({"type": "close"})
 
         def _emit_table_chunks(block):
             """Marker chunks around a native table's cells (#219). `open`
@@ -8112,6 +8187,10 @@ class NativeKFXGenerator:
                     entry_emphasis_spans.append(None)
                     if node == "table" and chunk.get("zoom"):
                         entry_nodes.append("zoom-table")
+                    elif node == "box" and chunk["box"].get("list"):
+                        entry_nodes.append("list")
+                    elif node == "box" and chunk["box"].get("item"):
+                        entry_nodes.append("item")
                     elif node == "box" and _is_frame(chunk["box"]):
                         entry_nodes.append("frame")
                     else:
@@ -8122,6 +8201,8 @@ class NativeKFXGenerator:
                         else None
                     )
                     extras = {"$152": widths} if widths else {}
+                    if node == "box":
+                        extras.update(_list_entry_keys(chunk["box"]))
                     if node == "link":
                         # A linked picture (#355): the link covers the one
                         # position the inline picture takes. The container
@@ -8348,6 +8429,11 @@ class NativeKFXGenerator:
                     continue
                 entry_kinds.append("text")
                 entry_image_specs.append(None)
+                if chunk.get("list_item") is not None:
+                    entry_extras[-1] = {
+                        "$159": IS("$277"),
+                        **_list_entry_keys({"item": chunk["list_item"]}),
+                    }
                 drop = None
                 if chunk_idx in heading_chunk_indices:
                     # The book's heading's small caps, transform, spacing

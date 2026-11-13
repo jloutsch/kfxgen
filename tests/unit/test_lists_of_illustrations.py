@@ -39,8 +39,21 @@ def _linked(block):
     )
 
 
+def _flat(blocks):
+    """Paragraphs, a list's items included (#768): (block, marker style or
+    None)."""
+    for b in blocks:
+        if b.get("type") == "box":
+            kind = (b["box"].get("list") or {}).get("type")
+            for kid in _flat(b["blocks"]):
+                yield kid[0], kid[1] or kind
+        else:
+            yield b, None
+
+
 def _printed(body):
-    """(text, linked) of each paragraph."""
+    """(text, linked) of each paragraph. An item of a numbered list, written
+    as a `$276` (#768), shows its number, as a Kindle draws it."""
     from lxml import etree
 
     from kfxgen import converter
@@ -54,7 +67,11 @@ def _printed(body):
         style_resolver=_resolver({}),
         base_href="c.xhtml",
     )
-    return [(b["text"], _linked(b)) for b in blocks]
+    out, n = [], 0
+    for b, kind in _flat(blocks):
+        n = n + 1 if kind == "$343" else 0
+        out.append((f"{n}. {b['text']}" if kind == "$343" else b["text"], _linked(b)))
+    return out
 
 
 @pytest.mark.unit
