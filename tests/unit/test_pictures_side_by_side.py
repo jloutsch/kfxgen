@@ -14,6 +14,7 @@ import pytest
 from lxml import etree
 
 from kfxgen import converter as _conv
+from kfxgen.inline_style import make_size_flag
 from kfxgen.native_generator import NativeKFXGenerator
 from tests._helpers import jpeg_of
 from tests._kfx_introspect import by_type, load_fragments, val
@@ -171,3 +172,59 @@ def test_preformatted_pictures_on_lines_stay_entries(tmp_path):
     # a line break among them keeps each an entry, as main writes them.
     lines = f"{_pic()}{_pic('b.jpg')}\n{_pic()}"
     assert _shapes(tmp_path, lines, preformatted=True) == ["picture"] * 3
+
+
+@pytest.mark.parametrize(
+    ("img", "size"),
+    [
+        # Beside a height attribute (px), the em width is in the base em,
+        # 1 / 1.31, as Previewer writes QA's Q766G Z81 and Z82 (#766).
+        ("style='width:1em' height='30'", ("0.76336", None)),
+        # Beside an em height both stay as written (probe PEM E06).
+        ("style='width:2em;height:1em'", ("2", "1")),
+    ],
+    ids=["px-height", "em-height"],
+)
+def test_an_em_width_beside_a_height_in_a_larger_paragraph(tmp_path, img, size):
+    def resolve(e):
+        css = dict(
+            (k.strip(), v.strip())
+            for k, _, v in (d.partition(":") for d in (e.get("style") or "").split(";"))
+            if v
+        )
+        if _conv._local_tag(e.tag) == "p":
+            css["font-size"] = 1.31 * 16  # in px, as calibre resolves it
+        return css
+
+    root = etree.fromstring(
+        f"<html xmlns='{XHTML}'><body><p>Q <img src='a.jpg' {img} alt='x'/> after.</p>"
+        "</body></html>"
+    )
+    blocks = _conv.extract_blocks_from_html(root, style_resolver=resolve)
+    # The words' size, as calibre's runs carry it, after body text at the
+    # book's main size, which sizes are measured against.
+    for b in blocks:
+        b["spans"] = [(0, len(b["text"]), frozenset({make_size_flag(1.31 * 16)}))]
+    body = {"text": "Body text. " * 40, "spans": [], "block_style": {"font_size": 16.0}}
+    blocks = [body, *blocks]
+    out = tmp_path / "e.kfx"
+    NativeKFXGenerator().generate_full_book(
+        "T",
+        "A",
+        [{"title": "Chapter", "text": "x", "blocks": blocks}],
+        output_path=str(out),
+        images={"a.jpg": jpeg_of(400, 100)},
+    )
+    frags = load_fragments(out)
+    styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
+    (style,) = [
+        styles[str(part["$157"])]
+        for st in by_type(frags, "$259")
+        for e in val(st)["$146"]
+        for part in (e.get("$146") or ())
+        if hasattr(part, "get") and str(part.get("$159")) == "$271"
+    ]
+    width, height = size
+    assert str(style["$56"]["$307"]) == width
+    if height:
+        assert str(style["$57"]["$307"]) == height

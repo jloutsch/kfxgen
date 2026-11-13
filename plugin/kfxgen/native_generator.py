@@ -2585,10 +2585,12 @@ class NativeKFXGenerator:
                 w_text = f"{round(pt / page_pt() * 100, 5):g}%"
         if pct_h is None and m and m.group(1) == "w":
             if unit == "em":
-                # An em width alone is in the base em, divided by the
-                # paragraph's font size; with a height, as written, as
-                # Previewer writes both (#766 QA, probe PEM E01, E05, E06).
-                w_em, fill = number / (1 if given else font_size or 1), True
+                # An em width is in the base em, divided by the paragraph's
+                # font size, alone or beside a px height; beside an em
+                # height both stay as written, as Previewer writes them
+                # (#766 QA, probe PEM E01, E05, E06; QA's Q766G Z81).
+                as_written = given and given.group(3) == "em"
+                w_em, fill = number / (1 if as_written else font_size or 1), True
             elif unit == "%":
                 w_em = number / 100 * column_px() / scale
             else:

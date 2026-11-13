@@ -65,6 +65,8 @@ BODY = (
     + _sized("E03", "0.75em", "height: 1em")
     + _sized("E05", "0.75em", "width: 1em", words="E05 words ")
     + _sized("E06", "1.31em", "width: 2em; height: 1em")
+    # QA's Q766G Z81: an em width beside a px height.
+    + _sized("Z81", "1.31em", "width: 1em; height: 30px")
     # Q766 Z66: a picture on a line of its own between two linked ones,
     # and a link to it.
     + f'<p><a href="c2.xhtml#t">{_img("Z66a", "n.jpg")}</a><br/>'
@@ -184,6 +186,10 @@ def test_a_line_of_two_then_a_line_of_one(pictures):
         # E06: width and height both given stay as written.
         ("E06", "$56", 2),
         ("E06", "$57", 1),
+        # Q766G Z81: beside a px height the em width is divided too, and
+        # 30 px is 30 x 0.45 / 12 / 1.31 em.
+        ("Z81", "$56", 1 / 1.31),
+        ("Z81", "$57", 30 * 0.45 / 12 / 1.31),
     ],
 )
 def test_an_em_size_alone_is_in_the_base_em(pictures, case, key, expected):
