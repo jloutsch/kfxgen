@@ -7603,36 +7603,53 @@ class NativeKFXGenerator:
 
         def _sides(boxes, scale, left=None, right=None, indent=None, own=()):
             """A picture's or its link container's (`$48`, `$50`) in % of
-            the page, as Kindle Previewer 4.0.3 adds them (#769; QA's Q770):
-            its containers' side margins, outermost first, then its block's,
-            its block's first-line indent and its own. A % one is of the
-            width the % ones outside it leave (Y11: 20 + 12 + 7.2); an em or
-            px one isn't (Y31), save an indent in em, which the width left
-            divides (Y32). An em of its block at `scale`."""
+            the page, as Kindle Previewer 4.0.3 adds them (#769; QA's Q770,
+            Q770E, Q770G): its containers' side margins, outermost first,
+            then its block's, its block's first-line indent and its own.
+
+            A % margin is of the width left when a box outside it has a
+            margin on that side, else of the page (Y81: 40, then 10% of the
+            60 left on the left but of the page on the right); every margin,
+            em ones too, takes its share off the width left (Y83, Y63, Y69).
+            An indent in % is of the width left; one in em or pt is divided
+            by the width the containers leave, not the block's own margins
+            (Y32; library 6858). An em of its block at `scale`."""
             width = 100.0
             out = [0.0, 0.0]
+            held = [False, False]
 
-            def part(length, s=1.0):
-                if not length:
-                    return 0.0, 0.0
+            def part(i, length, s=1.0):
+                # (its share of the page, its share off the width left).
                 if length[1] == "$314":
-                    pct = float(length[0]) * width / 100
-                    return pct, pct
-                return _share(length, s), 0.0
+                    frac = float(length[0]) / 100
+                    return frac * (width if held[i] else 100.0), frac * width
+                pct = _share(length, s)
+                return pct, pct
 
-            outer = [(box, 1.0) for box in reversed(boxes)]
-            for box, at in (*outer, ((left, right), scale)):
+            def add(box, at):
+                nonlocal width
                 taken = 0.0
                 for i, length in enumerate(box):
-                    pct, rel = part(length, at)
+                    if not length or not float(length[0]):
+                        continue
+                    pct, off = part(i, length, at)
                     out[i] += pct
-                    taken += rel
+                    taken += off
+                    held[i] = True
                 width = max(width - taken, 1.0)
+
+            for box in reversed(boxes):
+                add(box, 1.0)
+            left_by_containers = width
+            add((left, right), scale)
             if indent:
-                pct, rel = part(indent, scale)
-                out[0] += pct if rel else pct * 100 / width
+                if indent[1] == "$314":
+                    out[0] += part(0, indent)[0]
+                else:
+                    out[0] += _share(indent, scale) * 100 / left_by_containers
             for i, length in enumerate(own):
-                out[i] += part(length, scale)[0]
+                if length:
+                    out[i] += part(i, length, scale)[0]
             return out
 
         def _place_key(c):

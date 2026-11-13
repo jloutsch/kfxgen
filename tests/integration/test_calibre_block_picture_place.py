@@ -70,6 +70,12 @@ CSS = " ".join(
         "img.ml10 { margin-left: 10% }",
         "img.mln5 { margin-left: -5% }",
         "img.autol { display: block; margin-left: auto; margin-right: 0 }",
+        "p.img65 { margin-left: 65%; text-indent: 20pt }",
+        "div.l40 { margin-left: 40% }",
+        "div.s10 { margin: 0 10% }",
+        "div.r30 { margin-right: 30% }",
+        "p.p10 { margin-left: 10%; margin-right: 5%; text-indent: 0 }",
+        "div.neg { margin-left: -5% }",
     ]
 )
 
@@ -118,6 +124,13 @@ LTR = (
     f'<div class="m20"><p class="flat">{_img("Y33", "ml10")}</p></div>'
     f'<div class="m20"><p class="pct">{_img("Y35")}</p></div>'
     f'<div class="m20"><div class="m20"><p class="flat">{_img("Y37", "mln5")}</p></div></div>'
+    # QA's library 6858 and Q770E, Q770G: margins per side, em ones too.
+    f'<p class="img65">{_img("L6858")}</p>'
+    f'<div class="l40"><div class="s10"><p class="flat">{_img("Y81")}</p></div></div>'
+    f'<div class="r30"><div class="l40"><div class="s10"><p class="flat">{_img("Y83")}</p></div></div></div>'
+    f'<div class="ml3"><p class="p10">{_img("Y63")}</p></div>'
+    f'<div class="m20"><div class="ml3"><div class="m20"><p class="flat">{_img("Y69")}</p></div></div></div>'
+    f'<div class="neg"><p class="flat">{_img("Y65")}</p></div>'
     "<p>V99 A paragraph.</p>"
 )
 RTL = (
@@ -244,6 +257,18 @@ def test_its_margins_and_indent(ltr, alt, left, right):
         ("Y33", 26.0, 20.0),
         ("Y35", 26.0, 20.0),  # a 10% indent of the 60 left
         ("Y37", 30.2, 32.0),  # -5% of 36
+        # A % margin is of the width left only on a side where a box
+        # outside has a margin, else of the page; every margin, em ones
+        # too, takes its share off the width (QA's Q770G Y81, Y83; Q770E
+        # Y63, Y69).
+        ("Y81", 46.0, 10.0),  # 40 + 10% of 60; 10% of the page
+        ("Y83", 44.2, 34.2),  # 40 + 10% of 42; 30 + 10% of 42
+        ("Y63", 18.438, 5.0),  # 3em + 10% of 90.625; 5% of the page
+        ("Y69", 39.5, 30.125),
+        ("Y65", -5.0, None),  # a container's negative margin
+        # Library 6858: a 20pt indent past the block's own 65% isn't
+        # divided by the 35 that leaves (QA's re-check of 2aec1f9).
+        ("L6858", 70.208, None),
     ],
 )
 def test_nested_margins_as_previewer_adds_them(ltr, alt, left, right):

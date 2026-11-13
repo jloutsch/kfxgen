@@ -7138,9 +7138,24 @@ def extract_blocks_from_html(
         css = style_resolver(elem) or {}
         left = parse_css_length(css.get("margin-left") or "")
         right = parse_css_length(css.get("margin-right") or "")
-        if left is None and right is None:
+        # A negative one reaches a picture, as Previewer keeps it (QA's
+        # Q770E Y65); text keeps dropping it.
+        sides = tuple(
+            parse_css_length(css.get(f"margin-{side}") or "", negative=True)
+            for side in ("left", "right")
+        )
+        if sides == (None, None):
             return
         for b in blocks[start:]:
+            text = b.get("text") or ""
+            alone = (
+                b.get("type") not in ("box", "table")
+                and not _has_real_text(text)
+                and _IMG_TOKEN_RE.search(text)
+            )
+            if left is None and right is None and not alone:
+                # Only a negative margin: the rest as before.
+                continue
             if b.get("type") == "box" and b["box"].get("horizontal"):
                 # This element is vertical text, as around every horizontal
                 # block: its left and right are its top and bottom
@@ -7172,7 +7187,7 @@ def extract_blocks_from_html(
                     # so each is kept as written, the innermost first.
                     b["picture_boxes"] = (
                         *(b.get("picture_boxes") or ()),
-                        (left, right),
+                        sides,
                     )
                 continue
             style = dict(b.get("block_style") or compute_block_style({}))
