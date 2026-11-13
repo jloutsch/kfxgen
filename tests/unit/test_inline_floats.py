@@ -313,25 +313,41 @@ def test_a_linked_float_first_keeps_the_next_float_in_the_words(tmp_path):
     assert [k[0] for k in wrapper[3]] == ["mixed"]
 
 
-@pytest.mark.parametrize(
-    "item",
-    [
-        "L1 item <img src='b.jpg' alt='a' style='float:left;width:20%'/> words.",
-        "<img src='b.jpg' alt='a' style='float:right;width:20%'/>L2 lead item.",
-    ],
-    ids=["middle", "first"],
-)
-def test_a_list_items_float_is_unfloated_in_its_words(tmp_path, item):
-    """Previewer floats nothing in a list item (#699): the picture stays in
-    the item's words, unfloated, and the item isn't wrapped. kfxgen writes
-    the bullet as text, so a float first stays after it in the words."""
-    story, _ = _story(tmp_path, f"<h1>One</h1><ul><li>{item}</li></ul>")
-    assert not [
-        n for n in _walk(story) if n[0] == "box" and set(n[2]) <= {"$47", "$49"}
+def _wrappers(story):
+    """Float wrappers: plain containers, not a list or its items (#768)."""
+    return [
+        n
+        for n in _walk(story)
+        if n[0] == "box"
+        and n[1] not in ("$276", "$277")
+        and set(n[2]) <= {"$47", "$49"}
     ]
+
+
+def test_a_list_items_float_is_unfloated_in_its_words(tmp_path):
+    """Previewer floats nothing in a list item (#699): the picture stays in
+    the item's words, unfloated, and the item isn't wrapped."""
+    item = "L1 item <img src='b.jpg' alt='a' style='float:left;width:20%'/> words."
+    story, _ = _story(tmp_path, f"<h1>One</h1><ul><li>{item}</li></ul>")
+    assert not _wrappers(story)
     (mixed,) = [n for n in _walk(story) if n[0] == "mixed"]
     (pic,) = [p for p in mixed[1] if not isinstance(p, str)]
     assert "$140" not in pic[1] and pic[1]["$56"] == "6.4$308"
+
+
+def test_a_float_first_in_a_list_item_is_an_unfloated_entry_in_it(tmp_path):
+    """With no typed bullet ahead of it (#768) a float first in an item is
+    first in its words: an entry of its own, unfloated, as at the start of
+    an item's later paragraph (#699), and the item is a `$277` holding the
+    picture and the words."""
+    item = "<img src='b.jpg' alt='a' style='float:right;width:20%'/>L2 lead item."
+    story, _ = _story(tmp_path, f"<h1>One</h1><ul><li>{item}</li></ul>")
+    assert not _wrappers(story)
+    (lst,) = [n for n in _walk(story) if n[0] == "box" and n[1] == "$276"]
+    ((kind, typ, _style, kids),) = lst[3]
+    assert (kind, typ) == ("box", "$277")
+    assert [k[0] for k in kids] == ["picture", "text"]
+    assert "$140" not in kids[0][1]
 
 
 def test_a_float_first_in_a_list_items_second_paragraph_is_unfloated(tmp_path):
@@ -344,9 +360,7 @@ def test_a_float_first_in_a_list_items_second_paragraph_is_unfloated(tmp_path):
     )
     pictures = [n for n in _walk(story) if n[0] == "picture"]
     assert pictures and all("$140" not in p[1] for p in pictures)
-    assert not [
-        n for n in _walk(story) if n[0] == "box" and set(n[2]) <= {"$47", "$49"}
-    ]
+    assert not _wrappers(story)
 
 
 def test_a_lead_float_in_a_spaced_list_paragraph_keeps_the_space(tmp_path):
@@ -394,6 +408,10 @@ def test_a_lead_float_containers_margin_below_and_clear(tmp_path):
         "clear:both'><img src='b.jpg' alt='a' style='float:left;width:20%'/>"
         "L5 words.</p></li></ul>",
     )
-    (box,) = [n for n in _walk(story) if n[0] == "box" and "$49" in n[2]]
-    assert box[2]["$49"] == "1.66667$310"
-    assert "$628" in box[2]
+    (box,) = [n for n in _walk(story) if n[0] == "box" and "$628" in n[2]]
+    # The margin below goes on the container, or, last in its list, on the
+    # item and list it collapses into (#768), as a browser collapses it.
+    (item,) = [n for n in _walk(story) if n[0] == "box" and n[1] == "$277"]
+    (lst,) = [n for n in _walk(story) if n[0] == "box" and n[1] == "$276"]
+    assert item[3][-1] is box
+    assert "1.66667$310" in [n[2].get("$49") for n in (box, item, lst)]

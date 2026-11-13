@@ -5,6 +5,13 @@ whenever a Stylizer is available, which in the plugin is always. Every unit
 test of that path uses a fake resolver, so this converts a book of list cases
 with the real `ebook-convert` and reads the text back out of the KFX.
 
+Since #768 most lists are written as Kindle Previewer writes them, a `$276`
+list of `$277` items whose markers the Kindle draws. Each case's paragraphs
+are read as a Kindle shows them: an item's drawn marker, from its list's
+`$100` style, `$104` start and its own `$104` value, ahead of its first
+text (`_shown`). A reversed list and items that type their own number keep
+typed markers (C14, C10, C16).
+
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found. CI has no calibre, so like tier 2
 (#99) this is local-only: a green CI says nothing about it. Last run against
@@ -63,7 +70,7 @@ CASES = [
     ("C02", '<ol type="a"><li>one</li><li>two</li></ol>', ["a. one", "b. two"]),
     ("C03", '<ol type="I"><li>one</li><li>two</li></ol>', ["I. one", "II. two"]),
     ("C04", "<ul><li>one</li><li>two</li></ul>", ["• one", "• two"]),
-    ("C05", "<ul><li>outer<ul><li>inner</li></ul></li></ul>", ["• outer", "• inner"]),
+    ("C05", "<ul><li>outer<ul><li>inner</li></ul></li></ul>", ["• outer", "◦ inner"]),
     ("C06", '<ol class="none"><li>one</li><li>two</li></ol>', ["one", "two"]),
     ("C07", '<ol class="none2"><li>one</li><li>two</li></ol>', ["one", "two"]),
     (
@@ -81,7 +88,7 @@ CASES = [
         '<ol class="none"><li>1. First</li><li>2. Second</li></ol>',
         ["1. First", "2. Second"],
     ),
-    ("C11", '<ul class="sq"><li>one</li></ul>', ["• one"]),
+    ("C11", '<ul class="sq"><li>one</li></ul>', ["▪ one"]),
     (
         "C12",
         '<ol class="alpha-css"><li>one</li><li>two</li></ol>',
@@ -202,13 +209,7 @@ def converted(tmp_path_factory):
             [EBOOK_CONVERT, "--version"], capture_output=True, text=True
         ).stdout,
     )
-    paragraphs = [
-        str(t)
-        for f in by_type(load_fragments(kfx), "$145")
-        for k, x in val(f).items()
-        if isinstance(x, list)
-        for t in x
-    ]
+    paragraphs = _shown(load_fragments(kfx))
     by_case, current = {}, None
     for p in paragraphs:
         if re.fullmatch(r"C\d\d", p):
@@ -219,6 +220,48 @@ def converted(tmp_path_factory):
         elif current:
             by_case[current].append(p)
     return by_case, version.group(1) if version else "unknown"
+
+
+#: The marker a Kindle draws for each `$100` style (#768).
+_BULLETS = {"$340": "• ", "$342": "◦ ", "$341": "▪ "}
+
+
+def _shown(frags):
+    """Each text entry in reading order, an item's drawn marker ahead of
+    its first text, as a Kindle shows a `$276` list (#768)."""
+    from kfxgen.converter import _LIST_STYLE_SYMBOLS, _format_ordinal
+
+    names = {v: k for k, v in reversed(_LIST_STYLE_SYMBOLS.items())}
+    texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
+    out, pending = [], []
+
+    def drawn(kind, n):
+        return _BULLETS.get(kind) or f"{_format_ordinal(n, names[kind])}. "
+
+    def walk(entries, counter=None):
+        for e in entries:
+            if not hasattr(e, "get"):
+                continue
+            kind = str(e.get("$159"))
+            if kind == "$276":
+                walk(e["$146"], [str(e["$100"]), int(e.get("$104", 1))])
+                continue
+            if kind == "$277" and counter is not None:
+                if "$104" in e:
+                    counter[1] = int(e["$104"])
+                pending.append(drawn(counter[0], counter[1]))
+                counter[1] += 1
+            ref = e.get("$145")
+            if ref:
+                out.append("".join(pending) + str(texts[str(ref["name"])][ref["$403"]]))
+                pending.clear()
+            walk(e.get("$146") or ())
+            if kind == "$277":
+                pending.clear()  # an item with no text shows its marker alone
+
+    for f in by_type(frags, "$259"):
+        walk(val(f)["$146"])
+    return out
 
 
 @pytest.mark.parametrize(

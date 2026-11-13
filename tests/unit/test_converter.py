@@ -9429,12 +9429,18 @@ def test_a_clipped_visually_hidden_heading_stays():
 
 @pytest.mark.unit
 def test_a_list_item_hidden_by_css_takes_no_number():
-    """QA review: it vanished but kept its number, "1. one / 3. three"."""
-    texts = _texts(
-        '<ol><li>one</li><li class="hide">two</li><li>three</li></ol>',
+    """QA review: it vanished but kept its number, "1. one / 3. three". In a
+    `$276` list (#768) the hidden item has no entry and no value, so the
+    Kindle numbers the two it shows 1 and 2."""
+    (lst,) = extract_blocks_from_html(
+        _doc('<ol><li>one</li><li class="hide">two</li><li>three</li></ol>'),
         style_resolver=_hide_class,
     )
-    assert texts == ["1. one", "2. three"]
+    assert lst["box"]["list"] == {"type": "$343", "start": None, "inside": False}
+    assert [(b["text"], b["list_item"]) for b in lst["blocks"]] == [
+        ("one", {"value": None, "n": 1}),
+        ("three", {"value": None, "n": 2}),
+    ]
 
 
 @pytest.mark.unit

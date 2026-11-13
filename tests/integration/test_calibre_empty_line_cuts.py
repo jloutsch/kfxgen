@@ -194,7 +194,6 @@ PREVIEWER = [
 #: kfxgen's own value where it differs, by Previewer's.
 DIFFERENT = {
     "V9 ends with an empty line.\n": ["V9 ends with an empty line."],
-    "W2 item first\n": ["\u2022 W2 item first\n"],
     # calibre collapses the spaces round the no-break space before kfxgen
     # sees them, so only the no-break space's own space is left (#628).
     "X03 first\n  ": ["X03 first\n "],
