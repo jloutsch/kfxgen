@@ -570,7 +570,12 @@ def _cut_after_picture_lines(block):
     if any(m.group(4) for m in tokens) or block.get("preformatted"):
         return [block]
     if not IMG_TOKEN_RE.sub("", text).strip():
-        return [block]
+        # Pictures alone: one entry on one line, else cut line by line, as
+        # Previewer writes them: a line of two or more a paragraph of its
+        # own, a line of one a picture (#762, QA's Q766 Z03, Z04), and a
+        # link to a picture on a line of its own lands on it (Z66).
+        if "\n" not in text:
+            return [block]
     # (end of a piece, start of the next): a cut after a picture line drops
     # its line break; one before it, after an empty line, drops nothing.
     cuts, start = [], 0
@@ -2580,7 +2585,12 @@ class NativeKFXGenerator:
                 w_text = f"{round(pt / page_pt() * 100, 5):g}%"
         if pct_h is None and m and m.group(1) == "w":
             if unit == "em":
-                w_em, fill = number, True
+                # An em width is in the base em, divided by the paragraph's
+                # font size, alone or beside a px height; beside an em
+                # height both stay as written, as Previewer writes them
+                # (#766 QA, probe PEM E01, E05, E06; QA's Q766G Z81).
+                as_written = given and given.group(3) == "em"
+                w_em, fill = number / (1 if as_written else font_size or 1), True
             elif unit == "%":
                 w_em = number / 100 * column_px() / scale
             else:
@@ -2593,6 +2603,9 @@ class NativeKFXGenerator:
             # A height alone, the same rule on the other axis (QA on #564:
             # 2em stays 2em, height="30" is 1.125em).
             h_em = _inline_length_em(m, font_size)
+            if unit == "em":
+                # In the base em too (#766 QA, probe PEM E02-E04).
+                h_em /= font_size or 1
             w_em = h_em * width / height
         valign = _INLINE_VALIGN_SYMBOLS.get(extras.get("va"))
         shift = None if valign else _valign_shift(extras.get("va"))
@@ -5826,7 +5839,7 @@ class NativeKFXGenerator:
             return set(mine)
 
         def _inline_pictures(
-            para, para_spans, offsets, floats_in_words=False, unfloat=False
+            para, para_spans, offsets, floats_in_words=False, unfloat=False, apart=False
         ):
             """(text, spans, offsets, pictures) for a paragraph whose words
             hold pictures, or None (#529). Each picture becomes one
@@ -5842,8 +5855,13 @@ class NativeKFXGenerator:
                 return None
             # Pictures alone: entries. A line of only a picture after words
             # stays in them; `_cut_after_picture_lines` has cut the
-            # paragraph after it (#565).
-            if not IMG_TOKEN_RE.sub("", para).strip():
+            # paragraph after it (#565). Two or more on one line are one
+            # paragraph, side by side, as Kindle Previewer 4.0.3 writes them
+            # (#762, probe PSS P01-P09); a line break between them still
+            # makes each an entry (P04).
+            if not IMG_TOKEN_RE.sub("", para).strip() and (
+                len(tokens) < 2 or "\n" in para or apart
+            ):
                 return None
             text, cuts, pictures, last = [], [], [], 0
             for m in tokens:
@@ -6056,6 +6074,8 @@ class NativeKFXGenerator:
                 block_offsets,
                 bool(block.get("float_wrapped")),
                 _floats_unfloated(block),
+                # One set to display as a block keeps them apart (#762).
+                apart=bool(block.get("pictures_apart")),
             )
             if inline:
                 para, para_spans, block_offsets, pictures = inline
