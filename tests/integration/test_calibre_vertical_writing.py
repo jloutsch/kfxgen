@@ -638,11 +638,12 @@ def test_pictures_outside_horizontal_blocks_are_unchanged(vertical_pictures):
 
 
 def test_a_horizontal_books_picture_is_unchanged(calibre):  # noqa: F811
-    # An English ltr book isn't vertical: the block picture, centred.
+    # An English ltr book isn't vertical: a block picture, aligned only
+    # when its block is (#769, probe PBJ J21).
     pictures = _picture_book(calibre, "h247pic", False, "en", REST)
-    for alt in ("P1", "P2", "P3"):
+    for alt, align in (("P1", None), ("P2", "$320"), ("P3", None)):
         entry, own, _parent, _around = pictures[alt]
-        assert entry.get("$601") is None and own["$580"] == "$320", alt
+        assert entry.get("$601") is None and own.get("$580") == align, alt
 
 
 @pytest.fixture(scope="module")

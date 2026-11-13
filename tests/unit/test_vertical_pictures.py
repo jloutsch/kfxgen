@@ -96,7 +96,8 @@ def test_in_a_horizontal_file_the_picture_is_unchanged(tmp_path):
     (style,) = _picture_styles(
         tmp_path, [_chapter([_block(_make_img_token(PIC, ""))], mode="horizontal-tb")]
     )
-    assert "$56" in style and style["$580"] == "$320"
+    # Unaligned, as its block is (#769).
+    assert "$56" in style and "$580" not in style
 
 
 def _resolve(elem):

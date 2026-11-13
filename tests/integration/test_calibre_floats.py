@@ -139,7 +139,8 @@ def test_a_floated_picture_through_the_real_stylizer(
     by_alt, version = converted
     style, nxt = by_alt[alt]
     assert style.get("$140") == side, f"calibre {version}"
-    assert ("$580" in style) == (side is None), f"calibre {version}"
+    # None of their blocks is aligned: no `$580`, floated or not (#769).
+    assert "$580" not in style, f"calibre {version}"
     if width is not None:
         assert float(style["$56"]["$307"]) == width, f"calibre {version}"
     assert nxt.startswith(next_text), f"calibre {version}: {nxt[:30]}"

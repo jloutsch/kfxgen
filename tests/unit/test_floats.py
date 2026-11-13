@@ -186,7 +186,8 @@ def test_an_image_not_floated_keeps_its_style(tmp_path):
     body = f'<p><img class="full" src="i.jpg" alt="a"/></p><p>{WORDS}</p>'
     style = _image_style(_entries(body, tmp_path=tmp_path))
     assert "$140" not in style
-    assert style["$580"] == "$320"
+    # Unaligned, as its paragraph is (#769, probe PBI B01).
+    assert "$580" not in style
 
 
 @pytest.mark.unit
