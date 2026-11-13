@@ -26,6 +26,7 @@ from .inline_style import (
     turn_of,
     without_tcy,
     without_turn,
+    parse_css_length,
     ruby_of,
     run_font_size,
     without_math,
@@ -4329,6 +4330,7 @@ class NativeKFXGenerator:
         sized=False,
         box_align=None,
         full_width=False,
+        place=None,
     ):
         """Builds a $157 style for a picture entry: its own width against the
         text column, as Amazon sizes it (#145), at any size (#462);
@@ -4385,6 +4387,19 @@ class NativeKFXGenerator:
             # centred, as Kindle Previewer writes it (#243).
             value.pop(IS("$580"), None)
             value[IS("$140")] = IS("$59" if float_side == "left" else "$61")
+        elif place is not None:
+            # Placed as its block places it (#769): aligned only when the
+            # block is, and its margins as `$48`/`$50`, in % of the page.
+            align, left, right = place
+            if align:
+                value[IS("$580")] = IS(align)
+            else:
+                value.pop(IS("$580"), None)
+            for key, pct in (("$48", left), ("$50", right)):
+                if pct > 0:
+                    value[IS(key)] = IonStruct(
+                        IS("$307"), IonDecimal(f"{pct:g}"), IS("$306"), IS("$314")
+                    )
         # A picture set to clear floats (#381).
         _write_clear(value, clear)
         return YJFragment(fid=IS(entity_name), ftype=IS("$157"), value=value)
@@ -5763,11 +5778,17 @@ class NativeKFXGenerator:
                         chunk["size"] = m.group(3)  # the markup's own size
                     if m.group(4):
                         chunk["float"] = m.group(4)  # left or right (#243)
-                    height = dict(
+                    extras = dict(
                         e.split("=", 1)
                         for e in (m.group(5) or "").split(";")
                         if "=" in e
-                    ).get("h")
+                    )
+                    height = extras.get("h")
+                    own = {k: extras[k] for k in ("ml", "mr", "c") if k in extras}
+                    if own:
+                        # Its own side margins, or centred by auto ones
+                        # (#769).
+                        chunk["own_place"] = own
                     if height:
                         # The markup's height: in vertical text it sizes
                         # the picture whenever given (#247, QA's E51-E54).
@@ -6139,6 +6160,31 @@ class NativeKFXGenerator:
                     )
                     if plain and not boxed and align in ("left", "center", "right"):
                         chunk["box_align"] = align
+                    first = len(all_chunks) == block_first_chunk
+                    style = block_style or {}
+                    if not plain and link:
+                        # Inline in its link's container, which takes the
+                        # block's alignment and indent (#769, probe PBI
+                        # B07): the picture none.
+                        chunk["place"] = (None, None, None, None, (0.0, 0.0), None)
+                    elif not plain and not chapter_now.get("cover"):
+                        # A block picture, placed as Kindle Previewer 4.0.3
+                        # places it (#769, probes PBI, PBJ, PBR): `$580` by
+                        # its block's text-align, none when justified or
+                        # unset; `$48` its own, its block's and the
+                        # containers' left margins and, on a block's first
+                        # line, its indent; `$50` the right margins.
+                        # kfxgen's own cover page stays centred, as books'
+                        # cover pages are: calibre takes the source's out of
+                        # the spine (pg37106's has `text-align: center`).
+                        chunk["place"] = (
+                            align,
+                            style.get("indent") if first else None,
+                            style.get("margin_left"),
+                            style.get("margin_right"),
+                            tuple(block.get("picture_margins") or (0.0, 0.0)),
+                            style.get("font_size"),
+                        )
                     if link or boxed:
                         # A linked picture: a container whose link covers
                         # the picture, as Kindle Previewer writes it (#355).
@@ -6147,6 +6193,21 @@ class NativeKFXGenerator:
                             "node": "link",
                             "spans": [(0, 1, link)] if link else [],
                         }
+                        if not plain:
+                            # Its container takes the block's alignment and
+                            # first-line indent (#769, probe PBI B07).
+                            opener["picture_align"] = align
+                            opener["picture_indent"] = (
+                                style.get("indent") if first else None
+                            )
+                            # And its side margins, its block's and the
+                            # containers' (PBK K05, K08).
+                            opener["picture_sides"] = (
+                                style.get("margin_left"),
+                                style.get("margin_right"),
+                                tuple(block.get("picture_margins") or (0.0, 0.0)),
+                                style.get("font_size"),
+                            )
                         if boxed:
                             opener["plain"] = True
                             opener["align"] = align
@@ -6569,6 +6630,7 @@ class NativeKFXGenerator:
         for ch_idx, chapter in enumerate(chapters):
             start_idx = len(all_chunks)
             chapter_now["start"] = start_idx
+            chapter_now["cover"] = bool(chapter.get("_is_cover"))
             chapter_now["vertical"] = (
                 _chapter_writing_mode(chapter)
                 or getattr(self, "_book_writing_mode", None)
@@ -7381,6 +7443,65 @@ class NativeKFXGenerator:
             """
             return round(min(100.0, w / IMAGE_COLUMN_PX * 100.0), 3)
 
+        from .inline_style import (
+            FLAG_BOLD,
+            FLAG_ITALIC,
+            FLAG_NOT_BOLD,
+            FLAG_NOT_ITALIC,
+            FLAG_STRIKE,
+            FLAG_SUB,
+            FLAG_SUPER,
+            FLAG_TEXT_BOTTOM,
+            FLAG_TEXT_TOP,
+            FLAG_UNDERLINE,
+            BASELINE_SHIFT,
+            LINK_COLOUR_FLAG,
+            SHIFT_FLAGS,
+            TYPOGRAPHY_FLAGS,
+            flag_value,
+            is_monospace,
+            mono_families,
+            nested_shift,
+            run_font_size,
+        )
+
+        #: A block style's small caps, transform, spacing and colour as
+        #: build_fragment_157's arguments, by their run flags (#239).
+        typography_args = dict(zip(TYPOGRAPHY_FLAGS, TYPOGRAPHY_KEYS))
+
+        def _typography(bs):
+            return {k: bs[k] for k in TYPOGRAPHY_KEYS if bs.get(k) is not None}
+
+        def _chars_by_px(chunk):
+            # Each character at its run's size, or else its block's (#375
+            # review: a book can size its text on a span in every paragraph).
+            px = (chunk.get("block_style") or {}).get("font_size")
+            counts = collections.Counter()
+            if not px or chunk.get("type") in ("open", "close", "rule", "image"):
+                return counts
+            in_runs = 0
+            for _s, length, flags in chunk.get("spans") or []:
+                run_px = run_font_size(flags)
+                if run_px:
+                    counts[run_px] += length
+                    in_runs += length
+            counts[px] += len(chunk.get("text") or "") - in_runs
+            return counts
+
+        def _most(counts):
+            return max(sorted(counts), key=counts.get) if counts else None
+
+        # The book's main text size: the CSS size most of its text has. Sizes
+        # are written against it, so the main text is the reader's own size,
+        # as Kindle Previewer writes them (#241).
+        text_px = collections.Counter()
+        for chunk in all_chunks:
+            # A heading kept on a rebuilt contents page (#585) isn't the
+            # book's text: in a short book it outweighed it (QA on #594).
+            if not chunk.get("own_size"):
+                text_px.update(_chars_by_px(chunk))
+        main_px = _most(text_px)
+
         any_image_chunk = any(
             isinstance(c, dict) and c.get("type") == "image" for c in all_chunks
         )
@@ -7462,6 +7583,62 @@ class NativeKFXGenerator:
 
         plain_style_names = {}
 
+        def _share(length, scale=1.0):
+            """A (magnitude, unit) length as a % of the page, at Previewer's
+            rates (1em 12pt, 1px 0.45pt); an em at `scale`, its block's font
+            size against the main text's."""
+            if not length:
+                return 0.0
+            em = em_percent()
+            per = {
+                "$308": em * scale,
+                "$505": em,
+                "$319": em * 0.45 / 12,
+                "$318": em / 12,
+                "$316": em * 72 / 25.4 / 12,
+                "$314": 1.0,
+            }.get(length[1], 0.0)
+            return float(length[0]) * per
+
+        def _place_key(c):
+            """A block picture's place (#769): (`$580` or None, `$48` %,
+            `$50` %), or None for a picture placed as before, centred."""
+            raw = c.get("place")
+            if raw is None:
+                return None
+            align, indent, left, right, held, font_px = raw
+            own = c.get("own_place") or {}
+            if own.get("c"):
+                # display: block with auto margins (PBJ J04).
+                align = "center"
+            scale = font_px / main_px if font_px and main_px else 1.0
+            sym = {"left": "$59", "center": "$320", "right": "$61"}.get(align)
+            in_left = (
+                _share(left, scale)
+                + _share(indent, scale)
+                + held[0]
+                + _share(parse_css_length(own.get("ml") or ""), scale)
+            )
+            in_right = (
+                _share(right, scale)
+                + held[1]
+                + _share(parse_css_length(own.get("mr") or ""), scale)
+            )
+            return (sym, _up(in_left), _up(in_right))
+
+        def _place_order(place):
+            if place is None:
+                return (False, "", 0.0, 0.0)
+            return (True, place[0] or "", place[1], place[2])
+
+        def _floated(c):
+            return bool(c.get("float") or c.get("clear")) and not c.get("plain")
+
+        def _floated_key(c):
+            # A floated picture isn't placed; a cleared one is (#769).
+            place = None if c.get("float") else _place_key(c)
+            return (_image_size_key(c), c.get("float"), c.get("clear"), place)
+
         if any_image_chunk:
             for base, dims in (self._image_dims or {}).items():
                 resname, _ = (self.image_resources or {}).get(base, (None, None))
@@ -7479,7 +7656,7 @@ class NativeKFXGenerator:
             # others, so a book's unfloated images keep their names (#243).
             # A cleared one too (#381).
             keys_used = {
-                _image_size_key(c)
+                (_image_size_key(c), _place_key(c))
                 for c in styled
                 if not (c.get("float") or c.get("clear") or c.get("plain"))
             }
@@ -7491,37 +7668,51 @@ class NativeKFXGenerator:
                 key=lambda k: (k[0][0], k[0][1], k[1], k[2] or "", k[3] or "", k[4]),
             )
             floated = sorted(
-                {
-                    (_image_size_key(c), c.get("float"), c.get("clear"))
-                    for c in styled
-                    if (c.get("float") or c.get("clear")) and not c.get("plain")
-                },
-                key=lambda k: (k[0][0], k[0][1] or 0, k[1] or "", k[2] or ""),
+                {_floated_key(c) for c in styled if _floated(c)},
+                key=lambda k: (
+                    k[0][0],
+                    k[0][1] or 0,
+                    k[1] or "",
+                    k[2] or "",
+                    _place_order(k[3]),
+                ),
             )
-            widths_used = {pct for axis, pct in keys_used if axis == "w"}
-            heights_used = {pct for axis, pct in keys_used if axis == "h"}
+            widths_used = {
+                (pct, place) for (axis, pct), place in keys_used if axis == "w"
+            }
+            heights_used = {
+                (pct, place) for (axis, pct), place in keys_used if axis == "h"
+            }
 
             # Sorted, so the allocation order is a property of the widths
             # rather than of set iteration — the #96 reproducibility rule
             # applies here too, and there are now many of these rather than
             # three.
-            for idx, pct in enumerate(sorted(widths_used)):
+            def _by_size(k):
+                return (k[0], _place_order(k[1]))
+
+            for idx, (pct, place) in enumerate(sorted(widths_used, key=_by_size)):
                 name = f"s_img_w{idx}"
                 self.fragments.append(
-                    self.build_fragment_157_image(entity_name=name, width_pct=pct)
+                    self.build_fragment_157_image(
+                        entity_name=name, width_pct=pct, place=place
+                    )
                 )
                 extra_style_names.append(name)
-                width_style_names[pct] = name
+                width_style_names[(pct, place)] = name
 
-            for idx, pct in enumerate(sorted(heights_used)):
+            for idx, (pct, place) in enumerate(sorted(heights_used, key=_by_size)):
                 name = f"s_img_h{idx}"
                 self.fragments.append(
-                    self.build_fragment_157_image(entity_name=name, height_pct=pct)
+                    self.build_fragment_157_image(
+                        entity_name=name, height_pct=pct, place=place
+                    )
                 )
                 extra_style_names.append(name)
-                height_style_names[pct] = name
+                height_style_names[(pct, place)] = name
 
-            for idx, ((axis, pct), side, clear) in enumerate(floated):
+            for idx, key in enumerate(floated):
+                (axis, pct), side, clear, place = key
                 name = f"s_img_f{idx}"
                 self.fragments.append(
                     self.build_fragment_157_image(
@@ -7530,10 +7721,11 @@ class NativeKFXGenerator:
                         height_pct=pct if axis == "h" else None,
                         float_side=side,
                         clear=clear,
+                        place=place,
                     )
                 )
                 extra_style_names.append(name)
-                float_style_names[((axis, pct), side, clear)] = name
+                float_style_names[key] = name
 
             for idx, key in enumerate(plain_used):
                 (axis, pct), sized, box_align, clear, full_width = key
@@ -7556,73 +7748,12 @@ class NativeKFXGenerator:
         def _image_style_for(chunk):
             if chunk.get("plain"):
                 return plain_style_names.get(_plain_key(chunk))
-            if chunk.get("float") or chunk.get("clear"):
-                return float_style_names.get(
-                    (_image_size_key(chunk), chunk.get("float"), chunk.get("clear"))
-                )
+            if _floated(chunk):
+                return float_style_names.get(_floated_key(chunk))
             axis, pct = _image_size_key(chunk)
             if axis == "h":
-                return height_style_names.get(pct)
-            return width_style_names.get(pct)
-
-        from .inline_style import (
-            FLAG_BOLD,
-            FLAG_ITALIC,
-            FLAG_NOT_BOLD,
-            FLAG_NOT_ITALIC,
-            FLAG_STRIKE,
-            FLAG_SUB,
-            FLAG_SUPER,
-            FLAG_TEXT_BOTTOM,
-            FLAG_TEXT_TOP,
-            FLAG_UNDERLINE,
-            BASELINE_SHIFT,
-            LINK_COLOUR_FLAG,
-            SHIFT_FLAGS,
-            TYPOGRAPHY_FLAGS,
-            flag_value,
-            is_monospace,
-            mono_families,
-            nested_shift,
-            run_font_size,
-        )
-
-        #: A block style's small caps, transform, spacing and colour as
-        #: build_fragment_157's arguments, by their run flags (#239).
-        typography_args = dict(zip(TYPOGRAPHY_FLAGS, TYPOGRAPHY_KEYS))
-
-        def _typography(bs):
-            return {k: bs[k] for k in TYPOGRAPHY_KEYS if bs.get(k) is not None}
-
-        def _chars_by_px(chunk):
-            # Each character at its run's size, or else its block's (#375
-            # review: a book can size its text on a span in every paragraph).
-            px = (chunk.get("block_style") or {}).get("font_size")
-            counts = collections.Counter()
-            if not px or chunk.get("type") in ("open", "close", "rule", "image"):
-                return counts
-            in_runs = 0
-            for _s, length, flags in chunk.get("spans") or []:
-                run_px = run_font_size(flags)
-                if run_px:
-                    counts[run_px] += length
-                    in_runs += length
-            counts[px] += len(chunk.get("text") or "") - in_runs
-            return counts
-
-        def _most(counts):
-            return max(sorted(counts), key=counts.get) if counts else None
-
-        # The book's main text size: the CSS size most of its text has. Sizes
-        # are written against it, so the main text is the reader's own size,
-        # as Kindle Previewer writes them (#241).
-        text_px = collections.Counter()
-        for chunk in all_chunks:
-            # A heading kept on a rebuilt contents page (#585) isn't the
-            # book's text: in a short book it outweighed it (QA on #594).
-            if not chunk.get("own_size"):
-                text_px.update(_chars_by_px(chunk))
-        main_px = _most(text_px)
+                return height_style_names.get((pct, _place_key(chunk)))
+            return width_style_names.get((pct, _place_key(chunk)))
 
         # The book's main line height, as a factor of each paragraph's own
         # font size: the one most of its text has. A paragraph's $42 is
@@ -7974,11 +8105,37 @@ class NativeKFXGenerator:
                                     )
                                 )
                         elif not chunk.get("in_cell"):
+                            # Its block's alignment, first-line indent and
+                            # side margins, as Previewer writes a linked
+                            # picture's container (#769, PBI B07, PBK K04,
+                            # K05, K08, PBL); centred when they weren't read.
+                            place = {"align": "center"}
+                            if "picture_align" in chunk:
+                                place = {
+                                    "align": chunk["picture_align"],
+                                    "no_align": not chunk["picture_align"],
+                                    "text_indent": chunk.get("picture_indent"),
+                                    # The line above it main writes, kept with
+                                    # an indent too: Previewer's spacing here
+                                    # isn't matched (none in pg1260).
+                                    "space_above": _LINE_EM,
+                                }
+                                left, right, held, font_px = chunk["picture_sides"]
+                                scale = (
+                                    font_px / main_px if font_px and main_px else 1.0
+                                )
+                                for key, length, extra in (
+                                    ("margin_left", left, held[0]),
+                                    ("margin_right", right, held[1]),
+                                ):
+                                    pct = _up(_share(length, scale) + extra)
+                                    if pct > 0:
+                                        place[key] = (f"{pct:g}", "$314")
                             extras["$157"] = IS(
                                 _allocate_style(
                                     "",
                                     font_size=chapters[ch_idx].get("font_size", 1.0),
-                                    align="center",
+                                    **place,
                                     **(
                                         {"clear": chunk["clear"]}
                                         if chunk.get("clear")
