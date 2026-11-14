@@ -9760,9 +9760,8 @@ def test_the_heading_above_a_toc_target_starts_its_chapter(c1, frag):
     "above",
     [
         ["<p>A last line before.</p>"],
-        # A title page's heading and its "by" line: kfxgen left them as they
-        # were, where the first try at #776 split them in 13 of the
-        # Gutenberg 90.
+        # A title page's heading and its "by" line, which the first try at
+        # #776 split (pg11, pg981, pg2465 among 13 of the Gutenberg 90).
         ["<h1>The Book</h1>", "<p>by A. Writer</p>"],
     ],
     ids=["a-paragraph", "a-heading-then-a-paragraph"],

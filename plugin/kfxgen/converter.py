@@ -8139,8 +8139,9 @@ def _assemble_chapters_by_coordinate(
             # list under "Contents" left the heading at the end of the
             # chapter before, from another file: a second "Contents" on the
             # title page (QA's Q773K, Q773Q, #776). Headings after other
-            # text stay where they were: a title page's "by" line moved
-            # with them in 13 of the Gutenberg 90.
+            # text stay where they were: pulling those back moved section
+            # starts in 13 of the Gutenberg 90, splitting title pages from
+            # their "by" lines.
             bi = 0
         fi = file_offset[si] + bi
         if fi == prev_flat and listing_entry and not names_listing:
