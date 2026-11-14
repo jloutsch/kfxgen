@@ -6087,6 +6087,9 @@ def extract_blocks_from_html(
     native_made = set()  # ids of tables written as native tables
     pending_ids = []  # anchors awaiting the next leaf block (containers, standalone <a>)
     rule_ids = set()  # an <hr>'s own ids: they name the rule (QA on #720)
+    # Ids waiting for a block when a contents listing was discarded: the
+    # listing's, and those of the elements round it (QA's Q773E, Q773H).
+    listing_ids = set()
     # List markers awaiting the next text block: an item's number belongs on
     # the first text it holds, which may sit in a nested <p> (#201). An entry
     # is (marker, ordinal or None).
@@ -6683,6 +6686,7 @@ def extract_blocks_from_html(
                     (len(blocks), frozenset(_subtree_anchor_ids(elem)))
                 )
             _discard_listing(elem)
+            listing_ids.update(pending_ids)
             return
         background = _css_background_image(
             elem, style_resolver(elem) if style_resolver is not None else None
@@ -7595,7 +7599,12 @@ def extract_blocks_from_html(
         # Not a rule's own: it names the rule, in this file. A link to the
         # <hr> under a title alone opened the next chapter, where Kindle
         # Previewer 4.0.3 lands on the rule (QA on #720).
-        trailing_ids.extend(i for i in pending_ids if i not in rule_ids)
+        # Nor a discarded listing's, or a wrapper's round it: a TOC entry
+        # naming one keeps the listing's page for the rebuild, in this file
+        # (QA's Q773E, Q773G, Q773H on #773).
+        trailing_ids.extend(
+            i for i in pending_ids if i not in rule_ids and i not in listing_ids
+        )
     if pending_ids and blocks:
         last_block = next(
             (b for b in reversed(blocks) if b.get("type") != "rule"), blocks[-1]
@@ -8055,6 +8064,8 @@ def _assemble_chapters_by_coordinate(
     # Coords pointing before the entry listed above them: places, in the
     # book's TOC order, landing on their own block (#484).
     out_of_order = set()
+    # Ids at a file's very end whose entries start the next file (#772).
+    moved_ids = set()
     for entry in toc_entries:
         norm = _normalize_href(entry["href"])
         try:
@@ -8085,7 +8096,7 @@ def _assemble_chapters_by_coordinate(
         else:
             bi = 0
         bi = min(bi, len(spine_blocks[si]) - 1) if spine_blocks[si] else 0
-        fi = file_offset[si] + bi
+        own_si = si
         names_listing = next(
             (
                 ids
@@ -8094,6 +8105,22 @@ def _assemble_chapters_by_coordinate(
             ),
             None,
         )
+        if (
+            frag
+            and frag in spine_items_ordered[si].get("trailing_ids", ())
+            and si + 1 < len(spine_items_ordered)
+        ):
+            # An id at the file's very end, with no block after it, names
+            # the next file's start, where its link lands (#338): the entry
+            # starts its chapter there. On the file's last block it took
+            # that block into the next chapter, after its heading; Kindle
+            # Previewer 4.0.3 keeps every block in its own file's chapter
+            # (QA's Q771C, #772). A discarded contents listing's ids, and
+            # its wrappers', aren't trailing ids: their entry keeps the
+            # listing's page (QA's Q773E, Q773G, Q773H).
+            si, bi = si + 1, 0
+            moved_ids.add(frag)
+        fi = file_offset[si] + bi
         if fi == prev_flat and listing_entry and not names_listing:
             # The entry before named a listing that ends where this one
             # starts: it keeps the listing as a page with no blocks, for the
@@ -8120,7 +8147,7 @@ def _assemble_chapters_by_coordinate(
                 "place, no section of its own"
             )
             out_of_order.add(len(coords))
-        key = _entry_key(spine_items_ordered[si], frag)
+        key = _entry_key(spine_items_ordered[own_si], frag)
         if key is None and len(coords) in out_of_order:
             # A whole-file entry out of order: the file's key, on its first
             # block, so it lands there and not at the section's start.
@@ -8213,8 +8240,12 @@ def _assemble_chapters_by_coordinate(
     # NOTE: Known limitation — a malformed EPUB where genuine front matter
     # carries an `id` that duplicates a TOC fragment would be folded into
     # chapter 1 rather than emitted as a separate leading chapter.
+    # Not one at a file's very end that names the next file's start: it
+    # doesn't make its file's blocks the first chapter's (#772).
     head_has_toc_anchor = first_fi > 0 and any(
-        a in toc_anchors for b in flat[0:first_fi] for a in (b.get("anchor_ids") or [])
+        a in toc_anchors - moved_ids
+        for b in flat[0:first_fi]
+        for a in (b.get("anchor_ids") or [])
     )
     if first_fi > 0 and not head_has_toc_anchor:
         head = flat[0:first_fi]
@@ -8492,6 +8523,8 @@ def extract_chapters_from_oeb(
                 "blocks": blocks,
                 "nav_listing_at": nav_listing_at,
                 "note_ids": note_ids,
+                # Ids at its very end, with no block after them (#338, #772).
+                "trailing_ids": frozenset(trailing),
                 # Where the pages break is known only from the CSS (#363).
                 "breaks_known": resolver is not None,
             }
