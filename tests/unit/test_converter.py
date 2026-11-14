@@ -9647,6 +9647,37 @@ def test_an_entry_naming_a_contents_listing_at_a_files_end_stays_in_its_file(
 
 
 @pytest.mark.unit
+def test_a_link_to_an_id_in_a_contents_listing_at_a_files_end_stays_in_its_file():
+    """#338 moves the link keys of ids at a file's very end to the next
+    file. A discarded listing's ids aren't moved: a link into it lands on
+    its own file's page, as Previewer's do (QA's library sample on #773:
+    119 of 121 such links in one book now land in Previewer's chapter, 0 on
+    main)."""
+    spine = [
+        _RawSpineItem(
+            "e1.xhtml",
+            "<h2>Contents</h2><div class='toc'>"
+            "<p id='t1'><a href='e2.xhtml'>E2 Chapter</a></p>"
+            "<p><a href='e3.xhtml'>E3 Chapter</a></p></div>",
+        ),
+        _RawSpineItem("e2.xhtml", "<h2>E2 Chapter</h2><p>E2 words.</p>"),
+        _RawSpineItem(
+            "e3.xhtml", "<h2>E3 Chapter</h2><p><a href='e1.xhtml#t1'>Back</a></p>"
+        ),
+    ]
+    toc = [
+        _TOCNode("Contents", "e1.xhtml"),
+        _TOCNode("E2 Chapter", "e2.xhtml"),
+        _TOCNode("E3 Chapter", "e3.xhtml"),
+    ]
+    keys = _keys_by_text(
+        _conv.extract_chapters_from_oeb(_OEBBook(spine, toc), _silent_log())
+    )
+    assert "e1.xhtml#t1" in keys["Contents"]
+    assert "e1.xhtml#t1" not in keys["E2 Chapter"]
+
+
+@pytest.mark.unit
 def test_a_toc_entry_naming_an_id_at_the_books_very_end_keeps_its_last_block():
     spine = [
         _RawSpineItem("a.xhtml", "<h1>A</h1><p>A words.</p>"),
