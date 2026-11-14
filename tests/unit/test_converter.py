@@ -9599,6 +9599,44 @@ def test_an_out_of_order_entry_naming_an_id_at_a_files_very_end_keeps_its_own_ke
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("into", [False, True], ids=["listing", "and-a-line-in-it"])
+def test_an_entry_naming_a_contents_listing_at_a_files_end_stays_in_its_file(into):
+    """A listing kfxgen discards for its rebuild makes no blocks, so its ids
+    are at the file's end too. Its entry keeps the listing's page: moved to
+    the next file it printed "Contents" on the title page, and with a
+    second entry into the listing (#459) the next chapter was lost (QA's
+    Q773E, Q773G on #773)."""
+    first = " id='t1'" if into else ""
+    links = (
+        f'<p{first}><a href="e2.xhtml">E2 Chapter</a></p>'
+        '<p><a href="e3.xhtml">E3 Chapter</a></p>'
+    )
+    spine = [
+        _RawSpineItem("e0.xhtml", "<h1>E0 Title</h1><p>E0 words.</p>"),
+        _RawSpineItem(
+            "e1.xhtml", f"<h2>Contents</h2><div id='toc' class='toc'>{links}</div>"
+        ),
+        _RawSpineItem("e2.xhtml", "<h2>E2 Chapter</h2><p>E2 words.</p>"),
+        _RawSpineItem("e3.xhtml", "<h2>E3 Chapter</h2><p>E3 words.</p>"),
+    ]
+    toc = [
+        _TOCNode("E0 Title", "e0.xhtml"),
+        _TOCNode("Contents", "e1.xhtml#toc"),
+        *([_TOCNode("Contents first line", "e1.xhtml#t1")] if into else []),
+        _TOCNode("E2 Chapter", "e2.xhtml"),
+        _TOCNode("E3 Chapter", "e3.xhtml"),
+    ]
+    chapters = _conv.extract_chapters_from_oeb(_OEBBook(spine, toc), _silent_log())
+    assert [(c["title"], [b["text"] for b in c["blocks"]]) for c in chapters] == [
+        ("E0 Title", ["E0 Title", "E0 words."]),
+        ("Contents", ["Contents"]),
+        ("E2 Chapter", ["E2 Chapter", "E2 words."]),
+        ("E3 Chapter", ["E3 Chapter", "E3 words."]),
+    ]
+    assert chapters[1].get("_had_nav_listing")
+
+
+@pytest.mark.unit
 def test_a_toc_entry_naming_an_id_at_the_books_very_end_keeps_its_last_block():
     spine = [
         _RawSpineItem("a.xhtml", "<h1>A</h1><p>A words.</p>"),

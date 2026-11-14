@@ -8088,8 +8088,17 @@ def _assemble_chapters_by_coordinate(
             bi = 0
         bi = min(bi, len(spine_blocks[si]) - 1) if spine_blocks[si] else 0
         own_si = si
+        names_listing = next(
+            (
+                ids
+                for _, ids in spine_items_ordered[si].get("nav_listing_at") or ()
+                if frag and frag in ids
+            ),
+            None,
+        )
         if (
             frag
+            and not names_listing
             and frag in spine_items_ordered[si].get("trailing_ids", ())
             and si + 1 < len(spine_items_ordered)
         ):
@@ -8098,18 +8107,13 @@ def _assemble_chapters_by_coordinate(
             # starts its chapter there. On the file's last block it took
             # that block into the next chapter, after its heading; Kindle
             # Previewer 4.0.3 keeps every block in its own file's chapter
-            # (QA's Q771C, #772).
+            # (QA's Q771C, #772). Not an id on or in a contents listing
+            # kfxgen discards: the listing makes no blocks, so its ids are
+            # at the file's end too, but its entry keeps the listing's page
+            # (QA's Q773E, Q773G).
             si, bi = si + 1, 0
             moved_ids.add(frag)
         fi = file_offset[si] + bi
-        names_listing = next(
-            (
-                ids
-                for _, ids in spine_items_ordered[own_si].get("nav_listing_at") or ()
-                if frag and frag in ids
-            ),
-            None,
-        )
         if fi == prev_flat and listing_entry and not names_listing:
             # The entry before named a listing that ends where this one
             # starts: it keeps the listing as a page with no blocks, for the
