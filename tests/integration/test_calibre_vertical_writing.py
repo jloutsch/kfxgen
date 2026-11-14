@@ -276,12 +276,13 @@ def test_a_fixed_layout_japanese_rtl_book_is_not_made_vertical(calibre):  # noqa
     assert (str(doc["$560"]), str(doc["$192"])) == ("$557", "$375")
 
 
-def test_a_fixed_layout_books_vertical_pages_stay_horizontal(calibre):  # noqa: F811
+def test_a_fixed_layout_books_vertical_pages_are_vertical_sections(calibre):  # noqa: F811
     """#752: pages set vertical-rl in a fixed-layout book (QA's C751, the
-    #711 manga with `html { writing-mode: vertical-rl }`) were vertical
-    sections with the Japanese features. They are written as the manga
-    that passed on the Paperwhite: no vertical section, no vertical
-    features, and a book's margin-top in its own place."""
+    #711 manga with `html { writing-mode: vertical-rl }`) are vertical
+    sections with the Japanese features, in a book that stays horizontal
+    (#746). C751 written so passed on the Paperwhite, Voyage and Oasis.
+    A page's margin-top is the book's own, in em, as in any vertical
+    section (#747)."""
     frags = _fixed_layout_book(
         calibre,
         "v752fxl",
@@ -290,12 +291,12 @@ def test_a_fixed_layout_books_vertical_pages_stay_horizontal(calibre):  # noqa: 
     )
     doc = _doc(frags)
     assert (str(doc["$560"]), str(doc["$192"])) == ("$557", "$375")
-    assert _sections(frags) == [None, None, None]
-    assert not {
+    assert _sections(frags) == ["$559", "$559", "$559"]
+    assert {
         "jp-reflow-language",
         "jpvertical-reflow-language",
         "yj_mixed_writing_mode",
-    } & _features(frags)
+    } <= _features(frags)
     styles = {str(f.fid): val(f) for f in by_type(frags, "$157")}
     texts = {str(f.fid): list(val(f)["$146"]) for f in by_type(frags, "$145")}
     tops = set()
@@ -305,15 +306,15 @@ def test_a_fixed_layout_books_vertical_pages_stay_horizontal(calibre):  # noqa: 
             if r and str(texts[str(r["name"])][r["$403"]]).startswith("F01"):
                 top = styles[str(e["$157"])].get("$47")
                 tops.add(top and (str(top["$307"]), str(top["$306"])))
-    # Read as horizontal text, margin-top 2em is the space above, $47
-    # 1.66667lh; read as vertical, it would be the start of the line.
-    assert tops == {("1.66667", "$310")}
+    # Read as vertical text, margin-top 2em stays the book's $47 in em;
+    # read as horizontal, it would be the space above, 1.66667lh.
+    assert tops == {("2", "$308")}
 
 
-def test_a_fixed_layout_book_keeping_its_listing_stays_horizontal(calibre):  # noqa: F811
+def test_a_fixed_layout_book_keeping_its_listing_keeps_vertical_pages(calibre):  # noqa: F811
     """QA's C753L on #753: a printed contents listing and no Contents page
-    send the book through the listings-kept extraction again, which must
-    keep the pages horizontal too."""
+    send the book through the listings-kept extraction again, which keeps
+    the vertical-rl pages vertical as the first pass does (#752)."""
     listing = (
         '<ol class="toc"><li><a href="p1.xhtml">一</a></li>'
         '<li><a href="p2.xhtml">二</a></li><li><a href="p3.xhtml">三</a></li></ol>'
@@ -328,22 +329,24 @@ def test_a_fixed_layout_book_keeping_its_listing_stays_horizontal(calibre):  # n
         first=listing,
         toc=[("一", "p1.xhtml", 1), ("二", "p2.xhtml", 1), ("三", "p3.xhtml", 1)],
     )
-    assert set(_sections(frags)) == {None}
+    assert set(_sections(frags)) == {"$559"}
 
 
-def test_a_fixed_layout_books_horizontal_block_is_no_container(calibre):  # noqa: F811
+def test_a_fixed_layout_books_horizontal_block_is_a_container(calibre):  # noqa: F811
     """QA's C753 on #753: a horizontal-tb div on a vertical-rl page of a
-    fixed-layout book is plain horizontal text, with no $560 container of
-    its own (#749's), as the rest of the page is."""
+    fixed-layout book is a horizontal container (#749's), as on a vertical
+    page of any other book (#752)."""
     frags = _fixed_layout_book(
         calibre,
         "v753h",
         css=f"html {{ {VERT} }} .hz {{ writing-mode: horizontal-tb }}",
         text='<div class="hz"><p>H01 Horizontal line.</p></div>',
     )
-    assert not [
-        f.fid for f in by_type(frags, "$157") if "$560" in {str(k) for k in val(f)}
-    ]
+    assert [
+        str(val(f)["$560"])
+        for f in by_type(frags, "$157")
+        if "$560" in {str(k) for k in val(f)}
+    ] == ["$557"]
 
 
 def _entry_and_parent(frags, prefix):
@@ -411,12 +414,13 @@ def test_an_rtl_book_that_isnt_japanese_keeps_the_384pt_page(calibre):  # noqa: 
 
 
 def test_a_fixed_layout_japanese_book_keeps_the_384pt_page(calibre):  # noqa: F811
-    """QA on #754: a fixed-layout book isn't vertical (#746, #753), so its
-    percentages stay on 384pt too, its pages set vertical-rl or not."""
+    """QA on #754: a fixed-layout book isn't vertical (#746), so its
+    percentages stay on 384pt: 10px of padding is 1.172%, not 0.9375% of
+    a vertical book's 480pt."""
     frags = _fixed_layout_book(
         calibre,
         "v754fxl",
-        css=f"html {{ {VERT} }} .bxp {{ border: 1px solid black; padding: 10px }}",
+        css=".bxp { border: 1px solid black; padding: 10px }",
         text='<div class="bxp"><p>F01 枠の内側。</p></div>',
     )
     _, box = _entry_and_parent(frags, "F01")
