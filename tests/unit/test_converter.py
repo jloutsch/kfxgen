@@ -9756,17 +9756,26 @@ def test_the_heading_above_a_toc_target_starts_its_chapter(c1, frag):
 
 
 @pytest.mark.unit
-def test_a_paragraph_above_a_toc_target_stays_where_it_was():
-    """Only headings above the target move with it: a paragraph there is
-    the chapter before's, as before."""
+@pytest.mark.parametrize(
+    "above",
+    [
+        ["<p>A last line before.</p>"],
+        # A title page's heading and its "by" line: kfxgen left them as they
+        # were, where the first try at #776 split them in 13 of the
+        # Gutenberg 90.
+        ["<h1>The Book</h1>", "<p>by A. Writer</p>"],
+    ],
+    ids=["a-paragraph", "a-heading-then-a-paragraph"],
+)
+def test_text_above_a_toc_target_stays_where_it_was(above):
+    """Only headings, and nothing else, above the target move with it."""
     chapters = _contents_file(
-        "<p>A last line before.</p><h2 id='t'>Contents</h2><p>Words.</p>", "t"
+        "".join(above) + "<h2 id='t'>Contents</h2><p>Words.</p>", "t"
     )
-    assert [b["text"] for b in chapters[0]["blocks"]] == [
-        "C0 Title",
-        "C0 words.",
-        "A last line before.",
-    ]
+    texts = [b["text"] for b in chapters[0]["blocks"]]
+    assert texts[:2] == ["C0 Title", "C0 words."]
+    assert len(texts) == 2 + len(above)
+    assert [b["text"] for b in chapters[1]["blocks"]][0] == "Contents"
 
 
 @pytest.mark.unit
