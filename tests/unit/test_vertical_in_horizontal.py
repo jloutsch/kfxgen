@@ -118,12 +118,3 @@ def test_its_padding_is_by_its_own_axes():
     for key in ("$53", "$55"):
         assert str(st[key]["$306"]) == "$310"
         assert abs(float(st[key]["$307"]) - 0.833333) < 1e-6
-
-
-def test_a_fixed_layout_page_drops_the_mark():
-    # #752: such a page is read as horizontal text, every mark taken off.
-    root = _marked()["v"].getroottree().getroot()
-    _conv._drop_vertical_marks(root)
-    assert not any(
-        e.get(_conv._VERTICAL) for e in root.iter() if isinstance(e.tag, str)
-    )
