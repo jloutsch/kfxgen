@@ -9678,6 +9678,106 @@ def test_a_link_to_an_id_in_a_contents_listing_at_a_files_end_stays_in_its_file(
 
 
 @pytest.mark.unit
+def test_a_toc_entry_naming_an_hr_id_ending_its_file_starts_the_next_file():
+    """The rule's own id names the rule, for links (#720), so it wasn't one
+    of the file's end ids, and the next chapter started one block early,
+    or joined the one before. Kindle Previewer 4.0.3 starts a section at
+    the next file (QA's Q773D, #774); on the Paperwhite its Chapter Four
+    starts a page, kfxgen's ran on below the rule."""
+    spine = [
+        _RawSpineItem("d0.xhtml", "<h2>D0 Heading</h2><p>D0 words.</p><hr id='r0'/>"),
+        _RawSpineItem("d1.xhtml", "<h2>D1 Heading</h2><p>D1 words.</p>"),
+        _RawSpineItem("d2.xhtml", "<h2>D2 Heading</h2><p>D2 words.</p>"),
+    ]
+    toc = [
+        _TOCNode("D0 Heading", "d0.xhtml"),
+        _TOCNode("D1 Heading", "d0.xhtml#r0"),
+        _TOCNode("D2 Heading", "d2.xhtml"),
+    ]
+    chapters = _conv.extract_chapters_from_oeb(_OEBBook(spine, toc), _silent_log())
+    assert [(c["title"], [b["text"] for b in c["blocks"]]) for c in chapters] == [
+        ("D0 Heading", ["D0 Heading", "D0 words.", ""]),
+        ("D1 Heading", ["D1 Heading", "D1 words."]),
+        ("D2 Heading", ["D2 Heading", "D2 words."]),
+    ]
+    # A link to the rule still lands in its own file (#720).
+    assert "d0.xhtml#r0" not in _keys_by_text(chapters)["D1 Heading"]
+
+
+def _contents_file(c1, frag):
+    """A title page, a contents page `c1`, and two chapters; the contents
+    entry names `#frag` in `c1`."""
+    spine = [
+        _RawSpineItem("c0.xhtml", "<h1>C0 Title</h1><p>C0 words.</p>"),
+        _RawSpineItem("c1.xhtml", c1),
+        _RawSpineItem("c2.xhtml", "<h2>C2 Chapter</h2><p>C2 words.</p>"),
+        _RawSpineItem("c3.xhtml", "<h2>C3 Chapter</h2><p>C3 words.</p>"),
+    ]
+    toc = [
+        _TOCNode("C0 Title", "c0.xhtml"),
+        _TOCNode("Contents", f"c1.xhtml#{frag}"),
+        _TOCNode("C2 Chapter", "c2.xhtml"),
+        _TOCNode("C3 Chapter", "c3.xhtml"),
+    ]
+    return _conv.extract_chapters_from_oeb(_OEBBook(spine, toc), _silent_log())
+
+
+_LINKS = (
+    '<p><a href="c2.xhtml">C2 Chapter</a></p><p><a href="c3.xhtml">C3 Chapter</a></p>'
+)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "c1, frag",
+    [
+        (
+            "<h2>Contents</h2><ul id='lst'><li><a href='c2.xhtml'>C2 Chapter</a></li>"
+            "<li><a href='c3.xhtml'>C3 Chapter</a></li></ul>",
+            "lst",
+        ),
+        (
+            f"<h2>Contents</h2><div class='toc' id='toc'>{_LINKS}</div>"
+            "<p>Q1 a note.</p>",
+            "toc",
+        ),
+    ],
+    ids=["a-list", "a-listing-and-a-note"],
+)
+def test_the_heading_above_a_toc_target_starts_its_chapter(c1, frag):
+    """The entry names the list under the heading, so its chapter started
+    at the list, and the heading printed at the end of the title page: a
+    second "Contents" there (QA's Q773K, Q773Q, #776). Previewer prints it
+    once, on the contents page."""
+    chapters = _contents_file(c1, frag)
+    assert [b["text"] for b in chapters[0]["blocks"]] == ["C0 Title", "C0 words."]
+    assert chapters[1]["title"] == "Contents"
+    assert [b["text"] for b in chapters[1]["blocks"]][0] == "Contents"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "above",
+    [
+        ["<p>A last line before.</p>"],
+        # A title page's heading and its "by" line, which the first try at
+        # #776 split (pg11, pg981, pg2465 among 13 of the Gutenberg 90).
+        ["<h1>The Book</h1>", "<p>by A. Writer</p>"],
+    ],
+    ids=["a-paragraph", "a-heading-then-a-paragraph"],
+)
+def test_text_above_a_toc_target_stays_where_it_was(above):
+    """Only headings, and nothing else, above the target move with it."""
+    chapters = _contents_file(
+        "".join(above) + "<h2 id='t'>Contents</h2><p>Words.</p>", "t"
+    )
+    texts = [b["text"] for b in chapters[0]["blocks"]]
+    assert texts[:2] == ["C0 Title", "C0 words."]
+    assert len(texts) == 2 + len(above)
+    assert [b["text"] for b in chapters[1]["blocks"]][0] == "Contents"
+
+
+@pytest.mark.unit
 def test_a_toc_entry_naming_an_id_at_the_books_very_end_keeps_its_last_block():
     spine = [
         _RawSpineItem("a.xhtml", "<h1>A</h1><p>A words.</p>"),
