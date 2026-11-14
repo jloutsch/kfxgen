@@ -6087,6 +6087,9 @@ def extract_blocks_from_html(
     native_made = set()  # ids of tables written as native tables
     pending_ids = []  # anchors awaiting the next leaf block (containers, standalone <a>)
     rule_ids = set()  # an <hr>'s own ids: they name the rule (QA on #720)
+    # Ids waiting for a block when a contents listing was discarded: the
+    # listing's, and those of the elements round it (QA's Q773E, Q773H).
+    listing_ids = set()
     # List markers awaiting the next text block: an item's number belongs on
     # the first text it holds, which may sit in a nested <p> (#201). An entry
     # is (marker, ordinal or None).
@@ -6683,6 +6686,7 @@ def extract_blocks_from_html(
                     (len(blocks), frozenset(_subtree_anchor_ids(elem)))
                 )
             _discard_listing(elem)
+            listing_ids.update(pending_ids)
             return
         background = _css_background_image(
             elem, style_resolver(elem) if style_resolver is not None else None
@@ -7595,7 +7599,12 @@ def extract_blocks_from_html(
         # Not a rule's own: it names the rule, in this file. A link to the
         # <hr> under a title alone opened the next chapter, where Kindle
         # Previewer 4.0.3 lands on the rule (QA on #720).
-        trailing_ids.extend(i for i in pending_ids if i not in rule_ids)
+        # Nor a discarded listing's, or a wrapper's round it: a TOC entry
+        # naming one keeps the listing's page for the rebuild, in this file
+        # (QA's Q773E, Q773G, Q773H on #773).
+        trailing_ids.extend(
+            i for i in pending_ids if i not in rule_ids and i not in listing_ids
+        )
     if pending_ids and blocks:
         last_block = next(
             (b for b in reversed(blocks) if b.get("type") != "rule"), blocks[-1]
@@ -8098,7 +8107,6 @@ def _assemble_chapters_by_coordinate(
         )
         if (
             frag
-            and not names_listing
             and frag in spine_items_ordered[si].get("trailing_ids", ())
             and si + 1 < len(spine_items_ordered)
         ):
@@ -8107,10 +8115,9 @@ def _assemble_chapters_by_coordinate(
             # starts its chapter there. On the file's last block it took
             # that block into the next chapter, after its heading; Kindle
             # Previewer 4.0.3 keeps every block in its own file's chapter
-            # (QA's Q771C, #772). Not an id on or in a contents listing
-            # kfxgen discards: the listing makes no blocks, so its ids are
-            # at the file's end too, but its entry keeps the listing's page
-            # (QA's Q773E, Q773G).
+            # (QA's Q771C, #772). A discarded contents listing's ids, and
+            # its wrappers', aren't trailing ids: their entry keeps the
+            # listing's page (QA's Q773E, Q773G, Q773H).
             si, bi = si + 1, 0
             moved_ids.add(frag)
         fi = file_offset[si] + bi
