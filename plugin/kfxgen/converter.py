@@ -5972,6 +5972,7 @@ def extract_blocks_from_html(
     notes_seen=None,
     keep_nav_listings=False,
     trailing_ids=None,
+    end_ids=None,
 ):
     """Like extract_text_from_html but returns structured blocks:
     [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None,
@@ -6007,6 +6008,9 @@ def extract_blocks_from_html(
 
     `keep_nav_listings`: print contents listings as the book has them, for
     a book that gets no Contents page of kfxgen's (#335).
+
+    `end_ids`, when given, collects the ids at the file's very end for
+    chapter assembly: the trailing ids and a closing rule's own (#774).
 
     `trailing_ids`, when given, collects the ids at the file's very end with
     no block after them. They still go on the last block, for chapter
@@ -7605,6 +7609,11 @@ def extract_blocks_from_html(
         trailing_ids.extend(
             i for i in pending_ids if i not in rule_ids and i not in listing_ids
         )
+    if end_ids is not None and blocks:
+        # A rule's own id ending the file is one too: a TOC entry naming it
+        # starts the next file, where Previewer starts its section, though a
+        # link to it lands on the rule (QA's Q773D, #774).
+        end_ids.extend(i for i in pending_ids if i not in listing_ids)
     if pending_ids and blocks:
         last_block = next(
             (b for b in reversed(blocks) if b.get("type") != "rule"), blocks[-1]
@@ -8120,6 +8129,20 @@ def _assemble_chapters_by_coordinate(
             # listing's page (QA's Q773E, Q773G, Q773H).
             si, bi = si + 1, 0
             moved_ids.add(frag)
+        if (
+            0 < bi
+            and si not in last_block_in_file
+            and all(b.get("heading") for b in spine_blocks[si][:bi])
+        ):
+            # Only headings above the target in its file, and no entry
+            # before it there: they open its chapter. An entry naming the
+            # list under "Contents" left the heading at the end of the
+            # chapter before, from another file: a second "Contents" on the
+            # title page (QA's Q773K, Q773Q, #776). Headings after other
+            # text stay where they were: pulling those back moved section
+            # starts in 13 of the Gutenberg 90, splitting title pages from
+            # their "by" lines.
+            bi = 0
         fi = file_offset[si] + bi
         if fi == prev_flat and listing_entry and not names_listing:
             # The entry before named a listing that ends where this one
@@ -8448,6 +8471,7 @@ def extract_chapters_from_oeb(
             tables_seen = []
             notes_seen = []
             trailing = []
+            end_ids = []
             item_href = getattr(item, "href", "") or ""
             note_ids = _note_target_ids(item.data) | note_pairs.get(
                 _key_doc(item_href, "") if item_href else "", set()
@@ -8463,6 +8487,7 @@ def extract_chapters_from_oeb(
                 notes_seen=notes_seen,
                 keep_nav_listings=keep_nav_listings,
                 trailing_ids=trailing,
+                end_ids=end_ids,
                 # Assembly skips entries naming a footnote; so does this.
                 toc_targets=toc_targets.get(
                     _normalize_href(getattr(item, "href", "") or ""), set()
@@ -8524,7 +8549,7 @@ def extract_chapters_from_oeb(
                 "nav_listing_at": nav_listing_at,
                 "note_ids": note_ids,
                 # Ids at its very end, with no block after them (#338, #772).
-                "trailing_ids": frozenset(trailing),
+                "trailing_ids": frozenset(end_ids),
                 # Where the pages break is known only from the CSS (#363).
                 "breaks_known": resolver is not None,
             }

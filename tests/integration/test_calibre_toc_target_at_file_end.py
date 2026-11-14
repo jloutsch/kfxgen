@@ -51,17 +51,17 @@ TOC = [
 ]
 
 
-def _write(path):
+def _write(path, body=BODY, toc=TOC):
     items = "".join(
         f'<item id="x{i}" href="{h}" media-type="application/xhtml+xml"/>'
-        for i, h in enumerate(BODY)
+        for i, h in enumerate(body)
     )
-    spine = "".join(f'<itemref idref="x{i}"/>' for i in range(len(BODY)))
+    spine = "".join(f'<itemref idref="x{i}"/>' for i in range(len(body)))
     opf = (
         '<?xml version="1.0" encoding="utf-8"?>'
         '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="u">'
         '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
-        '<dc:identifier id="u">urn:kfxgen:t772</dc:identifier><dc:title>T772</dc:title>'
+        f'<dc:identifier id="u">urn:kfxgen:{path.stem}</dc:identifier><dc:title>T772</dc:title>'
         "<dc:creator>A</dc:creator><dc:language>en</dc:language></metadata>"
         f'<manifest>{items}<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/></manifest>'
         f'<spine toc="ncx">{spine}</spine></package>'
@@ -76,8 +76,8 @@ def _write(path):
             "</rootfiles></container>",
         )
         z.writestr("content.opf", opf)
-        z.writestr("toc.ncx", _ncx(TOC))
-        for h, b in BODY.items():
+        z.writestr("toc.ncx", _ncx(toc))
+        for h, b in body.items():
             z.writestr(h, _page(b, ' xml:lang="en"', "p { margin: 0 }"))
 
 
@@ -113,4 +113,46 @@ def test_each_chapter_keeps_its_own_files_blocks(calibre, tmp_path):  # noqa: F8
         ["C1 Heading", "C1 words.", "C1 one", "C1 two"],
         ["C2 Heading", "C2 words.", "C2 last line."],
         ["C3 Heading", "C3 words."],
+    ]
+
+
+# #774: an <hr id> ending a file, named by the next chapter's entry (QA's
+# Q773D). #776: an entry naming the list under a "Contents" heading, alone in
+# its file (Q773K), or a discarded listing with a note after it (Q773Q).
+LINKS = (
+    '<p><a href="k2.xhtml">K2 Chapter</a></p><p><a href="k3.xhtml">K3 Chapter</a></p>'
+)
+BODY2 = {
+    "d0.xhtml": "<h2>D0 Heading</h2><p>D0 words.</p><hr id='r0'/>",
+    "d1.xhtml": "<h2>D1 Heading</h2><p>D1 words.</p>",
+    "k1.xhtml": "<h2>Contents</h2><ul id='lst'><li><a href='k2.xhtml'>K2 Chapter</a></li>"
+    "<li><a href='k3.xhtml'>K3 Chapter</a></li></ul>",
+    "k2.xhtml": "<h2>K2 Chapter</h2><p>K2 words.</p>",
+    "q1.xhtml": f"<h2>Notes</h2><div class='toc' id='toc'>{LINKS}</div><p>Q1 a note.</p>",
+    "k3.xhtml": "<h2>K3 Chapter</h2><p>K3 words.</p>",
+}
+TOC2 = [
+    ("D0 Heading", "d0.xhtml", 1),
+    ("D1 Heading", "d0.xhtml#r0", 1),
+    ("Contents", "k1.xhtml#lst", 1),
+    ("K2 Chapter", "k2.xhtml", 1),
+    ("Notes", "q1.xhtml#toc", 1),
+    ("K3 Chapter", "k3.xhtml", 1),
+]
+
+
+def test_a_closing_rule_and_a_heading_above_the_target(calibre, tmp_path):  # noqa: F811
+    tmp, _env, _version = calibre
+    epub, kfx = tmp / "t774.epub", tmp / "t774.kfx"
+    _write(epub, BODY2, TOC2)
+    _ebook_convert(calibre, epub, kfx, True)
+    sections = _sections(kfx)
+    # D1 is a section of its own (#774).
+    assert sections[0] == ["D0 Heading", "D0 words."]
+    assert sections[1] == ["D1 Heading", "D1 words."]
+    # The headings above the entries' targets open their sections, not the
+    # end of the section before (#776).
+    assert all(s[-1] not in ("Contents", "Notes") for s in sections)
+    assert ["Contents", "Notes"] == [
+        s[0] for s in sections if s[0] in ("Contents", "Notes")
     ]
