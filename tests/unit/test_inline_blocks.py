@@ -78,27 +78,56 @@ def test_an_inline_div_in_a_list_item_or_a_cell_joins():
     assert cells == ["c d", "other"]
 
 
-def test_an_inline_box_with_side_padding_or_a_width_stays_a_block():
-    # Hindawi verse: two half-lines, inline-block with `padding: 0 10px`.
-    # Previewer pads each in a run of its own, which kfxgen doesn't write;
-    # joined bare they ran together as one word.
-    css = {
-        **CSS,
-        "half": {
-            "display": "inline-block",
-            "padding-left": "10px",
-            "padding-right": "10px",
-        },
-        "wide": {"display": "inline-block", "width": "45%"},
-    }
+#: Inline boxes Previewer writes with a run of their own (QA's q784e):
+#: kfxgen writes none of these on a run, so each stays a block.
+BOXES = {
+    # Hindawi verse half-lines: inline-block, `padding: 0 10px`.
+    "pad": {"display": "inline-block", "padding-left": "10px", "padding-right": "10px"},
+    "wide": {"display": "inline-block", "width": "45%"},
+    "ml": {"display": "inline-block", "margin-left": "1em"},
+    "mr": {"display": "inline", "margin-right": "1em"},
+    # Library book 5247's shape: a rule under an inline-block <p>.
+    "bb": {
+        "display": "inline-block",
+        "border-bottom-style": "solid",
+        "border-bottom-width": "1",
+        "border-bottom-color": "black",
+    },
+    # Library book 7559's shape: left-aligned in a centred blockquote.
+    "left": {"display": "inline-block", "text-align": "left"},
+    "zero": {"display": "inline-block", "margin-left": "0", "padding-left": "0px"},
+}
+
+
+@pytest.mark.parametrize("cls", ["pad", "wide", "ml", "mr", "bb", "left"])
+def test_an_inline_box_styled_as_a_box_stays_a_block(cls):
+    # Joined bare, "one" and "two" ran together as "onetwo".
+    blocks = _conv.extract_blocks_from_html(
+        _root(f'<div><div class="{cls}">one</div><div class="{cls}">two</div></div>'),
+        style_resolver=_resolver({**CSS, **BOXES}),
+    )
+    assert [b["text"] for b in blocks] == ["one", "two"]
+
+
+def test_an_inline_elements_own_text_align_still_joins():
+    # Hindawi list items: `(5) <p>` with `p { text-align: justify }` and the
+    # <p> set inline; one line in Previewer's book. P780 E03 too.
+    css = {**CSS, "num": {}, "jp": {"display": "inline", "text-align": "justify"}}
     blocks = _conv.extract_blocks_from_html(
         _root(
-            '<div><div class="half">one</div><div class="half">two</div></div>'
-            '<div><div class="wide">three</div><div class="wide">four</div></div>'
+            '<ul><li><span class="num">(5) </span><p class="jp">item words</p></li></ul>'
         ),
         style_resolver=_resolver(css),
     )
-    assert [b["text"] for b in blocks] == ["one", "two", "three", "four"]
+    assert [b["text"] for b in blocks] == ["(5) item words"]
+
+
+def test_zero_margins_and_padding_still_join():
+    blocks = _conv.extract_blocks_from_html(
+        _root('<div><div class="zero">one</div><div class="zero"> two</div></div>'),
+        style_resolver=_resolver({**CSS, **BOXES}),
+    )
+    assert [b["text"] for b in blocks] == ["one two"]
 
 
 def test_nested_inline_divs_join():

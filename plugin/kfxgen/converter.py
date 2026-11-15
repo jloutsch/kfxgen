@@ -5961,6 +5961,39 @@ _INLINE_DISPLAYS = frozenset({"inline", "inline-block"})
 _INLINE_ABLE_TAGS = frozenset({"div", "p", "h1", "h2", "h3", "h4", "h5", "h6"})
 
 
+def _nonzero_length(value):
+    """Whether a declared CSS length is other than zero ("auto" is zero)."""
+    m = re.match(r"\s*[-+]?(\d*\.?\d+)", str(value or ""))
+    return bool(m) and float(m.group(1)) != 0
+
+
+def _styles_its_own_box(css):
+    """Whether an element drawn inline sets what Kindle Previewer 4.0.3 puts
+    in a run of its own: side padding (`$53`/`$55`), a side margin
+    (`$48`/`$50`), a border (`$88`...), a width (`$63`) (QA's q784e). kfxgen
+    writes none of them on a run, so such an element stays a block of its
+    own: joined bare, two side by side ran together as one word, Arabic
+    verse half-lines (`.poetry_container.line > div > div`, inline-block,
+    `padding: 0 10px`) among them. So does an inline-block setting its own
+    text-align: joined, a left-aligned one took a centred blockquote's
+    alignment, where Previewer keeps it left (QA, library book 7559). An
+    `inline` element's text-align draws nothing, as in CSS: Previewer joins
+    an inline <div> set centred without centring the line (P780 E03), and
+    Hindawi's list items, `(5) <p>` with `p { text-align: justify }` and the
+    <p> set inline, are one line in Previewer's book."""
+    pads = _box_padding(css) or {}
+    inline_block = str(css.get("display") or "").strip().lower() == "inline-block"
+    return bool(
+        pads.get("left")
+        or pads.get("right")
+        or _nonzero_length(css.get("margin-left"))
+        or _nonzero_length(css.get("margin-right"))
+        or _css_border(css)
+        or str(css.get("width") or "auto").strip().lower() != "auto"
+        or (inline_block and str(css.get("own-text-align") or "").strip())
+    )
+
+
 def _inline_blocks_as_spans(body, style_resolver, block_tags):
     """Rename each <div>, <p> or heading in `body` that its CSS draws inline,
     and that holds no block, to a <span>, so every path walks it as words:
@@ -5987,16 +6020,7 @@ def _inline_blocks_as_spans(body, style_resolver, block_tags):
         local = _local_tag(elem.tag)
         if local not in _INLINE_ABLE_TAGS or display(elem) not in _INLINE_DISPLAYS:
             continue
-        # A box with side padding or a width: Previewer runs it in with a
-        # run of its own carrying them (`$53`/`$55`, `$63`), which kfxgen
-        # doesn't write. Joined bare, a verse's two half-lines
-        # (`.poetry_container.line > div > div`, inline-block, padding 0
-        # 10px) ran together as one word; apart, each is its own line.
-        css = style_resolver(elem) or {}
-        pads = _box_padding(css) or {}
-        if pads.get("left") or pads.get("right"):
-            continue
-        if str(css.get("width") or "auto").strip().lower() != "auto":
+        if _styles_its_own_box(style_resolver(elem) or {}):
             continue
         # A <br> is a line break in the words whatever display calibre
         # gives it (P780 A02: Previewer writes it as "\n").

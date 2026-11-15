@@ -33,6 +33,11 @@ CSS = """
 .ib { display: inline-block }
 .poetry_container.line > div > div { min-width: 45%; display: inline-block; padding: 0 10px }
 div.boxed { font-style: normal }
+.mlb { display: inline-block; margin-left: 1em }
+.bb { display: inline-block; border: 1px solid black }
+blockquote.mid { text-align: center }
+p.lib { display: inline-block; text-align: left }
+p.rule { display: inline-block; border-bottom: 1px solid black }
 """
 W = 'class="pg_body_wrapper"'
 
@@ -103,6 +108,24 @@ CASES = [
         ["half one", "half two"],
     ),
     (
+        "c1",
+        "MARGINS",
+        '<div><div class="mlb">left</div><div class="mlb">right</div></div>',
+        ["left", "right"],
+    ),
+    (
+        "c1",
+        "BORDERS",
+        '<div><div class="bb">left</div><div class="bb">right</div></div>',
+        ["left", "right"],
+    ),
+    (
+        "c1",
+        "RULE",
+        '<p class="rule">ruled</p><p class="rule">twice</p>',
+        ["ruled", "twice"],
+    ),
+    (
         "c2",
         "SPACER",
         f"<p>before</p><div {W}><br/>\n</div><p>after</p>",
@@ -133,3 +156,24 @@ def test_a_wrapper_of_line_breaks_between_paragraphs_keeps_its_space(converted):
     by_case, calibre_version = converted
     _before, (_text, style) = by_case["SPACER"]["rows"]
     assert Decimal(str(style["$47"]["$307"])) > Decimal("1"), calibre_version
+
+
+def test_an_inline_block_keeps_its_own_alignment_in_a_centred_quote(calibre):  # noqa: F811
+    # QA's library book 7559: Previewer keeps it left-aligned.
+    by_case, version = _convert(
+        calibre,
+        "inline-align",
+        [
+            (
+                "c1",
+                "ALIGN",
+                '<blockquote class="mid"><p class="lib">left words</p></blockquote>',
+            )
+        ],
+        CSS,
+        native=True,
+    )
+    ((text, style),) = by_case["ALIGN"]["rows"]
+    assert text == "left words"
+    # $34 $59 is left; a centred paragraph is $34 $320.
+    assert str(style.get("$34")) != "$320", version
