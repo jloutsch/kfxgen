@@ -29,6 +29,7 @@ from .inline_style import (
     parse_css_length,
     ruby_of,
     run_font_size,
+    span_margin_as_indent,
     without_math,
     without_ruby,
 )
@@ -656,6 +657,12 @@ def _cut_after_picture_lines(block):
                 piece.pop("heading_level", None)
             if (piece.get("block_style") or {}).get("indent"):
                 piece["block_style"] = {**piece["block_style"], "indent": None}
+            # A span opening the piece is its indent, as it is a
+            # paragraph's (#781); not in a list item, where it stays a run.
+            if piece.get("block_style") is not None and not piece.get("in_list"):
+                piece["spans"], indent = span_margin_as_indent(piece["spans"], None)
+                if indent is not None:
+                    piece["block_style"] = {**piece["block_style"], "indent": indent}
         if hi is not None:
             piece.pop("margin_below", None)  # the paragraph goes on (#553)
         pieces.append(piece)
@@ -7539,6 +7546,9 @@ class NativeKFXGenerator:
             mono_families,
             nested_shift,
             run_font_size,
+            MARGIN_LEFT_FLAG,
+            MARGIN_RIGHT_FLAG,
+            run_margin_length,
         )
 
         #: A block style's small caps, transform, spacing and colour as
@@ -8018,6 +8028,15 @@ class NativeKFXGenerator:
                 value = flag_value(flags, kind)
                 if value is not None:
                     attrs[arg] = value
+            # A span's own margins, on its first and last run, as Kindle
+            # Previewer 4.0.3 writes them (#781, P781 S02, S06).
+            for kind, arg in (
+                (MARGIN_LEFT_FLAG, "margin_left"),
+                (MARGIN_RIGHT_FLAG, "margin_right"),
+            ):
+                value = flag_value(flags, kind)
+                if value is not None:
+                    attrs[arg] = run_margin_length(value)
             link = flag_value(flags, LINK_COLOUR_FLAG)
             if link is not None:
                 if link_found:
@@ -8793,7 +8812,14 @@ class NativeKFXGenerator:
                             FLAG_UNDERLINE,
                             FLAG_STRIKE,
                         )
-                    ) or any(flag_value(flags, k) is not None for k in TYPOGRAPHY_FLAGS)
+                    ) or any(
+                        flag_value(flags, k) is not None
+                        for k in (
+                            *TYPOGRAPHY_FLAGS,
+                            MARGIN_LEFT_FLAG,
+                            MARGIN_RIGHT_FLAG,
+                        )
+                    )
                     link = flag_value(flags, LINK_COLOUR_FLAG)
                     if link is not None and (link[0] is not None or not link_found):
                         has_emphasis = True
