@@ -40,6 +40,12 @@ CSS = {
     "tip": {"text-indent": "5%"},
     "bm2": {"font-weight": "bold", "margin-left": "2em"},
     "bigm": {"margin-left": "2em", "font-size": "2em"},
+    "fl": {"float": "left", "margin-left": "-2.5em", "margin-right": "1em"},
+    "neg3": {"margin-left": "-3em"},
+    "hang": {"text-indent": "-1em", "margin-left": "2em"},
+    "pfn4": {"margin-left": "4em"},
+    "pfn1": {"margin-left": "1em"},
+    "neg1": {"margin-left": "-1em"},
 }
 
 
@@ -198,3 +204,36 @@ def test_the_generator_writes_the_runs_margins(tmp_path):
     # A px as 0.45pt (P781 S04: 20px is 9pt).
     assert _length(style, "$48") == ("9", "$318")
     assert _length(style, "$50") == ("2", "$308")
+
+
+def test_a_floated_spans_margins_are_left_alone():
+    # Line numbers hung in the margin (QA's q786 H01): Previewer writes no
+    # negative indent or run; the margin places the float.
+    (block,) = _blocks("<p><span class='fl'>12</span>The line of verse.</p>")
+    assert block["block_style"]["indent"] is None
+    assert _margins(block) == []
+    (block,) = _blocks("<p>Mid <span class='fl'>12</span> line.</p>")
+    assert _margins(block) == []
+
+
+def test_a_negative_margin_opening_the_paragraph_is_dropped():
+    # QA's q786 G07: no indent and no run in Previewer's book.
+    (block,) = _blocks("<p><span class='neg3'>out</span> words</p>")
+    assert block["block_style"]["indent"] is None
+    assert _margins(block) == []
+    # G06: a hanging indent keeps its own -1em.
+    (block,) = _blocks("<p class='hang'><span class='neg3'>out</span> words</p>")
+    assert block["block_style"]["indent"] == ("-1", "$308")
+    assert _margins(block) == []
+
+
+def test_a_negative_margin_opening_the_paragraph_hangs_into_its_margin():
+    # pg58169's footnotes: `.ln1 { margin-left: -1em }` opening a note set
+    # 4em in; Previewer's 437 such notes hang their numbers.
+    (block,) = _blocks("<p class='pfn4'><span class='neg1'>12</span> The note.</p>")
+    assert block["block_style"]["indent"] == ("-1", "$308")
+    assert _margins(block) == []
+    # Past the margin it is dropped.
+    (block,) = _blocks("<p class='pfn1'><span class='neg3'>12</span> x</p>")
+    assert block["block_style"]["indent"] is None
+    assert _margins(block) == []

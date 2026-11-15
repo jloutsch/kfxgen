@@ -29,7 +29,6 @@ from .inline_style import (
     parse_css_length,
     ruby_of,
     run_font_size,
-    span_margin_as_indent,
     without_math,
     without_ruby,
 )
@@ -657,12 +656,6 @@ def _cut_after_picture_lines(block):
                 piece.pop("heading_level", None)
             if (piece.get("block_style") or {}).get("indent"):
                 piece["block_style"] = {**piece["block_style"], "indent": None}
-            # A span opening the piece is its indent, as it is a
-            # paragraph's (#781); not in a list item, where it stays a run.
-            if piece.get("block_style") is not None and not piece.get("in_list"):
-                piece["spans"], indent = span_margin_as_indent(piece["spans"], None)
-                if indent is not None:
-                    piece["block_style"] = {**piece["block_style"], "indent": indent}
         if hi is not None:
             piece.pop("margin_below", None)  # the paragraph goes on (#553)
         pieces.append(piece)

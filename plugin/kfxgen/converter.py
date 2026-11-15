@@ -2615,8 +2615,13 @@ def _with_span_margins(parts, css):
     them as `$48`/`$50` on the element's run (P781 S02, S06); a span split
     into runs by a <b> inside still takes each once (T01), and margins do not
     inherit. Not in vertical text, where left and right are not the line's
-    ends (unmeasured)."""
+    ends (unmeasured). Nor on a floated element, whose margin places the
+    float: a line number hung in the margin (`float: left; margin-left:
+    -2.5em`) pulled its paragraph's text left, a drop cap's `margin-right`
+    spaced its letter (QA's q786 H01, G34; Previewer writes neither)."""
     if str(css.get("writing-mode") or "").startswith("vertical"):
+        return parts
+    if str(css.get("float") or "").strip().lower() in ("left", "right"):
         return parts
     sides = (
         (MARGIN_LEFT_FLAG, css_run_margin(css.get("margin-left")), range(len(parts))),
@@ -6963,7 +6968,7 @@ def _extract_blocks(
                         and _local_tag(elem.tag) not in ("li", "tr", *_CELL_TAGS)
                     ):
                         spans, bstyle["indent"] = span_margin_as_indent(
-                            spans, bstyle["indent"]
+                            spans, bstyle["indent"], bstyle["margin_left"]
                         )
                 if _local_tag(elem.tag) == "math" and elem.get("display") == "block":
                     # Centred, as Previewer sets a display equation (#235).

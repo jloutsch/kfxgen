@@ -584,16 +584,19 @@ def run_margin_length(value):
     return mag, unit
 
 
-def span_margin_as_indent(spans, indent):
+def span_margin_as_indent(spans, indent, margin_left=None):
     """(spans, indent) with a left margin on the paragraph's very first run
     moved into its text-indent (#781): Kindle Previewer 4.0.3 writes a span
     opening the paragraph as the paragraph's `$36`, added to its own (P781
     S03, S08: 1em + 2em is 3em; S12, a heading), not as a run. A list item
     keeps the run (S14). In another unit than the paragraph's own indent, the
     run stays too. The unit is kept as given, as kfxgen keeps an indent's
-    (#779). A paragraph cut at an empty line starts each piece so too
-    (pg22091: 130 lines after `<br/><br/>` opening with a 1em span, each a
-    3.125% indent in Previewer's book)."""
+    (#779). A negative one hangs into the paragraph's own left margin
+    (`margin_left`), as a hanging indent does (#465): pg58169's footnote
+    numbers (-1em in a 4em margin) are 437 negative indents in Previewer's
+    book. With no margin to hang into (QA's q786 G07), or an indent of its
+    own (G06 keeps its -1em), Previewer writes neither an indent nor a run,
+    so it is dropped."""
     first = next((s for s in spans if s[0] == 0), None)
     if first is None:
         return spans, indent
@@ -601,15 +604,21 @@ def span_margin_as_indent(spans, indent):
     margin = flag_value(flags, MARGIN_LEFT_FLAG)
     if margin is None or run_font_size(flags) is not None:
         return spans, indent
-    if indent is not None and indent[1] != margin[1]:
+    negative = float(margin[0]) < 0
+    if not negative and indent is not None and indent[1] != margin[1]:
         return spans, indent
-    total = float(margin[0]) + (float(indent[0]) if indent else 0.0)
     rest = frozenset(flags) - {(MARGIN_LEFT_FLAG, margin)}
     spans = [
         (start, length, rest) if s is first else s
         for s in spans
         if s is not first or rest
     ]
+    if negative:
+        hang, room = _length_percent(margin), _length_percent(margin_left)
+        if indent or hang is None or room is None or -hang > room:
+            return spans, indent
+        return spans, margin
+    total = float(margin[0]) + (float(indent[0]) if indent else 0.0)
     if total == 0:
         return spans, None
     return spans, (f"{total:.4f}".rstrip("0").rstrip("."), margin[1])

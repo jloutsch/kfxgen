@@ -53,6 +53,11 @@ CASES = [
     ),
     (
         "c1",
+        "FLOAT",
+        '<p><span style="float: left; margin-left: -2.5em">12</span>Floated number line.</p>',
+    ),
+    (
+        "c1",
         "LINK",
         "<p>lnk <a class='m2' href='c1.xhtml#lt'>link</a> after</p><p id='lt'>link target</p>",
     ),
@@ -134,11 +139,27 @@ def test_a_list_item_keeps_the_run(entries):
     )
 
 
-def test_a_span_opening_a_piece_after_an_empty_line_is_its_indent(entries):
-    # Previewer cuts the paragraph there and indents the piece (pg22091: 130
-    # such lines, each a 3.125% indent, 1em).
+def test_a_span_opening_a_piece_after_an_empty_line_keeps_its_run(entries):
+    # Previewer indents the piece (pg22091: 130 such lines, 3.125%); an
+    # indented piece would lose kfxgen's line of space above it (QA's q786
+    # G36), so the run stays, at the line's start.
     by_text, version = entries
     (key,) = [t for t in by_text if t.startswith("after blank")]
     style, runs = by_text[key]
-    assert _length(style, "$36") == ("1", "$308"), version
-    assert not [r for _s, _n, r in runs if _length(r, "$48") == ("1", "$308")]
+    assert _length(style, "$36") in (None, ("0", "$314")), version
+    assert [(s, n) for s, n, r in runs if _length(r, "$48") == ("1", "$308")] == [
+        (0, 11)
+    ]
+
+
+def test_a_floated_spans_negative_margin_is_left_alone(entries):
+    # QA's q786 H01: line numbers hung in the margin.
+    by_text, version = entries
+    (key,) = [t for t in by_text if "Floated number line." in t]
+    style, runs = by_text[key]
+    assert _length(style, "$36") in (None, ("0", "$314")), version
+    assert not [
+        r
+        for _s, _n, r in runs
+        if r.get("$48") is not None and str(r["$48"]["$307"]).startswith("-")
+    ]
