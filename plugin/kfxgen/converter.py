@@ -5953,7 +5953,109 @@ def _space_between(blocks, margins, measured=True, paddings=None):
     return out
 
 
-def extract_blocks_from_html(
+#: `display` values that run a block element into the words round it, as
+#: Kindle Previewer 4.0.3 writes it (P780: a <div>, <p> or <h3> set
+#: `inline` or `inline-block` joins its neighbours in one paragraph).
+_INLINE_DISPLAYS = frozenset({"inline", "inline-block"})
+#: The block tags measured so in P780 (div, p, h3) and the other headings.
+_INLINE_ABLE_TAGS = frozenset({"div", "p", "h1", "h2", "h3", "h4", "h5", "h6"})
+
+
+def _nonzero_length(value):
+    """Whether a declared CSS length is other than zero ("auto" is zero)."""
+    m = re.match(r"\s*[-+]?(\d*\.?\d+)", str(value or ""))
+    return bool(m) and float(m.group(1)) != 0
+
+
+def _styles_its_own_box(css):
+    """Whether an element drawn inline sets what Kindle Previewer 4.0.3 puts
+    in a run of its own: side padding (`$53`/`$55`), a side margin
+    (`$48`/`$50`), a border (`$88`...), a width (`$63`) (QA's q784e). kfxgen
+    writes none of them on a run, so such an element stays a block of its
+    own: joined bare, two side by side ran together as one word, Arabic
+    verse half-lines (`.poetry_container.line > div > div`, inline-block,
+    `padding: 0 10px`) among them. So does an inline-block setting its own
+    text-align: joined, a left-aligned one took a centred blockquote's
+    alignment, where Previewer keeps it left (QA, library book 7559). An
+    `inline` element's text-align draws nothing, as in CSS: Previewer joins
+    an inline <div> set centred without centring the line (P780 E03), and
+    Hindawi's list items, `(5) <p>` with `p { text-align: justify }` and the
+    <p> set inline, are one line in Previewer's book."""
+    pads = _box_padding(css) or {}
+    inline_block = str(css.get("display") or "").strip().lower() == "inline-block"
+    return bool(
+        pads.get("left")
+        or pads.get("right")
+        or _nonzero_length(css.get("margin-left"))
+        or _nonzero_length(css.get("margin-right"))
+        or _css_border(css)
+        or str(css.get("width") or "auto").strip().lower() != "auto"
+        or (inline_block and str(css.get("own-text-align") or "").strip())
+    )
+
+
+def _inline_blocks_as_spans(body, style_resolver, block_tags):
+    """Rename each <div>, <p> or heading in `body` that its CSS draws inline,
+    and that holds no block, to a <span>, so every path walks it as words:
+    Project Gutenberg wraps loose text in `div.pg_body_wrapper { display:
+    inline }`, and pg9939's "(", "Sufficient to Serve Six" and ")" were three
+    paragraphs (#780). One holding a block is left alone: Previewer breaks
+    the line round the block, as kfxgen's walk does (P780 C01-C03).
+
+    Returns `(element, tag)` pairs to put back once the walk is done: the
+    tree is calibre's, and a Stylizer built on it later must still match
+    `div.x` (styles already resolved are keyed by element, not tag)."""
+    if style_resolver is None:
+        return []
+    renamed = []
+
+    def display(elem):
+        return str((style_resolver(elem) or {}).get("display") or "").strip().lower()
+
+    # Innermost first, so an inline <div> inside another is a span by the
+    # time the outer one is checked for blocks.
+    for elem in reversed(list(body.iterdescendants())):
+        if not isinstance(elem.tag, str):
+            continue
+        local = _local_tag(elem.tag)
+        if local not in _INLINE_ABLE_TAGS or display(elem) not in _INLINE_DISPLAYS:
+            continue
+        if _styles_its_own_box(style_resolver(elem) or {}):
+            continue
+        # A <br> is a line break in the words whatever display calibre
+        # gives it (P780 A02: Previewer writes it as "\n").
+        if any(
+            isinstance(d.tag, str)
+            and _local_tag(d.tag) != "br"
+            and (
+                d.tag in block_tags
+                or _draws_as_block(_local_tag(d.tag), {"display": display(d)})
+            )
+            for d in elem.iterdescendants()
+        ):
+            continue
+        # One holding only line breaks or a non-breaking space breaks the
+        # paragraph and adds space, even between two inline <div>s of words
+        # (P780J J07-J08; pg23784's `<a id>&nbsp;</a>` before each chapter):
+        # it stays a spacer block (#230).
+        if _is_spacer(elem):
+            continue
+        renamed.append((elem, elem.tag))
+        elem.tag = elem.tag[: -len(local)] + "span"
+    return renamed
+
+
+def extract_blocks_from_html(element, *args, **kwargs):
+    """See `_extract_blocks`. Puts back the tags it renamed (#780)."""
+    renamed = []
+    try:
+        return _extract_blocks(element, *args, renamed=renamed, **kwargs)
+    finally:
+        for elem, tag in renamed:
+            elem.tag = tag
+
+
+def _extract_blocks(
     element,
     style_resolver=None,
     base_href=None,
@@ -5966,6 +6068,7 @@ def extract_blocks_from_html(
     keep_nav_listings=False,
     trailing_ids=None,
     end_ids=None,
+    renamed=None,
 ):
     """Like extract_text_from_html but returns structured blocks:
     [{"text": str, "spans": [(start, length, frozenset)], "block_style": dict|None,
@@ -6004,6 +6107,10 @@ def extract_blocks_from_html(
 
     `end_ids`, when given, collects the ids at the file's very end for
     chapter assembly: the trailing ids and a closing rule's own (#774).
+
+    `renamed`, when given, collects the `(element, tag)` pairs of blocks
+    drawn inline that the walk renamed to spans, for the caller to put
+    back (#780).
 
     `trailing_ids`, when given, collects the ids at the file's very end with
     no block after them. They still go on the last block, for chapter
@@ -6066,6 +6173,12 @@ def extract_blocks_from_html(
     ):
         block_tags.add(tag)
         block_tags.add(ns + tag)
+
+    # Blocks drawn inline are walked as spans (#780); `renamed` lets the
+    # caller put their tags back.
+    inline_spans = _inline_blocks_as_spans(body, style_resolver, block_tags)
+    if renamed is not None:
+        renamed.extend(inline_spans)
 
     def _holds_blocks(elem):
         """A block child: one in `block_tags`, or an <epub:switch> whose
@@ -7566,12 +7679,17 @@ def extract_blocks_from_html(
     is_svg_document = _local_tag(body.tag) == "svg"
     if is_svg_document:
         _emit_svg_blocks(body)
-    elif (body.text or "").strip() or any((c.tail or "").strip() for c in body):
+    elif (
+        (body.text or "").strip()
+        or any((c.tail or "").strip() for c in body)
+        or any(e.getparent() is body for e, _tag in inline_spans)
+    ):
         # Text written straight into <body>, outside any paragraph, is kept
-        # the way it is inside a <div> (#280). A body without any keeps the
-        # walk below, child by child. Any child that walk would treat as more
-        # than a run of text still goes to it: a <nav> listing is discarded
-        # there, and an <aside> or <header> holding paragraphs keeps them.
+        # the way it is inside a <div> (#280), and so is a block drawn
+        # inline there (#780). A body without any keeps the walk below,
+        # child by child. Any child that walk would treat as more than a run
+        # of text still goes to it: a <nav> listing is discarded there, and
+        # an <aside> or <header> holding paragraphs keeps them.
         _walk_container(body, is_block=_is_block_at_body)
     else:
         for child in body:
