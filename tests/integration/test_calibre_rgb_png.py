@@ -1,13 +1,15 @@
 """An RGB PNG over the 1920 px cap is written as a JPEG when that is smaller
 (#557): calibre scaled it as a PNG, which grew one picture from 89 KB to
-270 KB. Kindle Previewer 4.0.3 writes such a picture as a JPEG. One with an
-alpha channel stays a PNG: a JPEG has no transparency.
+270 KB. Kindle Previewer 4.0.3 writes such a picture as a JPEG. One with
+transparent pixels is drawn onto white first (#783), so it is opaque and
+treated the same.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found. CI has no calibre, so this is
 local-only.
 """
 
+import io
 import random
 import struct
 import sys
@@ -16,6 +18,7 @@ import zlib
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "plugin"))
@@ -104,7 +107,7 @@ def _epub(path, pictures):
             z.writestr(name, data)
 
 
-def test_an_opaque_png_over_the_cap_becomes_a_smaller_jpeg(calibre):  # noqa: F811
+def test_a_png_over_the_cap_becomes_a_smaller_jpeg(calibre):  # noqa: F811
     tmp, _env, version = calibre
     rgb, rgba = _png(False), _png(True)
     epub, kfx = tmp / "r557.epub", tmp / "r557.kfx"
@@ -113,17 +116,20 @@ def test_an_opaque_png_over_the_cap_becomes_a_smaller_jpeg(calibre):  # noqa: F8
     frags = load_fragments(kfx)
     raw = {str(f.fid): bytes(val(f)) for f in by_type(frags, "$417")}
     res = {str(f.fid): val(f) for f in by_type(frags, "$164")}
-    got = {}
+    got, pics = {}, {}
     for st in by_type(frags, "$259"):
         for e in iter_entries(val(st)["$146"]):
             if e.get("$175") is not None:
                 r = res[str(e["$175"])]
                 data = raw[str(r["$165"])]
                 got[str(e["$584"])] = (str(r["$161"]), data[:3], len(data))
+                pics[str(e["$584"])] = data
     # The RGB one: a JPEG, labelled one ($285), smaller than the source.
     fmt, magic, size = got["r"]
     assert (fmt, magic) == ("$285", b"\xff\xd8\xff"), f"calibre {version}: {got}"
     assert size < len(rgb), f"calibre {version}: {size} >= {len(rgb)}"
-    # The RGBA one: still a PNG with its alpha channel (colour type 6).
+    # The RGBA one: drawn onto white (#783), then a JPEG like the RGB one.
     fmt, magic, _size = got["t"]
-    assert (fmt, magic) == ("$284", b"\x89PN"), f"calibre {version}: {got}"
+    assert (fmt, magic) == ("$285", b"\xff\xd8\xff"), f"calibre {version}: {got}"
+    top = Image.open(io.BytesIO(pics["t"])).convert("RGB").getpixel((960, 100))
+    assert min(top) > 245, f"calibre {version}: top half {top}"
