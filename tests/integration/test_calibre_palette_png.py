@@ -1,6 +1,7 @@
 """A palette PNG over the 1920 px cap stays a palette PNG when scaled (#557):
 calibre gave it back as RGB, several times its bytes. One with a
-transparent colour stays RGBA, its transparency kept.
+transparent colour is drawn onto white in its palette first (#783), so it
+stays a palette too, with no transparency left.
 
 It needs calibre installed, so it is `slow` (run with `pytest -m slow`) and
 skips when `ebook-convert` is not found. CI has no calibre, so this is
@@ -105,9 +106,10 @@ def test_a_scaled_palette_png_stays_a_palette(calibre):  # noqa: F811
     frags = load_fragments(kfx)
     raw = {str(f.fid): bytes(val(f)) for f in by_type(frags, "$417")}
     pictures = [raw[str(val(f)["$165"])] for f in by_type(frags, "$164")]
-    # (width, height, PNG colour type): 3 a palette, 6 RGBA.
+    # (width, height, PNG colour type): 3 a palette.
     shown = sorted((*struct.unpack(">II", p[16:24]), p[25]) for p in pictures)
-    assert shown == [(1919, 1407, 3), (1919, 1407, 6)], f"calibre {version}"
+    assert shown == [(1919, 1407, 3), (1919, 1407, 3)], f"calibre {version}"
+    assert not any(b"tRNS" in p for p in pictures), f"calibre {version}"
     source = len(_palette_png(2000, 1466, False))
-    # The palette one stays near its own size; calibre's RGB copy was 2.5x.
-    assert min(len(p) for p in pictures) < 2 * source, f"calibre {version}"
+    # Each stays near its own size; calibre's RGB copy was 2.5x.
+    assert max(len(p) for p in pictures) < 2 * source, f"calibre {version}"
