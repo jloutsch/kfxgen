@@ -8,6 +8,7 @@ no-op so it never breaks anything.
 
 import os
 import struct
+import zlib
 
 DEFAULT_MAX_DIM = 1920
 DEFAULT_JPEG_QUALITY = 85
@@ -122,6 +123,88 @@ def cmyk_to_rgb(cover_image, images, log):
             return image_to_data(img, fmt="JPEG", compression_quality=quality)
         except Exception as e:  # noqa: BLE001 - never fail a conversion over an image
             log.warn(f"  CMYK picture kept as it is: {e}")
+            return data
+
+    return convert(cover_image), {href: convert(d) for href, d in images.items()}
+
+
+def _png_chunks(data):
+    """A PNG's chunks as (kind, body) pairs, or None when they don't parse."""
+    chunks, i = [], 8
+    while i + 8 <= len(data):
+        n = struct.unpack(">I", data[i : i + 4])[0]
+        kind, body = data[i + 4 : i + 8], data[i + 8 : i + 8 + n]
+        if len(body) != n:
+            return None
+        chunks.append((kind, body))
+        i += 12 + n
+        if kind == b"IEND":
+            return chunks
+    return None
+
+
+def _png_from_chunks(chunks):
+    out = bytearray(_PNG_SIG)
+    for kind, body in chunks:
+        crc = zlib.crc32(kind + body) & 0xFFFFFFFF
+        out += struct.pack(">I", len(body)) + kind + body + struct.pack(">I", crc)
+    return bytes(out)
+
+
+def _flatten_palette(data, chunks):
+    """A palette PNG with its transparent colours drawn onto white in the
+    palette itself: still a palette, and no pixel touched."""
+    plte = next((b for k, b in chunks if k == b"PLTE"), None)
+    trns = next((b for k, b in chunks if k == b"tRNS"), None)
+    if plte is None or trns is None or all(a == 255 for a in trns):
+        return data
+    rgb = bytearray(plte)
+    for i, a in enumerate(trns[: len(plte) // 3]):
+        for j in range(3 * i, 3 * i + 3):
+            rgb[j] = (rgb[j] * a + 255 * (255 - a)) // 255
+    return _png_from_chunks(
+        [(k, bytes(rgb) if k == b"PLTE" else b) for k, b in chunks if k != b"tRNS"]
+    )
+
+
+def flatten_transparent(cover_image, images, log):
+    """The cover and body pictures, each PNG with transparent pixels drawn
+    onto white and kept a PNG (#783). Kindle Previewer 4.0.3 draws them onto
+    white too, then writes a JPEG; a JPEG here was declined, so an opaque
+    PNG stays as it is. A grey picture stays grey. A picture that can't be
+    converted, or with no calibre, is left as it is."""
+
+    def convert(data):
+        if not data or data[:8] != _PNG_SIG or len(data) < 26:
+            return data
+        chunks = _png_chunks(data)
+        if chunks is None:
+            return data
+        kind = data[25]
+        if kind == 3:
+            return _flatten_palette(data, chunks)
+        if kind not in (4, 6) and not any(k == b"tRNS" for k, _ in chunks):
+            return data
+        try:
+            from calibre.utils.img import (
+                blend_image,
+                image_from_data,
+                image_has_transparent_pixels,
+                image_to_data,
+            )
+            from qt.core import QImage
+        except ImportError:
+            return data
+        try:
+            img = image_from_data(data)
+            if not image_has_transparent_pixels(img):
+                return data
+            img = blend_image(img)
+            if kind in (0, 4):
+                img = img.convertToFormat(QImage.Format.Format_Grayscale8)
+            return image_to_data(img, fmt="PNG")
+        except Exception as e:  # noqa: BLE001 - never fail a conversion over an image
+            log.warn(f"  transparent picture kept as it is: {e}")
             return data
 
     return convert(cover_image), {href: convert(d) for href, d in images.items()}

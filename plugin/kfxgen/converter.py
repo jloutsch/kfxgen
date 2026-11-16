@@ -27,6 +27,7 @@ from .image_optimize import (
     GIF_SIGNATURES,
     cmyk_to_rgb,
     decodes,
+    flatten_transparent,
     gif_to_png,
     optimize_images,
     svg_to_png,
@@ -10302,6 +10303,7 @@ def convert_oeb_to_kfx(oeb_book, output_path, opts, log):
     )
 
     cover_image, images = cmyk_to_rgb(cover_image, images, log)
+    cover_image, images = flatten_transparent(cover_image, images, log)
     cover_image, images = _check_and_optimize(
         cover_image, cover_href, images, opts, log
     )
