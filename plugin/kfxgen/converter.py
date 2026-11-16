@@ -82,6 +82,12 @@ from .inline_style import (
     parse_css_length,
     parse_vertical_align,
     run_font_size,
+    MARGIN_LEFT_FLAG,
+    MARGIN_RIGHT_FLAG,
+    css_run_margin,
+    span_margin_as_indent,
+    with_run_margin,
+    without_negative_opening_margin,
 )
 from .math_draw import draw as draw_math
 from .native_generator import NativeKFXGenerator
@@ -2604,6 +2610,43 @@ def _turned_parts(elem, cur, style_resolver, base_href, emphasis, mode):
     ]
 
 
+def _with_span_margins(parts, css):
+    """An inline element's `parts` with its own left margin on its first run
+    and its right margin on its last (#781). Kindle Previewer 4.0.3 writes
+    them as `$48`/`$50` on the element's run (P781 S02, S06); a span split
+    into runs by a <b> inside still takes each once (T01), and margins do not
+    inherit. Not in vertical text, where left and right are not the line's
+    ends (unmeasured). Nor on a floated element, whose margin places the
+    float: a line number hung in the margin (`float: left; margin-left:
+    -2.5em`) pulled its paragraph's text left, a drop cap's `margin-right`
+    spaced its letter (QA's q786 H01, G34; Previewer writes neither)."""
+    if str(css.get("writing-mode") or "").startswith("vertical"):
+        return parts
+    if str(css.get("float") or "").strip().lower() in ("left", "right"):
+        return parts
+    sides = (
+        (MARGIN_LEFT_FLAG, css_run_margin(css.get("margin-left")), range(len(parts))),
+        (
+            MARGIN_RIGHT_FLAG,
+            css_run_margin(css.get("margin-right")),
+            range(len(parts) - 1, -1, -1),
+        ),
+    )
+    for kind, value, order in sides:
+        if value is None:
+            continue
+        for i in order:
+            text, flags = parts[i]
+            if (
+                isinstance(text, str)
+                and text.strip()
+                and not _IMG_TOKEN_RE.search(text)
+            ):
+                parts[i] = (text, with_run_margin(flags, kind, value))
+                break
+    return parts
+
+
 def _walk_inline(
     elem,
     flags=frozenset(),
@@ -3054,6 +3097,8 @@ def _walk_inline(
         parts = _whole_baseline_dropped(
             parts, sum(1 for f in cur if f in SHIFT_FLAGS or nested_shift(f))
         )
+    if css and not line and local not in _CELL_TAGS:
+        parts = _with_span_margins(parts, css)
     if local in _CELL_TAGS and not is_root:
         parts.append((" ", frozenset()))
     if line:
@@ -4557,6 +4602,7 @@ def _table_cell(cell, style_resolver, base_href):
     text, spans, marks = normalize_runs_with_anchors(
         _walk_inline(cell, style_resolver=style_resolver, base_href=base_href)
     )
+    spans = without_negative_opening_margin(spans)
     ids = _dedupe_keep_order(_own_anchor_ids(cell) + list(marks))
     css = style_resolver(cell) if style_resolver is not None else None
     return {
@@ -6918,6 +6964,16 @@ def _extract_blocks(
                         spans, drop = _initial(elem, css, text, spans, style_resolver)
                         if drop:
                             bstyle["drop_cap"] = drop
+                    if (
+                        bstyle is not None
+                        and id(elem) not in leaf_cells
+                        and _local_tag(elem.tag) not in ("li", "tr", *_CELL_TAGS)
+                    ):
+                        spans, bstyle["indent"] = span_margin_as_indent(
+                            spans, bstyle["indent"], bstyle["margin_left"]
+                        )
+                    elif _local_tag(elem.tag) != "li":
+                        spans = without_negative_opening_margin(spans)
                 if _local_tag(elem.tag) == "math" and elem.get("display") == "block":
                     # Centred, as Previewer sets a display equation (#235).
                     bstyle = {**(bstyle or compute_block_style({})), "align": "center"}

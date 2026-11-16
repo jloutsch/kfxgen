@@ -561,6 +561,120 @@ def run_font_size(flags):
     return None
 
 
+#: A span's own left and right margin (#781), carried as (flag, (mag, unit))
+#: on the first and the last of its runs: Kindle Previewer 4.0.3 writes it
+#: as `$48`/`$50` on the run (P781 S02, S06). The value is parse_css_length's,
+#: a px still in px; `run_margin_length` gives what the run writes.
+MARGIN_LEFT_FLAG = "run-margin-left"
+MARGIN_RIGHT_FLAG = "run-margin-right"
+
+
+def css_run_margin(value):
+    """A span's declared `margin-left`/`margin-right` as (mag, unit), or None
+    for none, auto or zero. A negative one is kept (P781 S07)."""
+    return parse_css_length(str(value or ""), negative=True)
+
+
+def run_margin_length(value):
+    """The KFX length a run's margin writes: em, %, rem and pt as given, a px
+    as 0.45pt (P781 S04: 20px is `$48` 9pt)."""
+    mag, unit = value
+    if unit == "$319":
+        return f"{float(mag) * 0.45:.4g}", "$318"
+    return mag, unit
+
+
+def _length_sum(a, b):
+    """Two (mag, unit) lengths in one unit added, or None for zero."""
+    total = float(a[0]) + float(b[0])
+    if total == 0:
+        return None
+    return f"{total:.4f}".rstrip("0").rstrip("."), a[1]
+
+
+def _without_opening_margin(spans, first, margin):
+    start, length, flags = first
+    rest = frozenset(flags) - {(MARGIN_LEFT_FLAG, margin)}
+    return [
+        (start, length, rest) if s is first else s
+        for s in spans
+        if s is not first or rest
+    ]
+
+
+def without_negative_opening_margin(spans):
+    """`spans` without a negative left margin on the first run, which would
+    pull the line past its column: Previewer writes none at a table cell's
+    start or on a span of its own size opening a paragraph (QA's q786 I08,
+    J04). A list item keeps its run, as in Previewer's book (I07)."""
+    first = next((s for s in spans if s[0] == 0), None)
+    margin = flag_value(first[2], MARGIN_LEFT_FLAG) if first else None
+    if margin is None or float(margin[0]) >= 0:
+        return spans
+    return _without_opening_margin(spans, first, margin)
+
+
+def span_margin_as_indent(spans, indent, margin_left=None):
+    """(spans, indent) with a left margin on the paragraph's very first run
+    moved into its text-indent (#781): Kindle Previewer 4.0.3 writes a span
+    opening the paragraph as the paragraph's `$36`, added to its own (P781
+    S03, S08: 1em + 2em is 3em; S12, a heading), not as a run. A list item
+    keeps the run (S14). In another unit than the paragraph's own indent, the
+    run stays too. The unit is kept as given, as kfxgen keeps an indent's
+    (#779).
+
+    A negative one is added too, the sum held within the paragraph's own
+    left margin (`margin_left`), as a hanging indent is (#465): QA's q786
+    J01 1em - 1em is none, J02 -1em - 1em is -2em, J03 0.5em - 2em is
+    -1.5em; G06, -1em - 1em in a 1em margin, is -1em; G07, no margin, is
+    none. pg58169's footnote numbers (-1em in a 4em margin) are 437 such
+    indents in Previewer's book. Never a run: a span of its own size keeps
+    no negative run either (J04)."""
+    first = next((s for s in spans if s[0] == 0), None)
+    if first is None:
+        return spans, indent
+    margin = flag_value(first[2], MARGIN_LEFT_FLAG)
+    if margin is None:
+        return spans, indent
+    if float(margin[0]) >= 0:
+        if run_font_size(first[2]) is not None:
+            return spans, indent
+        if indent is not None and indent[1] != margin[1]:
+            return spans, indent
+        return _without_opening_margin(spans, first, margin), _length_sum(
+            margin, indent or ("0", margin[1])
+        )
+    spans = _without_opening_margin(spans, first, margin)
+    if run_font_size(first[2]) is not None:
+        return spans, indent
+    total, room = (
+        (_length_percent(indent) or 0.0) + (_length_percent(margin) or 0.0),
+        _length_percent(margin_left) or 0.0,
+    )
+    if total >= 0 or -total <= room:
+        if indent is not None and indent[1] != margin[1]:
+            return spans, indent
+        return spans, _length_sum(margin, indent or ("0", margin[1]))
+    # Past the margin: held at it, as #465 holds a hanging indent.
+    if room <= 0:
+        return spans, None
+    return spans, ("-" + margin_left[0], margin_left[1])
+
+
+def with_run_margin(flags, kind, value):
+    """`flags` with a margin of `kind` added: one already there in the same
+    unit is summed, as Previewer sums nested spans' margins (P781 T07: 2em
+    round 1em is one run, `$48` 3em). In another unit, the inner one's is
+    kept."""
+    have = flag_value(flags, kind)
+    if have is None:
+        return frozenset(flags) | {(kind, value)}
+    if have[1] != value[1]:
+        return frozenset(flags)
+    total = f"{float(have[0]) + float(value[0]):.4f}".rstrip("0").rstrip(".")
+    return (frozenset(flags) - {(kind, have)}) | {(kind, (total, value[1]))}
+
+
 #: Small caps, text-transform, letter-spacing and colour (#239): each a run's
 #: own when it differs from its parent's, carried as (flag, value). The
 #: value of the first two is the CSS keyword ("normal" and "none" inside a

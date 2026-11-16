@@ -30,6 +30,7 @@ from .inline_style import (
     ruby_of,
     run_font_size,
     without_math,
+    without_negative_opening_margin,
     without_ruby,
 )
 from .kfxlib_minimal.ion import (
@@ -656,6 +657,11 @@ def _cut_after_picture_lines(block):
                 piece.pop("heading_level", None)
             if (piece.get("block_style") or {}).get("indent"):
                 piece["block_style"] = {**piece["block_style"], "indent": None}
+            # Nor a negative margin opening its line, which would pull it
+            # past the column (#781, QA's q786 K01: Previewer writes none),
+            # in a list item too (L01; an item's own opening span keeps its
+            # run, I07, but that is no piece after a cut).
+            piece["spans"] = without_negative_opening_margin(piece["spans"])
         if hi is not None:
             piece.pop("margin_below", None)  # the paragraph goes on (#553)
         pieces.append(piece)
@@ -7539,6 +7545,9 @@ class NativeKFXGenerator:
             mono_families,
             nested_shift,
             run_font_size,
+            MARGIN_LEFT_FLAG,
+            MARGIN_RIGHT_FLAG,
+            run_margin_length,
         )
 
         #: A block style's small caps, transform, spacing and colour as
@@ -8018,6 +8027,15 @@ class NativeKFXGenerator:
                 value = flag_value(flags, kind)
                 if value is not None:
                     attrs[arg] = value
+            # A span's own margins, on its first and last run, as Kindle
+            # Previewer 4.0.3 writes them (#781, P781 S02, S06).
+            for kind, arg in (
+                (MARGIN_LEFT_FLAG, "margin_left"),
+                (MARGIN_RIGHT_FLAG, "margin_right"),
+            ):
+                value = flag_value(flags, kind)
+                if value is not None:
+                    attrs[arg] = run_margin_length(value)
             link = flag_value(flags, LINK_COLOUR_FLAG)
             if link is not None:
                 if link_found:
@@ -8793,7 +8811,14 @@ class NativeKFXGenerator:
                             FLAG_UNDERLINE,
                             FLAG_STRIKE,
                         )
-                    ) or any(flag_value(flags, k) is not None for k in TYPOGRAPHY_FLAGS)
+                    ) or any(
+                        flag_value(flags, k) is not None
+                        for k in (
+                            *TYPOGRAPHY_FLAGS,
+                            MARGIN_LEFT_FLAG,
+                            MARGIN_RIGHT_FLAG,
+                        )
+                    )
                     link = flag_value(flags, LINK_COLOUR_FLAG)
                     if link is not None and (link[0] is not None or not link_found):
                         has_emphasis = True
