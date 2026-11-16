@@ -51,6 +51,12 @@ CASES = [
         "<p>cut first<br/>\n<br/>\n<span style='margin-left: 1em;'>after blank</span><br/>\n<br/>\n"
         "cut last</p>",
     ),
+    # QA's q786 K01: a negative span opening a piece after an empty line.
+    (
+        "c1",
+        "NEGCUT",
+        "<p>neg first<br/>\n<br/>\n<span style='margin-left: -1em;'>neg piece</span> rest</p>",
+    ),
     (
         "c1",
         "FLOAT",
@@ -163,3 +169,15 @@ def test_a_floated_spans_negative_margin_is_left_alone(entries):
         for _s, _n, r in runs
         if r.get("$48") is not None and str(r["$48"]["$307"]).startswith("-")
     ]
+
+
+def test_a_negative_span_opening_a_piece_is_no_run(entries):
+    # It would pull the line past its column; Previewer writes none.
+    by_text, version = entries
+    (key,) = [t for t in by_text if t.startswith("neg piece")]
+    _style, runs = by_text[key]
+    assert not [
+        r
+        for _s, _n, r in runs
+        if r.get("$48") is not None and str(r["$48"]["$307"]).startswith("-")
+    ], version
