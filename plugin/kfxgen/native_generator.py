@@ -658,10 +658,10 @@ def _cut_after_picture_lines(block):
             if (piece.get("block_style") or {}).get("indent"):
                 piece["block_style"] = {**piece["block_style"], "indent": None}
             # Nor a negative margin opening its line, which would pull it
-            # past the column (#781, QA's q786 K01: Previewer writes none);
-            # a list item keeps its run (I07).
-            if not piece.get("in_list"):
-                piece["spans"] = without_negative_opening_margin(piece["spans"])
+            # past the column (#781, QA's q786 K01: Previewer writes none),
+            # in a list item too (L01; an item's own opening span keeps its
+            # run, I07, but that is no piece after a cut).
+            piece["spans"] = without_negative_opening_margin(piece["spans"])
         if hi is not None:
             piece.pop("margin_below", None)  # the paragraph goes on (#553)
         pieces.append(piece)

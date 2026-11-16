@@ -57,6 +57,12 @@ CASES = [
         "NEGCUT",
         "<p>neg first<br/>\n<br/>\n<span style='margin-left: -1em;'>neg piece</span> rest</p>",
     ),
+    # QA's q786 L01: the same in a list item.
+    (
+        "c1",
+        "NEGCUTLI",
+        "<ul><li>li first<br/>\n<br/>\n<span style='margin-left: -1em;'>li piece</span> rest</li></ul>",
+    ),
     (
         "c1",
         "FLOAT",
@@ -171,10 +177,12 @@ def test_a_floated_spans_negative_margin_is_left_alone(entries):
     ]
 
 
-def test_a_negative_span_opening_a_piece_is_no_run(entries):
-    # It would pull the line past its column; Previewer writes none.
+@pytest.mark.parametrize("start", ["neg piece", "li piece"], ids=["K01", "L01"])
+def test_a_negative_span_opening_a_piece_is_no_run(entries, start):
+    # It would pull the line past its column; Previewer writes none, in a
+    # list item too (QA's q786 K01, L01).
     by_text, version = entries
-    (key,) = [t for t in by_text if t.startswith("neg piece")]
+    (key,) = [t for t in by_text if t.startswith(start)]
     _style, runs = by_text[key]
     assert not [
         r
