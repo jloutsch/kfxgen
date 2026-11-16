@@ -9284,6 +9284,50 @@ def _count_text_blocks(blocks):
     return sum(count(b) for b in blocks)
 
 
+def _holds_links(blocks):
+    """Whether any of `blocks` has a link, in a box or a table's cells too."""
+
+    def links(b):
+        if b.get("type") == "box":
+            return _holds_links(b["blocks"])
+        if b.get("type") == "table":
+            return any(
+                _holds_links(cell.get("paragraphs") or [cell])
+                for row in b["table"]["rows"]
+                for cell in row["cells"]
+            )
+        return any(_is_link_flag(f) for _s, _n, fl in b.get("spans") or () for f in fl)
+
+    return any(links(b) for b in blocks)
+
+
+def _listing_under_its_entries(ch, chapters):
+    """Whether contents page `ch` is a heading over listings the book prints
+    under its own TOC entries (#782).
+
+    pg26209 prints `<h2>CONTENTS.</h2>` and then 19 tables of links, each
+    under an `<h3>` the navigation lists as a child of "CONTENTS.": its
+    chapter holds the heading only. Rebuilt, it printed every entry of the
+    book, and the 19 tables, in chapters of their own, followed it. Kindle
+    Previewer 4.0.3 prints the heading and the tables only. Not when the
+    book's listings there were dropped (#132): the rebuilt page is then its
+    only contents."""
+    if ch.get("_had_nav_listing") or _count_text_blocks(ch.get("blocks") or ()) > 1:
+        return False
+    level = ch.get("toc_level", 0)
+    under = list(
+        itertools.takewhile(
+            lambda c: c.get("toc_level", 0) > level,
+            chapters[chapters.index(ch) + 1 :],
+        )
+    )
+    return (
+        bool(under)
+        and not any(c.get("_had_nav_listing") for c in under)
+        and any(_holds_links(c.get("blocks") or ()) for c in under)
+    )
+
+
 def _block_keys(ch):
     """The anchor keys of a chapter's blocks, which hold their parts' own."""
     return [k for b in ch.get("blocks") or () for k in b.get("anchor_keys") or ()]
@@ -9349,6 +9393,13 @@ def _replace_title_page(chapters, metadata, log, listings_kept=False):
         ),
         None,
     )
+    if (
+        book_contents is not None
+        and book_contents is not nav_contents_ch
+        and _listing_under_its_entries(book_contents, chapters)
+    ):
+        log.info("  Kept the contents heading over the listings under its entries")
+        book_contents = None
     if book_contents is not None and id(book_contents) not in rebuilt_bidi:
         rebuilt_bidi[id(book_contents)] = page_bidi(book_contents.get("blocks"))
     # Front matter after a listing about to be replaced is split off before
