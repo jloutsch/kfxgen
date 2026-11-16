@@ -45,6 +45,12 @@ CSS = {
     "hang": {"text-indent": "-1em", "margin-left": "2em"},
     "pfn4": {"margin-left": "4em"},
     "pfn1": {"margin-left": "1em"},
+    "neg2": {"margin-left": "-2em"},
+    "bigneg": {"margin-left": "-1em", "font-size": "1.2em"},
+    "j01": {"text-indent": "1em", "margin-left": "3em"},
+    "j02": {"text-indent": "-1em", "margin-left": "3em"},
+    "j03": {"text-indent": "0.5em", "margin-left": "3em"},
+    "g06": {"text-indent": "-1em", "margin-left": "1em"},
     "neg1": {"margin-left": "-1em"},
 }
 
@@ -221,10 +227,47 @@ def test_a_negative_margin_opening_the_paragraph_is_dropped():
     (block,) = _blocks("<p><span class='neg3'>out</span> words</p>")
     assert block["block_style"]["indent"] is None
     assert _margins(block) == []
-    # G06: a hanging indent keeps its own -1em.
-    (block,) = _blocks("<p class='hang'><span class='neg3'>out</span> words</p>")
-    assert block["block_style"]["indent"] == ("-1", "$308")
+
+
+@pytest.mark.parametrize(
+    "para,span,indent",
+    [
+        # QA's q786 J01: 1em - 1em is none.
+        ("j01", "neg1", None),
+        # J02: -1em - 1em is -2em, within a 3em margin.
+        ("j02", "neg1", ("-2", "$308")),
+        # J03: 0.5em - 2em is -1.5em.
+        ("j03", "neg2", ("-1.5", "$308")),
+        # G06: -1em - 1em in a 1em margin is held at -1em.
+        ("g06", "neg1", ("-1", "$308")),
+    ],
+)
+def test_a_negative_opening_margin_adds_to_the_indent_within_the_margin(
+    para, span, indent
+):
+    (block,) = _blocks(f"<p class='{para}'><span class='{span}'>out</span> words</p>")
+    assert block["block_style"]["indent"] == indent
     assert _margins(block) == []
+
+
+def test_a_negative_opening_margin_is_never_a_run():
+    # QA's q786 J04: a span of its own size; I08: a table cell's start.
+    (block,) = _blocks("<p><span class='bigneg'>out</span> words</p>")
+    assert block["block_style"]["indent"] is None
+    assert _margins(block) == []
+    root = etree.fromstring(
+        f'<html xmlns="{XHTML}"><body><table><tr><td><span class="neg1">7</span> cell</td>'
+        "<td>other</td></tr></table></body></html>".encode()
+    )
+    (table,) = _conv.extract_blocks_from_html(
+        root, style_resolver=_resolver(CSS), base_href="c.xhtml", native_tables=True
+    )
+    cell = table["table"]["rows"][0]["cells"][0]
+    assert not any(flag_value(f, MARGIN_LEFT_FLAG) for _s, _n, f in cell["spans"])
+    # A list item keeps it (I07).
+    (box,) = _blocks("<ul><li><span class='neg1'>7</span> item</li></ul>")
+    (item,) = box["blocks"]
+    assert _margins(item) == [(0, 1, ("-1", "$308"), None)]
 
 
 def test_a_negative_margin_opening_the_paragraph_hangs_into_its_margin():
@@ -233,7 +276,7 @@ def test_a_negative_margin_opening_the_paragraph_hangs_into_its_margin():
     (block,) = _blocks("<p class='pfn4'><span class='neg1'>12</span> The note.</p>")
     assert block["block_style"]["indent"] == ("-1", "$308")
     assert _margins(block) == []
-    # Past the margin it is dropped.
+    # Past the margin it is held at it, as a hanging indent is (#465).
     (block,) = _blocks("<p class='pfn1'><span class='neg3'>12</span> x</p>")
-    assert block["block_style"]["indent"] is None
+    assert block["block_style"]["indent"] == ("-1", "$308")
     assert _margins(block) == []

@@ -87,6 +87,7 @@ from .inline_style import (
     css_run_margin,
     span_margin_as_indent,
     with_run_margin,
+    without_negative_opening_margin,
 )
 from .math_draw import draw as draw_math
 from .native_generator import NativeKFXGenerator
@@ -4601,6 +4602,7 @@ def _table_cell(cell, style_resolver, base_href):
     text, spans, marks = normalize_runs_with_anchors(
         _walk_inline(cell, style_resolver=style_resolver, base_href=base_href)
     )
+    spans = without_negative_opening_margin(spans)
     ids = _dedupe_keep_order(_own_anchor_ids(cell) + list(marks))
     css = style_resolver(cell) if style_resolver is not None else None
     return {
@@ -6970,6 +6972,8 @@ def _extract_blocks(
                         spans, bstyle["indent"] = span_margin_as_indent(
                             spans, bstyle["indent"], bstyle["margin_left"]
                         )
+                    elif _local_tag(elem.tag) != "li":
+                        spans = without_negative_opening_margin(spans)
                 if _local_tag(elem.tag) == "math" and elem.get("display") == "block":
                     # Centred, as Previewer sets a display equation (#235).
                     bstyle = {**(bstyle or compute_block_style({})), "align": "center"}
