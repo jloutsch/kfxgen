@@ -24,8 +24,9 @@ CELL = (
 
 def _resolver(elem):
     """calibre's computed style, as far as these blocks need it: a drawn
-    border on a rule, which keeps it a rule."""
-    if etree.QName(elem).localname == "hr":
+    border on a rule, which keeps it a rule; `hr.s` draws nothing, a
+    space."""
+    if etree.QName(elem).localname == "hr" and elem.get("class") != "s":
         return {"border-sides": [("solid", 1, "#000000")] * 4}
     return {}
 
@@ -64,7 +65,22 @@ def test_a_later_book_gets_no_id_from_an_earlier_one():
     assert _holders(later) == []
 
 
-def test_rules_and_spaces_get_lists_of_their_own():
-    a, b = _conv._empty_block(), _conv._empty_block()
-    assert a["anchor_ids"] is not b["anchor_ids"]
-    assert a["anchor_offsets"] is not b["anchor_offsets"]
+def test_rules_and_spaces_get_lists_of_their_own(monkeypatch):
+    # Two rules and two spaces (an <hr> drawing nothing), as the walk makes
+    # them, before spacing folds the spaces into margins (QA on #796).
+    seen = []
+    spacing = _conv._space_between
+
+    def capture(blocks, *args, **kwargs):
+        seen.extend(blocks)
+        return spacing(blocks, *args, **kwargs)
+
+    monkeypatch.setattr(_conv, "_space_between", capture)
+    _blocks(
+        '<p>A</p><hr/><p>B</p><hr class="s"/><p>C</p>'
+        '<hr/><p>D</p><hr class="s"/><p>E</p>'
+    )
+    empty = [b for b in seen if b.get("type") in ("rule", "space")]
+    assert sorted(b["type"] for b in empty) == ["rule", "rule", "space", "space"]
+    assert len({id(b["anchor_ids"]) for b in empty}) == 4
+    assert len({id(b["anchor_offsets"]) for b in empty}) == 4
