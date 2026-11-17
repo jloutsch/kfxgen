@@ -148,3 +148,19 @@ def test_picture_sizes_read_as_before(attrs, hint, extras):
     img = etree.fromstring(f'<img xmlns="{XH}" src="p.png" {attrs}/>')
     assert _conv._img_size_hint(img) == hint
     assert _conv._img_inline_extras(img) == extras
+
+
+@pytest.mark.parametrize(
+    "width, hint",
+    [("9" * 400, None), ("30%", "w=30%"), ("120px", "w=120px")],
+)
+def test_a_floated_wrappers_width_past_any_page_is_no_size(width, hint):
+    # A picture alone in a floated wrapper takes the wrapper's width; one of
+    # 400 digits is none, and the picture keeps its own size (QA on #797).
+    parent = etree.fromstring(f'<div xmlns="{XH}"><img src="p.png"/></div>')
+    img = parent[0]
+
+    def resolver(elem):
+        return {"float": "left", "width": width} if elem is parent else {}
+
+    assert _conv._img_float(img, parent, None, resolver) == ("left", hint)
