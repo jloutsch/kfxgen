@@ -8066,6 +8066,90 @@ def _anchor_block_index(blocks):
 #: comic that is every page, "Page 1" to "Page 93", printed at the end.
 CALIBRE_INLINE_TOC_ID = "calibre_generated_inline_toc"
 
+#: Elements deeper than this are unwrapped before the walk (#794). The walk
+#: recurses about four calls a level and stopped at about 248 nested
+#: <div>s (230 to 250 inside calibre), 250 elements of nested lists and
+#: 333 of nested tables, losing the file. Real books go far less deep: at
+#: most 11 levels in the Gutenberg 90 and 16 in a 300-book library sample.
+_NEST_LIMIT = 100
+#: Kept past the limit: what holds text, a picture, a link or a rule.
+_NEST_KEEP = frozenset(
+    {"p", "h1", "h2", "h3", "h4", "h5", "h6", "img", "image", "br", "hr", "a"}
+    | {"svg", "math"}
+)
+
+
+def _unwrap(elem):
+    """Put `elem`'s text and children in its place. Its id, if it has one,
+    stays as an empty <a id>, so links to it still land."""
+    from lxml import etree
+
+    parent = elem.getparent()
+    if parent is None:
+        return
+    if elem.get("id"):
+        ns = etree.QName(elem).namespace
+        mark = etree.Element(f"{{{ns}}}a" if ns else "a", id=elem.get("id"))
+        mark.tail, elem.text = elem.text, None
+        elem.insert(0, mark)
+    prev = elem.getprevious()
+
+    def add_text(text, after):
+        if not text:
+            return
+        if after is None:
+            parent.text = (parent.text or "") + text
+        else:
+            after.tail = (after.tail or "") + text
+
+    add_text(elem.text, prev)
+    kids, tail = list(elem), elem.tail
+    at = parent.index(elem)
+    for k, kid in enumerate(kids):
+        parent.insert(at + k, kid)
+    parent.remove(elem)
+    add_text(tail, kids[-1] if kids else prev)
+
+
+def _flatten_deep_nesting(root, log, href):
+    """Unwrap the elements nested more than `_NEST_LIMIT` deep, except
+    those in `_NEST_KEEP` and anything inside an <svg> or <math>, so the
+    walk keeps the file's text rather than losing the file (#794). Plain
+    wrappers print the same either way, as Kindle Previewer 4.0.3 writes
+    nested <div>s as one paragraph at any depth (P794); a wrapper's own
+    style past the limit is lost."""
+    deep, stack = [], [(root, 0)]
+    while stack:
+        elem, depth = stack.pop()
+        if depth == _NEST_LIMIT:
+            deep.append(elem)
+            continue
+        stack.extend((c, depth + 1) for c in elem if isinstance(c.tag, str))
+    unwrapped = 0
+    for top in deep:
+        below = list(top.iter())[1:]
+        drawn = {
+            id(x)
+            for k in below
+            if isinstance(k.tag, str) and _local_tag(k.tag) in ("svg", "math")
+            for x in k.iter()
+        }
+        # Each one's text and children move up into its parent; the order
+        # doesn't change the result (checked on 132 random trees, #794).
+        for elem in below:
+            if (
+                isinstance(elem.tag, str)
+                and id(elem) not in drawn
+                and _local_tag(elem.tag) not in _NEST_KEEP
+            ):
+                _unwrap(elem)
+                unwrapped += 1
+    if unwrapped:
+        log.warn(
+            f"  {href}: nested more than {_NEST_LIMIT} levels deep; "
+            f"{unwrapped} elements past that unwrapped, their own styles lost"
+        )
+
 
 def _is_calibre_inline_toc(element):
     """True for a spine document that is calibre's generated inline TOC."""
@@ -8663,6 +8747,9 @@ def extract_chapters_from_oeb(
                 log.info(f"  Skipping calibre's generated inline TOC ({href_for_log})")
                 continue
             resolver = _build_style_resolver(oeb_book, item, log)
+            _flatten_deep_nesting(
+                item.data, log, getattr(item, "href", "") or "<unknown>"
+            )
             nav_listing_at = []
             tables_seen = []
             notes_seen = []
