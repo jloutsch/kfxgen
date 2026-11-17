@@ -65,6 +65,8 @@ def test_an_unreadable_colour_is_none(value):
         ("rgb(" + "9" * 400 + "%,0,0)", (0xFF0000, 1.0)),
         ("rgb(300,0,0)", (0xFF0000, 1.0)),
         ("rgb(0255,0,0)", (0xFF0000, 1.0)),
+        # Leading zeros are no digits past 255 (QA on #797).
+        ("rgb(0012,0,0)", (0x0C0000, 1.0)),
         ("rgb(50%,0,0)", (0x800000, 1.0)),
         ("rgb(99.7%,0,0)", (0xFF0000, 1.0)),
         ("rgba(0,0,0,0.5)", (0x000000, 0.5)),
@@ -113,3 +115,36 @@ def test_a_hidden_rules_unreadable_margin_counts_as_none(height):
     assert _conv._hidden_rule_em({**css, "margin-top": "1.2.3px"}) == (
         _conv._hidden_rule_em(css)
     )
+
+
+@pytest.mark.parametrize(
+    "attrs",
+    [
+        'width="' + "9" * 400 + '"',
+        'height="' + "9" * 400 + '"',
+        'width="1e9"',
+        'width="' + "9" * 308 + 'em"',
+        'width="1000000000"',
+    ],
+)
+def test_a_picture_size_past_any_page_is_no_size(attrs):
+    # 400 digits read as infinity, and the generator's IonDecimal failed
+    # the whole book (QA on #797).
+    img = etree.fromstring(f'<img xmlns="{XH}" src="p.png" {attrs}/>')
+    assert _conv._img_size_hint(img) is None
+    assert _conv._img_inline_extras(img) is None
+
+
+@pytest.mark.parametrize(
+    "attrs, hint, extras",
+    [
+        ('width="200"', "w=200", None),
+        ('width="50%"', "w=50%", None),
+        ('height="2em"', "h=2em", "h=2em"),
+        ('width="999999999"', "w=999999999", None),
+    ],
+)
+def test_picture_sizes_read_as_before(attrs, hint, extras):
+    img = etree.fromstring(f'<img xmlns="{XH}" src="p.png" {attrs}/>')
+    assert _conv._img_size_hint(img) == hint
+    assert _conv._img_inline_extras(img) == extras
