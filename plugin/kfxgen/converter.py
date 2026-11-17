@@ -5580,15 +5580,19 @@ def _prefix_marker(marker, text, spans, mark_offsets):
 #: 1em is calibre's own paragraph margin, and a stanza's (#326).
 _MARGIN_BREAK_EM = 1.5
 
-#: The fields every block carries, for a rule or a space that holds no
-#: text (#230).
-_EMPTY_BLOCK = {
-    "text": "",
-    "spans": [],
-    "block_style": None,
-    "anchor_ids": [],
-    "anchor_offsets": {},
-}
+
+def _empty_block():
+    """The fields every block carries, for a rule or a space that holds no
+    text (#230). New lists each time: a module-level dict copied with `**`
+    shared its lists, so an id added to one rule went on every rule and
+    space after it, in later books too (#795)."""
+    return {
+        "text": "",
+        "spans": [],
+        "block_style": None,
+        "anchor_ids": [],
+        "anchor_offsets": {},
+    }
 
 
 #: A line of verse, an index entry, a cast list's name: at most this many
@@ -6504,7 +6508,11 @@ def _extract_blocks(
                 (start, ids) for _, ids in nav_listing_at[listings:]
             ]
         if pending_ids and out:
-            last = out[-1]
+            # On the last block with text: a cell keeps only those (see
+            # _paragraph_cell), so ids on a rule after them were lost with
+            # it. Kindle Previewer 4.0.3 keeps the rule and lands them
+            # there, just below that block (#795, P795).
+            last = next((b for b in reversed(out) if b.get("text")), out[-1])
             for aid in pending_ids:
                 if aid not in last["anchor_ids"]:
                     last["anchor_ids"].append(aid)
@@ -7111,7 +7119,7 @@ def _extract_blocks(
         dropped, as before."""
         blocks.append(
             {
-                **_EMPTY_BLOCK,
+                **_empty_block(),
                 "type": "space",
                 "margin": margin,
                 "line": line,
@@ -7143,7 +7151,7 @@ def _extract_blocks(
 
         blocks.append(
             {
-                **_EMPTY_BLOCK,
+                **_empty_block(),
                 "type": "rule",
                 "rule": {
                     "space_above": space("top"),
