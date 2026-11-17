@@ -9550,6 +9550,8 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     # blocks it drops (its file's, its heading's, the listing's), and those
     # of a listing with no block of its own, from the block they were
     # carried to.
+    # Pages keeping one listing share this list (#790): read it, never
+    # change it in place.
     moved = contents_ch.pop("_listing_keys", [])
     dropped = set(moved)  # once, not once per chapter (#789)
     for ch in all_chapters:

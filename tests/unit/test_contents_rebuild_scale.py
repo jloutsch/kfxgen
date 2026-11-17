@@ -73,32 +73,52 @@ def test_a_contents_page_of_ten_thousand_chapters_rebuilds_in_seconds(heading, l
         ]
 
 
+_LINK = frozenset({make_link_flag("c.xhtml")})
+
+
+def _lines(page, titles):
+    """The rebuilt page's lines, as (text, chapter) pairs, for a "Contents"
+    page of `page` lines ("link:" or "head:" and the words) before chapters
+    titled `titles`."""
+    blocks = [{"text": "Contents", "heading_level": 1}]
+    for line in page:
+        kind, words = line.split(":")
+        if kind == "link":
+            blocks.append({"text": words, "spans": [(0, len(words), _LINK)]})
+        else:
+            blocks.append({"text": words, "heading_level": 2})
+    contents = {"title": "Contents", "text": "", "blocks": blocks}
+    chapters = [contents, *({"title": t, "text": "Words."} for t in titles)]
+    _conv._rebuild_contents_page(contents, chapters, NullLog())
+    return [(t["text"], t.get("target_chapter_idx")) for t in contents["toc_links"]]
+
+
 def test_a_second_link_with_the_same_words_is_the_next_entry():
     # Two entries named "Part": the page's second "Part" link is the second
     # entry, so the heading between the links prints between them (#618).
-    link = frozenset({make_link_flag("c.xhtml")})
-    contents = {
-        "title": "Contents",
-        "text": "",
-        "blocks": [
-            {"text": "Contents", "heading_level": 1},
-            {"text": "Part", "spans": [(0, 4, link)]},
-            {"text": "Note", "heading_level": 2},
-            {"text": "Part", "spans": [(0, 4, link)]},
-        ],
-    }
-    chapters = [
-        contents,
-        {"title": "Part", "text": "One."},
-        {"title": "Part", "text": "Two."},
-    ]
-    _conv._rebuild_contents_page(contents, chapters, NullLog())
-    assert [
-        (t["text"], t.get("target_chapter_idx")) for t in contents["toc_links"]
-    ] == [
+    assert _lines(["link:Part", "head:Note", "link:Part"], ["Part", "Part"]) == [
         ("Part", 1),
         ("Note", None),
         ("Part", 2),
+    ]
+
+
+def test_a_link_past_the_last_entry_with_its_words_is_the_first():
+    # A third "Part" link, after both "Part" entries, is the first again: the
+    # heading before it prints before the first entry (QA on #791).
+    assert _lines(
+        ["link:Part", "link:Part", "head:Note", "link:Part"], ["Part", "Part"]
+    ) == [("Note", None), ("Part", 1), ("Part", 2)]
+
+
+def test_headings_after_the_last_link_print_last_in_page_order():
+    # No link after them: they go after every entry, in the page's order
+    # (QA on #791).
+    assert _lines(["link:Part", "head:First", "head:Second"], ["Part", "Other"]) == [
+        ("Part", 1),
+        ("Other", 2),
+        ("First", None),
+        ("Second", None),
     ]
 
 
@@ -129,3 +149,38 @@ def test_pages_keeping_one_listing_share_its_keys():
     assert all(keys is kept[0] for keys in kept)
     # The listing's ids, sorted as they always were.
     assert kept[0] == [f"a.xhtml#{i}" for i in sorted(f"i{j}" for j in range(500))]
+
+
+def test_two_listings_in_one_file_keep_their_own_keys():
+    # Each page keeps its own listing's keys, though both listings are in
+    # one file (QA's Q791E).
+    def listing(p, n):
+        return (
+            '<div class="toc">'
+            + "".join(f'<p id="{p}{j}"><a href="b.xhtml">L</a></p>' for j in range(n))
+            + "</div>"
+        )
+
+    spine = [
+        _spine_item(
+            "a.xhtml",
+            f'<h1>Front</h1>{listing("i", 2)}<h2 id="m">Mid</h2><p>Mid text.</p>'
+            f'{listing("j", 3)}<h2 id="e">End</h2><p>End text.</p>',
+        ),
+        _spine_item("b.xhtml", "<h1>B</h1><p>Body.</p>"),
+    ]
+    toc = [
+        {"title": "Front", "href": "a.xhtml"},
+        {"title": "First", "href": "a.xhtml#i0"},
+        {"title": "Mid", "href": "a.xhtml#m"},
+        {"title": "Second", "href": "a.xhtml#j0"},
+        {"title": "End", "href": "a.xhtml#e"},
+        {"title": "B", "href": "b.xhtml"},
+    ]
+    chapters = _conv._assemble_chapters_by_coordinate(spine, toc, NullLog())
+    assert {
+        c["title"]: c["_listing_keys"] for c in chapters if "_listing_keys" in c
+    } == {
+        "First": ["a.xhtml#i0", "a.xhtml#i1"],
+        "Second": ["a.xhtml#j0", "a.xhtml#j1", "a.xhtml#j2"],
+    }
