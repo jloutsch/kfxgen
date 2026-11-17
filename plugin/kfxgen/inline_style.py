@@ -94,9 +94,24 @@ _CSS_UNIT_TO_KFX = {
 
 # No space before the unit: "2 em" is invalid CSS, ignored as browsers and
 # Kindle Previewer ignore it (#486).
+#: ASCII only: in Unicode `re.I` reads `ın` and `İn` as `in`, a unit no
+#: table then has, and the KeyError dropped the chapter (#792).
 _LENGTH_RE = re.compile(
-    r"^\s*([+-]?[0-9]*\.?[0-9]+)(em|rem|%|pt|px|mm|in|cm|ex)\s*$", re.I
+    r"^\s*([+-]?[0-9]*\.?[0-9]+)(em|rem|%|pt|px|mm|in|cm|ex)\s*$", re.I | re.A
 )
+
+
+def number(text):
+    """`text` as a finite float, or None. Patterns such as `[\\d.]+` let
+    through "1.2.3" and ".", and 400 digits read as infinity: each raised,
+    or wrote "inf", and a value that raised dropped its chapter (#792)."""
+    try:
+        n = float(text)
+    except (TypeError, ValueError):
+        return None
+    return n if math.isfinite(n) else None
+
+
 #: Units read as one kfxgen writes, as Kindle Previewer 4.0.3 reads them
 #: (#486): 1in = 72pt, 1cm = 10mm, 1ex = 0.44em.
 _UNIT_AS = {"in": (72, "pt"), "cm": (10, "mm"), "ex": (0.44, "em")}
@@ -281,14 +296,14 @@ def parse_css_length(value, negative=False):
     if not m:
         return None
     mag, unit = m.group(1), m.group(2).lower()
-    try:
-        if float(mag) == 0.0 or (float(mag) < 0.0 and not negative):
-            return None
-    except ValueError:
+    n = number(mag)
+    if n is None or n == 0.0 or (n < 0.0 and not negative):
         return None
     if unit in _UNIT_AS:
         factor, unit = _UNIT_AS[unit]
-        mag = f"{float(mag) * factor:.4f}"
+        if number(n * factor) is None:
+            return None
+        mag = f"{n * factor:.4f}"
     # Normalize "2.0" -> "2", "1.50" -> "1.5" without forcing a float repr.
     # (mag has no surrounding whitespace — the regex group excludes it.)
     if "." in mag:
@@ -824,16 +839,25 @@ def _rgb_alpha(value):
         return int(v[1:], 16), 1.0
     m = _RGB.fullmatch(v)
     if m:
-        r, g, b = (
-            min(int(float(x[:-1]) * 256 // 100) if x.endswith("%") else int(x), 255)
-            for x in m.groups()[:3]
-        )
+
+        def channel(x):
+            # Capped at 255 however long: int() refuses 4,300 digits, and a
+            # percentage past a float's range is infinite (#792).
+            if x.endswith("%"):
+                p = float(x[:-1])
+                return 255 if p >= 100 else int(p * 256 // 100)
+            return 255 if len(x.lstrip("0")) > 3 else min(int(x), 255)
+
+        r, g, b = (channel(x) for x in m.groups()[:3])
         rgb = (r << 16) | (g << 8) | b
     else:
         m = _HSL.fullmatch(v)
         if not m:
             return None
-        h, sat, light = (float(x) for x in m.groups()[:3])
+        parts = [number(x) for x in m.groups()[:3]]
+        if None in parts:
+            return None  # "1.2.3", "." or infinite (#792)
+        h, sat, light = parts
         r, g, b = (
             round(c * 255)
             for c in colorsys.hls_to_rgb(
@@ -841,8 +865,10 @@ def _rgb_alpha(value):
             )
         )
         rgb = (r << 16) | (g << 8) | b
-    alpha = m.group(4)
-    return rgb, 1.0 if alpha is None else float(alpha)
+    if m.group(4) is None:
+        return rgb, 1.0
+    alpha = number(m.group(4))
+    return None if alpha is None else (rgb, alpha)
 
 
 def css_rgb(value):

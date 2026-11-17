@@ -89,6 +89,7 @@ from .inline_style import (
     span_margin_as_indent,
     with_run_margin,
     without_negative_opening_margin,
+    number as _number,
 )
 from .math_draw import draw as draw_math
 from .native_generator import NativeKFXGenerator
@@ -1403,7 +1404,19 @@ def _make_img_token(href, alt, size=None, float_side=None, extra=None):
 
 #: A CSS length or percentage, as the size hint accepts it. A bare number is
 #: an HTML attribute value in pixels.
-_IMG_SIZE_RE = re.compile(r"^\d+(?:\.\d+)?(?:%|px|em|pt)?$")
+_IMG_SIZE_RE = re.compile(r"^(\d+(?:\.\d+)?)(?:%|px|em|pt)?$")
+#: A picture size this large is no size: 400 digits read as infinity, and
+#: the generator's IonDecimal then failed the whole book (QA on #797). Far
+#: past any page, and small enough that no unit or percentage the
+#: generator converts it by can overflow.
+_IMG_SIZE_LIMIT = 1e9
+
+
+def _img_size(raw):
+    """Whether `raw` is a picture size the hint can carry."""
+    m = _IMG_SIZE_RE.match(raw)
+    n = _number(m.group(1)) if m else None
+    return n is not None and n < _IMG_SIZE_LIMIT
 
 
 def _img_size_hint(elem, style_resolver=None):
@@ -1422,7 +1435,7 @@ def _img_size_hint(elem, style_resolver=None):
         if raw is None or raw == "":
             raw = elem.get(axis)
         raw = str(raw or "").strip()
-        if raw and raw != "auto" and _IMG_SIZE_RE.match(raw):
+        if raw and raw != "auto" and _img_size(raw):
             return f"{axis[0]}={raw}"
     return None
 
@@ -1447,7 +1460,7 @@ def _img_inline_extras(elem, style_resolver=None):
     css = (style_resolver(elem) if style_resolver is not None else None) or {}
     out = []
     raw = str(css.get("height") or elem.get("height") or "").strip()
-    if _IMG_SIZE_RE.match(raw):
+    if _img_size(raw):
         out.append(f"h={raw}")
     valign = str(css.get("vertical-align") or "").strip().lower()
     if valign in _INLINE_VALIGNS or _INLINE_VALIGN_LENGTH_RE.match(valign):
@@ -1521,7 +1534,7 @@ def _img_float(img, parent, size, style_resolver):
     if not side or not only_image or "".join(parent.itertext()).strip():
         return None, size
     width = str(pcss.get("width") or "").strip()
-    if width and width != "auto" and _IMG_SIZE_RE.match(width):
+    if width and width != "auto" and _img_size(width):
         if size in (None, "w=100%"):
             size = f"w={width}"
     return side, size
@@ -3953,7 +3966,9 @@ def _width_pct(elem, style_resolver):
     declared = (css or {}).get("width")
     value = declared if declared is not None else elem.get("width")
     m = re.fullmatch(r"\s*([\d.]+)\s*%\s*", str(value or ""))
-    return float(m.group(1)) if m else None
+    # "1.2.3%" in a width attribute, which calibre passes on as written,
+    # raised and dropped the chapter (#792).
+    return _number(m.group(1)) if m else None
 
 
 def _column_widths(table, style_resolver):
@@ -4098,9 +4113,9 @@ def _padding_em(value, ratio=1.0):
     is the element's own: `ratio` is its font size against the 16px root
     (#647)."""
     m = re.fullmatch(r"\s*([\d.]+)\s*(px|pt|em|rem|%)?\s*", str(value or ""))
-    if not m:
-        return None
-    n = float(m.group(1))
+    n = _number(m.group(1)) if m else None
+    if n is None:
+        return None  # unreadable, or "1.2.3px" (#792)
     unit = m.group(2)
     if unit == "%":
         return ("%", n)
@@ -4360,10 +4375,10 @@ def _hidden_rule_em(css):
 
     def em(value):
         m = re.fullmatch(r"\s*(-?[\d.]+)\s*(px|pt|em|rem|%)?\s*", str(value or ""))
-        if not m or m.group(2) is None:
-            return 0.0
+        if not m or m.group(2) is None or _number(m.group(1)) is None:
+            return 0.0  # unreadable, or "1.2.3px" (#792)
         unit = m.group(2)
-        n = float(m.group(1)) * _HIDDEN_RULE_EM_PER_UNIT[unit]
+        n = _number(m.group(1)) * _HIDDEN_RULE_EM_PER_UNIT[unit]
         return n * ratio if unit == "em" else n
 
     top, bottom = em(css.get("margin-top")), em(css.get("margin-bottom"))
