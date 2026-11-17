@@ -8127,6 +8127,12 @@ def _flatten_deep_nesting(root, log, href):
         stack.extend((c, depth + 1) for c in elem if isinstance(c.tag, str))
     unwrapped = 0
     for top in deep:
+        if any(
+            _local_tag(a.tag) in ("svg", "math") for a in (top, *top.iterancestors())
+        ):
+            # Inside a drawing or an equation that starts above the limit:
+            # its own code reads it (a deep equation becomes text, #406).
+            continue
         below = list(top.iter())[1:]
         drawn = {
             id(x)

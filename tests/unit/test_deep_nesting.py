@@ -110,3 +110,23 @@ def test_a_page_within_the_limit_is_untouched():
     _conv._flatten_deep_nesting(root, log, "c.xhtml")
     assert etree.tostring(root) == before
     assert log.warnings == []
+
+
+@pytest.mark.parametrize("tag", ["math", "svg"])
+def test_a_drawing_or_equation_starting_above_the_limit_is_untouched(tag):
+    # The equation starts at depth 3; its rows run past 100. ziamath's own
+    # budget makes it text (#406); unwrapping its rows ran them together
+    # (the slow suite's deep equation, on #794).
+    ns = {
+        "math": "http://www.w3.org/1998/Math/MathML",
+        "svg": "http://www.w3.org/2000/svg",
+    }
+    inner = "<g>" * 150 + "<text>S</text>" + "</g>" * 150
+    if tag == "math":
+        inner = "<mrow>" * 150 + "<mn>1</mn>" + "</mrow>" * 150
+    root = _doc(f'<p><{tag} xmlns="{ns[tag]}">{inner}</{tag}></p>')
+    before = etree.tostring(root)
+    log = _Log()
+    _conv._flatten_deep_nesting(root, log, "c.xhtml")
+    assert etree.tostring(root) == before
+    assert log.warnings == []
