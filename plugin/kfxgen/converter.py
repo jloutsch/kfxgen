@@ -89,6 +89,7 @@ from .inline_style import (
     span_margin_as_indent,
     with_run_margin,
     without_negative_opening_margin,
+    number as _number,
 )
 from .math_draw import draw as draw_math
 from .native_generator import NativeKFXGenerator
@@ -3953,7 +3954,9 @@ def _width_pct(elem, style_resolver):
     declared = (css or {}).get("width")
     value = declared if declared is not None else elem.get("width")
     m = re.fullmatch(r"\s*([\d.]+)\s*%\s*", str(value or ""))
-    return float(m.group(1)) if m else None
+    # "1.2.3%" in a width attribute, which calibre passes on as written,
+    # raised and dropped the chapter (#792).
+    return _number(m.group(1)) if m else None
 
 
 def _column_widths(table, style_resolver):
@@ -4098,9 +4101,9 @@ def _padding_em(value, ratio=1.0):
     is the element's own: `ratio` is its font size against the 16px root
     (#647)."""
     m = re.fullmatch(r"\s*([\d.]+)\s*(px|pt|em|rem|%)?\s*", str(value or ""))
-    if not m:
-        return None
-    n = float(m.group(1))
+    n = _number(m.group(1)) if m else None
+    if n is None:
+        return None  # unreadable, or "1.2.3px" (#792)
     unit = m.group(2)
     if unit == "%":
         return ("%", n)
@@ -4360,10 +4363,10 @@ def _hidden_rule_em(css):
 
     def em(value):
         m = re.fullmatch(r"\s*(-?[\d.]+)\s*(px|pt|em|rem|%)?\s*", str(value or ""))
-        if not m or m.group(2) is None:
-            return 0.0
+        if not m or m.group(2) is None or _number(m.group(1)) is None:
+            return 0.0  # unreadable, or "1.2.3px" (#792)
         unit = m.group(2)
-        n = float(m.group(1)) * _HIDDEN_RULE_EM_PER_UNIT[unit]
+        n = _number(m.group(1)) * _HIDDEN_RULE_EM_PER_UNIT[unit]
         return n * ratio if unit == "em" else n
 
     top, bottom = em(css.get("margin-top")), em(css.get("margin-bottom"))
