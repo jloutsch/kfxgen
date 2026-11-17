@@ -1965,7 +1965,8 @@ def _key_doc(base_href, href):
 def _drop_keys(blocks, keys):
     """Take `keys` off every block, box paragraph and table part holding
     them (#338)."""
-    keys = set(keys)
+    if not isinstance(keys, (set, frozenset)):
+        keys = set(keys)
     for b in blocks:
         parts = [b]
         tbl = b.get("table")
@@ -8237,6 +8238,10 @@ def _assemble_chapters_by_coordinate(
     prev_flat = -1
     listing_entry = None  # the listing ids the entry before named
     empty_listing = {}  # coord -> its listing's keys, for a page with no blocks (#433)
+    # (spine index, id of the listing's ids) -> (those ids, their keys): one
+    # list per listing, which every page keeping it shares, rather than a
+    # copy for each page (#790). The ids are held so their id isn't reused.
+    listing_keys = {}
     same_spot = {}  # coord -> the entry before it, on the same block (#459)
     # Coords pointing before the entry listed above them: places, in the
     # book's TOC order, landing on their own block (#484).
@@ -8321,10 +8326,16 @@ def _assemble_chapters_by_coordinate(
             page = len(coords) - 1
             while page in same_spot:
                 page = same_spot[page]
-            empty_listing[page] = [
-                _entry_key(spine_items_ordered[coords[-1][1]], i)
-                for i in sorted(listing_entry)
-            ]
+            at = (coords[-1][1], id(listing_entry))
+            if at not in listing_keys:
+                listing_keys[at] = (
+                    listing_entry,
+                    [
+                        _entry_key(spine_items_ordered[coords[-1][1]], i)
+                        for i in sorted(listing_entry)
+                    ],
+                )
+            empty_listing[page] = listing_keys[at][1]
         elif fi == prev_flat:
             # A second entry on the same block: a place in its twin's
             # section, landing where the twin does (#459).
@@ -9540,8 +9551,9 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     # of a listing with no block of its own, from the block they were
     # carried to.
     moved = contents_ch.pop("_listing_keys", [])
+    dropped = set(moved)  # once, not once per chapter (#789)
     for ch in all_chapters:
-        _drop_keys(ch.get("blocks") or (), moved)
+        _drop_keys(ch.get("blocks") or (), dropped)
     contents_ch["anchor_keys"] = _dedupe_keep_order(_block_keys(contents_ch) + moved)
 
     # Build display text (header + entries)
@@ -9561,16 +9573,22 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
     # heading holding a link, or naming an entry the page lists anyway (a
     # part in the TOC), is that entry's line and isn't printed twice (QA on
     # #594), unless another line of the page links that entry too (#622).
-    listed = [_normalize_title(link["text"]) for link in toc_links]
+    listed = collections.defaultdict(list)  # words -> their entries, in order
+    for i, link in enumerate(toc_links):
+        listed[_normalize_title(link["text"])].append(i)
+    listed = dict(listed)
     events = []  # ("link", words) or ("heading", line), in page order
 
     def is_link(b):
         return any(_is_link_flag(f) for _s, _n, fl in b.get("spans") or () for f in fl)
 
     def entry(words, after):
-        """The first entry with `words` past entry `after`, else the first."""
-        hits = [i for i, w in enumerate(listed) if w == words]
-        return next((i for i in hits if i > after), hits[0])
+        """The first entry with `words` past entry `after`, else the first.
+        Looked up, not searched for: a search per line made a page of
+        thousands of entries take seconds (#789)."""
+        hits = listed[words]
+        at = bisect.bisect_right(hits, after)
+        return hits[at] if at < len(hits) else hits[0]
 
     # How many of the page's links each entry is, decided per entry, not by
     # words: two "Introduction" entries can have one linked (#622).
@@ -9632,21 +9650,24 @@ def _rebuild_contents_page(contents_ch, all_chapters, log):
                     },
                 )
             )
-    inserts = []
-    for n, (kind, line) in enumerate(events):
-        if kind != "heading":
-            continue
-        # The next link with an entry: one the TOC doesn't list ("Map") has no
-        # line on this page (#622).
-        after = next(
-            (w for k, w in events[n + 1 :] if k == "link" and w is not None), None
-        )
-        at = after if after is not None else len(listed)
-        inserts.append((at, n, line))
-    # Last first, so earlier places don't move; two at one place keep the
-    # page's order (#618).
-    for at, _n, line in sorted(inserts, key=lambda x: x[:2], reverse=True):
-        toc_links.insert(at, line)
+    # Each printed heading goes before the entry of the next link with an
+    # entry: one the TOC doesn't list ("Map") has no line on this page
+    # (#622). Found from the page's end, and put in with one pass over the
+    # entries, rather than a search and an insert for each heading (#789).
+    # Two at one place keep the page's order (#618).
+    before = collections.defaultdict(list)  # entry -> headings printed before it
+    after = len(toc_links)
+    for kind, line in reversed(events):
+        if kind == "heading":
+            before[after].append(line)
+        elif line is not None:
+            after = line
+    lines_out = []
+    for i, link in enumerate(toc_links):
+        lines_out.extend(reversed(before.get(i, ())))
+        lines_out.append(link)
+    lines_out.extend(reversed(before.get(len(toc_links), ())))
+    toc_links = lines_out
     contents_ch.pop("blocks", None)
 
     # Structured link data for the native generator
