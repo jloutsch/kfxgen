@@ -8124,8 +8124,9 @@ def _flatten_deep_nesting(root, log, href, style_resolver=None):
     content and hold no words of their own, so the walk keeps the file's
     text rather than losing the file (#794). A chain of them prints the
     same either way: Kindle Previewer 4.0.3 writes nested <div>s as one
-    paragraph at any depth (P794). A wrapper's own style is lost; one set
-    `display: none` is kept, so what it hides stays hidden."""
+    paragraph at any depth (P794). A wrapper set `display: none`, or with a
+    margin, padding, border or fill of its own, is kept; any other style of
+    its own is lost."""
     deep, stack, deepest = [], [(root, 0)], 0
     while stack:
         elem, depth = stack.pop()
@@ -8136,14 +8137,23 @@ def _flatten_deep_nesting(root, log, href, style_resolver=None):
     if deepest <= _NEST_FLATTEN_PAST:
         return
 
-    def hidden(elem):
-        if style_resolver is None:
-            return False
+    def own_look(elem):
+        """Set `display: none`, or a box of its own: a margin, padding,
+        border or fill, which a wrapper past the limit kept on main and in
+        Previewer (QA on #798)."""
         try:
-            css = style_resolver(elem) or {}
+            if _is_hidden(elem, style_resolver):
+                return True
+            css = (style_resolver(elem) if style_resolver is not None else {}) or {}
         except Exception:
-            return False
-        return str(css.get("display") or "").strip().lower() == "none"
+            return True
+        for side in _SIDES:
+            for prop in ("margin", "padding"):
+                value = str(css.get(f"{prop}-{side}") or "").strip()
+                m = re.match(r"[-+]?[\d.]+", value)
+                if value and not (m and _number(m.group()) == 0):
+                    return True
+        return bool(_css_border(css) or _box_background(css))
 
     def bare(elem):
         """No words of its own: none before, between or after its children."""
@@ -8162,7 +8172,7 @@ def _flatten_deep_nesting(root, log, href, style_resolver=None):
             and parent is not None
             and bare(parent)
             and sum(isinstance(c.tag, str) for c in parent) == 1
-            and not hidden(elem)
+            and not own_look(elem)
         )
 
     unwrapped = 0

@@ -53,6 +53,8 @@ def _resolver(elem):
         return {"display": "none"}
     if elem.get("class") == "pb":
         return {"display": "block", "page-break-before": "always"}
+    if elem.get("class") == "m":
+        return {"display": "block", "margin-left": "3em"}
     if elem.get("class") == "b":
         return {"border-sides": [("solid", 1, "#000000")] * 4, "display": "block"}
     inline = ("span", "em", "a", "ruby", "rt", "rp")
@@ -81,8 +83,8 @@ def _walk(body, levels=CHAIN, open_="<div>"):
 
 @pytest.mark.parametrize(
     "open_, levels",
-    [("<div>", 1000), ('<div class="b">', CHAIN), ("<blockquote>", CHAIN)],
-    ids=["div", "bordered-div", "blockquote"],
+    [("<div>", 1000), ("<blockquote>", CHAIN)],
+    ids=["div", "blockquote"],
 )
 def test_a_chain_of_wrappers_past_the_walks_depth_keeps_its_text(open_, levels):
     close = "</blockquote>" if open_ == "<blockquote>" else "</div>"
@@ -197,3 +199,50 @@ def test_nested_lists_and_tables_are_left_as_they_are():
     before = etree.tostring(root)
     _conv._flatten_deep_nesting(root, NullLog(), "c.xhtml")
     assert etree.tostring(root) == before
+
+
+@pytest.mark.parametrize(
+    "body, kept",
+    [
+        # QA's X01: 230 bordered containers on main and in Previewer.
+        ('<div class="b">' * 230 + "<p>W.</p>" + "</div>" * 230, 230),
+        # QA's X07: a margin on div 151 of 230.
+        (
+            "<div>" * 150
+            + '<div class="m">'
+            + "<div>" * 79
+            + "<p>W.</p>"
+            + "</div>" * 230,
+            1,
+        ),
+    ],
+    ids=["borders", "margin"],
+)
+def test_a_wrapper_with_a_box_of_its_own_is_kept(body, kept):
+    root = _doc(body)
+    _conv._flatten_deep_nesting(root, NullLog(), "c.xhtml", _resolver)
+    assert len(root.xpath("//*[@class='b' or @class='m']")) == kept
+
+
+@pytest.mark.parametrize(
+    "css",
+    [{"padding-top": "2px"}, {"margin-bottom": "auto"}, {"background-color": "red"}],
+)
+def test_padding_auto_margins_and_fills_are_boxes_too(css):
+    root = _doc("<div>" * 230 + '<div class="x"><p>W.</p></div>' + "</div>" * 230)
+
+    def resolver(elem):
+        return dict(css) if elem.get("class") == "x" else {}
+
+    _conv._flatten_deep_nesting(root, NullLog(), "c.xhtml", resolver)
+    assert root.xpath("//*[@class='x']")
+
+
+def test_zero_margins_are_no_box():
+    root = _doc("<div>" * 230 + '<div class="x"><p>W.</p></div>' + "</div>" * 230)
+
+    def resolver(elem):
+        return {f"margin-{s}": "0px" for s in ("top", "right", "bottom", "left")}
+
+    _conv._flatten_deep_nesting(root, NullLog(), "c.xhtml", resolver)
+    assert not root.xpath("//*[@class='x']")
