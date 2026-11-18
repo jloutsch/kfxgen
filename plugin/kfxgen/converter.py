@@ -8066,16 +8066,23 @@ def _anchor_block_index(blocks):
 #: comic that is every page, "Page 1" to "Page 93", printed at the end.
 CALIBRE_INLINE_TOC_ID = "calibre_generated_inline_toc"
 
-#: Elements deeper than this are unwrapped before the walk (#794). The walk
-#: recurses about four calls a level and stopped at about 248 nested
-#: <div>s (230 to 250 inside calibre), 250 elements of nested lists and
-#: 333 of nested tables, losing the file. Real books go far less deep: at
-#: most 11 levels in the Gutenberg 90 and 16 in a 300-book library sample.
+#: A file nested deeper than this has its plain wrappers unwrapped before
+#: the walk (#794). The walk recurses about four calls a level and stopped
+#: at about 248 nested <div>s (230 to 250 inside calibre), losing the file;
+#: up to there it reads them as Kindle Previewer 4.0.3 does, so a file
+#: within this depth is left as it is. Real books go far less deep: at most
+#: 11 levels in the Gutenberg 90, 16 and 17 in two library samples.
+_NEST_FLATTEN_PAST = 200
+#: In such a file, the depth past which plain wrappers are unwrapped.
 _NEST_LIMIT = 100
-#: Kept past the limit: what holds text, a picture, a link or a rule.
-_NEST_KEEP = frozenset(
-    {"p", "h1", "h2", "h3", "h4", "h5", "h6", "img", "image", "br", "hr", "a"}
-    | {"svg", "math"}
+#: Elements that only wrap: unwrapped when they hold no words of their own
+#: and are their parent's only content, which prints the same without them.
+#: Nothing else is: list items, cells, ruby text and scripts each read
+#: differently once unwrapped, and siblings ran together (QA on #798).
+_NEST_WRAPPERS = frozenset(
+    {"div", "span", "section", "article", "aside", "main", "header", "footer"}
+    | {"nav", "blockquote", "center", "font", "b", "i", "em", "strong", "u"}
+    | {"small", "big"}
 )
 
 
@@ -8111,49 +8118,65 @@ def _unwrap(elem):
     add_text(tail, kids[-1] if kids else prev)
 
 
-def _flatten_deep_nesting(root, log, href):
-    """Unwrap the elements nested more than `_NEST_LIMIT` deep, except
-    those in `_NEST_KEEP` and anything inside an <svg> or <math>, so the
-    walk keeps the file's text rather than losing the file (#794). Plain
-    wrappers print the same either way, as Kindle Previewer 4.0.3 writes
-    nested <div>s as one paragraph at any depth (P794); a wrapper's own
-    style past the limit is lost."""
-    deep, stack = [], [(root, 0)]
+def _flatten_deep_nesting(root, log, href, style_resolver=None):
+    """In a file nested more than `_NEST_FLATTEN_PAST` deep, unwrap the plain
+    wrappers more than `_NEST_LIMIT` deep that are their parent's only
+    content and hold no words of their own, so the walk keeps the file's
+    text rather than losing the file (#794). A chain of them prints the
+    same either way: Kindle Previewer 4.0.3 writes nested <div>s as one
+    paragraph at any depth (P794). A wrapper's own style is lost; one set
+    `display: none` is kept, so what it hides stays hidden."""
+    deep, stack, deepest = [], [(root, 0)], 0
     while stack:
         elem, depth = stack.pop()
+        deepest = max(deepest, depth)
         if depth == _NEST_LIMIT:
             deep.append(elem)
-            continue
         stack.extend((c, depth + 1) for c in elem if isinstance(c.tag, str))
+    if deepest <= _NEST_FLATTEN_PAST:
+        return
+
+    def hidden(elem):
+        if style_resolver is None:
+            return False
+        try:
+            css = style_resolver(elem) or {}
+        except Exception:
+            return False
+        return str(css.get("display") or "").strip().lower() == "none"
+
+    def bare(elem):
+        """No words of its own: none before, between or after its children."""
+        return not (elem.text or "").strip() and not any(
+            (c.tail or "").strip() for c in elem
+        )
+
+    def plain_wrapper(elem):
+        # Its parent's only content, so nothing beside it can run into what
+        # it holds once it's gone (QA on #798).
+        parent = elem.getparent()
+        return (
+            _local_tag(elem.tag) in _NEST_WRAPPERS
+            and any(isinstance(c.tag, str) for c in elem)
+            and bare(elem)
+            and parent is not None
+            and bare(parent)
+            and sum(isinstance(c.tag, str) for c in parent) == 1
+            and not hidden(elem)
+        )
+
     unwrapped = 0
     for top in deep:
-        if any(
-            _local_tag(a.tag) in ("svg", "math") for a in (top, *top.iterancestors())
-        ):
-            # Inside a drawing or an equation that starts above the limit:
-            # its own code reads it (a deep equation becomes text, #406).
-            continue
-        below = list(top.iter())[1:]
-        drawn = {
-            id(x)
-            for k in below
-            if isinstance(k.tag, str) and _local_tag(k.tag) in ("svg", "math")
-            for x in k.iter()
-        }
-        # Each one's text and children move up into its parent; the order
-        # doesn't change the result (checked on 132 random trees, #794).
-        for elem in below:
-            if (
-                isinstance(elem.tag, str)
-                and id(elem) not in drawn
-                and _local_tag(elem.tag) not in _NEST_KEEP
-            ):
+        # Each one's child moves up into its parent; the order doesn't
+        # change the result.
+        for elem in list(top.iter())[1:]:
+            if isinstance(elem.tag, str) and plain_wrapper(elem):
                 _unwrap(elem)
                 unwrapped += 1
     if unwrapped:
         log.warn(
-            f"  {href}: nested more than {_NEST_LIMIT} levels deep; "
-            f"{unwrapped} elements past that unwrapped, their own styles lost"
+            f"  {href}: nested {deepest} levels deep; {unwrapped} plain "
+            f"wrappers past {_NEST_LIMIT} levels unwrapped, their own styles lost"
         )
 
 
@@ -8754,7 +8777,7 @@ def extract_chapters_from_oeb(
                 continue
             resolver = _build_style_resolver(oeb_book, item, log)
             _flatten_deep_nesting(
-                item.data, log, getattr(item, "href", "") or "<unknown>"
+                item.data, log, getattr(item, "href", "") or "<unknown>", resolver
             )
             nav_listing_at = []
             tables_seen = []

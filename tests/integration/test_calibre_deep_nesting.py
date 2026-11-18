@@ -2,7 +2,8 @@
 link to an id deep inside lands on its paragraph (#794).
 
 Before, 250 nested <div>s raised RecursionError in the block walk and the
-spine loop left the file out; inside calibre, 230 converted and 250 did
+spine loop left the file out; in a file past 200 levels, plain wrappers
+past 100 are unwrapped, and siblings stay apart; inside calibre, 230 converted and 250 did
 not (P794). Kindle Previewer 4.0.3 kept every depth to 1,000, as one
 paragraph. calibre's own parser stops at about 256 levels: past that it
 drops the rest of the file, an EPUB-to-EPUB conversion too, so kfxgen can
@@ -45,9 +46,12 @@ FILES = {
     "d250.xhtml": "<h1>Two fifty</h1>" + _nest(250, "<p>DEPTHTWOFIFTY here.</p>"),
     "d1000.xhtml": "<h1>Thousand</h1><p>ABOVETHOUSAND here.</p>"
     + _nest(1000, "<p>Lost by calibre.</p>"),
-    # The id is on a <div> 151 levels down, past the limit: unwrapped.
+    # The id is on a <div> 231 levels down, in a file past 200: unwrapped.
     "dl.xhtml": "<h1>Linked</h1>"
-    + _nest(150, '<div id="deep"><p>LINKTARGET here.</p></div>'),
+    + _nest(230, '<div id="deep"><p>LINKTARGET here.</p></div>'),
+    # Siblings in such a file stay apart (QA on #798).
+    "ds.xhtml": "<h1>Siblings</h1>"
+    + _nest(230, "<div>SIBALPHA</div><div>SIBBETA</div><p>SIBGAMMA</p>"),
     "end.xhtml": '<h1>End</h1><p><a href="dl.xhtml#deep">Back to the deep one</a>.</p>',
 }
 
@@ -73,6 +77,9 @@ def test_deeply_nested_files_keep_their_text_and_links(calibre):  # noqa: F811
     words = {w for e in entries for w in text(e).split()}
     for word in ("DEPTHTWOFIFTY", "ABOVETHOUSAND", "LINKTARGET"):
         assert word in words, f"{word} missing, calibre {version}"
+    lines = [text(e) for e in entries]
+    for word in ("SIBALPHA", "SIBBETA", "SIBGAMMA"):
+        assert word in lines, f"calibre {version}: {[t for t in lines if 'SIB' in t]}"
     anchors = {str(f.fid): val(f)["$183"] for f in by_type(frags, "$266")}
     by_id = {e["$155"]: e for e in entries}
     link = next(e for e in entries if text(e) == "Back to the deep one.")

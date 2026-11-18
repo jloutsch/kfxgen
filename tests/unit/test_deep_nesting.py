@@ -1,10 +1,13 @@
 """A file nested past any real book keeps its text (#794).
 
 The block walk recurses about four calls a level; 248 nested <div>s raised
-RecursionError, and the spine loop left the whole file out. Elements past
-100 levels are now unwrapped before the walk. Kindle Previewer 4.0.3 writes
-nested plain <div>s as one paragraph at any depth (P794), as kfxgen does.
-The calibre end-to-end case is in tests/integration/test_calibre_deep_nesting.py.
+RecursionError, and the spine loop left the whole file out. In a file
+nested more than 200 levels deep, plain wrappers holding one element are
+now unwrapped past 100 levels; nothing else changes, so siblings, list
+items, cells, ruby text, scripts and hidden elements read as they did
+(QA on #798). Kindle Previewer 4.0.3 writes nested <div>s as one paragraph
+at any depth (P794). The calibre case is in
+tests/integration/test_calibre_deep_nesting.py.
 """
 
 import pytest
@@ -16,6 +19,7 @@ from tests._helpers import NullLog
 pytestmark = pytest.mark.unit
 
 XH = "http://www.w3.org/1999/xhtml"
+CHAIN = 300  # past _NEST_FLATTEN_PAST, under calibre's own cut (~256 + body)
 
 
 class _Log(NullLog):
@@ -42,91 +46,154 @@ def _depth(root):
     return deepest
 
 
-def _text(blocks):
-    return " ".join(b.get("text") or "" for b in blocks)
-
-
 def _resolver(elem):
     tag = etree.QName(elem).localname
+    if elem.get("class") == "h" or tag in ("script", "style"):
+        # As calibre's resolver gives them, from a browser's own rules.
+        return {"display": "none"}
+    if elem.get("class") == "pb":
+        return {"display": "block", "page-break-before": "always"}
     if elem.get("class") == "b":
         return {"border-sides": [("solid", 1, "#000000")] * 4, "display": "block"}
-    return {"display": "inline"} if tag in ("span", "em", "a") else {"display": "block"}
+    inline = ("span", "em", "a", "ruby", "rt", "rp")
+    return {"display": "inline"} if tag in inline else {"display": "block"}
+
+
+def _walk(body, levels=CHAIN, open_="<div>"):
+    """`body` under `levels` plain wrappers, flattened and walked: (each
+    block's type, text, space above and page break, warnings)."""
+    root = _doc(open_ * levels + body + "</div>" * levels)
+    log = _Log()
+    _conv._flatten_deep_nesting(root, log, "c.xhtml", _resolver)
+    blocks = _conv.extract_blocks_from_html(
+        root, style_resolver=_resolver, base_href="c.xhtml", native_tables=True
+    )
+    return [
+        (
+            b.get("type"),
+            b.get("text") or "",
+            b.get("space_above"),
+            b.get("break_before"),
+        )
+        for b in blocks
+    ], log.warnings
 
 
 @pytest.mark.parametrize(
-    "open_, close, levels",
-    [
-        ("<div>", "</div>", 1000),
-        ('<div class="b">', "</div>", 300),
-        ("<blockquote>", "</blockquote>", 300),
-        ("<ul><li>", "</li></ul>", 200),
-        ("<table><tr><td>", "</td></tr></table>", 150),
-    ],
-    ids=["div", "bordered-div", "blockquote", "list", "table"],
+    "open_, levels",
+    [("<div>", 1000), ('<div class="b">', CHAIN), ("<blockquote>", CHAIN)],
+    ids=["div", "bordered-div", "blockquote"],
 )
-def test_a_page_nested_past_the_walks_depth_keeps_its_text(open_, close, levels):
+def test_a_chain_of_wrappers_past_the_walks_depth_keeps_its_text(open_, levels):
+    close = "</blockquote>" if open_ == "<blockquote>" else "</div>"
     root = _doc(open_ * levels + "<p>DEEPWORD here.</p>" + close * levels)
     log = _Log()
-    _conv._flatten_deep_nesting(root, log, "c.xhtml")
+    _conv._flatten_deep_nesting(root, log, "c.xhtml", _resolver)
     assert _depth(root) <= _conv._NEST_LIMIT + 1
     blocks = _conv.extract_blocks_from_html(
         root, style_resolver=_resolver, base_href="c.xhtml", native_tables=True
     )
-    assert "DEEPWORD" in _text(blocks)
+    assert "DEEPWORD here." in [b.get("text") for b in blocks]
     assert len(log.warnings) == 1 and "c.xhtml" in log.warnings[0]
 
 
+#: Shapes under the chain that the walk reads one way at 5 levels, untouched,
+#: as on main; flattened at 300 levels they must read the same (QA on #798).
+SHAPES = {
+    "divs": "<div>Alpha</div><div>Beta</div>",
+    "list": "<ul><li>One</li><li>Two</li></ul>",
+    "definitions": "<dl><dt>Term</dt><dd>Meaning</dd></dl>",
+    "cells": "<table><tr><td>CellA</td><td>CellB</td></tr></table>",
+    "rule": "<p>Before</p><hr/><p>After</p><br/>",
+    "inline-beside": "<div><span>InA</span></div><span>InC</span>",
+    "inline-in-wrapper": "<div><div><span>InA</span></div><span>InC</span></div>",
+    "words-beside": "<div><p>Inner</p></div>Loose words",
+    "display-none": '<div class="h"><p>HIDDENONE</p></div><p>Shown.</p>',
+    "hidden-chain": '<div class="h"><div><p>HIDDENTWO</p></div></div><p>Shown.</p>',
+    "script": "<script>var SCRIPTWORD = 1;</script><p>Shown.</p>",
+    "ruby": "<p><ruby>Kan<rt>kan</rt>ji<rt>ji</rt></ruby></p>",
+    "empty": "<div></div><p>Shown.</p>",
+    "inline-words-beside": "<div><span>InA</span></div>Loose words",
+    "hidden-alone": '<div><div class="h"><p>HIDDENTHREE</p></div></div><p>Shown.</p>',
+    # An empty element's page break marks the next block (#363).
+    "break-alone": '<p>Top</p><div><div class="pb"></div></div><p>Bottom</p>',
+}
+
+
+@pytest.mark.parametrize("shape", list(SHAPES))
+def test_shapes_past_the_limit_read_as_they_do_shallow(shape):
+    shallow, warnings = _walk(SHAPES[shape], levels=5)
+    assert warnings == []
+    deep, warnings = _walk(SHAPES[shape])
+    assert len(warnings) == 1
+    assert deep == shallow
+
+
 def test_text_keeps_its_order():
-    levels = 300
-    body = "".join(f"a{i}<div>" for i in range(levels)) + "<p>mid</p>"
-    body += "".join(f"</div>z{i}" for i in reversed(range(levels)))
+    # Every 50th wrapper holds words of its own, so it stays.
+    body = (
+        "".join(f"<div>a{i} " if i % 50 == 0 else "<div>" for i in range(CHAIN))
+        + "<p>mid</p>"
+    )
+    body += "".join(
+        f"</div>z{i} " if i % 50 == 0 else "</div>" for i in reversed(range(CHAIN))
+    )
     root = _doc(body)
     before = " ".join("".join(root.itertext()).split())
     _conv._flatten_deep_nesting(root, NullLog(), "c.xhtml")
     assert " ".join("".join(root.itertext()).split()) == before
+    assert _depth(root) < 120
 
 
-def test_ids_pictures_links_and_drawings_stay():
-    deep = "<div>" * 150
-    shut = "</div>" * 150
+def test_an_unwrapped_wrappers_id_stays():
     root = _doc(
-        deep
-        + '<div id="target"><p>P <a href="#x">link</a></p><img src="p.png" alt=""/>'
-        + '<svg xmlns="http://www.w3.org/2000/svg"><g><text>S</text></g></svg></div>'
-        + shut
+        "<div>" * CHAIN
+        + '<div id="target"><p>P <a href="#x">link</a></p></div>'
+        + "</div>" * CHAIN
     )
     _conv._flatten_deep_nesting(root, NullLog(), "c.xhtml")
-    tags = [etree.QName(e).localname for e in root.iter() if isinstance(e.tag, str)]
-    assert root.xpath("//*[@id='target']")[0].tag == f"{{{XH}}}a"
-    for tag in ("p", "img", "svg", "g", "text"):
-        assert tag in tags
+    (target,) = root.xpath("//*[@id='target']")
+    assert target.tag == f"{{{XH}}}a"
     assert root.xpath("//*[local-name()='a'][@href='#x']")
 
 
-def test_a_page_within_the_limit_is_untouched():
-    root = _doc("<div>" * 60 + '<p id="x">W.</p>' + "</div>" * 60)
+@pytest.mark.parametrize("levels", [60, 150, 190])
+def test_a_page_within_the_limit_is_untouched(levels):
+    # Siblings under 150 wrappers ran together when everything past 100
+    # was unwrapped (QA on #798); main reads them right to about 240.
+    root = _doc(
+        "<div>" * levels
+        + '<div>Alpha</div><div class="h">Hidden</div><p id="x">W.</p>'
+        + "</div>" * levels
+    )
     before = etree.tostring(root)
     log = _Log()
-    _conv._flatten_deep_nesting(root, log, "c.xhtml")
+    _conv._flatten_deep_nesting(root, log, "c.xhtml", _resolver)
     assert etree.tostring(root) == before
     assert log.warnings == []
 
 
 @pytest.mark.parametrize("tag", ["math", "svg"])
-def test_a_drawing_or_equation_starting_above_the_limit_is_untouched(tag):
-    # The equation starts at depth 3; its rows run past 100. ziamath's own
-    # budget makes it text (#406); unwrapping its rows ran them together
-    # (the slow suite's deep equation, on #794).
+def test_a_drawing_or_equation_is_untouched(tag):
+    # ziamath's own budget makes a deep equation text (#406); unwrapping its
+    # rows ran them together (the slow suite's deep equation, on #794).
     ns = {
         "math": "http://www.w3.org/1998/Math/MathML",
         "svg": "http://www.w3.org/2000/svg",
     }
-    inner = "<g>" * 150 + "<text>S</text>" + "</g>" * 150
+    inner = "<g>" * 250 + "<text>S</text>" + "</g>" * 250
     if tag == "math":
-        inner = "<mrow>" * 150 + "<mn>1</mn>" + "</mrow>" * 150
+        inner = "<mrow>" * 250 + "<mn>1</mn>" + "</mrow>" * 250
     root = _doc(f'<p><{tag} xmlns="{ns[tag]}">{inner}</{tag}></p>')
     before = etree.tostring(root)
-    log = _Log()
-    _conv._flatten_deep_nesting(root, log, "c.xhtml")
+    _conv._flatten_deep_nesting(root, NullLog(), "c.xhtml")
     assert etree.tostring(root) == before
-    assert log.warnings == []
+
+
+def test_nested_lists_and_tables_are_left_as_they_are():
+    # Not wrappers: unwrapping them would change what they are. Past about
+    # 250 elements the walk still fails on them, as before.
+    root = _doc("<ul><li>" * 120 + "W." + "</li></ul>" * 120)
+    before = etree.tostring(root)
+    _conv._flatten_deep_nesting(root, NullLog(), "c.xhtml")
+    assert etree.tostring(root) == before
