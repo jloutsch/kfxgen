@@ -8066,6 +8066,129 @@ def _anchor_block_index(blocks):
 #: comic that is every page, "Page 1" to "Page 93", printed at the end.
 CALIBRE_INLINE_TOC_ID = "calibre_generated_inline_toc"
 
+#: A file nested deeper than this has its plain wrappers unwrapped before
+#: the walk (#794). The walk recurses about four calls a level and stopped
+#: at about 248 nested <div>s (230 to 250 inside calibre), losing the file;
+#: up to there it reads them as Kindle Previewer 4.0.3 does, so a file
+#: within this depth is left as it is. Real books go far less deep: at most
+#: 11 levels in the Gutenberg 90, 16 and 17 in two library samples.
+_NEST_FLATTEN_PAST = 200
+#: In such a file, the depth past which plain wrappers are unwrapped.
+_NEST_LIMIT = 100
+#: Elements that only wrap: unwrapped when they hold no words of their own
+#: and are their parent's only content, which prints the same without them.
+#: Nothing else is: list items, cells, ruby text and scripts each read
+#: differently once unwrapped, and siblings ran together (QA on #798).
+_NEST_WRAPPERS = frozenset(
+    {"div", "span", "section", "article", "aside", "main", "header", "footer"}
+    | {"nav", "blockquote", "center", "font", "b", "i", "em", "strong", "u"}
+    | {"small", "big"}
+)
+
+
+def _unwrap(elem):
+    """Put `elem`'s text and children in its place. Its id, if it has one,
+    stays as an empty <a id>, so links to it still land."""
+    from lxml import etree
+
+    parent = elem.getparent()
+    if parent is None:
+        return
+    if elem.get("id"):
+        ns = etree.QName(elem).namespace
+        mark = etree.Element(f"{{{ns}}}a" if ns else "a", id=elem.get("id"))
+        mark.tail, elem.text = elem.text, None
+        elem.insert(0, mark)
+    prev = elem.getprevious()
+
+    def add_text(text, after):
+        if not text:
+            return
+        if after is None:
+            parent.text = (parent.text or "") + text
+        else:
+            after.tail = (after.tail or "") + text
+
+    add_text(elem.text, prev)
+    kids, tail = list(elem), elem.tail
+    at = parent.index(elem)
+    for k, kid in enumerate(kids):
+        parent.insert(at + k, kid)
+    parent.remove(elem)
+    add_text(tail, kids[-1] if kids else prev)
+
+
+def _flatten_deep_nesting(root, log, href, style_resolver=None):
+    """In a file nested more than `_NEST_FLATTEN_PAST` deep, unwrap the plain
+    wrappers more than `_NEST_LIMIT` deep that are their parent's only
+    content and hold no words of their own, so the walk keeps the file's
+    text rather than losing the file (#794). A chain of them prints the
+    same either way: Kindle Previewer 4.0.3 writes nested <div>s as one
+    paragraph at any depth (P794). A wrapper set `display: none`, or with a
+    margin, padding, border or fill of its own, is kept; any other style of
+    its own is lost."""
+    deep, stack, deepest = [], [(root, 0)], 0
+    while stack:
+        elem, depth = stack.pop()
+        deepest = max(deepest, depth)
+        if depth == _NEST_LIMIT:
+            deep.append(elem)
+        stack.extend((c, depth + 1) for c in elem if isinstance(c.tag, str))
+    if deepest <= _NEST_FLATTEN_PAST:
+        return
+
+    def own_look(elem):
+        """Set `display: none`, or a box of its own: a margin, padding,
+        border or fill, which a wrapper past the limit kept on main and in
+        Previewer (QA on #798)."""
+        try:
+            if _is_hidden(elem, style_resolver):
+                return True
+            css = (style_resolver(elem) if style_resolver is not None else {}) or {}
+        except Exception:
+            return True
+        for side in _SIDES:
+            for prop in ("margin", "padding"):
+                value = str(css.get(f"{prop}-{side}") or "").strip()
+                m = re.match(r"[-+]?[\d.]+", value)
+                if value and not (m and _number(m.group()) == 0):
+                    return True
+        return bool(_css_border(css) or _box_background(css))
+
+    def bare(elem):
+        """No words of its own: none before, between or after its children."""
+        return not (elem.text or "").strip() and not any(
+            (c.tail or "").strip() for c in elem
+        )
+
+    def plain_wrapper(elem):
+        # Its parent's only content, so nothing beside it can run into what
+        # it holds once it's gone (QA on #798).
+        parent = elem.getparent()
+        return (
+            _local_tag(elem.tag) in _NEST_WRAPPERS
+            and any(isinstance(c.tag, str) for c in elem)
+            and bare(elem)
+            and parent is not None
+            and bare(parent)
+            and sum(isinstance(c.tag, str) for c in parent) == 1
+            and not own_look(elem)
+        )
+
+    unwrapped = 0
+    for top in deep:
+        # Each one's child moves up into its parent; the order doesn't
+        # change the result.
+        for elem in list(top.iter())[1:]:
+            if isinstance(elem.tag, str) and plain_wrapper(elem):
+                _unwrap(elem)
+                unwrapped += 1
+    if unwrapped:
+        log.warn(
+            f"  {href}: nested {deepest} levels deep; {unwrapped} plain "
+            f"wrappers past {_NEST_LIMIT} levels unwrapped, their own styles lost"
+        )
+
 
 def _is_calibre_inline_toc(element):
     """True for a spine document that is calibre's generated inline TOC."""
@@ -8663,6 +8786,9 @@ def extract_chapters_from_oeb(
                 log.info(f"  Skipping calibre's generated inline TOC ({href_for_log})")
                 continue
             resolver = _build_style_resolver(oeb_book, item, log)
+            _flatten_deep_nesting(
+                item.data, log, getattr(item, "href", "") or "<unknown>", resolver
+            )
             nav_listing_at = []
             tables_seen = []
             notes_seen = []
