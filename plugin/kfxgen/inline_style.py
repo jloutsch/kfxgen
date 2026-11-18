@@ -168,6 +168,11 @@ def normalize_runs_with_anchors(
     pre_spaces = []  # indexes of spaces kept in preformatted text
     prev_space = True  # strip leading whitespace
     line_started = False  # just past a LINE_START, no text since
+    # Where the current line starts: the index of the last "\n" in `chars`,
+    # or -1. Only _break writes one, and nothing before the end removes one
+    # (_drop_last pops spaces), so a tab needn't walk back to find it: that
+    # made a line of n tabs take time n squared (#793).
+    last_break = -1
 
     def _drop_last():
         chars.pop()
@@ -183,9 +188,11 @@ def normalize_runs_with_anchors(
         # Trailing spaces before a line break are invisible; drop them. A
         # break before any text is dropped too: a paragraph never opens on an
         # empty line.
+        nonlocal last_break
         while chars and chars[-1] == " ":
             _drop_last()
         if chars:
+            last_break = len(chars)
             chars.append("\n")
             flags_per_char.append(flags)
 
@@ -214,10 +221,7 @@ def normalize_runs_with_anchors(
                 prev_space = True
             elif pre and ch in " \t":
                 if ch == "\t":
-                    line_start = len(chars) - 1
-                    while line_start >= 0 and chars[line_start] != "\n":
-                        line_start -= 1
-                    width = _TAB_STOP - (len(chars) - line_start - 1) % _TAB_STOP
+                    width = _TAB_STOP - (len(chars) - last_break - 1) % _TAB_STOP
                 else:
                     width = 1
                 for _ in range(width):
