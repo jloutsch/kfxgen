@@ -246,3 +246,16 @@ def test_zero_margins_are_no_box():
 
     _conv._flatten_deep_nesting(root, NullLog(), "c.xhtml", resolver)
     assert not root.xpath("//*[@class='x']")
+
+
+def test_a_wrapper_the_resolver_cant_read_is_kept():
+    # Unknown look: kept, as main keeps it (QA on #798).
+    root = _doc("<div>" * 230 + '<div class="x"><p>W.</p></div>' + "</div>" * 230)
+
+    def resolver(elem):
+        if elem.get("class") == "x":
+            raise ValueError("unreadable")
+        return {}
+
+    _conv._flatten_deep_nesting(root, NullLog(), "c.xhtml", resolver)
+    assert root.xpath("//*[@class='x']")
